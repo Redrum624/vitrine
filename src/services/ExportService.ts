@@ -1,0 +1,716 @@
+import { logger } from '../utils/Logger';
+
+export interface ExportOptions {
+  // Output format
+  format: 'jpeg' | 'png' | 'tiff' | 'webp';
+
+  // Quality settings
+  quality: number;           // 0-100 for JPEG/WebP, ignored for PNG/TIFF
+  compression: 'none' | 'lzw' | 'zip' | 'jpeg'; // TIFF compression
+
+  // Dimensions
+  width?: number;           // Output width (null = original)
+  height?: number;          // Output height (null = original)
+  resizeMode: 'fit' | 'fill' | 'stretch' | 'crop';
+  maintainAspectRatio: boolean;
+
+  // Color management
+  colorSpace: 'srgb' | 'adobergb' | 'prophoto' | 'rec2020';
+  bitDepth: 8 | 16;        // Bit depth per channel
+
+  // Metadata
+  preserveMetadata: boolean;
+  includeProcessingHistory: boolean;
+  customMetadata: Record<string, string>;
+
+  // Sharpening
+  outputSharpening: {
+    enabled: boolean;
+    amount: number;        // 0-100
+    radius: number;        // 0.1-5.0
+    threshold: number;     // 0-255
+    media: 'screen' | 'print' | 'web';
+  };
+
+  // File naming
+  filename?: string;
+  suffix?: string;         // Added to original filename
+  outputDirectory?: string;
+}
+
+export interface ExportResult {
+  success: boolean;
+  outputPath?: string;
+  outputSize?: number;     // File size in bytes
+  dimensions?: { width: number; height: number };
+  processingTime?: number;
+  error?: string;
+  warnings?: string[];
+}
+
+export interface ExportPreset {
+  id: string;
+  name: string;
+  description: string;
+  options: Partial<ExportOptions>;
+}
+
+export class ExportService {
+  private readonly defaultOptions: ExportOptions = {
+    format: 'jpeg',
+    quality: 95,
+    compression: 'none',
+    resizeMode: 'fit',
+    maintainAspectRatio: true,
+    colorSpace: 'srgb',
+    bitDepth: 8,
+    preserveMetadata: true,
+    includeProcessingHistory: false,
+    customMetadata: {},
+    outputSharpening: {
+      enabled: true,
+      amount: 50,
+      radius: 1.0,
+      threshold: 4,
+      media: 'screen'
+    }
+  };
+
+  private readonly builtinPresets: ExportPreset[] = [
+    {
+      id: 'web_high',
+      name: 'Web (High Quality)',
+      description: 'JPEG 95% quality, sRGB, optimized for web',
+      options: {
+        format: 'jpeg',
+        quality: 95,
+        colorSpace: 'srgb',
+        bitDepth: 8,
+        width: 2048,
+        height: 2048,
+        resizeMode: 'fit',
+        outputSharpening: { enabled: true, media: 'web', amount: 60 }
+      }
+    },
+    {
+      id: 'web_medium',
+      name: 'Web (Medium Quality)',
+      description: 'JPEG 85% quality, smaller file size',
+      options: {
+        format: 'jpeg',
+        quality: 85,
+        colorSpace: 'srgb',
+        bitDepth: 8,
+        width: 1200,
+        height: 1200,
+        resizeMode: 'fit',
+        outputSharpening: { enabled: true, media: 'web', amount: 50 }
+      }
+    },
+    {
+      id: 'print_high',
+      name: 'Print (High Quality)',
+      description: 'TIFF 16-bit, Adobe RGB, for professional printing',
+      options: {
+        format: 'tiff',
+        colorSpace: 'adobergb',
+        bitDepth: 16,
+        compression: 'lzw',
+        outputSharpening: { enabled: true, media: 'print', amount: 40, radius: 1.2 }
+      }
+    },
+    {
+      id: 'archive',
+      name: 'Archive Quality',
+      description: 'PNG lossless, full resolution, maximum quality',
+      options: {
+        format: 'png',
+        colorSpace: 'srgb',
+        bitDepth: 16,
+        preserveMetadata: true,
+        includeProcessingHistory: true,
+        outputSharpening: { enabled: false }
+      }
+    },
+    {
+      id: 'social_media',
+      name: 'Social Media',
+      description: 'JPEG optimized for social media platforms',
+      options: {
+        format: 'jpeg',
+        quality: 90,
+        colorSpace: 'srgb',
+        bitDepth: 8,
+        width: 1080,
+        height: 1080,
+        resizeMode: 'crop',
+        outputSharpening: { enabled: true, media: 'web', amount: 70 }
+      }
+    }
+  ];
+
+  // Export processed image with given options
+  async exportImage(
+    imageData: Float32Array,
+    originalWidth: number,
+    originalHeight: number,
+    options: Partial<ExportOptions> = {},
+    originalFilePath?: string
+  ): Promise<ExportResult> {
+    const startTime = performance.now();
+    const exportOptions = { ...this.defaultOptions, ...options };
+    const warnings: string[] = [];
+
+    try {
+      logger.info(`Starting export: ${originalWidth}x${originalHeight} to ${exportOptions.format}`);
+
+      // Calculate output dimensions
+      const outputDimensions = this.calculateOutputDimensions(
+        originalWidth,
+        originalHeight,
+        exportOptions
+      );
+
+      // Resize if needed
+      let processedData = imageData;
+      if (outputDimensions.width !== originalWidth || outputDimensions.height !== originalHeight) {
+        processedData = await this.resizeImage(
+          imageData,
+          originalWidth,
+          originalHeight,
+          outputDimensions.width,
+          outputDimensions.height,
+          exportOptions.resizeMode
+        );
+      }
+
+      // Apply output sharpening
+      if (exportOptions.outputSharpening.enabled) {
+        processedData = this.applyOutputSharpening(
+          processedData,
+          outputDimensions.width,
+          outputDimensions.height,
+          exportOptions.outputSharpening
+        );
+      }
+
+      // Convert color space if needed
+      if (exportOptions.colorSpace !== 'srgb') {
+        processedData = this.convertColorSpace(
+          processedData,
+          outputDimensions.width,
+          outputDimensions.height,
+          'srgb',
+          exportOptions.colorSpace
+        );
+        warnings.push(`Color space conversion to ${exportOptions.colorSpace} is approximated`);
+      }
+
+      // Convert to the appropriate bit depth
+      const outputData = this.convertBitDepth(
+        processedData,
+        outputDimensions.width,
+        outputDimensions.height,
+        exportOptions.bitDepth
+      );
+
+      // Determine output path
+      const outputPath = this.generateOutputPath(originalFilePath, exportOptions);
+
+      // Create the image file
+      await this.createImageFile(
+        outputData,
+        outputDimensions.width,
+        outputDimensions.height,
+        exportOptions,
+        outputPath
+      );
+
+      // Get file size
+      const outputSize = await this.getFileSize(outputPath);
+
+      const processingTime = performance.now() - startTime;
+      logger.info(`Export completed in ${processingTime.toFixed(2)}ms: ${outputPath}`);
+
+      return {
+        success: true,
+        outputPath,
+        outputSize,
+        dimensions: outputDimensions,
+        processingTime,
+        warnings: warnings.length > 0 ? warnings : undefined
+      };
+
+    } catch (error) {
+      const processingTime = performance.now() - startTime;
+      logger.error(`Export failed after ${processingTime.toFixed(2)}ms:`, error);
+
+      return {
+        success: false,
+        processingTime,
+        error: error instanceof Error ? error.message : 'Unknown export error'
+      };
+    }
+  }
+
+  // Batch export multiple images
+  async batchExport(
+    images: Array<{
+      data: Float32Array;
+      width: number;
+      height: number;
+      filePath?: string;
+    }>,
+    options: Partial<ExportOptions> = {}
+  ): Promise<ExportResult[]> {
+    logger.info(`Starting batch export of ${images.length} images`);
+
+    const results: ExportResult[] = [];
+
+    for (let i = 0; i < images.length; i++) {
+      const image = images[i];
+
+      logger.info(`Processing image ${i + 1}/${images.length}`);
+
+      // Add batch suffix to avoid filename conflicts
+      const batchOptions = {
+        ...options,
+        suffix: options.suffix ? `${options.suffix}_${i + 1}` : `_${i + 1}`
+      };
+
+      const result = await this.exportImage(
+        image.data,
+        image.width,
+        image.height,
+        batchOptions,
+        image.filePath
+      );
+
+      results.push(result);
+
+      // Brief pause between exports to prevent system overload
+      if (i < images.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, 10));
+      }
+    }
+
+    const successful = results.filter(r => r.success).length;
+    logger.info(`Batch export completed: ${successful}/${images.length} successful`);
+
+    return results;
+  }
+
+  // Calculate output dimensions based on resize options
+  private calculateOutputDimensions(
+    originalWidth: number,
+    originalHeight: number,
+    options: ExportOptions
+  ): { width: number; height: number } {
+    let { width, height } = options;
+
+    // If no dimensions specified, use original
+    if (!width && !height) {
+      return { width: originalWidth, height: originalHeight };
+    }
+
+    // If only one dimension specified, calculate the other
+    if (!width) {
+      width = Math.round((originalWidth * height!) / originalHeight);
+    }
+    if (!height) {
+      height = Math.round((originalHeight * width) / originalWidth);
+    }
+
+    if (!options.maintainAspectRatio) {
+      return { width, height };
+    }
+
+    // Maintain aspect ratio based on resize mode
+    const originalAspect = originalWidth / originalHeight;
+    const targetAspect = width / height;
+
+    switch (options.resizeMode) {
+      case 'fit':
+        if (originalAspect > targetAspect) {
+          height = Math.round(width / originalAspect);
+        } else {
+          width = Math.round(height * originalAspect);
+        }
+        break;
+
+      case 'fill':
+        if (originalAspect > targetAspect) {
+          width = Math.round(height * originalAspect);
+        } else {
+          height = Math.round(width / originalAspect);
+        }
+        break;
+
+      case 'crop':
+        // Keep target dimensions, will crop during resize
+        break;
+
+      case 'stretch':
+        // Keep target dimensions, ignore aspect ratio
+        break;
+    }
+
+    return { width, height };
+  }
+
+  // Resize image using high-quality resampling
+  private async resizeImage(
+    imageData: Float32Array,
+    originalWidth: number,
+    originalHeight: number,
+    newWidth: number,
+    newHeight: number,
+    mode: ExportOptions['resizeMode']
+  ): Promise<Float32Array> {
+    logger.debug(`Resizing image: ${originalWidth}x${originalHeight} → ${newWidth}x${newHeight} (${mode})`);
+
+    const resized = new Float32Array(newWidth * newHeight * 4);
+
+    // Use bicubic interpolation for high-quality resizing
+    for (let y = 0; y < newHeight; y++) {
+      for (let x = 0; x < newWidth; x++) {
+        const destIndex = (y * newWidth + x) * 4;
+
+        // Calculate source coordinates
+        let srcX: number, srcY: number;
+
+        switch (mode) {
+          case 'crop':
+            // Center crop
+            const scale = Math.max(originalWidth / newWidth, originalHeight / newHeight);
+            const offsetX = (originalWidth - newWidth * scale) / 2;
+            const offsetY = (originalHeight - newHeight * scale) / 2;
+            srcX = x * scale + offsetX;
+            srcY = y * scale + offsetY;
+            break;
+
+          default:
+            // Standard scaling
+            srcX = (x * originalWidth) / newWidth;
+            srcY = (y * originalHeight) / newHeight;
+            break;
+        }
+
+        // Bicubic interpolation
+        const sample = this.bicubicSample(imageData, originalWidth, originalHeight, srcX, srcY);
+
+        resized[destIndex] = sample[0];     // R
+        resized[destIndex + 1] = sample[1]; // G
+        resized[destIndex + 2] = sample[2]; // B
+        resized[destIndex + 3] = sample[3]; // A
+      }
+    }
+
+    return resized;
+  }
+
+  // Bicubic interpolation sampling
+  private bicubicSample(
+    imageData: Float32Array,
+    width: number,
+    height: number,
+    x: number,
+    y: number
+  ): [number, number, number, number] {
+    const x1 = Math.floor(x);
+    const y1 = Math.floor(y);
+    const dx = x - x1;
+    const dy = y - y1;
+
+    const result: [number, number, number, number] = [0, 0, 0, 0];
+
+    for (let channel = 0; channel < 4; channel++) {
+      let value = 0;
+
+      // 4x4 bicubic kernel
+      for (let ky = -1; ky <= 2; ky++) {
+        for (let kx = -1; kx <= 2; kx++) {
+          const sx = Math.max(0, Math.min(width - 1, x1 + kx));
+          const sy = Math.max(0, Math.min(height - 1, y1 + ky));
+          const pixelValue = imageData[(sy * width + sx) * 4 + channel];
+
+          const weightX = this.cubicWeight(dx - kx);
+          const weightY = this.cubicWeight(dy - ky);
+
+          value += pixelValue * weightX * weightY;
+        }
+      }
+
+      result[channel] = Math.max(0, Math.min(1, value));
+    }
+
+    return result;
+  }
+
+  // Cubic interpolation weight function
+  private cubicWeight(t: number): number {
+    const a = -0.5; // Catmull-Rom parameter
+    const absT = Math.abs(t);
+
+    if (absT <= 1) {
+      return (a + 2) * absT * absT * absT - (a + 3) * absT * absT + 1;
+    } else if (absT < 2) {
+      return a * absT * absT * absT - 5 * a * absT * absT + 8 * a * absT - 4 * a;
+    }
+
+    return 0;
+  }
+
+  // Apply output sharpening
+  private applyOutputSharpening(
+    imageData: Float32Array,
+    width: number,
+    height: number,
+    sharpening: ExportOptions['outputSharpening']
+  ): Float32Array {
+    const { amount, radius, threshold } = sharpening;
+
+    if (amount === 0) return imageData;
+
+    logger.debug(`Applying output sharpening: amount=${amount}, radius=${radius}, threshold=${threshold}`);
+
+    const sharpened = new Float32Array(imageData);
+    const blurred = this.gaussianBlur(imageData, width, height, radius);
+
+    const normalizedAmount = amount / 100.0;
+    const normalizedThreshold = threshold / 255.0;
+
+    for (let i = 0; i < imageData.length; i += 4) {
+      for (let c = 0; c < 3; c++) { // RGB channels only
+        const original = imageData[i + c];
+        const blur = blurred[i + c];
+        const difference = Math.abs(original - blur);
+
+        if (difference > normalizedThreshold) {
+          const sharpAmount = normalizedAmount * (difference / normalizedThreshold);
+          const unsharpMask = original + (original - blur) * sharpAmount;
+          sharpened[i + c] = Math.max(0, Math.min(1, unsharpMask));
+        }
+      }
+    }
+
+    return sharpened;
+  }
+
+  // Gaussian blur for unsharp mask
+  private gaussianBlur(
+    imageData: Float32Array,
+    width: number,
+    height: number,
+    radius: number
+  ): Float32Array {
+    // Simple box blur approximation for performance
+    const blurred = new Float32Array(imageData);
+    const kernelSize = Math.max(3, Math.round(radius * 2) * 2 + 1);
+    const halfKernel = Math.floor(kernelSize / 2);
+
+    // Horizontal pass
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const destIndex = (y * width + x) * 4;
+        const rgba: [number, number, number, number] = [0, 0, 0, 0];
+        let weightSum = 0;
+
+        for (let kx = -halfKernel; kx <= halfKernel; kx++) {
+          const sx = Math.max(0, Math.min(width - 1, x + kx));
+          const srcIndex = (y * width + sx) * 4;
+          const weight = 1; // Uniform weight for box blur
+
+          rgba[0] += imageData[srcIndex] * weight;
+          rgba[1] += imageData[srcIndex + 1] * weight;
+          rgba[2] += imageData[srcIndex + 2] * weight;
+          rgba[3] += imageData[srcIndex + 3] * weight;
+          weightSum += weight;
+        }
+
+        blurred[destIndex] = rgba[0] / weightSum;
+        blurred[destIndex + 1] = rgba[1] / weightSum;
+        blurred[destIndex + 2] = rgba[2] / weightSum;
+        blurred[destIndex + 3] = rgba[3] / weightSum;
+      }
+    }
+
+    return blurred;
+  }
+
+  // Convert color space (simplified implementation)
+  private convertColorSpace(
+    imageData: Float32Array,
+    width: number,
+    height: number,
+    fromSpace: string,
+    toSpace: string
+  ): Float32Array {
+    if (fromSpace === toSpace) return imageData;
+
+    logger.debug(`Converting color space: ${fromSpace} → ${toSpace}`);
+
+    const converted = new Float32Array(imageData);
+
+    // Simplified color space conversion matrices
+    const matrices = {
+      'srgb_to_adobergb': [
+        0.7151, 0.2849, 0.0000,
+        0.0000, 1.0000, 0.0000,
+        0.0000, 0.0411, 0.9589
+      ],
+      'srgb_to_prophoto': [
+        0.7976, 0.1352, 0.0313,
+        0.2880, 0.7118, 0.0001,
+        0.0000, 0.0000, 0.8252
+      ]
+    };
+
+    const matrixKey = `${fromSpace}_to_${toSpace}` as keyof typeof matrices;
+    const matrix = matrices[matrixKey];
+
+    if (matrix) {
+      for (let i = 0; i < imageData.length; i += 4) {
+        const r = imageData[i];
+        const g = imageData[i + 1];
+        const b = imageData[i + 2];
+
+        converted[i] = Math.max(0, Math.min(1, matrix[0] * r + matrix[1] * g + matrix[2] * b));
+        converted[i + 1] = Math.max(0, Math.min(1, matrix[3] * r + matrix[4] * g + matrix[5] * b));
+        converted[i + 2] = Math.max(0, Math.min(1, matrix[6] * r + matrix[7] * g + matrix[8] * b));
+      }
+    }
+
+    return converted;
+  }
+
+  // Convert bit depth
+  private convertBitDepth(
+    imageData: Float32Array,
+    width: number,
+    height: number,
+    bitDepth: 8 | 16
+  ): Uint8Array | Uint16Array {
+    if (bitDepth === 8) {
+      const output = new Uint8Array(width * height * 4);
+      for (let i = 0; i < imageData.length; i++) {
+        output[i] = Math.round(Math.max(0, Math.min(1, imageData[i])) * 255);
+      }
+      return output;
+    } else {
+      const output = new Uint16Array(width * height * 4);
+      for (let i = 0; i < imageData.length; i++) {
+        output[i] = Math.round(Math.max(0, Math.min(1, imageData[i])) * 65535);
+      }
+      return output;
+    }
+  }
+
+  // Generate output file path
+  private generateOutputPath(originalPath: string | undefined, options: ExportOptions): string {
+    if (options.filename) {
+      return options.outputDirectory
+        ? `${options.outputDirectory}/${options.filename}`
+        : options.filename;
+    }
+
+    const baseName = originalPath ?
+      originalPath.replace(/\.[^/.]+$/, '') :
+      'exported_image';
+
+    const suffix = options.suffix || '_exported';
+    const extension = options.format === 'jpeg' ? 'jpg' : options.format;
+    const filename = `${baseName}${suffix}.${extension}`;
+
+    return options.outputDirectory
+      ? `${options.outputDirectory}/${filename.split('/').pop()}`
+      : filename;
+  }
+
+  // Create image file (simplified - would use actual image libraries in production)
+  private async createImageFile(
+    imageData: Uint8Array | Uint16Array,
+    width: number,
+    height: number,
+    options: ExportOptions,
+    outputPath: string
+  ): Promise<void> {
+    // This is a simplified implementation
+    // In a real application, you would use libraries like:
+    // - Canvas API for JPEG/PNG
+    // - TIFF.js for TIFF files
+    // - Sharp (Node.js) for server-side processing
+
+    logger.debug(`Creating ${options.format.toUpperCase()} file: ${width}x${height}, ${options.bitDepth}-bit`);
+
+    // For now, we'll simulate file creation
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    // In production, implement actual file writing based on format
+    switch (options.format) {
+      case 'jpeg':
+        // await this.writeJPEG(imageData, width, height, options.quality, outputPath);
+        break;
+      case 'png':
+        // await this.writePNG(imageData, width, height, outputPath);
+        break;
+      case 'tiff':
+        // await this.writeTIFF(imageData, width, height, options, outputPath);
+        break;
+      case 'webp':
+        // await this.writeWebP(imageData, width, height, options.quality, outputPath);
+        break;
+    }
+  }
+
+  // Get file size
+  private async getFileSize(filePath: string): Promise<number> {
+    // Simulate file size calculation
+    return Math.floor(Math.random() * 5000000) + 1000000; // 1-6MB
+  }
+
+  // Get available presets
+  getPresets(): ExportPreset[] {
+    return [...this.builtinPresets];
+  }
+
+  // Get preset by ID
+  getPreset(id: string): ExportPreset | undefined {
+    return this.builtinPresets.find(preset => preset.id === id);
+  }
+
+  // Get default options
+  getDefaultOptions(): ExportOptions {
+    return { ...this.defaultOptions };
+  }
+
+  // Validate export options
+  validateOptions(options: Partial<ExportOptions>): { valid: boolean; errors: string[] } {
+    const errors: string[] = [];
+
+    if (options.quality !== undefined && (options.quality < 0 || options.quality > 100)) {
+      errors.push('Quality must be between 0 and 100');
+    }
+
+    if (options.width !== undefined && options.width <= 0) {
+      errors.push('Width must be positive');
+    }
+
+    if (options.height !== undefined && options.height <= 0) {
+      errors.push('Height must be positive');
+    }
+
+    if (options.outputSharpening?.amount !== undefined &&
+        (options.outputSharpening.amount < 0 || options.outputSharpening.amount > 100)) {
+      errors.push('Sharpening amount must be between 0 and 100');
+    }
+
+    return {
+      valid: errors.length === 0,
+      errors
+    };
+  }
+}
+
+// Export singleton
+export const exportService = new ExportService();

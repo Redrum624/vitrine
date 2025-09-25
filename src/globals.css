@@ -1,0 +1,39 @@
+/* Global styles to ensure proper text color inheritance */
+*, *::before, *::after {
+  color: inherit;
+}
+
+/* Override any default text colors */
+input, textarea, select, button {
+  color: inherit;
+}
+
+/* Ensure labels inherit color */
+label {
+  color: inherit;
+}
+
+/* Ensure span elements inherit color */
+span {
+  color: inherit;
+}
+
+/* Ensure div elements inherit color */
+div {
+  color: inherit;
+}
+
+/* Prevent browser defaults from overriding our colors */
+input[type="text"], input[type="number"], input[type="range"] {
+  color: inherit !important;
+}
+
+/* Ensure proper text color for form elements */
+.text-dark-300 input,
+.text-dark-300 textarea,
+.text-dark-300 select,
+.text-dark-300 label,
+.text-dark-300 span,
+.text-dark-300 div {
+  color: #d8d8d8 !important;
+}

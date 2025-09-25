@@ -1,0 +1,164 @@
+import {
+  Image,
+  Layers,
+  Settings,
+  ZoomIn,
+  ZoomOut,
+  RotateCcw,
+  Crop,
+  Move,
+  MousePointer,
+  Brush,
+  FolderOpen,
+  Download,
+  Play,
+  BookOpen,
+  HelpCircle,
+  Package
+} from 'lucide-react';
+import { useAppStore } from '../../stores/appStore';
+import { electronService } from '../../services/ElectronService';
+
+const tools = [
+  { id: 'select', icon: MousePointer, name: 'Select' },
+  { id: 'move', icon: Move, name: 'Move' },
+  { id: 'crop', icon: Crop, name: 'Crop' },
+  { id: 'brush', icon: Brush, name: 'Brush' },
+];
+
+interface ToolbarProps {
+  onExport?: () => void;
+  onBatchProcess?: () => void;
+  onOpenPresets?: () => void;
+  onOpenPlugins?: () => void;
+  onShowHelp?: () => void;
+}
+
+export function Toolbar({ onExport, onBatchProcess, onOpenPresets, onOpenPlugins, onShowHelp }: ToolbarProps) {
+  const { selectedTool, setSelectedTool, viewport, setViewport, resetZoom } = useAppStore();
+
+  const handleZoom = (delta: number) => {
+    const newZoom = Math.max(0.1, Math.min(5, viewport.zoom + delta));
+    setViewport({ zoom: newZoom });
+  };
+
+  return (
+    <div className="h-12 bg-dark-850 border-b border-dark-700 flex items-center px-4 justify-between no-select rounded-t-lg">
+      {/* Left side - File and Tools */}
+      <div className="flex items-center space-x-1">
+        {/* File operations - show only in Electron */}
+        {electronService.isElectron() && (
+          <>
+            <button
+              onClick={() => electronService.openFile()}
+              className="p-2 rounded-md transition-professional hover:bg-dark-700 text-dark-300"
+              title="Open Image"
+            >
+              <FolderOpen className="w-4 h-4" />
+            </button>
+            <button
+              onClick={onExport}
+              className="p-2 rounded-md transition-professional hover:bg-dark-700 text-dark-300"
+              title="Export Image"
+            >
+              <Download className="w-4 h-4" />
+            </button>
+            <button
+              onClick={onBatchProcess}
+              className="p-2 rounded-md transition-professional hover:bg-dark-700 text-dark-300"
+              title="Batch Processing"
+            >
+              <Play className="w-4 h-4" />
+            </button>
+            <button
+              onClick={onOpenPresets}
+              className="p-2 rounded-md transition-professional hover:bg-dark-700 text-dark-300"
+              title="Preset Manager"
+            >
+              <BookOpen className="w-4 h-4" />
+            </button>
+            <div className="w-px h-4 bg-dark-700 mx-2" />
+          </>
+        )}
+        {tools.map((tool) => (
+          <button
+            key={tool.id}
+            onClick={() => setSelectedTool(selectedTool === tool.id ? null : tool.id)}
+            className={`p-2 rounded-md transition-professional hover:bg-dark-700 ${
+              selectedTool === tool.id ? 'bg-dark-600 text-dark-200' : 'text-dark-300'
+            }`}
+            title={tool.name}
+          >
+            <tool.icon className="w-4 h-4" />
+          </button>
+        ))}
+      </div>
+
+      {/* Center - Image info and app status */}
+      <div className="flex items-center space-x-4 text-sm text-dark-300">
+        <div className="flex items-center space-x-2">
+          <Image className="w-4 h-4" />
+          <span>No image loaded</span>
+          {electronService.isElectron() && (
+            <span className="text-xs bg-dark-800 px-2 py-1 rounded text-dark-300">Desktop</span>
+          )}
+        </div>
+        <div className="w-px h-4 bg-dark-700" />
+        <span>{Math.round(viewport.zoom * 100)}%</span>
+      </div>
+
+      {/* Right side - View controls */}
+      <div className="flex items-center space-x-1">
+        <button
+          onClick={() => handleZoom(-0.1)}
+          className="p-2 rounded-md transition-professional hover:bg-dark-700 text-dark-300"
+          title="Zoom Out"
+        >
+          <ZoomOut className="w-4 h-4" />
+        </button>
+        <button
+          onClick={() => handleZoom(0.1)}
+          className="p-2 rounded-md transition-professional hover:bg-dark-700 text-dark-300"
+          title="Zoom In"
+        >
+          <ZoomIn className="w-4 h-4" />
+        </button>
+        <button
+          onClick={resetZoom}
+          className="p-2 rounded-md transition-professional hover:bg-dark-700 text-dark-300"
+          title="Fit to Window"
+        >
+          <RotateCcw className="w-4 h-4" />
+        </button>
+        <div className="w-px h-4 bg-dark-700 mx-2" />
+        <button
+          className="p-2 rounded-md transition-professional hover:bg-dark-700 text-dark-300"
+          title="Layers"
+        >
+          <Layers className="w-4 h-4" />
+        </button>
+        <button
+          onClick={onOpenPlugins}
+          className="p-2 rounded-md transition-professional hover:bg-dark-700 text-dark-300"
+          title="Plugin Manager"
+        >
+          <Package className="w-4 h-4" />
+        </button>
+        <button
+          className="p-2 rounded-md transition-professional hover:bg-dark-700 text-dark-300"
+          title="Settings"
+        >
+          <Settings className="w-4 h-4" />
+        </button>
+        <button
+          onClick={onShowHelp}
+          className="p-2 rounded-md transition-professional hover:bg-dark-700 text-dark-300"
+          title="Keyboard Shortcuts (F1)"
+        >
+          <HelpCircle className="w-4 h-4" />
+        </button>
+      </div>
+
+    </div>
+  );
+}
