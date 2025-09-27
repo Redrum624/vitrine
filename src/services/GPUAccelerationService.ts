@@ -1,17 +1,65 @@
 import { logger } from '../utils/Logger';
+import { WebGLUniforms } from '../types/index';
 
 // GPU API type declarations for WebGPU
 declare global {
   interface Navigator {
     gpu?: {
-      requestAdapter(options?: any): Promise<any>;
+      requestAdapter(options?: GPURequestAdapterOptions): Promise<GPUAdapter | null>;
     };
   }
 }
 
-// Basic GPU types when not available
-type GPUDevice = any;
-type GPUAdapter = any;
+// GPU types
+interface GPURequestAdapterOptions {
+  powerPreference?: 'low-power' | 'high-performance';
+  forceFallbackAdapter?: boolean;
+}
+
+interface GPUAdapter {
+  requestDevice(descriptor?: GPUDeviceDescriptor): Promise<GPUDevice>;
+  features: Set<string>;
+  limits: Record<string, number>;
+}
+
+interface GPUDeviceDescriptor {
+  requiredFeatures?: string[];
+  requiredLimits?: Record<string, number>;
+}
+
+interface GPUDevice {
+  createBuffer(descriptor: GPUBufferDescriptor): GPUBuffer;
+  createTexture(descriptor: GPUTextureDescriptor): GPUTexture;
+  queue: GPUQueue;
+}
+
+interface GPUBufferDescriptor {
+  size: number;
+  usage: number;
+  mappedAtCreation?: boolean;
+}
+
+interface GPUTextureDescriptor {
+  size: [number, number, number];
+  format: string;
+  usage: number;
+}
+
+interface GPUBuffer {
+  mapAsync(mode: number): Promise<void>;
+  getMappedRange(): ArrayBuffer;
+  unmap(): void;
+}
+
+interface GPUTexture {
+  createView(): GPUTextureView;
+}
+
+interface GPUTextureView {}
+
+interface GPUQueue {
+  writeBuffer(buffer: GPUBuffer, offset: number, data: ArrayBuffer): void;
+}
 
 // GPU constants
 const GPUBufferUsage = {
@@ -59,18 +107,18 @@ export interface ComputeShaderProgram {
   id: string;
   name: string;
   source: string;
-  uniforms: Record<string, any>;
+  uniforms: WebGLUniforms;
   workgroupSize: [number, number, number];
 }
 
-export interface GPUBuffer {
+export interface GPUBufferWrapper {
   buffer: GPUBuffer | WebGLBuffer;
   size: number;
   usage: string;
   format: string;
 }
 
-export interface GPUTexture {
+export interface GPUTextureWrapper {
   texture: GPUTexture | WebGLTexture;
   width: number;
   height: number;
@@ -134,9 +182,9 @@ class GPUAccelerationService {
     try {
       if (!('gpu' in navigator)) return;
 
-      this.webgpuAdapter = await navigator.gpu?.requestAdapter({
+      this.webgpuAdapter = (await navigator.gpu?.requestAdapter({
         powerPreference: 'high-performance'
-      });
+      })) ?? null;
 
       if (!this.webgpuAdapter) return;
 
@@ -263,7 +311,7 @@ class GPUAccelerationService {
     width: number,
     height: number,
     operation: string,
-    parameters: Record<string, any> = {}
+    parameters: WebGLUniforms = {}
   ): Promise<Float32Array> {
     if (!this.isInitialized || !this.capabilities) {
       throw new Error('GPU acceleration not initialized');
@@ -288,14 +336,15 @@ class GPUAccelerationService {
     width: number,
     height: number,
     shader: ComputeShaderProgram,
-    parameters: Record<string, any>
+    parameters: WebGLUniforms
   ): Promise<Float32Array> {
     if (!this.webgpuDevice) throw new Error('WebGPU device not available');
 
     const device = this.webgpuDevice;
 
     // Create compute shader module
-    const shaderModule = device.createShaderModule({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const shaderModule = (device as any).createShaderModule({
       code: this.adaptShaderForWebGPU(shader.source)
     });
 
@@ -331,7 +380,8 @@ class GPUAccelerationService {
     uniformBuffer.unmap();
 
     // Create bind group layout
-    const bindGroupLayout = device.createBindGroupLayout({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const bindGroupLayout = (device as any).createBindGroupLayout({
       entries: [
         {
           binding: 0,
@@ -352,8 +402,10 @@ class GPUAccelerationService {
     });
 
     // Create compute pipeline
-    const computePipeline = device.createComputePipeline({
-      layout: device.createPipelineLayout({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const computePipeline = (device as any).createComputePipeline({
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      layout: (device as any).createPipelineLayout({
         bindGroupLayouts: [bindGroupLayout]
       }),
       compute: {
@@ -363,7 +415,8 @@ class GPUAccelerationService {
     });
 
     // Create bind group
-    const bindGroup = device.createBindGroup({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const bindGroup = (device as any).createBindGroup({
       layout: bindGroupLayout,
       entries: [
         { binding: 0, resource: { buffer: inputBuffer } },
@@ -373,7 +426,8 @@ class GPUAccelerationService {
     });
 
     // Dispatch compute shader
-    const commandEncoder = device.createCommandEncoder();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const commandEncoder = (device as any).createCommandEncoder();
     const passEncoder = commandEncoder.beginComputePass();
 
     passEncoder.setPipeline(computePipeline);
@@ -390,7 +444,8 @@ class GPUAccelerationService {
     commandEncoder.copyBufferToBuffer(outputBuffer, 0, stagingBuffer, 0, imageData.byteLength);
 
     // Submit commands
-    device.queue.submit([commandEncoder.finish()]);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (device.queue as any).submit([commandEncoder.finish()]);
 
     // Read result
     await stagingBuffer.mapAsync(GPUMapMode.READ);
@@ -398,10 +453,14 @@ class GPUAccelerationService {
     stagingBuffer.unmap();
 
     // Cleanup
-    inputBuffer.destroy();
-    outputBuffer.destroy();
-    stagingBuffer.destroy();
-    uniformBuffer.destroy();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (inputBuffer as any).destroy();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (outputBuffer as any).destroy();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (stagingBuffer as any).destroy();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (uniformBuffer as any).destroy();
 
     return result;
   }
@@ -411,7 +470,7 @@ class GPUAccelerationService {
     width: number,
     height: number,
     shader: ComputeShaderProgram,
-    _parameters: Record<string, any>
+    _parameters: WebGLUniforms
   ): Float32Array {
     if (!this.webgl2Context) throw new Error('WebGL2 context not available');
 
@@ -476,7 +535,7 @@ class GPUAccelerationService {
   private createShaderProgram(
     gl: WebGL2RenderingContext,
     fragmentSource: string,
-    _parameters: Record<string, any>
+    _parameters: WebGLUniforms
   ): WebGLProgram {
     const vertexSource = `#version 300 es
       in vec2 position;
@@ -528,8 +587,8 @@ class GPUAccelerationService {
   private setUniforms(
     gl: WebGL2RenderingContext,
     program: WebGLProgram,
-    defaults: Record<string, any>,
-    parameters: Record<string, any>
+    defaults: WebGLUniforms,
+    parameters: WebGLUniforms
   ): void {
     const uniforms = { ...defaults, ...parameters };
 
@@ -566,7 +625,7 @@ class GPUAccelerationService {
     gl.deleteBuffer(buffer);
   }
 
-  private packUniforms(defaults: Record<string, any>, parameters: Record<string, any>): Float32Array {
+  private packUniforms(defaults: WebGLUniforms, parameters: WebGLUniforms): Float32Array {
     const uniforms = { ...defaults, ...parameters };
     const values: number[] = [];
 
@@ -866,7 +925,8 @@ class GPUAccelerationService {
 
     // Cleanup WebGPU
     if (this.webgpuDevice) {
-      this.webgpuDevice.destroy();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (this.webgpuDevice as any).destroy();
       this.webgpuDevice = null;
     }
 

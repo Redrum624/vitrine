@@ -1,28 +1,15 @@
 import { useState, useCallback, useEffect } from 'react';
-import { ChevronDown, ChevronRight, RotateCcw, RefreshCw } from 'lucide-react';
+import { ChevronDown, ChevronRight, RotateCcw, RefreshCw, Expand, Minimize2 } from 'lucide-react';
 import { BasicAdjustmentsModule } from '../../modules/BasicAdjustmentsModule';
 import { WhiteBalanceModule } from '../../modules/WhiteBalanceModule';
 import { ToneCurvePipelineModule } from '../../modules/ToneCurvePipelineModule';
 import { ColorBalancePipelineModule } from '../../modules/ColorBalancePipelineModule';
 import { ShadowsHighlightsPipelineModule } from '../../modules/ShadowsHighlightsPipelineModule';
-import { LocalAdjustmentsPipelineModule } from '../../modules/LocalAdjustmentsPipelineModule';
-import { LensCorrectionsPipelineModule } from '../../modules/LensCorrectionsPipelineModule';
 import { BasicAdjustmentsModuleComponent } from '../Modules/BasicAdjustmentsModuleComponent';
 import { WhiteBalanceModuleComponent } from '../Modules/WhiteBalanceModuleComponent';
 import { ToneCurveModuleComponent } from '../Modules/ToneCurveModuleComponent';
 import { ColorBalanceModuleComponent } from '../Modules/ColorBalanceModuleComponent';
 import { ShadowsHighlightsModuleComponent } from '../Modules/ShadowsHighlightsModuleComponent';
-import { LocalAdjustmentsModuleComponent } from '../Modules/LocalAdjustmentsModuleComponent';
-import { LensCorrectionsModuleComponent } from '../Modules/LensCorrectionsModuleComponent';
-import { AdvancedRawModule } from '../Modules/AdvancedRawModule';
-import { NoiseReductionModule } from '../Modules/NoiseReductionModule';
-import { LensCorrectionModule } from '../Modules/LensCorrectionModule';
-import { PrintModule } from '../Modules/PrintModule';
-import { WebGalleryModule } from '../Modules/WebGalleryModule';
-import { WatermarkModule } from '../Modules/WatermarkModule';
-import { CopyrightModule } from '../Modules/CopyrightModule';
-import { OutputCollectionModule } from '../Modules/OutputCollectionModule';
-import { LuminosityMaskModule } from '../Modules/LuminosityMaskModule';
 import { imageProcessingPipeline } from '../../services/ImageProcessingPipeline';
 import { imageService } from '../../services/ImageService';
 import { autoRawAdjustmentService } from '../../services/AutoRawAdjustmentService';
@@ -36,7 +23,6 @@ interface ModuleState {
 
 export function AdjustmentPanel() {
   const { setProcessedImageData, currentImage } = useAppStore();
-  const [realTimeProcessing, setRealTimeProcessing] = useState(true);
   const [moduleStates, setModuleStates] = useState<Record<string, ModuleState>>({
     // Core processing modules first (most commonly used)
     exposure: { expanded: true, enabled: true },
@@ -74,8 +60,6 @@ export function AdjustmentPanel() {
   const toneCurveModule = imageProcessingPipeline.getModule<ToneCurvePipelineModule>('tonecurve');
   const colorBalanceModule = imageProcessingPipeline.getModule<ColorBalancePipelineModule>('colorbalance');
   const shadowsHighlightsModule = imageProcessingPipeline.getModule<ShadowsHighlightsPipelineModule>('shadowshighlights');
-  const localAdjustmentsModule = imageProcessingPipeline.getModule<LocalAdjustmentsPipelineModule>('localadjustments');
-  const lensCorrectionsModule = imageProcessingPipeline.getModule<LensCorrectionsPipelineModule>('lenscorrections');
 
   const toggleModule = useCallback((moduleId: string) => {
     setModuleStates(prev => ({
@@ -153,24 +137,6 @@ export function AdjustmentPanel() {
     }
   }, [setProcessedImageData, isProcessing]);
 
-  const toggleModuleEnabled = useCallback((moduleId: string) => {
-    setModuleStates(prev => {
-      const newEnabled = !prev[moduleId]?.enabled;
-      imageProcessingPipeline.setModuleEnabled(moduleId, newEnabled);
-      logger.info(`Module ${moduleId} ${newEnabled ? 'enabled' : 'disabled'}`);
-
-      // Trigger real-time update
-      processCurrentImageRealTime();
-
-      return {
-        ...prev,
-        [moduleId]: {
-          ...prev[moduleId],
-          enabled: newEnabled
-        }
-      };
-    });
-  }, [processCurrentImageRealTime]);
 
   const [debounceTimer, setDebounceTimer] = useState<NodeJS.Timeout | null>(null);
 
@@ -221,6 +187,30 @@ export function AdjustmentPanel() {
     logger.info('All modules reset to defaults');
   }, [processCurrentImageRealTime]);
 
+  // Check if all modules are expanded
+  const areAllModulesExpanded = useCallback(() => {
+    const visibleModules = ['basicadj', 'whitebalance', 'shadowshighlights', 'tonecurve', 'colorbalance'];
+    return visibleModules.every(moduleId => moduleStates[moduleId]?.expanded === true);
+  }, [moduleStates]);
+
+  const toggleAllModules = useCallback(() => {
+    const allExpanded = areAllModulesExpanded();
+
+    setModuleStates(prev => {
+      const newStates = { ...prev };
+      const visibleModules = ['basicadj', 'whitebalance', 'shadowshighlights', 'tonecurve', 'colorbalance'];
+
+      visibleModules.forEach(key => {
+        if (newStates[key]) {
+          newStates[key] = { ...newStates[key], expanded: !allExpanded };
+        }
+      });
+      return newStates;
+    });
+
+    logger.info(allExpanded ? 'All modules retracted' : 'All modules expanded');
+  }, [areAllModulesExpanded]);
+
   // Monitor image changes for real-time updates
   useEffect(() => {
     // Add listener for new image loads
@@ -241,11 +231,18 @@ export function AdjustmentPanel() {
   }, [processCurrentImageRealTime]);
 
   return (
-    <div className="w-80 bg-dark-900 border-l border-dark-700 flex flex-col h-full rounded-r-lg">
+    <div className="w-80 bg-dark-900 border-dark-700 flex flex-col h-full rounded-r-lg">
       {/* Header */}
       <div className="p-3 border-b border-dark-700 rounded-tr-lg">
         <div className="flex items-center justify-between">
-          <h2 className="text-sm font-medium text-dark-300">Develop</h2>
+          <div className="flex items-center gap-3">
+            <h2 className="text-sm font-medium text-dark-300">Develop</h2>
+            {lastProcessingTime > 0 && !isProcessing && (
+              <div className="text-xs text-center text-dark-500">
+                2x downscaled preview ({lastProcessingTime.toFixed(1)}ms)
+              </div>
+            )}
+          </div>
           <div className="flex items-center space-x-1">
             {currentImage?.isRaw && (
               <button
@@ -269,32 +266,18 @@ export function AdjustmentPanel() {
             >
               <RotateCcw className="w-4 h-4" />
             </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Processing Pipeline Status */}
-      <div className="px-3 py-2 bg-dark-850 border-b border-dark-800">
-        <div className="flex items-center justify-between text-xs">
-          <div className="flex items-center gap-2">
-            <div className="text-dark-400">
-              {isProcessing ? (
-                <span className="text-yellow-400 animate-pulse">Processing...</span>
+            <button
+              onClick={toggleAllModules}
+              className="p-1 hover:bg-dark-700 rounded text-dark-300 transition-professional"
+              title={areAllModulesExpanded() ? "Retract all modules" : "Expand all modules"}
+            >
+              {areAllModulesExpanded() ? (
+                <Minimize2 className="w-4 h-4" />
               ) : (
-                <span className="text-green-400">Ready</span>
+                <Expand className="w-4 h-4" />
               )}
-            </div>
-            {currentImage?.autoAdjustmentResult?.isRAW && (
-              <div className="text-blue-400 text-xs bg-blue-500/10 px-2 py-1 rounded">
-                RAW Auto-adjusted
-              </div>
-            )}
+            </button>
           </div>
-          {lastProcessingTime > 0 && !isProcessing && (
-            <div className="text-dark-500">
-              2x downscaled preview ({lastProcessingTime.toFixed(1)}ms)
-            </div>
-          )}
         </div>
       </div>
 
@@ -305,30 +288,17 @@ export function AdjustmentPanel() {
         {/* Basic Adjustments Module */}
         {basicAdjModule && (
           <div className="border-b border-dark-800">
-            <div className="flex items-center">
-              <button
-                onClick={() => toggleModule('basicadj')}
-                className="flex-1 p-3 flex items-center justify-between hover:bg-dark-800 transition-professional text-left"
-              >
-                <span className="text-sm font-medium text-dark-300">Basic Adjustments</span>
-                {moduleStates.basicadj?.expanded ? (
-                  <ChevronDown className="w-4 h-4 text-dark-300" />
-                ) : (
-                  <ChevronRight className="w-4 h-4 text-dark-300" />
-                )}
-              </button>
-              <button
-                onClick={() => toggleModuleEnabled('basicadj')}
-                className={`px-2 py-1 mx-2 rounded text-xs transition-professional ${
-                  moduleStates.basicadj?.enabled
-                    ? 'bg-green-600 text-white'
-                    : 'bg-dark-700 text-dark-400'
-                }`}
-                title={`${moduleStates.basicadj?.enabled ? 'Disable' : 'Enable'} module`}
-              >
-                {moduleStates.basicadj?.enabled ? 'ON' : 'OFF'}
-              </button>
-            </div>
+            <button
+              onClick={() => toggleModule('basicadj')}
+              className="w-full p-3 flex items-center justify-between hover:bg-dark-800 transition-professional text-left"
+            >
+              <span className="text-sm font-medium text-dark-300">Basic Adjustments</span>
+              {moduleStates.basicadj?.expanded ? (
+                <ChevronDown className="w-4 h-4 text-dark-300" />
+              ) : (
+                <ChevronRight className="w-4 h-4 text-dark-300" />
+              )}
+            </button>
 
             {moduleStates.basicadj?.expanded && (
               <div className="px-3 pb-3">
@@ -344,30 +314,17 @@ export function AdjustmentPanel() {
         {/* White Balance Module */}
         {whiteBalanceModule && (
           <div className="border-b border-dark-800">
-            <div className="flex items-center">
-              <button
-                onClick={() => toggleModule('whitebalance')}
-                className="flex-1 p-3 flex items-center justify-between hover:bg-dark-800 transition-professional text-left"
-              >
-                <span className="text-sm font-medium text-dark-300">White Balance</span>
-                {moduleStates.whitebalance?.expanded ? (
-                  <ChevronDown className="w-4 h-4 text-dark-300" />
-                ) : (
-                  <ChevronRight className="w-4 h-4 text-dark-300" />
-                )}
-              </button>
-              <button
-                onClick={() => toggleModuleEnabled('temperature')}
-                className={`px-2 py-1 mx-2 rounded text-xs transition-professional ${
-                  moduleStates.whitebalance?.enabled
-                    ? 'bg-green-600 text-white'
-                    : 'bg-dark-700 text-dark-400'
-                }`}
-                title={`${moduleStates.whitebalance?.enabled ? 'Disable' : 'Enable'} module`}
-              >
-                {moduleStates.whitebalance?.enabled ? 'ON' : 'OFF'}
-              </button>
-            </div>
+            <button
+              onClick={() => toggleModule('whitebalance')}
+              className="w-full p-3 flex items-center justify-between hover:bg-dark-800 transition-professional text-left"
+            >
+              <span className="text-sm font-medium text-dark-300">White Balance</span>
+              {moduleStates.whitebalance?.expanded ? (
+                <ChevronDown className="w-4 h-4 text-dark-300" />
+              ) : (
+                <ChevronRight className="w-4 h-4 text-dark-300" />
+              )}
+            </button>
 
             {moduleStates.whitebalance?.expanded && (
               <div className="px-3 pb-3">
@@ -384,30 +341,17 @@ export function AdjustmentPanel() {
         {/* Shadows & Highlights Module */}
         {shadowsHighlightsModule && (
           <div className="border-b border-dark-800">
-            <div className="flex items-center">
-              <button
-                onClick={() => toggleModule('shadowshighlights')}
-                className="flex-1 p-3 flex items-center justify-between hover:bg-dark-800 transition-professional text-left"
-              >
-                <span className="text-sm font-medium text-dark-300">Shadows & Highlights</span>
-                {moduleStates.shadowshighlights?.expanded ? (
-                  <ChevronDown className="w-4 h-4 text-dark-300" />
-                ) : (
-                  <ChevronRight className="w-4 h-4 text-dark-300" />
-                )}
-              </button>
-              <button
-                onClick={() => toggleModuleEnabled('shadowshighlights')}
-                className={`px-2 py-1 mx-2 rounded text-xs transition-professional ${
-                  moduleStates.shadowshighlights?.enabled
-                    ? 'bg-green-600 text-white'
-                    : 'bg-dark-700 text-dark-400'
-                }`}
-                title={`${moduleStates.shadowshighlights?.enabled ? 'Disable' : 'Enable'} module`}
-              >
-                {moduleStates.shadowshighlights?.enabled ? 'ON' : 'OFF'}
-              </button>
-            </div>
+            <button
+              onClick={() => toggleModule('shadowshighlights')}
+              className="w-full p-3 flex items-center justify-between hover:bg-dark-800 transition-professional text-left"
+            >
+              <span className="text-sm font-medium text-dark-300">Shadows & Highlights</span>
+              {moduleStates.shadowshighlights?.expanded ? (
+                <ChevronDown className="w-4 h-4 text-dark-300" />
+              ) : (
+                <ChevronRight className="w-4 h-4 text-dark-300" />
+              )}
+            </button>
 
             {moduleStates.shadowshighlights?.expanded && (
               <div className="px-3 pb-3">
@@ -423,30 +367,17 @@ export function AdjustmentPanel() {
         {/* Tone Curve Module */}
         {toneCurveModule && (
           <div className="border-b border-dark-800">
-            <div className="flex items-center">
-              <button
-                onClick={() => toggleModule('tonecurve')}
-                className="flex-1 p-3 flex items-center justify-between hover:bg-dark-800 transition-professional text-left"
-              >
-                <span className="text-sm font-medium text-dark-300">Tone Curve</span>
-                {moduleStates.tonecurve?.expanded ? (
-                  <ChevronDown className="w-4 h-4 text-dark-300" />
-                ) : (
-                  <ChevronRight className="w-4 h-4 text-dark-300" />
-                )}
-              </button>
-              <button
-                onClick={() => toggleModuleEnabled('tonecurve')}
-                className={`px-2 py-1 mx-2 rounded text-xs transition-professional ${
-                  moduleStates.tonecurve?.enabled
-                    ? 'bg-green-600 text-white'
-                    : 'bg-dark-700 text-dark-400'
-                }`}
-                title={`${moduleStates.tonecurve?.enabled ? 'Disable' : 'Enable'} module`}
-              >
-                {moduleStates.tonecurve?.enabled ? 'ON' : 'OFF'}
-              </button>
-            </div>
+            <button
+              onClick={() => toggleModule('tonecurve')}
+              className="w-full p-3 flex items-center justify-between hover:bg-dark-800 transition-professional text-left"
+            >
+              <span className="text-sm font-medium text-dark-300">Tone Curve</span>
+              {moduleStates.tonecurve?.expanded ? (
+                <ChevronDown className="w-4 h-4 text-dark-300" />
+              ) : (
+                <ChevronRight className="w-4 h-4 text-dark-300" />
+              )}
+            </button>
 
             {moduleStates.tonecurve?.expanded && (
               <div className="px-3 pb-3">
@@ -462,30 +393,17 @@ export function AdjustmentPanel() {
         {/* Color Balance Module */}
         {colorBalanceModule && (
           <div className="border-b border-dark-800">
-            <div className="flex items-center">
-              <button
-                onClick={() => toggleModule('colorbalance')}
-                className="flex-1 p-3 flex items-center justify-between hover:bg-dark-800 transition-professional text-left"
-              >
-                <span className="text-sm font-medium text-dark-300">Color Balance</span>
-                {moduleStates.colorbalance?.expanded ? (
-                  <ChevronDown className="w-4 h-4 text-dark-300" />
-                ) : (
-                  <ChevronRight className="w-4 h-4 text-dark-300" />
-                )}
-              </button>
-              <button
-                onClick={() => toggleModuleEnabled('colorbalance')}
-                className={`px-2 py-1 mx-2 rounded text-xs transition-professional ${
-                  moduleStates.colorbalance?.enabled
-                    ? 'bg-green-600 text-white'
-                    : 'bg-dark-700 text-dark-400'
-                }`}
-                title={`${moduleStates.colorbalance?.enabled ? 'Disable' : 'Enable'} module`}
-              >
-                {moduleStates.colorbalance?.enabled ? 'ON' : 'OFF'}
-              </button>
-            </div>
+            <button
+              onClick={() => toggleModule('colorbalance')}
+              className="w-full p-3 flex items-center justify-between hover:bg-dark-800 transition-professional text-left"
+            >
+              <span className="text-sm font-medium text-dark-300">Color Balance</span>
+              {moduleStates.colorbalance?.expanded ? (
+                <ChevronDown className="w-4 h-4 text-dark-300" />
+              ) : (
+                <ChevronRight className="w-4 h-4 text-dark-300" />
+              )}
+            </button>
 
             {moduleStates.colorbalance?.expanded && (
               <div className="px-3 pb-3">

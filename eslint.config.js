@@ -57,6 +57,35 @@ export default [
         requestAnimationFrame: 'readonly',
         cancelAnimationFrame: 'readonly',
         crypto: 'readonly',
+        // DOM APIs
+        FileReader: 'readonly',
+        MouseEvent: 'readonly',
+        TouchEvent: 'readonly',
+        PointerEvent: 'readonly',
+        WheelEvent: 'readonly',
+        TouchList: 'readonly',
+        MediaQueryListEvent: 'readonly',
+        Window: 'readonly',
+        HTMLImageElement: 'readonly',
+        ImageData: 'readonly',
+        OffscreenCanvas: 'readonly',
+        WebGLTexture: 'readonly',
+        WebGLBuffer: 'readonly',
+        WebGLFramebuffer: 'readonly',
+        WebGL2RenderingContext: 'readonly',
+        WebGLProgram: 'readonly',
+        WebGLShader: 'readonly',
+        Event: 'readonly',
+        HTMLButtonElement: 'readonly',
+        GlobalCompositeOperation: 'readonly',
+        btoa: 'readonly',
+        // Node.js types
+        NodeJS: 'readonly',
+        // Error types
+        ErrorEvent: 'readonly',
+        // Additional browser APIs
+        fetch: 'readonly',
+        MediaQueryList: 'readonly',
       },
     },
     plugins: {
@@ -92,6 +121,7 @@ export default [
         Buffer: 'readonly',
         global: 'readonly',
         window: 'readonly',
+        logger: 'readonly',
       },
     },
     rules: {

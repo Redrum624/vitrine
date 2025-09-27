@@ -58,7 +58,7 @@ const SliderControl: React.FC<SliderControlProps> = ({
         value={value}
         onChange={(e) => onChange(parseFloat(e.target.value))}
         disabled={disabled}
-        className="w-full h-2 rounded-lg appearance-none cursor-pointer slider-thumb visible-track disabled:opacity-50"
+        className="w-full h-2 border border-dark-700 rounded-lg appearance-none cursor-pointer slider-thumb visible-track disabled:opacity-50"
         aria-labelledby={labelId}
         aria-describedby={descriptionId}
         aria-valuemin={min}

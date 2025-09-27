@@ -10,6 +10,8 @@ import {
 } from 'lucide-react';
 import SliderControl from '../Controls/SliderControl';
 import { ExportOptions, ExportPreset, exportService } from '../../services/ExportService';
+import { imageService } from '../../services/ImageService';
+import { logger } from '../../utils/Logger';
 
 interface ExportDialogProps {
   isOpen: boolean;
@@ -128,10 +130,60 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
     setIsExporting(true);
 
     try {
+      let exportImageData: Float32Array;
+      let exportWidth: number;
+      let exportHeight: number;
+
+      // Load full-resolution image for export if we have an original file path
+      if (originalFilePath) {
+        logger.info('Loading full-resolution image for export');
+        const fullResImageData = await imageService.loadImageForExport(originalFilePath);
+
+        // Apply the same processing pipeline to full-resolution image
+        const pipeline = imageService.getProcessingPipeline();
+        if (pipeline) {
+          logger.info(`Processing full-resolution image: ${fullResImageData.width}x${fullResImageData.height}`);
+          const context = { width: fullResImageData.width, height: fullResImageData.height, channels: 4 };
+          const processedData = await pipeline.processImage(fullResImageData.data, context);
+
+          if (processedData && typeof processedData === 'object' && 'data' in processedData) {
+            // Handle new preview data structure
+            const previewData = processedData as unknown as { data: Float32Array; width: number; height: number; isPreview: boolean };
+            exportImageData = previewData.data;
+            exportWidth = previewData.width;
+            exportHeight = previewData.height;
+          } else if (processedData && processedData instanceof Float32Array) {
+            // Handle legacy data structure
+            exportImageData = processedData;
+            exportWidth = fullResImageData.width;
+            exportHeight = fullResImageData.height;
+          } else {
+            // Fallback to unprocessed full-resolution data
+            exportImageData = fullResImageData.data;
+            exportWidth = fullResImageData.width;
+            exportHeight = fullResImageData.height;
+          }
+
+          logger.info(`Export using processed full-resolution image: ${exportWidth}x${exportHeight}`);
+        } else {
+          // No processing pipeline, use raw full-resolution image
+          exportImageData = fullResImageData.data;
+          exportWidth = fullResImageData.width;
+          exportHeight = fullResImageData.height;
+          logger.info(`Export using unprocessed full-resolution image: ${exportWidth}x${exportHeight}`);
+        }
+      } else {
+        // Fallback to provided image data (display resolution)
+        exportImageData = imageData;
+        exportWidth = imageWidth;
+        exportHeight = imageHeight;
+        logger.info(`Export using display resolution image: ${exportWidth}x${exportHeight}`);
+      }
+
       const result = await exportService.exportImage(
-        imageData,
-        imageWidth,
-        imageHeight,
+        exportImageData,
+        exportWidth,
+        exportHeight,
         exportOptions,
         originalFilePath
       );
@@ -144,6 +196,7 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
         alert(`Export failed: ${result.error}`);
       }
     } catch (error) {
+      logger.error('Export failed:', error);
       onExportComplete(false);
       alert(`Export failed: ${error}`);
     } finally {

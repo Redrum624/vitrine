@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react';
 import { RotateCcw, Info, Zap } from 'lucide-react';
 import type { ExposureParams } from '../../types/darktable';
 import { ExposureModule } from '../../modules/ExposureModule';
+import { DelayedInputControl } from '../Controls/DelayedInputControl';
 
 interface ExposureModuleComponentProps {
   module: ExposureModule;
@@ -119,15 +120,14 @@ export function ExposureModuleComponent({
             <div className="flex items-center justify-between">
               <label className="text-xs text-dark-300">Exposure</label>
               <div className="flex items-center space-x-1">
-                <input
-                  type="number"
-                  value={params.exposure.toFixed(2)}
-                  onChange={(e) => handleParamChange('exposure', parseFloat(e.target.value))}
-                  disabled={disabled}
-                  className="w-16 px-1 py-0.5 text-xs bg-dark-800 border border-dark-700 rounded text-dark-300 text-right disabled:opacity-50"
-                  step={0.1}
+                <DelayedInputControl
+                  value={params.exposure}
+                  onChange={(value) => handleParamChange('exposure', value)}
                   min={constraints.exposure.min}
                   max={constraints.exposure.max}
+                  step={0.1}
+                  precision={2}
+                  disabled={disabled}
                 />
                 <span className="text-xs text-dark-300">EV</span>
                 <button
@@ -166,15 +166,14 @@ export function ExposureModuleComponent({
             <div className="flex items-center justify-between">
               <label className="text-xs text-dark-300">Black Level</label>
               <div className="flex items-center space-x-1">
-                <input
-                  type="number"
-                  value={params.black.toFixed(3)}
-                  onChange={(e) => handleParamChange('black', parseFloat(e.target.value))}
-                  disabled={disabled}
-                  className="w-16 px-1 py-0.5 text-xs bg-dark-800 border border-dark-700 rounded text-dark-300 text-right disabled:opacity-50"
-                  step={0.01}
+                <DelayedInputControl
+                  value={params.black}
+                  onChange={(value) => handleParamChange('black', value)}
                   min={constraints.black.min}
                   max={constraints.black.max}
+                  step={0.01}
+                  precision={3}
+                  disabled={disabled}
                 />
                 <button
                   onClick={() => handleParamChange('black', constraints.black.default)}
@@ -232,15 +231,15 @@ export function ExposureModuleComponent({
             <div className="flex items-center justify-between">
               <label className="text-xs text-dark-300">Percentile</label>
               <div className="flex items-center space-x-1">
-                <input
-                  type="number"
-                  value={params.deflicker_percentile.toFixed(1)}
-                  onChange={(e) => handleParamChange('deflicker_percentile', parseFloat(e.target.value))}
-                  disabled={disabled}
-                  className="w-12 px-1 py-0.5 text-xs bg-dark-800 border border-dark-700 rounded text-dark-300 text-right disabled:opacity-50"
-                  step={1}
+                <DelayedInputControl
+                  value={params.deflicker_percentile}
+                  onChange={(value) => handleParamChange('deflicker_percentile', value)}
                   min={constraints.deflicker_percentile.min}
                   max={constraints.deflicker_percentile.max}
+                  step={1}
+                  precision={1}
+                  disabled={disabled}
+                  className="w-12"
                 />
                 <span className="text-xs text-dark-300">%</span>
               </div>
@@ -262,15 +261,14 @@ export function ExposureModuleComponent({
             <div className="flex items-center justify-between">
               <label className="text-xs text-dark-300">Target Level</label>
               <div className="flex items-center space-x-1">
-                <input
-                  type="number"
-                  value={params.deflicker_target_level.toFixed(1)}
-                  onChange={(e) => handleParamChange('deflicker_target_level', parseFloat(e.target.value))}
-                  disabled={disabled}
-                  className="w-16 px-1 py-0.5 text-xs bg-dark-800 border border-dark-700 rounded text-dark-300 text-right disabled:opacity-50"
-                  step={0.1}
+                <DelayedInputControl
+                  value={params.deflicker_target_level}
+                  onChange={(value) => handleParamChange('deflicker_target_level', value)}
                   min={constraints.deflicker_target_level.min}
                   max={constraints.deflicker_target_level.max}
+                  step={0.1}
+                  precision={1}
+                  disabled={disabled}
                 />
                 <span className="text-xs text-dark-300">EV</span>
               </div>

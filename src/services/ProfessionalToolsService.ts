@@ -50,7 +50,7 @@ export interface MeasurementTool {
   type: 'ruler' | 'protractor' | 'area' | 'pixel-inspector' | 'color-sampler';
   active: boolean;
   persistent: boolean;
-  settings: any;
+  settings: unknown;
 }
 
 export interface Measurement {
@@ -106,7 +106,7 @@ class ProfessionalToolsService {
   private measurements: Map<string, Measurement> = new Map();
   private tools: Map<string, MeasurementTool> = new Map();
   private colorSamplers: Map<string, ColorSampler> = new Map();
-  private observers: Set<(event: string, data?: any) => void> = new Set();
+  private observers: Set<(event: string, data?: unknown) => void> = new Set();
   private canvasElement: HTMLCanvasElement | null = null;
   private overlayCanvas: HTMLCanvasElement | null = null;
   private overlayContext: CanvasRenderingContext2D | null = null;
@@ -1004,12 +1004,12 @@ class ProfessionalToolsService {
     }
   }
 
-  subscribe(callback: (event: string, data?: any) => void): () => void {
+  subscribe(callback: (event: string, data?: unknown) => void): () => void {
     this.observers.add(callback);
     return () => this.observers.delete(callback);
   }
 
-  private notifyObservers(event: string, data?: any): void {
+  private notifyObservers(event: string, data?: unknown): void {
     this.observers.forEach(callback => {
       try {
         callback(event, data);

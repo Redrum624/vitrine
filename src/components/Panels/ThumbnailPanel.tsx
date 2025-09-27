@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { ImageFileInfo } from '../../services/FileSystemService';
 import { logger } from '../../utils/Logger';
@@ -24,7 +24,7 @@ export function ThumbnailPanel({
   const selectedImageRef = useRef<HTMLDivElement>(null);
 
   // Load thumbnail for an image
-  const loadThumbnail = async (image: ImageFileInfo) => {
+  const loadThumbnail = useCallback(async (image: ImageFileInfo) => {
     if (thumbnails.has(image.id) || loadingThumbnails.has(image.id)) {
       return;
     }
@@ -75,7 +75,7 @@ export function ThumbnailPanel({
         return newSet;
       });
     }
-  };
+  }, [thumbnails, loadingThumbnails]);
 
   // Load visible thumbnails
   useEffect(() => {
@@ -84,7 +84,7 @@ export function ThumbnailPanel({
     // Load first few thumbnails immediately
     const initialLoad = images.slice(0, 10);
     initialLoad.forEach(loadThumbnail);
-  }, [images, visible]);
+  }, [images, visible, loadThumbnail]);
 
   // Scroll to selected image
   useEffect(() => {

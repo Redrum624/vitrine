@@ -188,7 +188,7 @@ export class AutoRawAdjustmentService {
     reasoning: string[];
   } {
     const reasoning: string[] = [];
-    let confidence = 1.0;
+    const confidence = 1.0;
 
     // Analyze histogram for exposure issues
     let needsExposureAdjustment = false;
@@ -375,16 +375,18 @@ export class AutoRawAdjustmentService {
       // Apply exposure parameters
       const exposureModule = pipeline.getModule<ExposureModule>('exposure');
       if (exposureModule && Object.keys(params.exposure).length > 0) {
-        // Apply parameters using direct property setting (since updateParams isn't available)
+        // Apply parameters using module's setParameters method
+        const exposureParams: Partial<import('../types/darktable').ExposureParams> = {};
         if (params.exposure.exposure !== undefined) {
-          (exposureModule as any).exposure = params.exposure.exposure;
+          exposureParams.exposure = params.exposure.exposure;
         }
         if (params.exposure.blackpoint !== undefined) {
-          (exposureModule as any).blackpoint = params.exposure.blackpoint;
+          exposureParams.black = params.exposure.blackpoint;
         }
         if (params.exposure.mode !== undefined) {
-          (exposureModule as any).mode = params.exposure.mode;
+          exposureParams.mode = params.exposure.mode === 'automatic' ? 'automatic' : 'manual';
         }
+        exposureModule.setCurrentParams(exposureParams);
         pipeline.setModuleEnabled('exposure', true);
         logger.debug('Applied auto exposure parameters:', params.exposure);
       }
@@ -392,15 +394,14 @@ export class AutoRawAdjustmentService {
       // Apply white balance parameters
       const whiteBalanceModule = pipeline.getModule<WhiteBalanceModule>('temperature');
       if (whiteBalanceModule && Object.keys(params.whiteBalance).length > 0) {
+        const wbParams: Partial<import('../types/index').WhiteBalanceParams> = {};
         if (params.whiteBalance.temperature !== undefined) {
-          (whiteBalanceModule as any).temperature = params.whiteBalance.temperature;
+          wbParams.temperature = params.whiteBalance.temperature;
         }
         if (params.whiteBalance.tint !== undefined) {
-          (whiteBalanceModule as any).tint = params.whiteBalance.tint;
+          wbParams.tint = params.whiteBalance.tint;
         }
-        if (params.whiteBalance.illuminant !== undefined) {
-          (whiteBalanceModule as any).illuminant = params.whiteBalance.illuminant;
-        }
+        whiteBalanceModule.setParams(wbParams);
         pipeline.setModuleEnabled('temperature', true);
         logger.debug('Applied auto white balance parameters:', params.whiteBalance);
       }
@@ -408,24 +409,25 @@ export class AutoRawAdjustmentService {
       // Apply basic adjustments parameters
       const basicModule = pipeline.getModule<BasicAdjustmentsModule>('basicadj');
       if (basicModule && Object.keys(params.basicAdjustments).length > 0) {
+        const basicParams: Partial<import('../types/index').BasicAdjustmentsParams> = {};
         if (params.basicAdjustments.contrast !== undefined) {
-          (basicModule as any).contrast = params.basicAdjustments.contrast;
+          basicParams.contrast = params.basicAdjustments.contrast;
         }
         if (params.basicAdjustments.brightness !== undefined) {
-          (basicModule as any).brightness = params.basicAdjustments.brightness;
+          basicParams.brightness = params.basicAdjustments.brightness;
         }
         if (params.basicAdjustments.saturation !== undefined) {
-          (basicModule as any).saturation = params.basicAdjustments.saturation;
+          basicParams.saturation = params.basicAdjustments.saturation;
         }
         if (params.basicAdjustments.vibrance !== undefined) {
-          (basicModule as any).vibrance = params.basicAdjustments.vibrance;
+          basicParams.vibrance = params.basicAdjustments.vibrance;
         }
         if (params.basicAdjustments.clarity !== undefined) {
-          (basicModule as any).clarity = params.basicAdjustments.clarity;
+          basicParams.clarity = params.basicAdjustments.clarity;
         }
-        if (params.basicAdjustments.dehaze !== undefined) {
-          (basicModule as any).dehaze = params.basicAdjustments.dehaze;
-        }
+        basicModule.setParams(basicParams);
+        // Note: dehaze parameter would need to be added to BasicAdjustmentsParams interface
+        // Skipping dehaze parameter application for now
         pipeline.setModuleEnabled('basicadj', true);
         logger.debug('Applied auto basic adjustment parameters:', params.basicAdjustments);
       }
@@ -433,24 +435,26 @@ export class AutoRawAdjustmentService {
       // Apply shadows/highlights parameters
       const shadowsModule = pipeline.getModule<ShadowsHighlightsPipelineModule>('shadowshighlights');
       if (shadowsModule && Object.keys(params.shadowsHighlights).length > 0) {
+        const shadowsParams: Partial<import('../types/index').ShadowsHighlightsParams> = {};
         if (params.shadowsHighlights.shadows !== undefined) {
-          (shadowsModule as any).shadows = params.shadowsHighlights.shadows;
+          shadowsParams.shadows = params.shadowsHighlights.shadows;
         }
         if (params.shadowsHighlights.highlights !== undefined) {
-          (shadowsModule as any).highlights = params.shadowsHighlights.highlights;
+          shadowsParams.highlights = params.shadowsHighlights.highlights;
         }
         if (params.shadowsHighlights.whitepoint !== undefined) {
-          (shadowsModule as any).whitepoint = params.shadowsHighlights.whitepoint;
+          shadowsParams.whitepoint = params.shadowsHighlights.whitepoint;
         }
         if (params.shadowsHighlights.blackpoint !== undefined) {
-          (shadowsModule as any).blackpoint = params.shadowsHighlights.blackpoint;
+          shadowsParams.blackpoint = params.shadowsHighlights.blackpoint;
         }
         if (params.shadowsHighlights.radius !== undefined) {
-          (shadowsModule as any).radius = params.shadowsHighlights.radius;
+          shadowsParams.radius = params.shadowsHighlights.radius;
         }
         if (params.shadowsHighlights.compress !== undefined) {
-          (shadowsModule as any).compress = params.shadowsHighlights.compress;
+          shadowsParams.compress = params.shadowsHighlights.compress;
         }
+        shadowsModule.setParams(shadowsParams);
         pipeline.setModuleEnabled('shadowshighlights', true);
         logger.debug('Applied auto shadows/highlights parameters:', params.shadowsHighlights);
       }
@@ -610,7 +614,7 @@ export class AutoRawAdjustmentService {
   /**
    * Generate color grading parameters for specific cameras
    */
-  private generateColorGradingParams(metadata: RawMetadata): Record<string, any> {
+  private generateColorGradingParams(metadata: RawMetadata): Record<string, number | string | boolean | number[]> {
     const make = metadata.make?.toLowerCase() || '';
 
     const baseParams = {

@@ -35,7 +35,7 @@ export function HistogramPanel() {
   };
 
   return (
-    <div className="bg-dark-850 rounded-lg p-3 mb-4">
+    <div className="bg-dark-900 rounded-lg p-3">
       <div className="flex items-center justify-between mb-2">
         <h3 className="text-xs font-medium text-dark-300">Histogram</h3>
         <div className="flex space-x-2 text-xs">

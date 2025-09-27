@@ -175,6 +175,8 @@ export class ImageProcessingPipeline {
   private async processOnMainThread(input: Float32Array, context: ProcessingContext): Promise<Float32Array> {
     let currentData: Float32Array = new Float32Array(input);
 
+    // Debug logging removed - issue resolved
+
     logger.info(`Processing on main thread: ${context.width}x${context.height} (${this.processingOrder.length} modules)`);
     const startTime = performance.now();
 
@@ -200,6 +202,8 @@ export class ImageProcessingPipeline {
           logger.debug(`Processing module: ${module.getName()} (${moduleId})`);
           currentData = module.process(currentData, context);
 
+          // Debug logging removed - issue resolved
+
           const moduleTime = performance.now() - moduleStartTime;
           logger.debug(`Module ${module.getName()} completed in ${moduleTime.toFixed(2)}ms`);
 
@@ -211,6 +215,8 @@ export class ImageProcessingPipeline {
 
       const totalTime = performance.now() - startTime;
       logger.info(`Main thread processing completed in ${totalTime.toFixed(2)}ms`);
+
+      // Debug logging removed - issue resolved
 
       return currentData;
 

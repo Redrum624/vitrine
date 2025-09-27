@@ -59,10 +59,10 @@ export class BasicAdjustmentsModule {
     // Simple auto adjustment algorithm
     // In a real implementation, this would analyze the image histogram
     const autoParams: BasicAdjParams = {
-      black_point: 0.02,      // Slight black point lift
-      exposure: 0.2,          // Slight exposure boost
-      contrast: 0.15,         // Moderate contrast increase
-      brightness: 0.0,        // No brightness change
+      black_point: 0.0,       // No black point adjustment (was causing zero values)
+      exposure: 0.5,          // More exposure boost to brighten image
+      contrast: 0.2,          // Moderate contrast increase
+      brightness: 0.1,        // Slight brightness boost
       saturation: 0.1,        // Slight saturation boost
       vibrance: 0.15          // Moderate vibrance increase
     };

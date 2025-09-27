@@ -107,15 +107,15 @@ export const ColorBalanceModuleComponent: React.FC<ColorBalanceModuleComponentPr
     return (
       <div className="space-y-4">
         {/* Range Selection */}
-        <div className="flex rounded-md bg-gray-800 p-1">
+        <div className="flex rounded-md bg-gray-700 p-1">
           {(['shadows', 'midtones', 'highlights'] as const).map((range) => (
             <button
               key={range}
               onClick={() => setActiveRange(range)}
               className={`flex-1 px-3 py-2 text-xs font-medium rounded transition-colors capitalize ${
                 activeRange === range
-                  ? 'bg-blue-600 text-white'
-                  : 'text-gray-400 hover:text-gray-300'
+                  ? 'bg-gray-600 text-white shadow-sm'
+                  : 'bg-transparent hover:text-gray-600'
               }`}
             >
               {range}
@@ -143,7 +143,7 @@ export const ColorBalanceModuleComponent: React.FC<ColorBalanceModuleComponentPr
           />
 
           {/* Yellow-Blue Slider */}
-          <div className="w-full max-w-xs">
+          <div className="w-full py-4 max-w-xs">
             <SliderControl
               label="Yellow ↔ Blue"
               value={rangeParams.yellow_blue}
@@ -163,15 +163,15 @@ export const ColorBalanceModuleComponent: React.FC<ColorBalanceModuleComponentPr
     return (
       <div className="space-y-4">
         {/* Global Color Control Tabs */}
-        <div className="flex rounded-md bg-gray-800 p-1">
+        <div className="flex rounded-md bg-gray-700 p-1">
           {(['saturation', 'luminance', 'hue'] as GlobalTabType[]).map((tab) => (
             <button
               key={tab}
               onClick={() => setGlobalTab(tab)}
               className={`flex-1 px-3 py-2 text-xs font-medium rounded transition-colors ${
                 globalTab === tab
-                  ? 'bg-blue-600 text-white'
-                  : 'text-gray-400 hover:text-gray-300'
+                ? 'bg-gray-600 text-white shadow-sm'
+                : 'bg-transparent hover:text-gray-600'
               }`}
             >
               {tab.charAt(0).toUpperCase() + tab.slice(1)}
@@ -226,10 +226,7 @@ export const ColorBalanceModuleComponent: React.FC<ColorBalanceModuleComponentPr
   return (
     <div className="space-y-4">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center space-x-2">
-          <h3 className="text-sm font-medium text-gray-300">Color Balance</h3>
-        </div>
+      <div className="flex items-center justify-end">
         <button
           onClick={resetParams}
           className="p-1 text-gray-400 hover:text-gray-300 transition-colors"
@@ -240,13 +237,13 @@ export const ColorBalanceModuleComponent: React.FC<ColorBalanceModuleComponentPr
       </div>
 
       {/* Main Tabs */}
-      <div className="flex rounded-md bg-gray-800 p-1">
+      <div className="flex rounded-md bg-gray-700 p-1">
         <button
           onClick={() => setActiveTab('traditional')}
           className={`flex-1 px-3 py-2 text-xs font-medium rounded transition-colors ${
             activeTab === 'traditional'
-              ? 'bg-green-600 text-white'
-              : 'text-gray-400 hover:text-gray-300'
+              ? 'bg-gray-600 text-white shadow-sm'
+              : 'bg-transparent hover:text-gray-600'
           }`}
         >
           Traditional
@@ -255,8 +252,8 @@ export const ColorBalanceModuleComponent: React.FC<ColorBalanceModuleComponentPr
           onClick={() => setActiveTab('global')}
           className={`flex-1 px-3 py-2 text-xs font-medium rounded transition-colors ${
             activeTab === 'global'
-              ? 'bg-green-600 text-white'
-              : 'text-gray-400 hover:text-gray-300'
+              ? 'bg-gray-600 text-white shadow-sm'
+              : 'bg-transparent hover:text-gray-600'
           }`}
         >
           Global Colors
@@ -267,11 +264,6 @@ export const ColorBalanceModuleComponent: React.FC<ColorBalanceModuleComponentPr
       {activeTab === 'traditional' && renderTraditionalControls()}
       {activeTab === 'global' && renderGlobalControls()}
 
-      {/* Tab Description */}
-      <div className="text-xs text-gray-500 px-2 border-t border-gray-700 pt-2">
-        {activeTab === 'traditional' && 'Professional 3-range color balance: Shadows, Midtones, Highlights'}
-        {activeTab === 'global' && 'Advanced 8-color HSL grading system'}
-      </div>
     </div>
   );
 };

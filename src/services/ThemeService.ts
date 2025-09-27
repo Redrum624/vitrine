@@ -669,7 +669,7 @@ class ThemeService {
         throw new Error('Invalid theme structure');
       }
       return theme;
-    } catch (error) {
+    } catch {
       throw new Error('Failed to import theme: Invalid JSON or theme structure');
     }
   }

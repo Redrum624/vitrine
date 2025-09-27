@@ -336,7 +336,7 @@ export const CopyrightModule: React.FC<CopyrightModuleProps> = ({
                   <label className="block text-xs text-gray-400 mb-1">Copyright Status</label>
                   <select
                     value={iptcMetadata.copyrightStatus || 'copyrighted'}
-                    onChange={(e) => updateIptcField('copyrightStatus', e.target.value as any)}
+                    onChange={(e) => updateIptcField('copyrightStatus', e.target.value as 'copyrighted' | 'public-domain' | 'unknown')}
                     className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-blue-400 focus:outline-none"
                   >
                     {copyrightStatuses.map(status => (

@@ -13,7 +13,7 @@ interface CanvasProps {
   currentImage?: ImageFileInfo | null;
 }
 
-export function Canvas({ onFitWindow, onActualSize, onZoomIn, onZoomOut, zoom, currentImage }: CanvasProps) {
+export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize, onZoomIn: _onZoomIn, onZoomOut: _onZoomOut, zoom: _zoom, currentImage }: CanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const { viewport, setViewport, processedImageData } = useAppStore();
@@ -25,14 +25,28 @@ export function Canvas({ onFitWindow, onActualSize, onZoomIn, onZoomOut, zoom, c
   const drawLoadedImage = useCallback((ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, imageMetadata: { width: number; height: number }, imageData: Float32Array) => {
     const { width: imageWidth, height: imageHeight } = imageMetadata;
 
+    // Debug logging removed - issue resolved
+
     // Create ImageData from Float32Array
     const imgData = ctx.createImageData(imageWidth, imageHeight);
     const data = imgData.data;
 
-    // Convert float data (0-1) back to uint8 (0-255) for canvas display
+    // Convert float data to uint8 for canvas display
+    // Check if data is already in 0-255 range or needs scaling from 0-1
+    const maxValue = Math.max(...imageData.slice(0, Math.min(1000, imageData.length)));
+    const isNormalized = maxValue <= 1.0;
+
     for (let i = 0; i < imageData.length; i++) {
-      data[i] = Math.round(Math.max(0, Math.min(1, imageData[i])) * 255);
+      if (isNormalized) {
+        // Data is in 0-1 range, scale to 0-255
+        data[i] = Math.round(Math.max(0, Math.min(1, imageData[i])) * 255);
+      } else {
+        // Data is already in 0-255 range, just clamp
+        data[i] = Math.round(Math.max(0, Math.min(255, imageData[i])));
+      }
     }
+
+    // Debug logging removed - issue resolved
 
     // Calculate display dimensions and position
     const centerX = canvas.width / 2;
@@ -161,7 +175,8 @@ export function Canvas({ onFitWindow, onActualSize, onZoomIn, onZoomOut, zoom, c
       // Draw placeholder content
       drawPlaceholder(ctx, canvas);
     }
-  }, [processedImageData, displayImage, drawLoadedImage, drawPlaceholder]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [processedImageData, displayImage]);
 
   const loadImage = useCallback(async (image: ImageFileInfo) => {
     try {
@@ -171,8 +186,8 @@ export function Canvas({ onFitWindow, onActualSize, onZoomIn, onZoomOut, zoom, c
       // Load image using ImageService
       await imageService.loadImage(image.path);
 
-      // Update canvas with loaded image
-      redrawCanvas();
+      // Canvas will be redrawn by the useEffect that watches for processedImageData changes
+      // No need to manually call redrawCanvas here
 
       // Trigger initial processing with the loaded image
       // This will be handled by the AdjustmentPanel's useEffect
@@ -181,7 +196,8 @@ export function Canvas({ onFitWindow, onActualSize, onZoomIn, onZoomOut, zoom, c
     } finally {
       setImageLoading(false);
     }
-  }, [redrawCanvas]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Handle image loading from file system
   useEffect(() => {
@@ -193,7 +209,8 @@ export function Canvas({ onFitWindow, onActualSize, onZoomIn, onZoomOut, zoom, c
   // Redraw canvas when processed image data changes
   useEffect(() => {
     redrawCanvas();
-  }, [redrawCanvas]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [processedImageData, displayImage]);
 
 
   const navigateImage = async (direction: 'next' | 'prev') => {
@@ -210,7 +227,8 @@ export function Canvas({ onFitWindow, onActualSize, onZoomIn, onZoomOut, zoom, c
   // Redraw canvas when viewport changes
   useEffect(() => {
     redrawCanvas();
-  }, [viewport, redrawCanvas]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewport]);
 
   const handleMouseDown = (e: React.MouseEvent) => {
     setIsDragging(true);

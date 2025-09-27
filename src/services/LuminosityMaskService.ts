@@ -133,11 +133,12 @@ export class LuminosityMaskService {
         baseSelection = 1 - luminosity;
         break;
 
-      case 'midtones':
+      case 'midtones': {
         // Midtones masks select middle values
         const distanceFromMid = Math.abs(luminosity - 0.5) * 2;
         baseSelection = 1 - distanceFromMid;
         break;
+      }
     }
 
     // Apply level progression

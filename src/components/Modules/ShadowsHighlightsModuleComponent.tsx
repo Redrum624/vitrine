@@ -67,7 +67,7 @@ export const ShadowsHighlightsModuleComponent: React.FC<ShadowsHighlightsModuleC
         step={step}
         value={value}
         onChange={(e) => onChange(parseFloat(e.target.value))}
-        className="w-full h-2 bg-gray-300 rounded-lg appearance-none cursor-pointer slider-thumb visible-track"
+        className="w-full h-2 border border-dark-700 rounded-lg appearance-none cursor-pointer slider-thumb visible-track"
       />
     </div>
   );
@@ -76,33 +76,8 @@ export const ShadowsHighlightsModuleComponent: React.FC<ShadowsHighlightsModuleC
     <div className="space-y-4">
       {/* Preset Buttons */}
       <div className="space-y-2">
-        {/* Preset Row */}
-        <div className="grid grid-cols-3 gap-1">
-          <button
-            onClick={() => handlePresetApply('subtle')}
-            className="px-2 py-1 text-xs bg-dark-700 hover:bg-dark-600 text-dark-300 rounded transition-professional"
-            title="Subtle shadow/highlight recovery"
-          >
-            Subtle
-          </button>
-          <button
-            onClick={() => handlePresetApply('moderate')}
-            className="px-2 py-1 text-xs bg-dark-700 hover:bg-dark-600 text-dark-300 rounded transition-professional"
-            title="Moderate shadow/highlight recovery"
-          >
-            Moderate
-          </button>
-          <button
-            onClick={() => handlePresetApply('strong')}
-            className="px-2 py-1 text-xs bg-dark-700 hover:bg-dark-600 text-dark-300 rounded transition-professional"
-            title="Strong shadow/highlight recovery"
-          >
-            Strong
-          </button>
-        </div>
-
         {/* Action Row */}
-        <div className="flex space-x-1">
+        <div className="flex justify-end space-x-1">
           <button
             onClick={() => {
               const autoParams = module.autoAdjust();
@@ -110,27 +85,52 @@ export const ShadowsHighlightsModuleComponent: React.FC<ShadowsHighlightsModuleC
               onParamsChange?.(autoParams);
               logger.info('Auto shadows/highlights applied');
             }}
-            className="flex-1 px-2 py-1 text-xs bg-dark-700 hover:bg-dark-600 text-dark-300 rounded transition-professional flex items-center justify-center space-x-1"
+            className="p-1 text-xs bg-dark-700 hover:bg-dark-600 text-dark-300 rounded transition-professional flex items-center justify-center"
             title="Auto shadows/highlights adjustment"
           >
-            <Zap className="w-3 h-3" />
-            <span>Auto</span>
+            <Zap className="w-4 h-4" />
           </button>
           <button
             onClick={handleReset}
-            className="px-2 py-1 text-xs bg-dark-700 hover:bg-dark-600 text-dark-300 rounded transition-professional flex items-center justify-center"
+            className="p-1 text-xs bg-dark-700 hover:bg-dark-600 text-dark-300 rounded transition-professional flex items-center justify-center"
             title="Reset to defaults"
           >
-            <RotateCcw className="w-3 h-3" />
+            <RotateCcw className="w-4 h-4" />
           </button>
         </div>
+
+        {/* Preset Row */}
+        <div className="grid grid-cols-3 gap-1">
+          <button
+            onClick={() => handlePresetApply('subtle')}
+            className="px-2 py-1 text-xs border border-dark-700 bg-dark-700 hover:bg-dark-600 text-dark-300 rounded transition-professional"
+            title="Subtle shadow/highlight recovery"
+          >
+            Subtle
+          </button>
+          <button
+            onClick={() => handlePresetApply('moderate')}
+            className="px-2 py-1 text-xs border border-dark-700 bg-dark-700 hover:bg-dark-600 text-dark-300 rounded transition-professional"
+            title="Moderate shadow/highlight recovery"
+          >
+            Moderate
+          </button>
+          <button
+            onClick={() => handlePresetApply('strong')}
+            className="px-2 py-1 text-xs border border-dark-700 bg-dark-700 hover:bg-dark-600 text-dark-300 rounded transition-professional"
+            title="Strong shadow/highlight recovery"
+          >
+            Strong
+          </button>
+        </div>
+
       </div>
 
       {/* Section Tabs */}
       <div className="flex bg-dark-800 rounded-lg p-1">
         <button
           onClick={() => setActiveSection('shadows')}
-          className={`flex-1 flex items-center justify-center space-x-1 px-2 py-1 text-xs rounded transition-professional ${
+          className={`flex-1 flex items-center justify-center border border-dark-700 space-x-1 px-2 py-1 text-xs rounded transition-professional ${
             activeSection === 'shadows'
               ? 'bg-dark-600 text-white'
               : 'text-dark-400 hover:text-dark-300'
@@ -141,7 +141,7 @@ export const ShadowsHighlightsModuleComponent: React.FC<ShadowsHighlightsModuleC
         </button>
         <button
           onClick={() => setActiveSection('highlights')}
-          className={`flex-1 flex items-center justify-center space-x-1 px-2 py-1 text-xs rounded transition-professional ${
+          className={`flex-1 flex items-center justify-center border border-dark-700 space-x-1 px-2 py-1 text-xs rounded transition-professional ${
             activeSection === 'highlights'
               ? 'bg-dark-600 text-white'
               : 'text-dark-400 hover:text-dark-300'
@@ -152,7 +152,7 @@ export const ShadowsHighlightsModuleComponent: React.FC<ShadowsHighlightsModuleC
         </button>
         <button
           onClick={() => setActiveSection('advanced')}
-          className={`flex-1 flex items-center justify-center space-x-1 px-2 py-1 text-xs rounded transition-professional ${
+          className={`flex-1 flex items-center justify-center border border-dark-700 space-x-1 px-2 py-1 text-xs rounded transition-professional ${
             activeSection === 'advanced'
               ? 'bg-dark-600 text-white'
               : 'text-dark-400 hover:text-dark-300'

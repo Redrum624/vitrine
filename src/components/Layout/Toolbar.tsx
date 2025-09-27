@@ -13,8 +13,7 @@ import {
   HelpCircle,
   Package,
   ZoomIn,
-  ZoomOut,
-  RotateCcw
+  ZoomOut
 } from 'lucide-react';
 import { useAppStore } from '../../stores/appStore';
 import { electronService } from '../../services/ElectronService';

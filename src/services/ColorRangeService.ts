@@ -181,8 +181,8 @@ export class ColorRangeService {
     const delta = max - min;
 
     let h = 0;
-    let s = max === 0 ? 0 : delta / max;
-    let v = max;
+    const s = max === 0 ? 0 : delta / max;
+    const v = max;
 
     if (delta !== 0) {
       if (max === r) {
@@ -236,7 +236,7 @@ export class ColorRangeService {
     model: 'hsv' | 'lab' | 'rgb'
   ): number {
     switch (model) {
-      case 'hsv':
+      case 'hsv': {
         // Special handling for hue wraparound
         const [h1, s1, v1] = color1;
         const [h2, s2, v2] = color2;
@@ -249,8 +249,9 @@ export class ColorRangeService {
           Math.pow(s1 - s2, 2) +
           Math.pow(v1 - v2, 2)
         );
+      }
 
-      case 'lab':
+      case 'lab': {
         // Perceptually uniform color space
         const [l1, a1, b1] = color1;
         const [l2, a2, b2] = color2;
@@ -259,6 +260,7 @@ export class ColorRangeService {
           Math.pow((a1 - a2) / 100, 2) +
           Math.pow((b1 - b2) / 100, 2)
         );
+      }
 
       case 'rgb':
       default:

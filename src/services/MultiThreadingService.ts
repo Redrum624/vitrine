@@ -1,7 +1,25 @@
+import { JobData } from '../types/index';
+
+// Worker operation interfaces
+export interface WorkerParams {
+  priority?: number;
+  timeout?: number;
+  maxRetries?: number;
+  [key: string]: unknown;
+}
+
+export interface ProcessingTaskData {
+  imageData: Float32Array;
+  width: number;
+  height: number;
+  operation: string;
+  params?: Record<string, unknown>;
+}
+
 export interface WorkerTask {
   id: string;
   type: string;
-  data: any;
+  data: JobData;
   priority: number; // 0 = highest priority
   createdAt: number;
   estimatedDuration?: number;
@@ -10,7 +28,7 @@ export interface WorkerTask {
 export interface WorkerResult {
   id: string;
   type: string;
-  data: any;
+  data: JobData | ProcessingTaskData[];
   success: boolean;
   error?: string;
   executionTime: number;
@@ -476,7 +494,7 @@ class MultiThreadingService {
       const result: WorkerResult = {
         id: task.id,
         type: task.type,
-        data: null,
+        data: [] as ProcessingTaskData[],
         success: false,
         error: error.message,
         executionTime: Date.now() - task.createdAt
@@ -524,7 +542,7 @@ class MultiThreadingService {
     width: number,
     height: number,
     operation: string,
-    params: any = {},
+    params: WorkerParams = {},
     priority: number = 5
   ): Promise<WorkerResult> {
     return new Promise((resolve, reject) => {
@@ -555,7 +573,7 @@ class MultiThreadingService {
       width: number;
       height: number;
       operation: string;
-      params?: any;
+      params?: Record<string, unknown>;
     }>,
     priority: number = 5
   ): Promise<WorkerResult[]> {
@@ -575,7 +593,7 @@ class MultiThreadingService {
         const task: WorkerTask = {
           id: this.generateTaskId(),
           type: 'batch',
-          data: batch,
+          data: { operations: batch } as JobData,
           priority,
           createdAt: Date.now()
         };
@@ -611,7 +629,7 @@ class MultiThreadingService {
     return batches;
   }
 
-  private queueTask(task: WorkerTask, params: any = {}): void {
+  private queueTask(task: WorkerTask, params: WorkerParams = {}): void {
     this.stats.totalTasks++;
 
     if (this.options.enablePriority) {
@@ -632,7 +650,7 @@ class MultiThreadingService {
     this.processNextTask(params);
   }
 
-  private processNextTask(params: any = {}): void {
+  private processNextTask(params: WorkerParams = {}): void {
     if (this.workerPool.taskQueue.length === 0 || this.workerPool.availableWorkers.size === 0) {
       return;
     }
@@ -691,7 +709,7 @@ class MultiThreadingService {
       'statistics': 0.001
     };
 
-    return ((baseTime as any)[operation] || 0.003) * pixelCount / 1000; // ms per 1000 pixels
+    return ((baseTime as Record<string, number>)[operation] || 0.003) * pixelCount / 1000; // ms per 1000 pixels
   }
 
   getStats(): ProcessingStats {

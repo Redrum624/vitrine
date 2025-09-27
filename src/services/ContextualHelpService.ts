@@ -35,7 +35,7 @@ export interface TutorialStep {
   validation?: {
     type: 'element' | 'state' | 'value';
     condition: string;
-    expected: any;
+    expected: unknown;
   };
   hints?: string[];
   screenshot?: string;
@@ -89,7 +89,7 @@ class ContextualHelpService {
   private tutorials: Map<string, Tutorial> = new Map();
   private contextualTips: Map<string, ContextualTip> = new Map();
   private state: HelpState;
-  private observers: Set<(event: string, data?: any) => void> = new Set();
+  private observers: Set<(event: string, data?: unknown) => void> = new Set();
   private currentHighlight: HTMLElement | null = null;
   private tooltipElement: HTMLElement | null = null;
   private tutorialOverlay: HTMLElement | null = null;
@@ -571,9 +571,10 @@ class ContextualHelpService {
     const { type, condition, expected } = step.validation;
 
     switch (type) {
-      case 'element':
+      case 'element': {
         const element = document.querySelector(condition);
         return !!element === expected;
+      }
 
       case 'state':
         // Check application state
@@ -588,7 +589,7 @@ class ContextualHelpService {
     }
   }
 
-  private checkApplicationState(_condition: string, _expected: any): boolean {
+  private checkApplicationState(_condition: string, _expected: unknown): boolean {
     // Implementation would check specific application states
     // This is a placeholder for actual state checking
     return true;
@@ -1162,12 +1163,12 @@ class ContextualHelpService {
     }
   }
 
-  subscribe(callback: (event: string, data?: any) => void): () => void {
+  subscribe(callback: (event: string, data?: unknown) => void): () => void {
     this.observers.add(callback);
     return () => this.observers.delete(callback);
   }
 
-  private notifyObservers(event: string, data?: any): void {
+  private notifyObservers(event: string, data?: unknown): void {
     this.observers.forEach(callback => {
       try {
         callback(event, data);

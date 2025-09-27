@@ -610,7 +610,7 @@ class TouchGestureService {
       pressure,
       tiltX: event.tiltX * this.tabletSettings.tiltSensitivity,
       tiltY: event.tiltY * this.tabletSettings.tiltSensitivity,
-      twist: (event as any).twist || 0
+      twist: (event as unknown as { twist?: number }).twist || 0
     });
   }
 
@@ -692,7 +692,7 @@ class TouchGestureService {
         x: touch.clientX,
         y: touch.clientY,
         timestamp: Date.now(),
-        pressure: (touch as any).force || 1,
+        pressure: (touch as unknown as { force?: number }).force || 1,
         radiusX: touch.radiusX || 0,
         radiusY: touch.radiusY || 0
       });
@@ -742,7 +742,7 @@ class TouchGestureService {
   }
 
   private startInertia(velocity: { x: number; y: number }): void {
-    let currentVelocity = { ...velocity };
+    const currentVelocity = { ...velocity };
 
     const animate = () => {
       this.emitGestureEvent('pan', {
@@ -783,12 +783,12 @@ class TouchGestureService {
     this.gestureState = this.createDefaultGestureState();
   }
 
-  private emitGestureEvent(type: string, data: any = {}): void {
+  private emitGestureEvent(type: string, data: unknown = {}): void {
     const event: GestureEvent = {
       type,
       gesture: { ...this.gestureState },
       preventDefault: () => {},
-      ...data
+      ...(typeof data === 'object' && data !== null ? data as Record<string, unknown> : {})
     };
 
     this.observers.forEach(callback => {
@@ -805,7 +805,7 @@ class TouchGestureService {
     }
   }
 
-  private showGestureHint(type: string, data: any): void {
+  private showGestureHint(type: string, data: unknown): void {
     if (typeof document === 'undefined') return;
 
     const hintText = this.getGestureHintText(type, data);
@@ -826,16 +826,18 @@ class TouchGestureService {
     }, 1000);
   }
 
-  private getGestureHintText(type: string, data: any): string | null {
+  private getGestureHintText(type: string, data: unknown): string | null {
     switch (type) {
       case 'pinch':
-        return data.scale > 1 ? 'Zoom In' : 'Zoom Out';
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        return (data as any)?.scale > 1 ? 'Zoom In' : 'Zoom Out';
       case 'rotate':
         return 'Rotate';
       case 'pan':
         return 'Pan';
       case 'swipe':
-        return `Swipe ${data.direction}`;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        return `Swipe ${(data as any)?.direction || ''}`;
       case 'doubletap':
         return 'Double Tap';
       case 'longpress':

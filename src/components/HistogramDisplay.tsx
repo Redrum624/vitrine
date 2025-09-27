@@ -115,7 +115,7 @@ export const HistogramDisplay: React.FC<HistogramDisplayProps> = ({
   const highlightClipPercent = ((histogramData.clipping.highlights.total / totalPixels) * 100).toFixed(1);
 
   return (
-    <div className={`bg-gray-800 rounded-lg border border-gray-700 ${className}`}>
+    <div className={`bg-gray-900 rounded-lg border border-l border-dark-700 ${className}`}>
       {/* Header */}
       <div className="flex items-center justify-between p-3 border-b border-gray-700">
         <div className="flex items-center gap-2">

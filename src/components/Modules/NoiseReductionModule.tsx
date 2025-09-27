@@ -61,8 +61,12 @@ export const NoiseReductionModule: React.FC<NoiseReductionModuleProps> = ({
     // Estimate noise in current image
     if (processedImageData && currentImage) {
       try {
+        const imageData = processedImageData instanceof Float32Array
+          ? processedImageData
+          : processedImageData.data;
+
         const estimate = noiseReductionService.estimateNoiseLevel(
-          processedImageData,
+          imageData,
           currentImage.metadata.width,
           currentImage.metadata.height
         );
@@ -93,8 +97,12 @@ export const NoiseReductionModule: React.FC<NoiseReductionModuleProps> = ({
       setIsProcessing(true);
       logger.info('Applying noise reduction...', options);
 
+      const imageData = processedImageData instanceof Float32Array
+        ? processedImageData
+        : processedImageData.data;
+
       const denoisedData = await noiseReductionService.applyNoiseReduction(
-        processedImageData,
+        imageData,
         currentImage.metadata.width,
         currentImage.metadata.height,
         options

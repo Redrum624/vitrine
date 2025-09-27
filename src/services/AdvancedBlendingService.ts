@@ -134,10 +134,11 @@ export class AdvancedBlendingService {
       case 'normal':
         return overlay;
 
-      case 'dissolve':
+      case 'dissolve': {
         // Random dither based on alpha
         const random = Math.random();
         return random < overlay.a ? overlay : base;
+      }
 
       // Darkening modes
       case 'darken':
@@ -164,10 +165,11 @@ export class AdvancedBlendingService {
         result.b = Math.max(0, base.b + overlay.b - 1);
         break;
 
-      case 'darker-color':
+      case 'darker-color': {
         const baseLum = 0.299 * base.r + 0.587 * base.g + 0.114 * base.b;
         const overlayLum = 0.299 * overlay.r + 0.587 * overlay.g + 0.114 * overlay.b;
         return baseLum < overlayLum ? base : overlay;
+      }
 
       // Lightening modes
       case 'lighten':
@@ -194,10 +196,11 @@ export class AdvancedBlendingService {
         result.b = Math.min(1, base.b + overlay.b);
         break;
 
-      case 'lighter-color':
+      case 'lighter-color': {
         const baseLum2 = 0.299 * base.r + 0.587 * base.g + 0.114 * base.b;
         const overlayLum2 = 0.299 * overlay.r + 0.587 * overlay.g + 0.114 * overlay.b;
         return baseLum2 > overlayLum2 ? base : overlay;
+      }
 
       // Contrast modes
       case 'overlay':
@@ -387,8 +390,8 @@ export class AdvancedBlendingService {
     const delta = max - min;
 
     let h = 0;
-    let s = max === 0 ? 0 : delta / max;
-    let v = max;
+    const s = max === 0 ? 0 : delta / max;
+    const v = max;
 
     if (delta !== 0) {
       if (max === r) {

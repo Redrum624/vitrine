@@ -105,13 +105,7 @@ const ColorWheel: React.FC<ColorWheelProps> = ({
     ctx.arc(x, y, 8, 0, 2 * Math.PI);
     ctx.fill();
     ctx.stroke();
-  }, [cyanRed, magentaGreen, size, disabled]);
-
-  const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    if (disabled) return;
-    isDraggingRef.current = true;
-    handleMouseMove(e);
-  }, [disabled]);
+  }, [cyanRed, magentaGreen, size]);
 
   const handleMouseMove = useCallback((e: React.MouseEvent | MouseEvent) => {
     if (!isDraggingRef.current || disabled) return;
@@ -144,6 +138,12 @@ const ColorWheel: React.FC<ColorWheelProps> = ({
       yellowBlue
     });
   }, [disabled, size, yellowBlue, onChange]);
+
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    if (disabled) return;
+    isDraggingRef.current = true;
+    handleMouseMove(e);
+  }, [disabled, handleMouseMove]);
 
   const handleMouseUp = useCallback(() => {
     isDraggingRef.current = false;

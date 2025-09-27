@@ -2,6 +2,8 @@
 
 This document describes the LibRaw WebAssembly integration for professional RAW image processing in Photo Editor Pro.
 
+> **Note**: This document has been superseded by [RAW Processing Guide](RAW_PROCESSING.md). This file is kept for historical reference.
+
 ## Overview
 
 The LibRaw integration provides professional-grade RAW image processing capabilities through WebAssembly, enabling high-quality demosaicing, color correction, and camera-specific optimizations directly in the browser.

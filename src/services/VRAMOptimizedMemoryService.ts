@@ -7,7 +7,7 @@ export interface VRAMAllocation {
   priority: 'critical' | 'high' | 'medium' | 'low';
   lastAccessed: number;
   persistent: boolean;
-  gpuResource: WebGLTexture | WebGLBuffer | any;
+  gpuResource: WebGLTexture | WebGLBuffer | unknown;
 }
 
 export interface MemoryPool {
@@ -24,7 +24,7 @@ export interface ProcessingBuffer {
   width: number;
   height: number;
   format: 'RGBA32F' | 'RGBA16F' | 'RGBA8' | 'R32F' | 'RG32F';
-  texture: WebGLTexture | any | null; // Support WebGL textures, WebGPU buffers, or null for tiled
+  texture: WebGLTexture | unknown | null; // Support WebGL textures, WebGPU buffers, or null for tiled
   framebuffer?: WebGLFramebuffer | null;
   size: number;
   priority: 'critical' | 'high' | 'medium' | 'low';
@@ -123,7 +123,6 @@ export class VRAMOptimizedMemoryService {
     // Check WebGL limits first
     const maxTextureSize = this.gl.getParameter(this.gl.MAX_TEXTURE_SIZE);
     const maxRenderbufferSize = this.gl.getParameter(this.gl.MAX_RENDERBUFFER_SIZE);
-    const maxSize = Math.min(maxTextureSize, maxRenderbufferSize);
 
     logger.info(`WebGL limits: Max texture size: ${maxTextureSize}, Max renderbuffer: ${maxRenderbufferSize}`);
 
@@ -226,7 +225,9 @@ export class VRAMOptimizedMemoryService {
     // Check if buffer already exists
     if (this.textureCache.has(id)) {
       const existing = this.textureCache.get(id)!;
-      existing.framebuffer = existing.framebuffer || this.createFramebuffer(existing.texture);
+      if (!existing.framebuffer && existing.texture) {
+        existing.framebuffer = this.createFramebuffer(existing.texture as WebGLTexture);
+      }
       return existing;
     }
 
@@ -305,21 +306,41 @@ export class VRAMOptimizedMemoryService {
     this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_WRAP_S, this.gl.CLAMP_TO_EDGE);
     this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_WRAP_T, this.gl.CLAMP_TO_EDGE);
 
-    // Choose optimal internal format
+    // Choose optimal internal format with fallbacks for framebuffer compatibility
     let internalFormat: number;
     let dataFormat: number;
     let dataType: number;
 
+    // Check if we have the required extensions for floating point framebuffers
+    const hasColorBufferFloat = this.gl.getExtension('EXT_color_buffer_float');
+    const hasColorBufferHalfFloat = this.gl.getExtension('EXT_color_buffer_half_float');
+
     switch (format) {
       case 'RGBA32F':
-        internalFormat = this.gl.RGBA32F;
-        dataFormat = this.gl.RGBA;
-        dataType = this.gl.FLOAT;
+        if (hasColorBufferFloat) {
+          internalFormat = this.gl.RGBA32F;
+          dataFormat = this.gl.RGBA;
+          dataType = this.gl.FLOAT;
+        } else {
+          // Fallback to RGBA8 for framebuffer compatibility
+          logger.warn('RGBA32F not supported for framebuffers, falling back to RGBA8');
+          internalFormat = this.gl.RGBA8;
+          dataFormat = this.gl.RGBA;
+          dataType = this.gl.UNSIGNED_BYTE;
+        }
         break;
       case 'RGBA16F':
-        internalFormat = this.gl.RGBA16F;
-        dataFormat = this.gl.RGBA;
-        dataType = this.gl.HALF_FLOAT;
+        if (hasColorBufferHalfFloat || hasColorBufferFloat) {
+          internalFormat = this.gl.RGBA16F;
+          dataFormat = this.gl.RGBA;
+          dataType = this.gl.HALF_FLOAT;
+        } else {
+          // Fallback to RGBA8 for framebuffer compatibility
+          logger.warn('RGBA16F not supported for framebuffers, falling back to RGBA8');
+          internalFormat = this.gl.RGBA8;
+          dataFormat = this.gl.RGBA;
+          dataType = this.gl.UNSIGNED_BYTE;
+        }
         break;
       case 'RGBA8':
         internalFormat = this.gl.RGBA8;
@@ -356,7 +377,7 @@ export class VRAMOptimizedMemoryService {
     return texture;
   }
 
-  private createFramebuffer(texture: WebGLTexture): WebGLFramebuffer {
+  private createFramebuffer(texture: WebGLTexture): WebGLFramebuffer | null {
     if (!this.gl) throw new Error('WebGL2 context not available');
 
     const framebuffer = this.gl.createFramebuffer();
@@ -386,7 +407,8 @@ export class VRAMOptimizedMemoryService {
       };
 
       const errorName = errorMap[status] || `Unknown error ${status}`;
-      throw new Error(`Framebuffer creation failed: ${errorName}`);
+      logger.warn(`Framebuffer creation failed: ${errorName}, texture will use fallback rendering`);
+      return null;  // Return null instead of throwing, allowing fallback processing
     }
 
     this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, null);
@@ -435,7 +457,7 @@ export class VRAMOptimizedMemoryService {
 
       const processingBuffer: ProcessingBuffer = {
         id,
-        texture: buffer as any, // Store WebGPU buffer in texture field
+        texture: buffer as unknown, // Store WebGPU buffer in texture field
         framebuffer: null, // Not applicable for WebGPU
         width,
         height,
@@ -513,7 +535,7 @@ export class VRAMOptimizedMemoryService {
 
     // Try to find existing buffer with exact dimensions
     const exactId = `${purpose}_${width}x${height}_${format}`;
-    let buffer = this.textureCache.get(exactId);
+    const buffer = this.textureCache.get(exactId);
 
     if (buffer) {
       this.updateLastAccessed(exactId);
@@ -634,7 +656,7 @@ export class VRAMOptimizedMemoryService {
     // Remove from caches
     const buffer = this.textureCache.get(id);
     if (buffer && this.gl) {
-      this.gl.deleteTexture(buffer.texture);
+      this.gl.deleteTexture(buffer.texture as WebGLTexture | null);
       if (buffer.framebuffer) {
         this.gl.deleteFramebuffer(buffer.framebuffer);
       }

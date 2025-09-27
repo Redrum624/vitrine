@@ -1,5 +1,22 @@
 import { logger } from '../utils/Logger';
 
+// CUDA interfaces
+interface CUDAModule {
+  ptr: unknown;
+  functions: Record<string, unknown>;
+}
+
+interface CUDAStream {
+  id: number;
+  active: boolean;
+  handle?: unknown;
+}
+
+interface CUDAMemory {
+  ptr: unknown;
+  size: number;
+}
+
 // CUDA-optimized processing for RTX 3080
 export interface CUDAConfig {
   deviceId: number;
@@ -23,8 +40,8 @@ export class CUDAAcceleratedService {
   private static instance: CUDAAcceleratedService;
   private cudaConfig: CUDAConfig;
   private isInitialized = false;
-  private cudaModule: any = null;
-  private streams: any[] = [];
+  private cudaModule: CUDAModule | null = null;
+  private streams: CUDAStream[] = [];
   private performanceMetrics: RTXPerformanceMetrics;
 
   private constructor() {
@@ -155,7 +172,7 @@ export class CUDAAcceleratedService {
     rawData: Float32Array,
     width: number,
     height: number,
-    parameters: Record<string, any>
+    parameters: Record<string, unknown>
   ): Promise<Float32Array> {
     const startTime = performance.now();
 
@@ -184,7 +201,7 @@ export class CUDAAcceleratedService {
       // Step 4: Pipeline execution
       let currentBuffer = results[0];
 
-      if (parameters.noiseReduction > 0) {
+      if (typeof parameters.noiseReduction === 'number' && parameters.noiseReduction > 0) {
         currentBuffer = await this.executeNoiseReductionKernel(currentBuffer, width, height, streamId);
       }
 
@@ -229,7 +246,7 @@ export class CUDAAcceleratedService {
     }
   }
 
-  private async allocateGPUMemory(sizeBytes: number): Promise<any> {
+  private async allocateGPUMemory(sizeBytes: number): Promise<CUDAMemory> {
     // In real CUDA implementation:
     // void* d_ptr;
     // cudaMalloc(&d_ptr, sizeBytes);
@@ -238,17 +255,17 @@ export class CUDAAcceleratedService {
     return { ptr: null, size: sizeBytes };
   }
 
-  private async freeGPUMemory(gpuMemory: any): Promise<void> {
+  private async freeGPUMemory(gpuMemory: CUDAMemory): Promise<void> {
     // cudaFree(gpuMemory.ptr);
     logger.debug(`Freed ${gpuMemory.size / (1024 * 1024)} MB GPU memory`);
   }
 
-  private async transferToGPUAsync(data: Float32Array, _gpuMemory: any, streamId: number): Promise<void> {
+  private async transferToGPUAsync(data: Float32Array, _gpuMemory: CUDAMemory, streamId: number): Promise<void> {
     // cudaMemcpyAsync(gpuMemory.ptr, data, data.byteLength, cudaMemcpyHostToDevice, streams[streamId]);
     logger.debug(`Transferred ${data.byteLength / (1024 * 1024)} MB to GPU on stream ${streamId}`);
   }
 
-  private async transferFromGPUAsync(_gpuMemory: any, sizeElements: number, streamId: number): Promise<Float32Array> {
+  private async transferFromGPUAsync(_gpuMemory: CUDAMemory, sizeElements: number, streamId: number): Promise<Float32Array> {
     // const result = new Float32Array(sizeElements);
     // cudaMemcpyAsync(result, gpuMemory.ptr, sizeElements * 4, cudaMemcpyDeviceToHost, streams[streamId]);
 
@@ -257,12 +274,12 @@ export class CUDAAcceleratedService {
   }
 
   private async launchDebayerKernel(
-    gpuMemory: any,
+    gpuMemory: CUDAMemory,
     _width: number,
     _height: number,
-    _parameters: any,
+    _parameters: Record<string, unknown>,
     _streamId: number
-  ): Promise<any> {
+  ): Promise<CUDAMemory> {
     // Configure CUDA kernel launch parameters
     const blockSize = { x: 16, y: 16, z: 1 }; // 256 threads per block
     const gridSize = {
@@ -280,7 +297,7 @@ export class CUDAAcceleratedService {
     return gpuMemory; // Placeholder
   }
 
-  private async setupNoiseReductionKernel(_parameters: any): Promise<any> {
+  private async setupNoiseReductionKernel(_parameters: Record<string, unknown>): Promise<Record<string, unknown>> {
     // Setup optimized noise reduction using Tensor Cores for AI denoising
     if (this.cudaConfig.tensorCoreEnabled && _parameters.aiDenoising) {
       logger.info('Using Tensor Cores for AI-powered noise reduction');
@@ -290,11 +307,11 @@ export class CUDAAcceleratedService {
   }
 
   private async executeNoiseReductionKernel(
-    gpuMemory: any,
+    gpuMemory: CUDAMemory,
     _width: number,
     _height: number,
     streamId: number
-  ): Promise<any> {
+  ): Promise<CUDAMemory> {
     // Launch multi-pass noise reduction kernel
     const passes = 3; // Multiple passes for better quality
 
@@ -309,17 +326,17 @@ export class CUDAAcceleratedService {
     return gpuMemory;
   }
 
-  private async setupToneMappingKernel(_parameters: any): Promise<any> {
+  private async setupToneMappingKernel(_parameters: Record<string, unknown>): Promise<Record<string, unknown>> {
     // Setup tone mapping with ACES or custom tone curves
     return {};
   }
 
   private async executeToneMappingKernel(
-    gpuMemory: any,
+    gpuMemory: CUDAMemory,
     _width: number,
     _height: number,
     streamId: number
-  ): Promise<any> {
+  ): Promise<CUDAMemory> {
     // Launch tone mapping kernel with optimized LUT access
     // tone_mapping_kernel<<<grid, block, 0, streams[streamId]>>>(
     //   input, output, width, height, exposure, highlights, shadows, contrast
@@ -329,17 +346,17 @@ export class CUDAAcceleratedService {
     return gpuMemory;
   }
 
-  private async setupColorGradingKernel(_parameters: any): Promise<any> {
+  private async setupColorGradingKernel(_parameters: Record<string, unknown>): Promise<Record<string, unknown>> {
     // Setup 3D LUT for color grading
     return {};
   }
 
   private async executeColorGradingKernel(
-    gpuMemory: any,
+    gpuMemory: CUDAMemory,
     _width: number,
     _height: number,
     streamId: number
-  ): Promise<any> {
+  ): Promise<CUDAMemory> {
     // Launch color grading kernel with 3D LUT interpolation
     // color_grading_kernel<<<grid, block, 0, streams[streamId]>>>(
     //   input, output, width, height, lut3d, strength
@@ -353,7 +370,7 @@ export class CUDAAcceleratedService {
    * Batch process multiple images using GPU pipeline
    */
   async batchProcessImages(
-    images: Array<{ data: Float32Array; width: number; height: number; parameters: any }>
+    images: Array<{ data: Float32Array; width: number; height: number; parameters: Record<string, unknown> }>
   ): Promise<Float32Array[]> {
     const startTime = performance.now();
     const results: Float32Array[] = [];

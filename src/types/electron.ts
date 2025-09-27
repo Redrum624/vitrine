@@ -100,13 +100,13 @@ export interface ElectronAPI {
 
   // Metadata operations
   readImageMetadata: (filePath: string) => Promise<{
-    exif: Record<string, any>;
-    iptc: Record<string, any>;
-    xmp: Record<string, any>;
-    icc: Record<string, any>;
-    thumbnail: any;
+    exif: import('./index').ExifData;
+    iptc: import('./index').IptcData;
+    xmp: import('./index').XmpData;
+    icc: import('./index').IccProfile;
+    thumbnail: import('./index').ThumbnailData;
   }>;
-  writeImageMetadata: (filePath: string, metadata: Record<string, any>) => Promise<boolean>;
+  writeImageMetadata: (filePath: string, metadata: import('./index').ImageMetadata) => Promise<boolean>;
 
   // Menu event listeners
   onFileOpen: (callback: (filePath: string) => void) => void;

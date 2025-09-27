@@ -186,8 +186,20 @@ export class FileSystemService {
 
   // Check if file is an image
   isImageFile(fileName: string): boolean {
-    const extension = fileName.toLowerCase().substring(fileName.lastIndexOf('.'));
-    return IMAGE_EXTENSIONS.includes(extension);
+    // Get the extension and normalize it to lowercase
+    const lastDotIndex = fileName.lastIndexOf('.');
+    if (lastDotIndex === -1) return false; // No extension
+
+    const extension = fileName.substring(lastDotIndex).toLowerCase();
+    const isImage = IMAGE_EXTENSIONS.includes(extension);
+
+    // Debug logging for ORF files (both cases)
+    if (extension === '.orf' || fileName.toLowerCase().includes('.orf')) {
+      logger.info(`ORF file check: original="${fileName}", processed extension="${extension}", isImage=${isImage}`);
+      logger.info(`Available extensions:`, IMAGE_EXTENSIONS);
+    }
+
+    return isImage;
   }
 
   // Format file size

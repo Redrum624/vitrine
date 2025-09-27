@@ -1,7 +1,8 @@
 import { useState, useCallback } from 'react';
-import { RotateCcw, Info, Zap } from 'lucide-react';
+import { RotateCcw, Zap } from 'lucide-react';
 import { WhiteBalanceModule, WhiteBalanceParams, WHITE_BALANCE_PRESETS } from '../../modules/WhiteBalanceModule';
 import { logger } from '../../utils/Logger';
+import { DelayedInputControl } from '../Controls/DelayedInputControl';
 
 interface WhiteBalanceModuleComponentProps {
   module: WhiteBalanceModule;
@@ -15,8 +16,6 @@ export function WhiteBalanceModuleComponent({
   onAutoDetect
 }: WhiteBalanceModuleComponentProps) {
   const [params, setParams] = useState<WhiteBalanceParams>(module.getParams());
-  const [showTooltip, setShowTooltip] = useState<string | null>(null);
-
   const updateParam = useCallback((key: keyof WhiteBalanceParams, value: number | string) => {
     const newParams = { ...params, [key]: value };
     setParams(newParams);
@@ -64,55 +63,38 @@ export function WhiteBalanceModuleComponent({
   };
 
   return (
-    <div className="space-y-4 p-4 bg-dark-850 rounded-md">
+    <div className="space-y-4">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center space-x-2">
-          <h3 className="text-sm font-semibold text-dark-300">White Balance</h3>
-          <button
-            className="p-1 hover:bg-dark-700 rounded text-dark-300"
-            onMouseEnter={() => setShowTooltip('wb-info')}
-            onMouseLeave={() => setShowTooltip(null)}
-          >
-            <Info className="w-4 h-4" />
-          </button>
-        </div>
-        <div className="flex items-center space-x-1">
-          <button
-            onClick={handleAutoDetect}
-            className="p-1 hover:bg-dark-700 rounded text-dark-300"
-            title="Auto detect white balance"
-          >
-            <Zap className="w-4 h-4" />
-          </button>
-          <button
-            onClick={resetAll}
-            className="p-1 hover:bg-dark-700 rounded transition-professional text-dark-300 disabled:opacity-50"
-            title="Reset all parameters"
-          >
-            <RotateCcw className="w-4 h-4" />
-          </button>
-        </div>
-      </div>
 
-      {/* Tooltip */}
-      {showTooltip === 'wb-info' && (
-        <div className="absolute bg-dark-800 border border-dark-600 rounded p-2 text-xs text-dark-300 max-w-xs z-10">
-          Adjust color temperature and tint to correct white balance.
-          Use presets for common lighting conditions or auto-detect from image.
-        </div>
-      )}
-
-      <div className="space-y-4">
+      <div className="space-y-2">
         {/* Preset Selection */}
-        <div className="space-y-2">
+        <div className="flex items-center justify-between">
           <label className="text-xs font-medium text-dark-300">Preset</label>
+          <div className="flex items-center space-x-1">
+            <button
+              onClick={handleAutoDetect}
+              className="p-1 hover:bg-dark-700 rounded text-dark-300"
+              title="Auto detect white balance"
+            >
+              <Zap className="w-4 h-4" />
+            </button>
+            <button
+              onClick={resetAll}
+              className="p-1 hover:bg-dark-700 rounded transition-professional text-dark-300 disabled:opacity-50"
+              title="Reset all parameters"
+            >
+              <RotateCcw className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+
+        <div className="space-y-2">
           <div className="grid grid-cols-2 gap-1">
             {Object.keys(WHITE_BALANCE_PRESETS).map((preset) => (
               <button
                 key={preset}
                 onClick={() => handlePresetChange(preset)}
-                className={`px-2 py-1 text-xs rounded transition-professional ${
+                className={`px-2 py-1 text-xs rounded border border-dark-700 transition-professional ${
                   params.preset === preset
                     ? 'bg-dark-600 text-dark-200'
                     : 'bg-dark-800 text-dark-300 hover:bg-dark-700'
@@ -137,14 +119,13 @@ export function WhiteBalanceModuleComponent({
           <div className="flex items-center justify-between">
             <label className="text-xs text-dark-300">Temperature</label>
             <div className="flex items-center space-x-2">
-              <input
-                type="number"
-                value={Math.round(params.temperature)}
-                onChange={(e) => updateParam('temperature', Math.max(2000, Math.min(12000, parseInt(e.target.value) || 5500)))}
-                className="w-16 px-1 py-0.5 text-xs bg-dark-800 border border-dark-700 rounded text-dark-300 text-right disabled:opacity-50"
-                step="100"
-                min="2000"
-                max="12000"
+              <DelayedInputControl
+                value={params.temperature}
+                onChange={(value) => updateParam('temperature', value)}
+                min={2000}
+                max={12000}
+                step={100}
+                precision={0}
               />
               <span className="text-xs text-dark-300">K</span>
               <button
@@ -179,14 +160,13 @@ export function WhiteBalanceModuleComponent({
           <div className="flex items-center justify-between">
             <label className="text-xs text-dark-300">Tint</label>
             <div className="flex items-center space-x-2">
-              <input
-                type="number"
-                value={params.tint.toFixed(1)}
-                onChange={(e) => updateParam('tint', Math.max(-100, Math.min(100, parseFloat(e.target.value) || 0)))}
-                className="w-16 px-1 py-0.5 text-xs bg-dark-800 border border-dark-700 rounded text-dark-300 text-right disabled:opacity-50"
-                step="1"
-                min="-100"
-                max="100"
+              <DelayedInputControl
+                value={params.tint}
+                onChange={(value) => updateParam('tint', value)}
+                min={-100}
+                max={100}
+                step={1}
+                precision={1}
               />
               <button
                 onClick={() => resetParam('tint', 0.0)}

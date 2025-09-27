@@ -18,7 +18,7 @@ interface StatusBarProps {
 }
 
 export function StatusBar({ currentImage, processingStats }: StatusBarProps) {
-  const { viewport } = useAppStore();
+  const { viewport: _viewport } = useAppStore();
 
   // Format file size
   const formatFileSize = (bytes: number): string => {

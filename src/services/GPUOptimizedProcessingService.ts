@@ -1,6 +1,23 @@
 import { logger } from '../utils/Logger';
 // import { gpuAccelerationService } from './GPUAccelerationService';
 
+// GPU processing interfaces
+export interface GPUBuffer {
+  buffer: WebGLTexture | WebGLBuffer;
+  type: 'texture' | 'buffer';
+  size: number;
+}
+
+export interface ShaderProgram {
+  program: WebGLProgram;
+  uniforms: Record<string, unknown>;
+  attributes: Record<string, number>;
+}
+
+export interface ProcessingParameters {
+  [key: string]: number | number[] | boolean | string;
+}
+
 // GPU-optimized configuration for RTX 3080
 export interface RTXOptimizedConfig {
   dedicatedVRAM: number; // 12GB in bytes
@@ -15,7 +32,7 @@ export interface RTXOptimizedConfig {
 export interface GPUMemoryPool {
   totalAllocated: number;
   available: number;
-  buffers: Map<string, WebGLTexture | any>;
+  buffers: Map<string, GPUBuffer>;
   reservedForProcessing: number;
 }
 
@@ -26,7 +43,7 @@ export interface ProcessingTask {
   imageData: Float32Array;
   width: number;
   height: number;
-  parameters: Record<string, any>;
+  parameters: ProcessingParameters;
   gpuMemoryRequired: number;
 }
 
@@ -40,8 +57,8 @@ export class GPUOptimizedProcessingService {
   private ___activeOperations: Set<string> = new Set();
   private gl: WebGL2RenderingContext | null = null;
   // @ts-ignore: Reserved for WebGPU compute operations
-  private ___webgpuDevice: any = null;
-  private shaderCache: Map<string, any> = new Map();
+  private ___webgpuDevice: unknown = null;
+  private shaderCache: Map<string, ShaderProgram> = new Map();
   private textureCache: Map<string, WebGLTexture> = new Map();
 
   private constructor() {
@@ -411,7 +428,7 @@ export class GPUOptimizedProcessingService {
     rawData: Float32Array,
     width: number,
     height: number,
-    parameters: Record<string, any>
+    parameters: ProcessingParameters
   ): Promise<Float32Array> {
     const startTime = performance.now();
 
@@ -425,7 +442,7 @@ export class GPUOptimizedProcessingService {
 
       // Step 2: Noise reduction (if needed)
       let processedData = debayeredData;
-      if (parameters.noiseReduction > 0) {
+      if (typeof parameters.noiseReduction === 'number' && parameters.noiseReduction > 0) {
         processedData = await this.gpuNoiseReduction(processedData, width, height, parameters);
       }
 
@@ -452,7 +469,7 @@ export class GPUOptimizedProcessingService {
     rawData: Float32Array,
     width: number,
     height: number,
-    parameters: Record<string, any>
+    parameters: ProcessingParameters
   ): Promise<Float32Array> {
     if (!this.gl) throw new Error('WebGL2 not initialized');
 
@@ -489,7 +506,7 @@ export class GPUOptimizedProcessingService {
     gl.useProgram(program);
     gl.uniform1i(gl.getUniformLocation(program, 'rawTexture'), 0);
     gl.uniform2f(gl.getUniformLocation(program, 'imageSize'), width, height);
-    gl.uniform1i(gl.getUniformLocation(program, 'bayerPattern'), parameters.bayerPattern || 0);
+    gl.uniform1i(gl.getUniformLocation(program, 'bayerPattern'), typeof parameters.bayerPattern === 'number' ? parameters.bayerPattern : 0);
 
     gl.viewport(0, 0, width, height);
     this.renderFullscreenQuad(gl);
@@ -509,7 +526,7 @@ export class GPUOptimizedProcessingService {
     imageData: Float32Array,
     width: number,
     height: number,
-    parameters: Record<string, any>
+    parameters: ProcessingParameters
   ): Promise<Float32Array> {
     if (!this.gl) throw new Error('WebGL2 not initialized');
 
@@ -519,13 +536,14 @@ export class GPUOptimizedProcessingService {
 
     // Multi-pass noise reduction for better quality
     let currentData = imageData;
-    const passes = Math.min(3, Math.max(1, Math.floor(parameters.noiseReduction * 3)));
+    const noiseReductionValue = typeof parameters.noiseReduction === 'number' ? parameters.noiseReduction : 0.5;
+    const passes = Math.min(3, Math.max(1, Math.floor(noiseReductionValue * 3)));
 
     for (let pass = 0; pass < passes; pass++) {
       currentData = await this.applyShaderPass(
         gl, program, currentData, width, height,
         {
-          strength: parameters.noiseReduction / passes,
+          strength: noiseReductionValue / passes,
           threshold: parameters.noiseThreshold || 0.1
         }
       );
@@ -538,7 +556,7 @@ export class GPUOptimizedProcessingService {
     imageData: Float32Array,
     width: number,
     height: number,
-    parameters: Record<string, any>
+    parameters: ProcessingParameters
   ): Promise<Float32Array> {
     if (!this.gl) throw new Error('WebGL2 not initialized');
 
@@ -559,7 +577,7 @@ export class GPUOptimizedProcessingService {
     imageData: Float32Array,
     width: number,
     height: number,
-    parameters: Record<string, any>
+    parameters: ProcessingParameters
   ): Promise<Float32Array> {
     if (!this.gl) throw new Error('WebGL2 not initialized');
 
@@ -567,16 +585,21 @@ export class GPUOptimizedProcessingService {
     const program = this.shaderCache.get('colorGrading');
     if (!program) throw new Error('Color grading shader not found');
 
-    return this.applyShaderPass(gl, program, imageData, width, height, parameters.colorGrading);
+    const colorGradingParams = parameters.colorGrading &&
+      typeof parameters.colorGrading === 'object' &&
+      !Array.isArray(parameters.colorGrading) ?
+      parameters.colorGrading as Record<string, number | number[] | WebGLTexture> : {};
+
+    return this.applyShaderPass(gl, program, imageData, width, height, colorGradingParams);
   }
 
   private async applyShaderPass(
     gl: WebGL2RenderingContext,
-    program: WebGLProgram,
+    shaderProgram: ShaderProgram,
     imageData: Float32Array,
     width: number,
     height: number,
-    uniforms: Record<string, any>
+    uniforms: Record<string, number | number[] | WebGLTexture>
   ): Promise<Float32Array> {
     // Create input texture
     const inputTexture = gl.createTexture();
@@ -597,13 +620,13 @@ export class GPUOptimizedProcessingService {
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, outputTexture, 0);
 
     // Setup shader
-    gl.useProgram(program);
-    gl.uniform1i(gl.getUniformLocation(program, 'inputTexture'), 0);
-    gl.uniform2f(gl.getUniformLocation(program, 'imageSize'), width, height);
+    gl.useProgram(shaderProgram.program);
+    gl.uniform1i(gl.getUniformLocation(shaderProgram.program, 'inputTexture'), 0);
+    gl.uniform2f(gl.getUniformLocation(shaderProgram.program, 'imageSize'), width, height);
 
     // Set uniforms
     for (const [name, value] of Object.entries(uniforms)) {
-      const location = gl.getUniformLocation(program, name);
+      const location = gl.getUniformLocation(shaderProgram.program, name);
       if (location) {
         if (typeof value === 'number') {
           gl.uniform1f(location, value);
@@ -633,7 +656,7 @@ export class GPUOptimizedProcessingService {
     return result;
   }
 
-  private createShaderProgram(gl: WebGL2RenderingContext, fragmentSource: string): WebGLProgram {
+  private createShaderProgram(gl: WebGL2RenderingContext, fragmentSource: string): ShaderProgram {
     const vertexSource = `#version 300 es
       precision highp float;
       in vec2 position;
@@ -660,7 +683,29 @@ export class GPUOptimizedProcessingService {
     gl.deleteShader(vertexShader);
     gl.deleteShader(fragmentShader);
 
-    return program;
+    // Get program uniforms and attributes
+    const uniforms: Record<string, unknown> = {};
+    const attributes: Record<string, number> = {};
+
+    // Get uniform locations
+    const numUniforms = gl.getProgramParameter(program, gl.ACTIVE_UNIFORMS);
+    for (let i = 0; i < numUniforms; i++) {
+      const uniform = gl.getActiveUniform(program, i);
+      if (uniform) {
+        uniforms[uniform.name] = gl.getUniformLocation(program, uniform.name);
+      }
+    }
+
+    // Get attribute locations
+    const numAttributes = gl.getProgramParameter(program, gl.ACTIVE_ATTRIBUTES);
+    for (let i = 0; i < numAttributes; i++) {
+      const attribute = gl.getActiveAttrib(program, i);
+      if (attribute) {
+        attributes[attribute.name] = gl.getAttribLocation(program, attribute.name);
+      }
+    }
+
+    return { program, uniforms, attributes };
   }
 
   private compileShader(gl: WebGL2RenderingContext, type: number, source: string): WebGLShader {

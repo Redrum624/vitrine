@@ -488,7 +488,7 @@ export const OutputCollectionModule: React.FC<OutputCollectionModuleProps> = ({
                 <label className="block text-sm font-medium text-white mb-2">Category</label>
                 <select
                   value={newCollection.category}
-                  onChange={(e) => setNewCollection(prev => ({ ...prev, category: e.target.value as any }))}
+                  onChange={(e) => setNewCollection(prev => ({ ...prev, category: e.target.value as 'client' | 'portfolio' | 'stock' | 'personal' | 'project' | 'custom' }))}
                   className="w-full bg-gray-700 text-white text-sm rounded px-3 py-2 border border-gray-600 focus:border-green-400 focus:outline-none"
                 >
                   {categories.map(category => (

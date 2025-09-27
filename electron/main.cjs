@@ -268,7 +268,7 @@ ipcMain.handle('get-system-drives', async () => {
           path: drivePath,
           type: 'drive'
         });
-      } catch (error) {
+      } catch {
         // Drive doesn't exist, skip
       }
     }

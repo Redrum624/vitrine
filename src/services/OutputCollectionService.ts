@@ -306,14 +306,17 @@ export class OutputCollectionService {
   ): string {
     const id = `collection-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
-    let defaultSettings: any = {
+    let defaultSettings: ExportOptions = {
       format: 'jpeg',
       quality: 85,
+      compression: 'none',
       colorSpace: 'srgb',
       bitDepth: 8,
       resizeMode: 'fit',
       maintainAspectRatio: true,
       preserveMetadata: true,
+      includeProcessingHistory: false,
+      customMetadata: {},
       outputSharpening: {
         enabled: true,
         amount: 75,

@@ -116,8 +116,12 @@ export const PrintModule: React.FC<PrintModuleProps> = ({
         }
       };
 
+      const imageData = processedImageData instanceof Float32Array
+        ? processedImageData
+        : processedImageData.data;
+
       await printService.generateSoftProof(
-        processedImageData,
+        imageData,
         currentImage.metadata.width,
         currentImage.metadata.height,
         settings
@@ -161,8 +165,12 @@ export const PrintModule: React.FC<PrintModuleProps> = ({
         }
       };
 
+      const imageData2 = processedImageData instanceof Float32Array
+        ? processedImageData
+        : processedImageData.data;
+
       const jobId = await printService.createPrintJob(
-        processedImageData,
+        imageData2,
         currentImage.metadata.width,
         currentImage.metadata.height,
         settings

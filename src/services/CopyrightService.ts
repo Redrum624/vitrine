@@ -300,9 +300,9 @@ export class CopyrightService {
         for (const [variable, replacement] of Object.entries(defaultVariables)) {
           processedValue = processedValue.replace(new RegExp(variable.replace(/[[\]]/g, '\\$&'), 'g'), replacement);
         }
-        (result as any)[key] = processedValue;
+        (result as Record<string, unknown>)[key] = processedValue;
       } else {
-        (result as any)[key] = value;
+        (result as Record<string, unknown>)[key] = value;
       }
     }
 
@@ -522,7 +522,7 @@ export class CopyrightService {
             const existing = result.keywords || [];
             result.keywords = [...new Set([...existing, ...value])];
           } else {
-            (result as any)[key] = value;
+            (result as Record<string, unknown>)[key] = value;
           }
         }
       }

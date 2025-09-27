@@ -51,6 +51,7 @@ export const LuminosityMaskModule: React.FC<LuminosityMaskModuleProps> = ({
     if (previewMask && currentImage) {
       generateMaskPreview(previewMask);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [previewMask, currentImage, maskSettings.previewColor, maskSettings.previewOpacity]);
 
   // Generate single luminosity mask
@@ -63,10 +64,14 @@ export const LuminosityMaskModule: React.FC<LuminosityMaskModuleProps> = ({
     try {
       setIsGenerating(true);
 
+      const imageData = processedImageData instanceof Float32Array
+        ? processedImageData
+        : processedImageData.data;
+
       let mask;
       if (maskSettings.type === 'custom') {
         mask = luminosityMaskService.generateLuminosityMask(
-          processedImageData,
+          imageData,
           currentImage.metadata.width,
           currentImage.metadata.height,
           'lights', // Use 'lights' as base for custom range
@@ -75,7 +80,7 @@ export const LuminosityMaskModule: React.FC<LuminosityMaskModuleProps> = ({
         );
       } else {
         mask = luminosityMaskService.generateLuminosityMask(
-          processedImageData,
+          imageData,
           currentImage.metadata.width,
           currentImage.metadata.height,
           maskSettings.type,
@@ -106,8 +111,12 @@ export const LuminosityMaskModule: React.FC<LuminosityMaskModuleProps> = ({
     try {
       setIsGenerating(true);
 
+      const imageData = processedImageData instanceof Float32Array
+        ? processedImageData
+        : processedImageData.data;
+
       const maskSet = luminosityMaskService.generateCompleteMaskSet(
-        processedImageData,
+        imageData,
         currentImage.metadata.width,
         currentImage.metadata.height
       );
@@ -334,7 +343,7 @@ export const LuminosityMaskModule: React.FC<LuminosityMaskModuleProps> = ({
                 <label className="block text-xs text-gray-400 mb-1">Type</label>
                 <select
                   value={maskSettings.type}
-                  onChange={(e) => setMaskSettings(prev => ({ ...prev, type: e.target.value as any }))}
+                  onChange={(e) => setMaskSettings(prev => ({ ...prev, type: e.target.value as 'lights' | 'darks' | 'midtones' }))}
                   className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-purple-400 focus:outline-none"
                   disabled={isGenerating}
                 >

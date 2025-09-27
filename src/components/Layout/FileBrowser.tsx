@@ -42,7 +42,7 @@ export function FileBrowser({ onImageSelected, onFolderSelected }: FileBrowserPr
         setTimeout(() => reject(new Error('Folder loading timeout')), 5000);
       });
 
-      const contentsPromise = fileSystemService.getFolderContents(folderPath, shallow);
+      const contentsPromise = fileSystemService.getFolderContents(folderPath);
       const contents = await Promise.race([contentsPromise, timeoutPromise]);
 
       setFolderContents(prev => new Map(prev).set(folderId, contents));
@@ -55,6 +55,15 @@ export function FileBrowser({ onImageSelected, onFolderSelected }: FileBrowserPr
 
         if (isCurrentlySelected || wasJustSelected) {
           onFolderSelected?.(contents.images);
+
+          // Auto-select first image when folder name is clicked (non-shallow load)
+          if (wasJustSelected && contents.images[0]) {
+            // Set up navigation context
+            fileSystemService.setCurrentImages(contents.images, 0);
+            onImageSelected?.(contents.images[0]);
+            logger.info(`Auto-selected first image: ${contents.images[0].name}`);
+          }
+
           logger.info(`Gallery triggered for folder with ${contents.images.length} images`);
         }
       }
@@ -67,9 +76,12 @@ export function FileBrowser({ onImageSelected, onFolderSelected }: FileBrowserPr
     } finally {
       setLoading(null);
     }
-  }, [onFolderSelected, selectedFolder]);
+  }, [onFolderSelected, onImageSelected, selectedFolder]);
 
-  const toggleFolder = useCallback(async (folderId: string, folderPath: string, isSecondaryExpansion = false) => {
+
+  // Handler for expanding/collapsing and showing image files (without loading them into gallery/preview)
+  const handleArrowClick = useCallback(async (e: React.MouseEvent, folderId: string, folderPath: string, _isSecondaryExpansion = false) => {
+    e.stopPropagation(); // Prevent triggering the folder name click
     const isExpanded = expandedFolders.has(folderId);
     const newExpanded = new Set(expandedFolders);
 
@@ -84,30 +96,18 @@ export function FileBrowser({ onImageSelected, onFolderSelected }: FileBrowserPr
     } else {
       newExpanded.add(folderId);
 
-      // Only set as selected folder if it's a direct user click (not secondary expansion)
-      if (!isSecondaryExpansion) {
-        setSelectedFolder(folderId);
+      // Set as selected folder to show image files in the tree
+      setSelectedFolder(folderId);
 
-        // Load contents deeply (non-shallow) for user-selected folders to trigger gallery
-        if (!folderContents.has(folderId)) {
-          await loadFolderContents(folderPath, folderId, false); // Deep load for selection
-        } else {
-          // If already loaded, trigger gallery for existing images
-          const existingContents = folderContents.get(folderId);
-          if (existingContents && existingContents.images.length > 0) {
-            onFolderSelected?.(existingContents.images);
-          }
-        }
-      } else {
-        // Load contents if not already loaded (shallow load for performance)
-        if (!folderContents.has(folderId)) {
-          await loadFolderContents(folderPath, folderId, true);
-        }
+      // Load contents to show image files but don't trigger gallery or preview loading
+      if (!folderContents.has(folderId)) {
+        await loadFolderContents(folderPath, folderId, true); // Shallow load - just show files, don't load into gallery
       }
+      // Don't trigger gallery or image selection - just show the files in the tree
     }
 
     setExpandedFolders(newExpanded);
-  }, [expandedFolders, folderContents, loadFolderContents, onFolderSelected]);
+  }, [expandedFolders, folderContents, loadFolderContents]);
 
   const handleImageClick = useCallback((image: ImageFileInfo) => {
     const currentFolderImages = selectedFolder && folderContents.has(selectedFolder)
@@ -122,6 +122,37 @@ export function FileBrowser({ onImageSelected, onFolderSelected }: FileBrowserPr
     logger.info(`Selected image: ${image.name} (${imageIndex + 1}/${currentFolderImages.length})`);
   }, [selectedFolder, folderContents, onImageSelected]);
 
+  // Handler for selecting folder and loading images
+  const handleFolderNameClick = useCallback(async (e: React.MouseEvent, folderId: string, folderPath: string) => {
+    e.stopPropagation(); // Prevent any parent handlers
+
+    // Expand folder if not already expanded
+    const isExpanded = expandedFolders.has(folderId);
+    if (!isExpanded) {
+      const newExpanded = new Set(expandedFolders);
+      newExpanded.add(folderId);
+      setExpandedFolders(newExpanded);
+    }
+
+    // Set as selected folder
+    setSelectedFolder(folderId);
+
+    // Load contents and trigger gallery
+    if (!folderContents.has(folderId)) {
+      await loadFolderContents(folderPath, folderId, false); // Deep load for selection
+    } else {
+      // If already loaded, trigger gallery for existing images
+      const existingContents = folderContents.get(folderId);
+      if (existingContents && existingContents.images.length > 0) {
+        onFolderSelected?.(existingContents.images);
+        // Load first image
+        if (existingContents.images[0]) {
+          handleImageClick(existingContents.images[0]);
+        }
+      }
+    }
+  }, [expandedFolders, folderContents, loadFolderContents, onFolderSelected, handleImageClick]);
+
   const renderDriveOrFolder = (item: DriveInfo, depth = 0) => {
     const isExpanded = expandedFolders.has(item.id);
     const isLoading = loading === item.id;
@@ -132,37 +163,48 @@ export function FileBrowser({ onImageSelected, onFolderSelected }: FileBrowserPr
       <div key={item.id} className="select-none">
         {/* Drive/Folder Header */}
         <div
-          className={`flex items-center px-2 py-1 hover:bg-dark-800 cursor-pointer transition-professional ${
+          className={`flex items-center px-2 py-1 hover:bg-dark-800 transition-professional ${
             selectedFolder === item.id ? 'bg-dark-700' : ''
           }`}
           style={{ paddingLeft: `${8 + depth * 16}px` }}
-          onClick={() => toggleFolder(item.id, item.path)}
         >
-          {isLoading ? (
-            <div className="w-3 h-3 mr-1 animate-spin rounded-full border border-dark-300 border-t-transparent" />
-          ) : (
-            isExpanded ? (
-              <ChevronDown className="w-3 h-3 mr-1 text-dark-300" />
+          {/* Arrow - expand/collapse only */}
+          <div
+            className="flex items-center justify-center w-4 h-4 mr-1 cursor-pointer hover:bg-dark-700 rounded"
+            onClick={(e) => handleArrowClick(e, item.id, item.path)}
+          >
+            {isLoading ? (
+              <div className="w-3 h-3 animate-spin rounded-full border border-dark-300 border-t-transparent" />
             ) : (
-              <ChevronRight className="w-3 h-3 mr-1 text-dark-300" />
-            )
-          )}
+              isExpanded ? (
+                <ChevronDown className="w-3 h-3 text-dark-300" />
+              ) : (
+                <ChevronRight className="w-3 h-3 text-dark-300" />
+              )
+            )}
+          </div>
 
-          {item.type === 'drive' ? (
-            <HardDrive className="w-4 h-4 mr-2 text-dark-300" />
-          ) : isExpanded ? (
-            <FolderOpen className="w-4 h-4 mr-2 text-dark-300" />
-          ) : (
-            <Folder className="w-4 h-4 mr-2 text-dark-300" />
-          )}
+          {/* Folder content - select folder and load images */}
+          <div
+            className="flex items-center flex-1 cursor-pointer hover:bg-dark-750 rounded px-1"
+            onClick={(e) => handleFolderNameClick(e, item.id, item.path)}
+          >
+            {item.type === 'drive' ? (
+              <HardDrive className="w-4 h-4 mr-2 text-dark-300" />
+            ) : isExpanded ? (
+              <FolderOpen className="w-4 h-4 mr-2 text-dark-300" />
+            ) : (
+              <Folder className="w-4 h-4 mr-2 text-dark-300" />
+            )}
 
-          <span className="text-sm text-dark-300 flex-1 truncate">{item.name}</span>
+            <span className="text-sm text-dark-300 flex-1 truncate">{item.name}</span>
 
-          {hasImages && (
-            <span className="text-xs text-dark-400 ml-2">
-              {contents.images.length} images
-            </span>
-          )}
+            {hasImages && (
+              <span className="text-xs text-dark-400 ml-2">
+                {contents.images.length} images
+              </span>
+            )}
+          </div>
         </div>
 
         {/* Expanded Contents */}
@@ -206,32 +248,44 @@ export function FileBrowser({ onImageSelected, onFolderSelected }: FileBrowserPr
     return (
       <div key={folder.id}>
         <div
-          className={`flex items-center px-2 py-1 hover:bg-dark-800 cursor-pointer transition-professional ${
+          className={`flex items-center px-2 py-1 hover:bg-dark-800 transition-professional ${
             selectedFolder === folder.id ? 'bg-dark-700' : ''
           }`}
           style={{ paddingLeft: `${8 + depth * 16}px` }}
-          onClick={() => toggleFolder(folder.id, folder.path, depth > 1)}
         >
-          {isLoading ? (
-            <div className="w-3 h-3 mr-1 animate-spin rounded-full border border-dark-300 border-t-transparent" />
-          ) : (
-            isExpanded ? (
-              <ChevronDown className="w-3 h-3 mr-1 text-dark-300" />
+          {/* Arrow - expand/collapse only */}
+          <div
+            className="flex items-center justify-center w-4 h-4 mr-1 cursor-pointer hover:bg-dark-700 rounded"
+            onClick={(e) => handleArrowClick(e, folder.id, folder.path, depth > 1)}
+          >
+            {isLoading ? (
+              <div className="w-3 h-3 animate-spin rounded-full border border-dark-300 border-t-transparent" />
             ) : (
-              <ChevronRight className="w-3 h-3 mr-1 text-dark-300" />
-            )
-          )}
-          {isExpanded ? (
-            <FolderOpen className="w-4 h-4 mr-2 text-dark-300" />
-          ) : (
-            <Folder className="w-4 h-4 mr-2 text-dark-300" />
-          )}
-          <span className="text-sm text-dark-300 flex-1 truncate">{folder.name}</span>
-          {hasImages && (
-            <span className="text-xs text-dark-400 ml-2">
-              {contents.images.length} images
-            </span>
-          )}
+              isExpanded ? (
+                <ChevronDown className="w-3 h-3 text-dark-300" />
+              ) : (
+                <ChevronRight className="w-3 h-3 text-dark-300" />
+              )
+            )}
+          </div>
+
+          {/* Folder content - select folder and load images */}
+          <div
+            className="flex items-center flex-1 cursor-pointer hover:bg-dark-750 rounded px-1"
+            onClick={(e) => handleFolderNameClick(e, folder.id, folder.path)}
+          >
+            {isExpanded ? (
+              <FolderOpen className="w-4 h-4 mr-2 text-dark-300" />
+            ) : (
+              <Folder className="w-4 h-4 mr-2 text-dark-300" />
+            )}
+            <span className="text-sm text-dark-300 flex-1 truncate">{folder.name}</span>
+            {hasImages && (
+              <span className="text-xs text-dark-400 ml-2">
+                {contents.images.length} images
+              </span>
+            )}
+          </div>
         </div>
 
         {/* Recursive rendering for infinite depth */}

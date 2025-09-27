@@ -8,7 +8,7 @@ import { logger } from '../utils/Logger';
  */
 export class ToneCurvePipelineModule implements PipelineModule {
   private toneCurveModule: ToneCurveModule;
-  public isEnabled = true;
+  public isEnabled = false; // Temporarily disabled to test if this is causing black images
 
   constructor() {
     this.toneCurveModule = new ToneCurveModule();

@@ -80,8 +80,12 @@ export const LensCorrectionModule: React.FC<LensCorrectionModuleProps> = ({
         corrections
       });
 
+      const imageData = processedImageData instanceof Float32Array
+        ? processedImageData
+        : processedImageData.data;
+
       const correctedData = await lensProfileService.applyLensCorrections(
-        processedImageData,
+        imageData,
         currentImage.metadata.width,
         currentImage.metadata.height,
         selectedProfile,

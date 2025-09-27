@@ -6,9 +6,9 @@ import { advancedDemosaicingService } from './AdvancedDemosaicingService';
 import { rawHistogramService, HistogramData } from './RawHistogramService';
 import { noiseReductionService, NoiseReductionOptions } from './NoiseReductionService';
 import { lensProfileService, LensProfile, LensCorrections } from './LensProfileService';
-import { colorManagementService } from './ColorManagementService';
-import { printService } from './PrintService';
-import { webGalleryService } from './WebGalleryService';
+import { colorManagementService, SoftProofOptions, ColorConversionOptions } from './ColorManagementService';
+import { printService, PrintSettings } from './PrintService';
+import { webGalleryService, GalleryImage, GalleryOutput, GallerySettings } from './WebGalleryService';
 
 export interface RawImageData {
   width: number;
@@ -859,9 +859,9 @@ export class RawImageService {
   /**
    * Apply soft proofing for print preview
    */
-  async applySoftProof(imageData: Float32Array, width: number, height: number, options: any) {
+  async applySoftProof(imageData: Float32Array, width: number, height: number, options: Record<string, unknown>) {
     try {
-      return await colorManagementService.applySoftProof(imageData, width, height, options);
+      return await colorManagementService.applySoftProof(imageData, width, height, options as unknown as SoftProofOptions);
     } catch (error) {
       logger.error('Failed to apply soft proof:', error);
       throw error;
@@ -871,9 +871,9 @@ export class RawImageService {
   /**
    * Convert image to different color profile
    */
-  async convertColorProfile(imageData: Float32Array, width: number, height: number, options: any) {
+  async convertColorProfile(imageData: Float32Array, width: number, height: number, options: Record<string, unknown>) {
     try {
-      return await colorManagementService.convertColorProfile(imageData, width, height, options);
+      return await colorManagementService.convertColorProfile(imageData, width, height, options as unknown as ColorConversionOptions);
     } catch (error) {
       logger.error('Failed to convert color profile:', error);
       throw error;
@@ -897,9 +897,9 @@ export class RawImageService {
   /**
    * Create print job
    */
-  async createPrintJob(imageData: Float32Array, width: number, height: number, settings: any) {
+  async createPrintJob(imageData: Float32Array, width: number, height: number, settings: Record<string, unknown>) {
     try {
-      return await printService.createPrintJob(imageData, width, height, settings);
+      return await printService.createPrintJob(imageData, width, height, settings as unknown as PrintSettings);
     } catch (error) {
       logger.error('Failed to create print job:', error);
       throw error;
@@ -923,9 +923,9 @@ export class RawImageService {
   /**
    * Generate web gallery
    */
-  async generateWebGallery(images: any[], settings: any) {
+  async generateWebGallery(images: unknown[], settings: Record<string, unknown>) {
     try {
-      return await webGalleryService.generateGallery(images, settings);
+      return await webGalleryService.generateGallery(images as GalleryImage[], settings as unknown as GallerySettings);
     } catch (error) {
       logger.error('Failed to generate web gallery:', error);
       throw error;
@@ -935,9 +935,9 @@ export class RawImageService {
   /**
    * Export gallery as downloadable file
    */
-  async exportGallery(galleryOutput: any, filename: string) {
+  async exportGallery(galleryOutput: unknown, filename: string) {
     try {
-      return await webGalleryService.exportGallery(galleryOutput, filename);
+      return await webGalleryService.exportGallery(galleryOutput as GalleryOutput, filename);
     } catch (error) {
       logger.error('Failed to export gallery:', error);
       throw error;

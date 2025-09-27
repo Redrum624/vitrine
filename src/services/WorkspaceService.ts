@@ -16,7 +16,7 @@ export interface PanelConfig {
   isResizable: boolean;
   isDockable: boolean;
   order: number;
-  content?: any;
+  content?: unknown;
   customComponent?: string;
 }
 
@@ -619,7 +619,7 @@ class WorkspaceService {
     layoutCopy.id = presetId;
     layoutCopy.name = name;
     layoutCopy.description = description;
-    layoutCopy.category = category as any;
+    layoutCopy.category = category as 'photo' | 'raw' | 'retouch' | 'print' | 'custom';
 
     const preset: WorkspacePreset = {
       id: presetId,
@@ -796,7 +796,7 @@ class WorkspaceService {
 
       this.persistCustomLayouts();
       return newId;
-    } catch (error) {
+    } catch {
       throw new Error('Failed to import layout: Invalid JSON or layout structure');
     }
   }

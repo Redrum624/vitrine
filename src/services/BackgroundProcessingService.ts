@@ -1,18 +1,20 @@
+import { JobData, ProcessingParameters } from '../types/index';
+
 export interface ProcessingJob {
   id: string;
   type: 'export' | 'batch' | 'background_edit' | 'thumbnail' | 'analysis';
   priority: number; // 0 = highest priority
   status: 'queued' | 'processing' | 'completed' | 'failed' | 'cancelled';
   progress: number; // 0-100
-  data: any;
-  parameters: any;
+  data: JobData;
+  parameters: ProcessingParameters;
   createdAt: number;
   startedAt?: number;
   completedAt?: number;
   estimatedDuration?: number;
   actualDuration?: number;
   error?: string;
-  result?: any;
+  result?: JobData;
   dependencies?: string[]; // Job IDs this job depends on
   retryCount: number;
   maxRetries: number;
@@ -125,8 +127,8 @@ class BackgroundProcessingService {
 
   queueJob(
     type: ProcessingJob['type'],
-    data: any,
-    parameters: any = {},
+    data: JobData,
+    parameters: ProcessingParameters = {},
     priority: number = 5,
     dependencies: string[] = [],
     maxRetries: number = 3
@@ -399,13 +401,22 @@ class BackgroundProcessingService {
   private handleWorkerMessage(
     job: ProcessingJob,
     workerId: string,
-    message: any,
+    message: {
+      type: string;
+      progress?: number;
+      result?: JobData;
+      error?: string;
+      message?: string;
+      currentStep?: number;
+      totalSteps?: number;
+      estimatedTimeRemaining?: number;
+    },
     timeoutId: NodeJS.Timeout
   ): void {
     clearTimeout(timeoutId);
 
     if (message.type === 'progress') {
-      job.progress = message.progress;
+      job.progress = message.progress ?? 0;
 
       const progressCallback = this.progressCallbacks.get(job.id);
       if (progressCallback) {
@@ -413,18 +424,18 @@ class BackgroundProcessingService {
           jobId: job.id,
           progress: job.progress,
           status: job.status,
-          message: message.message,
-          currentStep: message.currentStep,
-          totalSteps: message.totalSteps,
-          estimatedTimeRemaining: message.estimatedTimeRemaining
+          message: message.message ?? '',
+          currentStep: (message.currentStep ?? 0).toString(),
+          totalSteps: message.totalSteps ?? 1,
+          estimatedTimeRemaining: message.estimatedTimeRemaining ?? 0
         });
       }
 
     } else if (message.type === 'completed') {
-      this.handleJobCompletion(job, workerId, message.result);
+      this.handleJobCompletion(job, workerId, message.result ?? {});
 
     } else if (message.type === 'error') {
-      this.handleJobError(job, workerId, message.error, timeoutId);
+      this.handleJobError(job, workerId, message.error ?? 'Unknown error', timeoutId);
     }
   }
 
@@ -482,7 +493,7 @@ class BackgroundProcessingService {
     this.processNextJobs();
   }
 
-  private handleJobCompletion(job: ProcessingJob, workerId: string, result: any): void {
+  private handleJobCompletion(job: ProcessingJob, workerId: string, result: JobData): void {
     job.status = 'completed';
     job.progress = 100;
     job.result = result;
@@ -778,7 +789,7 @@ class BackgroundProcessingService {
     `;
   }
 
-  private estimateJobDuration(type: ProcessingJob['type'], data: any): number {
+  private estimateJobDuration(type: ProcessingJob['type'], data: JobData): number {
     const baseTimes = {
       export: 5000,      // 5 seconds
       batch: 3000,       // 3 seconds

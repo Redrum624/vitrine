@@ -39,7 +39,7 @@ export interface CacheOptions {
 export interface PreviewRequest {
   imageHash: string;
   operation: string;
-  parameters: Record<string, any>;
+  parameters: Record<string, unknown>;
   width: number;
   height: number;
   priority: number;
@@ -259,7 +259,7 @@ class PreviewCacheService {
     return this.hashObject(keyData);
   }
 
-  private hashObject(obj: any): string {
+  private hashObject(obj: unknown): string {
     const str = JSON.stringify(obj);
     let hash = 0;
 
@@ -512,7 +512,7 @@ class PreviewCacheService {
   async preloadPreviews(
     imageHash: string,
     operations: string[],
-    parameters: Record<string, any>[] = []
+    parameters: Record<string, unknown>[] = []
   ): Promise<void> {
     const requests: PreviewRequest[] = [];
 
@@ -610,7 +610,7 @@ class PreviewCacheService {
               // Remove expired entry
               localStorage.removeItem(key);
             }
-          } catch (error) {
+          } catch {
             // Invalid entry, remove it
             localStorage.removeItem(key);
           }

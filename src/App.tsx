@@ -6,7 +6,6 @@ import { AdjustmentPanel } from './components/Panels/AdjustmentPanel';
 import { HistogramPanel } from './components/Panels/HistogramPanel';
 import { ThumbnailPanel } from './components/Panels/ThumbnailPanel';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import { LibRawStatus } from './components/LibRawStatus';
 import { ExportDialog } from './components/Dialogs/ExportDialog';
 import { BatchProcessingDialog } from './components/Dialogs/BatchProcessingDialog';
 import { PresetDialog } from './components/Dialogs/PresetDialog';
@@ -352,14 +351,13 @@ function App() {
         </div>
 
         {/* Right Panel - Editing Tools */}
-        <div className="w-80 flex flex-col overflow-hidden">
-          <div className="p-3 flex-shrink-0 space-y-3">
+        <div className="w-80 bg-dark-900 border-l border-dark-700 flex flex-col overflow-hidden">
+          <div className="p-3 flex-shrink-0">
             <div className="histogram-panel">
               <HistogramPanel />
             </div>
-            <LibRawStatus showDetails={true} />
           </div>
-          <div className="flex-1 overflow-y-auto adjustment-panel">
+          <div className="flex-1 border-t overflow-y-auto adjustment-panel">
             <AdjustmentPanel />
           </div>
         </div>
@@ -398,7 +396,13 @@ function App() {
         <ExportDialog
           isOpen={isExportDialogOpen}
           onClose={() => setIsExportDialogOpen(false)}
-          imageData={processedImageData || imageService.getCurrentImage()?.data || new Float32Array()}
+          imageData={
+            processedImageData
+              ? (processedImageData instanceof Float32Array
+                 ? processedImageData
+                 : processedImageData.data)
+              : imageService.getCurrentImage()?.data || new Float32Array()
+          }
           imageWidth={imageService.getCurrentImage()?.width || 0}
           imageHeight={imageService.getCurrentImage()?.height || 0}
           originalFilePath={imageService.getCurrentImage()?.filePath}

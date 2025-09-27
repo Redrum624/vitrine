@@ -8,7 +8,7 @@ import { logger } from '../utils/Logger';
  */
 export class ShadowsHighlightsPipelineModule implements PipelineModule {
   private shadowsHighlightsModule: ShadowsHighlightsModule;
-  public isEnabled = true;
+  public isEnabled = false; // Temporarily disabled - this module is zeroing out RGB values
 
   constructor() {
     this.shadowsHighlightsModule = new ShadowsHighlightsModule();

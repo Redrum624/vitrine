@@ -138,7 +138,7 @@ export class LibRawWasm {
       const wasmPath = '/wasm/libraw.js';
       const response = await fetch(wasmPath);
       if (response.ok) {
-        const wasmModule = await import(wasmPath);
+        const wasmModule = await import(/* @vite-ignore */ wasmPath);
         const libraw = await wasmModule.default();
         logger.info('LibRaw WASM module loaded successfully');
         return libraw;

@@ -151,8 +151,8 @@ export const WebGalleryModule: React.FC<WebGalleryModuleProps> = ({
 
     try {
       const newWindow = window.open('', '_blank') as unknown as Window | null;
-      if (newWindow && (newWindow as any).document) {
-        const doc = (newWindow as any).document;
+      if (newWindow && (newWindow as Window).document) {
+        const doc = (newWindow as Window).document;
         doc.write(generatedGallery.htmlContent);
         if (doc.head) {
           doc.head.innerHTML += `<style>${generatedGallery.cssContent}</style>`;
@@ -324,7 +324,7 @@ export const WebGalleryModule: React.FC<WebGalleryModuleProps> = ({
                 <label className="block text-xs text-gray-400 mb-1">Layout</label>
                 <select
                   value={gallerySettings.layout}
-                  onChange={(e) => updateGallerySetting('layout', e.target.value as any)}
+                  onChange={(e) => updateGallerySetting('layout', e.target.value as 'grid' | 'masonry' | 'justified' | 'slideshow')}
                   className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-green-400 focus:outline-none"
                   disabled={isGenerating}
                 >
@@ -366,7 +366,7 @@ export const WebGalleryModule: React.FC<WebGalleryModuleProps> = ({
                 <label className="block text-xs text-gray-400 mb-1">Thumbnail Quality</label>
                 <select
                   value={gallerySettings.thumbnailQuality}
-                  onChange={(e) => updateGallerySetting('thumbnailQuality', e.target.value as any)}
+                  onChange={(e) => updateGallerySetting('thumbnailQuality', e.target.value as 'low' | 'medium' | 'high')}
                   className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-green-400 focus:outline-none"
                   disabled={isGenerating}
                 >
@@ -380,7 +380,7 @@ export const WebGalleryModule: React.FC<WebGalleryModuleProps> = ({
                 <label className="block text-xs text-gray-400 mb-1">Preview Quality</label>
                 <select
                   value={gallerySettings.previewQuality}
-                  onChange={(e) => updateGallerySetting('previewQuality', e.target.value as any)}
+                  onChange={(e) => updateGallerySetting('previewQuality', e.target.value as 'medium' | 'high' | 'maximum')}
                   className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-green-400 focus:outline-none"
                   disabled={isGenerating}
                 >

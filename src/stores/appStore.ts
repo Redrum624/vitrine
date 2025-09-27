@@ -1,15 +1,7 @@
 import { create } from 'zustand';
-import type { AppState, ImageFile, Layer, ViewportState } from '../types';
-
-interface ProcessedImageData {
-  data: Float32Array;
-  width: number;
-  height: number;
-  isPreview: boolean;
-}
+import type { AppState, ImageFile, Layer, ViewportState, ProcessedImageData } from '../types';
 
 interface AppStore extends AppState {
-  processedImageData: Float32Array | ProcessedImageData | null;
   setCurrentImage: (image: ImageFile | null) => void;
   setSelectedTool: (toolId: string | null) => void;
   addLayer: (layer: Layer) => void;

@@ -516,7 +516,7 @@ class GraduatedFiltersService {
       // Regenerate ID to avoid conflicts
       filter.id = `filter_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
       return filter;
-    } catch (error) {
+    } catch {
       throw new Error('Invalid filter JSON format');
     }
   }

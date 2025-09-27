@@ -50,7 +50,7 @@ class KeyboardWorkflowService {
   private keySequence: KeySequence[] = [];
   private settings: KeyboardSettings;
   private stats: WorkflowStats;
-  private observers: Set<(action: string, data?: any) => void> = new Set();
+  private observers: Set<(action: string, data?: unknown) => void> = new Set();
   private shortcutUsage: Map<string, number> = new Map();
   private isListening = false;
 
@@ -597,7 +597,7 @@ class KeyboardWorkflowService {
       this.persistSettings();
 
       return newId;
-    } catch (error) {
+    } catch {
       throw new Error('Failed to import workflow: Invalid JSON');
     }
   }
@@ -653,12 +653,12 @@ class KeyboardWorkflowService {
     }
   }
 
-  subscribe(callback: (action: string, data?: any) => void): () => void {
+  subscribe(callback: (action: string, data?: unknown) => void): () => void {
     this.observers.add(callback);
     return () => this.observers.delete(callback);
   }
 
-  private notifyObservers(action: string, data?: any): void {
+  private notifyObservers(action: string, data?: unknown): void {
     this.observers.forEach(callback => {
       try {
         callback(action, data);

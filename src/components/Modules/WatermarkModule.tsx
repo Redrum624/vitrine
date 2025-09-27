@@ -61,6 +61,7 @@ export const WatermarkModule: React.FC<WatermarkModuleProps> = ({
     if (isEnabled && processedImageData && watermarkSettings.enabled) {
       generatePreview();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isEnabled, processedImageData, currentImage, watermarkSettings]);
 
   // Generate watermark preview
@@ -79,14 +80,19 @@ export const WatermarkModule: React.FC<WatermarkModuleProps> = ({
       canvas.height = currentImage.metadata.height;
       const ctx = canvas.getContext('2d')!;
 
-      const imageData = ctx.createImageData(currentImage.metadata.width, currentImage.metadata.height);
+      const imageDataCanvas = ctx.createImageData(currentImage.metadata.width, currentImage.metadata.height);
+
+      // Extract Float32Array data
+      const imageData = processedImageData instanceof Float32Array
+        ? processedImageData
+        : processedImageData.data;
 
       // Convert Float32Array to Uint8ClampedArray
-      for (let i = 0; i < processedImageData.length; i += 4) {
-        imageData.data[i] = Math.round(processedImageData[i] * 255);     // R
-        imageData.data[i + 1] = Math.round(processedImageData[i + 1] * 255); // G
-        imageData.data[i + 2] = Math.round(processedImageData[i + 2] * 255); // B
-        imageData.data[i + 3] = 255; // A
+      for (let i = 0; i < imageData.length; i += 4) {
+        imageDataCanvas.data[i] = Math.round(imageData[i] * 255);     // R
+        imageDataCanvas.data[i + 1] = Math.round(imageData[i + 1] * 255); // G
+        imageDataCanvas.data[i + 2] = Math.round(imageData[i + 2] * 255); // B
+        imageDataCanvas.data[i + 3] = 255; // A
       }
 
       // Generate preview at smaller size for performance
@@ -96,7 +102,7 @@ export const WatermarkModule: React.FC<WatermarkModuleProps> = ({
       };
 
       const preview = await watermarkService.previewWatermark(
-        imageData,
+        imageDataCanvas,
         watermarkSettings,
         previewSize
       );
@@ -336,7 +342,7 @@ export const WatermarkModule: React.FC<WatermarkModuleProps> = ({
                     <label className="block text-xs text-gray-400 mb-1">Weight</label>
                     <select
                       value={watermarkSettings.fontWeight || 'normal'}
-                      onChange={(e) => updateWatermarkSetting('fontWeight', e.target.value as any)}
+                      onChange={(e) => updateWatermarkSetting('fontWeight', e.target.value as 'normal' | 'bold' | '100' | '200' | '300' | '400' | '500' | '600' | '700' | '800' | '900')}
                       className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-purple-400 focus:outline-none"
                     >
                       <option value="normal">Normal</option>
@@ -404,7 +410,7 @@ export const WatermarkModule: React.FC<WatermarkModuleProps> = ({
                 <label className="block text-xs text-gray-400 mb-1">Position</label>
                 <select
                   value={watermarkSettings.position}
-                  onChange={(e) => updateWatermarkSetting('position', e.target.value as any)}
+                  onChange={(e) => updateWatermarkSetting('position', e.target.value as 'top-left' | 'top-center' | 'top-right' | 'center-left' | 'center' | 'center-right' | 'bottom-left' | 'bottom-center' | 'bottom-right')}
                   className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-purple-400 focus:outline-none"
                 >
                   {positions.map(pos => (
@@ -419,7 +425,7 @@ export const WatermarkModule: React.FC<WatermarkModuleProps> = ({
                 <label className="block text-xs text-gray-400 mb-1">Blend Mode</label>
                 <select
                   value={watermarkSettings.blendMode || 'normal'}
-                  onChange={(e) => updateWatermarkSetting('blendMode', e.target.value as any)}
+                  onChange={(e) => updateWatermarkSetting('blendMode', e.target.value as 'source-over' | 'multiply' | 'screen' | 'overlay' | 'soft-light' | 'hard-light' | 'difference' | 'exclusion')}
                   className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-purple-400 focus:outline-none"
                 >
                   {blendModes.map(mode => (

@@ -277,6 +277,73 @@ export class ImageService {
     return this.currentImage;
   }
 
+  // Load image at full resolution for export (bypasses performance optimizations)
+  async loadImageForExport(filePath: string): Promise<ImageData> {
+    const result = await errorHandlingService.withErrorHandling(
+      async () => {
+        logger.info(`Loading full-resolution image for export: ${filePath}`);
+
+        // Load image at full resolution without downsampling
+        const img = new Image();
+
+        return new Promise<ImageData>((resolve, reject) => {
+          img.onload = () => {
+            try {
+              logger.info(`Full-resolution image loaded: ${img.width}x${img.height}`);
+
+              // Use canvas to extract image data at full resolution
+              const canvas = document.createElement('canvas');
+              const ctx = canvas.getContext('2d');
+              if (!ctx) {
+                reject(new Error('Failed to get canvas context'));
+                return;
+              }
+
+              canvas.width = img.width;
+              canvas.height = img.height;
+
+              // Draw image at full resolution
+              ctx.drawImage(img, 0, 0);
+
+              // Get image data
+              const imageData = ctx.getImageData(0, 0, img.width, img.height);
+
+              // Convert to Float32Array for processing pipeline
+              const floatData = new Float32Array(imageData.data.length);
+              for (let i = 0; i < imageData.data.length; i++) {
+                floatData[i] = imageData.data[i] / 255.0; // Convert to 0-1 range
+              }
+
+              resolve({
+                width: img.width,
+                height: img.height,
+                data: floatData,
+                fileName: filePath.split('/').pop() || filePath.split('\\').pop() || 'unknown',
+                filePath: filePath
+              });
+            } catch (error) {
+              reject(error);
+            }
+          };
+
+          img.onerror = () => {
+            reject(new Error(`Failed to load image: ${filePath}`));
+          };
+
+          img.src = filePath;
+        });
+      },
+      'ImageService.loadImageForExport',
+      'io'
+    );
+
+    if (!result) {
+      throw new Error('Failed to load full-resolution image for export');
+    }
+
+    return result;
+  }
+
   clearImage(): void {
     this.currentImage = null;
     logger.info('Image cleared');

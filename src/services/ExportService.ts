@@ -175,7 +175,28 @@ export class ExportService {
     const warnings: string[] = [];
 
     try {
+      // Debug: Check actual image data dimensions vs expected
+      const expectedDataLength = originalWidth * originalHeight * 4; // RGBA
+      const actualDataLength = imageData.length;
+
       logger.info(`Starting export: ${originalWidth}x${originalHeight} to ${exportOptions.format}`);
+      logger.info(`Expected data length: ${expectedDataLength}, Actual: ${actualDataLength}`);
+
+      if (expectedDataLength !== actualDataLength) {
+        // Calculate actual dimensions from data length
+        const actualPixelCount = actualDataLength / 4;
+        const aspectRatio = originalWidth / originalHeight;
+        const actualHeight = Math.sqrt(actualPixelCount / aspectRatio);
+        const actualWidth = actualPixelCount / actualHeight;
+
+        logger.warn(`Dimension mismatch detected! Actual image data is ${Math.round(actualWidth)}x${Math.round(actualHeight)}`);
+
+        // Override original dimensions with actual data dimensions
+        originalWidth = Math.round(actualWidth);
+        originalHeight = Math.round(actualHeight);
+
+        logger.info(`Using corrected dimensions: ${originalWidth}x${originalHeight}`);
+      }
 
       // Calculate output dimensions
       const outputDimensions = this.calculateOutputDimensions(
@@ -715,7 +736,7 @@ export class ExportService {
 
     if (isElectron() && window.electronAPI) {
       // Use Electron with Sharp for high-quality image processing
-      const exportOptions: any = {
+      const exportOptions: Record<string, unknown> = {
         width,
         height,
         channels: 4, // RGBA
@@ -739,7 +760,21 @@ export class ExportService {
         outputPath,
         imageData.buffer as ArrayBuffer, // Type assertion for ArrayBuffer
         options.format,
-        exportOptions
+        exportOptions as {
+          width: number;
+          height: number;
+          channels?: number;
+          quality?: number;
+          progressive?: boolean;
+          compressionLevel?: number;
+          compression?: string;
+          lossless?: boolean;
+          resize?: {
+            width?: number;
+            height?: number;
+            fit?: string;
+          };
+        }
       );
     } else {
       // Fallback for browser environment using Canvas API
