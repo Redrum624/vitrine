@@ -105,8 +105,6 @@ export class LensCorrectionsModule {
     }
   };
 
-  private lensProfiles: LensProfile[] = [];
-
   // Process image with lens corrections
   processImage(imageData: Float32Array, width: number, height: number): Float32Array {
     let result = new Float32Array(imageData);
@@ -117,15 +115,18 @@ export class LensCorrectionsModule {
     try {
       // Apply corrections in optimal order
       if (this.params.distortion.enabled) {
-        result = this.correctDistortion(result, width, height);
+        const distortionResult = this.correctDistortion(result, width, height);
+        result = new Float32Array(distortionResult);
       }
 
       if (this.params.chromaticAberration.enabled) {
-        result = this.correctChromaticAberration(result, width, height);
+        const caResult = this.correctChromaticAberration(result, width, height);
+        result = new Float32Array(caResult);
       }
 
       if (this.params.vignetting.enabled) {
-        result = this.correctVignetting(result, width, height);
+        const vignettingResult = this.correctVignetting(result, width, height);
+        result = new Float32Array(vignettingResult);
       }
 
       const processingTime = performance.now() - startTime;
@@ -147,7 +148,6 @@ export class LensCorrectionsModule {
 
     const centerX = width / 2;
     const centerY = height / 2;
-    const maxRadius = Math.sqrt(centerX * centerX + centerY * centerY);
 
     // Normalize amount
     const correctionStrength = amount / 100.0;
@@ -207,12 +207,11 @@ export class LensCorrectionsModule {
     const { barrel, perspective, scale } = this.params.distortion;
 
     if (barrel === 0 && perspective.horizontal === 0 && perspective.vertical === 0 && scale === 1.0) {
-      return new Float32Array(imageData);
+      return imageData.slice();
     }
 
     const centerX = width / 2;
     const centerY = height / 2;
-    const maxRadius = Math.sqrt(centerX * centerX + centerY * centerY);
 
     // Normalize parameters
     const barrelAmount = barrel / 100.0;
@@ -320,9 +319,6 @@ export class LensCorrectionsModule {
       return result;
     }
 
-    const centerX = width / 2;
-    const centerY = height / 2;
-
     // Lateral chromatic aberration correction
     if (redCyan !== 0 || blueMagenta !== 0) {
       this.correctLateralCA(result, width, height, redCyan, blueMagenta);
@@ -361,7 +357,6 @@ export class LensCorrectionsModule {
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
         const pixelIndex = y * width + x;
-        const rgbaIndex = pixelIndex * 4;
 
         // Calculate distance from center
         const dx = x - centerX;
@@ -394,8 +389,8 @@ export class LensCorrectionsModule {
 
   private correctColorFringing(
     imageData: Float32Array,
-    width: number,
-    height: number,
+    _width: number,
+    _height: number,
     purple: { amount: number; hue: number; range: number },
     green: { amount: number; hue: number; range: number }
   ): void {
@@ -559,8 +554,6 @@ export class LensCorrectionsModule {
   autoDetectVignetting(imageData: Float32Array, width: number, height: number): void {
     logger.info('Auto-detecting vignetting...');
 
-    const centerX = width / 2;
-    const centerY = height / 2;
     const cornerBrightness = this.calculateCornerBrightness(imageData, width, height);
     const centerBrightness = this.calculateCenterBrightness(imageData, width, height);
 

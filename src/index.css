@@ -58,6 +58,70 @@
   background: #d8d8d8;
 }
 
+/* Visible slider track styles */
+.visible-track {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.visible-track::-webkit-slider-track {
+  background: #d1d5db;
+  height: 8px;
+  border-radius: 4px;
+  border: 1px solid #9ca3af;
+}
+
+.visible-track::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  background: #e5e5e5;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: 2px solid #737373;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.visible-track::-webkit-slider-thumb:hover {
+  background: #f5f5f5;
+  border-color: #a3a3a3;
+  transform: scale(1.1);
+}
+
+.visible-track::-webkit-slider-thumb:active {
+  background: #d4d4d8;
+  transform: scale(0.95);
+}
+
+/* Firefox slider styles */
+.visible-track::-moz-range-track {
+  background: #d1d5db;
+  height: 8px;
+  border-radius: 4px;
+  border: 1px solid #9ca3af;
+}
+
+.visible-track::-moz-range-thumb {
+  background: #e5e5e5;
+  border: 2px solid #737373;
+  border-radius: 50%;
+  width: 20px;
+  height: 20px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.visible-track::-moz-range-thumb:hover {
+  background: #f5f5f5;
+  border-color: #a3a3a3;
+  transform: scale(1.1);
+}
+
 /* Notification animations */
 @keyframes slide-in-right {
   from {

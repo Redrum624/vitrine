@@ -10,6 +10,8 @@ export interface ImageFile {
     format: string;
     dateCreated: Date;
   };
+  isRaw?: boolean;
+  autoAdjustmentResult?: import('../services/AutoRawAdjustmentService').RAWDetectionResult;
 }
 
 export interface Tool {

@@ -4,16 +4,19 @@ import { FileBrowser } from './components/Layout/FileBrowser';
 import { Canvas } from './components/Layout/Canvas';
 import { AdjustmentPanel } from './components/Panels/AdjustmentPanel';
 import { HistogramPanel } from './components/Panels/HistogramPanel';
+import { ThumbnailPanel } from './components/Panels/ThumbnailPanel';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { LibRawStatus } from './components/LibRawStatus';
 import { ExportDialog } from './components/Dialogs/ExportDialog';
 import { BatchProcessingDialog } from './components/Dialogs/BatchProcessingDialog';
 import { PresetDialog } from './components/Dialogs/PresetDialog';
-import { NotificationSystem, useNotifications } from './components/UI/NotificationSystem';
+import { NotificationSystem } from './components/UI/NotificationSystem';
+import { useNotifications } from './hooks/useNotifications';
 import { ShortcutsHelpDialog } from './components/Dialogs/ShortcutsHelpDialog';
 import { StatusBar } from './components/Layout/StatusBar';
 import { PluginManagerDialog } from './components/Dialogs/PluginManagerDialog';
 import { WelcomeScreen } from './components/Welcome/WelcomeScreen';
+import { PerformanceMonitor } from './components/Debug/PerformanceMonitor';
 import { keyboardShortcutsService, createDefaultShortcuts } from './services/KeyboardShortcutsService';
 import { electronService } from './services/ElectronService';
 import { imageService } from './services/ImageService';
@@ -21,13 +24,15 @@ import { ImageFileInfo } from './services/FileSystemService';
 import { useAppStore } from './stores/appStore';
 import { logger } from './utils/Logger';
 import { historyService } from './services/HistoryService';
+import { AdjustmentPreset } from './services/PresetService';
+import { errorHandlingService } from './services/ErrorHandlingService';
 
 // Import pipeline tests for development
 if (process.env.NODE_ENV === 'development') {
   import('./test/PipelineTest').then(({ testCompletePipeline, testWebWorkerProcessing }) => {
     // Make tests available in console for development
-    (window as any).testPipeline = testCompletePipeline;
-    (window as any).testWebWorkers = testWebWorkerProcessing;
+    (window as typeof window & { testPipeline: typeof testCompletePipeline }).testPipeline = testCompletePipeline;
+    (window as typeof window & { testWebWorkers: typeof testWebWorkerProcessing }).testWebWorkers = testWebWorkerProcessing;
     logger.info('Development pipeline tests available: testPipeline(), testWebWorkers()');
   });
 }
@@ -42,6 +47,7 @@ function App() {
   const [isPluginManagerOpen, setIsPluginManagerOpen] = useState(false);
   const [isWelcomeVisible, setIsWelcomeVisible] = useState(false);
   const [availableImages, setAvailableImages] = useState<ImageFileInfo[]>([]);
+  const [showThumbnailPanel, setShowThumbnailPanel] = useState(false);
   const { notifications, remove: removeNotification, success: showSuccess, error: showError } = useNotifications();
 
   // Viewing control functions (available in JSX)
@@ -70,6 +76,7 @@ function App() {
   const handleFolderSelected = useCallback((images: ImageFileInfo[]) => {
     logger.info(`Folder selected with ${images.length} images`);
     setAvailableImages(images);
+    setShowThumbnailPanel(images.length > 0);
     // Optionally auto-select first image
     if (images.length > 0 && !currentImage) {
       setCurrentImage(images[0]);
@@ -101,11 +108,14 @@ function App() {
 
         // Convert file paths to ImageFileInfo objects
         const imageFiles: ImageFileInfo[] = filePaths.map((filePath: string, index: number) => ({
+          id: `image-${Date.now()}-${index}`,
           name: filePath.split(/[/\\]/).pop() || `File ${index}`,
           path: filePath,
           size: 0, // Size will be determined when file is loaded
+          format: filePath.split('.').pop()?.toLowerCase() || 'unknown',
           type: filePath.split('.').pop()?.toLowerCase() || 'unknown',
-          lastModified: Date.now()
+          lastModified: Date.now(),
+          dateModified: new Date()
         }));
 
         // Add to available images
@@ -180,8 +190,8 @@ function App() {
     };
 
     // Add event listeners
-    window.addEventListener('electron-file-open', handleFileOpen as unknown as EventListener);
-    window.addEventListener('electron-file-import', handleFileImport as unknown as EventListener);
+    window.addEventListener('electron-file-open', handleFileOpen as unknown as () => void);
+    window.addEventListener('electron-file-import', handleFileImport as unknown as () => void);
     window.addEventListener('electron-file-export', handleFileExport);
     window.addEventListener('electron-view-zoom-in', handleZoomIn);
     window.addEventListener('electron-view-zoom-out', handleZoomOut);
@@ -193,8 +203,8 @@ function App() {
 
     return () => {
       // Cleanup
-      window.removeEventListener('electron-file-open', handleFileOpen as unknown as EventListener);
-      window.removeEventListener('electron-file-import', handleFileImport as unknown as EventListener);
+      window.removeEventListener('electron-file-open', handleFileOpen as unknown as () => void);
+      window.removeEventListener('electron-file-import', handleFileImport as unknown as () => void);
       window.removeEventListener('electron-file-export', handleFileExport);
       window.removeEventListener('electron-view-zoom-in', handleZoomIn);
       window.removeEventListener('electron-view-zoom-out', handleZoomOut);
@@ -205,7 +215,8 @@ function App() {
       window.removeEventListener('electron-edit-reset-all', handleResetAll);
       electronService.cleanup();
     };
-  }, [setViewport, resetZoom]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Handle export completion
   const handleExportComplete = useCallback((success: boolean, outputPath?: string) => {
@@ -219,7 +230,7 @@ function App() {
   }, [showSuccess, showError]);
 
   // Handle preset application
-  const handleApplyPreset = useCallback((preset: any) => {
+  const handleApplyPreset = useCallback((preset: AdjustmentPreset) => {
     try {
       // The PresetService.applyPreset() method already handles applying
       // the preset settings to all modules in the pipeline
@@ -233,6 +244,10 @@ function App() {
   useEffect(() => {
     logger.info('App component mounted');
     logger.debug('Current viewport state:', useAppStore.getState().viewport);
+
+    // Initialize global error handling
+    errorHandlingService.setupGlobalErrorHandling();
+    logger.info('Global error handling initialized');
 
     if (electronService.isElectron()) {
       logger.info('Running in Electron desktop mode');
@@ -265,7 +280,7 @@ function App() {
       id: 'help-shortcuts',
       key: 'F1',
       description: 'Show keyboard shortcuts',
-      category: 'help' as any,
+      category: 'help' as const,
       action: () => setIsShortcutsDialogOpen(true)
     });
 
@@ -274,7 +289,7 @@ function App() {
       key: '?',
       shiftKey: true,
       description: 'Show keyboard shortcuts',
-      category: 'help' as any,
+      category: 'help' as const,
       action: () => setIsShortcutsDialogOpen(true)
     });
 
@@ -290,6 +305,7 @@ function App() {
     return () => {
       keyboardShortcutsService.destroy();
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTool, setSelectedTool, currentImage]);
 
   return (
@@ -303,11 +319,18 @@ function App() {
           onOpenPresets={() => setIsPresetDialogOpen(true)}
           onOpenPlugins={() => setIsPluginManagerOpen(true)}
           onShowHelp={() => setIsShortcutsDialogOpen(true)}
+          onZoomIn={handleZoomIn}
+          onZoomOut={handleZoomOut}
+          onFitWindow={handleFitWindow}
+          onActualSize={handleActualSize}
+          zoom={viewport.zoom}
         />
       </div>
 
       {/* Main Content */}
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 flex-col overflow-hidden">
+        {/* Top Section - File Browser, Canvas, and Adjustment Panel */}
+        <div className="flex flex-1 overflow-hidden">
         {/* Left Panel - File System Explorer */}
         <div className="file-browser">
           <FileBrowser
@@ -340,6 +363,16 @@ function App() {
             <AdjustmentPanel />
           </div>
         </div>
+        </div>
+
+        {/* Bottom Panel - Thumbnail Gallery */}
+        <ThumbnailPanel
+          images={availableImages}
+          selectedImage={currentImage || undefined}
+          onImageSelect={setCurrentImage}
+          onClose={() => setShowThumbnailPanel(false)}
+          visible={showThumbnailPanel}
+        />
       </div>
 
       {/* Bottom Status Bar */}
@@ -434,6 +467,9 @@ function App() {
         notifications={notifications}
         onDismiss={removeNotification}
       />
+
+      {/* Development Performance Monitor */}
+      {process.env.NODE_ENV === 'development' && <PerformanceMonitor />}
     </div>
     </ErrorBoundary>
   );

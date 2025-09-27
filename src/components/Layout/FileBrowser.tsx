@@ -33,44 +33,81 @@ export function FileBrowser({ onImageSelected, onFolderSelected }: FileBrowserPr
     }
   };
 
-  const loadFolderContents = async (folderPath: string, folderId: string) => {
+  const loadFolderContents = useCallback(async (folderPath: string, folderId: string, shallow = false) => {
     try {
       setLoading(folderId);
-      const contents = await fileSystemService.getFolderContents(folderPath);
+
+      // Add timeout to prevent hanging on slow file systems
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error('Folder loading timeout')), 5000);
+      });
+
+      const contentsPromise = fileSystemService.getFolderContents(folderPath, shallow);
+      const contents = await Promise.race([contentsPromise, timeoutPromise]);
 
       setFolderContents(prev => new Map(prev).set(folderId, contents));
 
-      // If this folder has images, notify parent
+      // Notify parent if this folder has images and was intentionally selected (not just expanded)
       if (contents.images.length > 0) {
-        onFolderSelected?.(contents.images);
+        // Check if this folder was recently selected or if it's the current selected folder
+        const isCurrentlySelected = selectedFolder === folderId;
+        const wasJustSelected = !shallow; // Non-shallow loads are typically from user selection
+
+        if (isCurrentlySelected || wasJustSelected) {
+          onFolderSelected?.(contents.images);
+          logger.info(`Gallery triggered for folder with ${contents.images.length} images`);
+        }
       }
 
       logger.info(`Loaded folder contents: ${contents.folders.length} folders, ${contents.images.length} images`);
     } catch (error) {
       logger.error(`Failed to load folder contents for ${folderPath}:`, error);
+      // Set empty contents on error to prevent infinite loading state
+      setFolderContents(prev => new Map(prev).set(folderId, { folders: [], images: [] }));
     } finally {
       setLoading(null);
     }
-  };
+  }, [onFolderSelected, selectedFolder]);
 
-  const toggleFolder = useCallback(async (folderId: string, folderPath: string) => {
+  const toggleFolder = useCallback(async (folderId: string, folderPath: string, isSecondaryExpansion = false) => {
     const isExpanded = expandedFolders.has(folderId);
     const newExpanded = new Set(expandedFolders);
 
     if (isExpanded) {
       newExpanded.delete(folderId);
+      // Remove all child folders from expanded state
+      Array.from(expandedFolders).forEach(id => {
+        if (id.startsWith(folderId + '/')) {
+          newExpanded.delete(id);
+        }
+      });
     } else {
       newExpanded.add(folderId);
-      setSelectedFolder(folderId);
 
-      // Load contents if not already loaded
-      if (!folderContents.has(folderId)) {
-        await loadFolderContents(folderPath, folderId);
+      // Only set as selected folder if it's a direct user click (not secondary expansion)
+      if (!isSecondaryExpansion) {
+        setSelectedFolder(folderId);
+
+        // Load contents deeply (non-shallow) for user-selected folders to trigger gallery
+        if (!folderContents.has(folderId)) {
+          await loadFolderContents(folderPath, folderId, false); // Deep load for selection
+        } else {
+          // If already loaded, trigger gallery for existing images
+          const existingContents = folderContents.get(folderId);
+          if (existingContents && existingContents.images.length > 0) {
+            onFolderSelected?.(existingContents.images);
+          }
+        }
+      } else {
+        // Load contents if not already loaded (shallow load for performance)
+        if (!folderContents.has(folderId)) {
+          await loadFolderContents(folderPath, folderId, true);
+        }
       }
     }
 
     setExpandedFolders(newExpanded);
-  }, [expandedFolders, folderContents, onFolderSelected]);
+  }, [expandedFolders, folderContents, loadFolderContents, onFolderSelected]);
 
   const handleImageClick = useCallback((image: ImageFileInfo) => {
     const currentFolderImages = selectedFolder && folderContents.has(selectedFolder)
@@ -130,23 +167,78 @@ export function FileBrowser({ onImageSelected, onFolderSelected }: FileBrowserPr
 
         {/* Expanded Contents */}
         {isExpanded && contents && (
-          <div className="ml-4">
-            {/* Subfolders */}
-            {contents.folders.map(folder => (
+          <div>
+            {/* Subfolders - now recursive to support infinite depth */}
+            {contents.folders.map(folder => renderSubFolder(folder, depth + 1))}
+
+            {/* Images - only show if this folder is selected */}
+            {selectedFolder === item.id && contents.images.map(image => (
               <div
-                key={folder.id}
-                className="flex items-center px-2 py-1 hover:bg-dark-800 cursor-pointer transition-professional"
+                key={image.id}
+                className="flex items-center px-2 py-1 mx-2 rounded-md cursor-pointer transition-professional hover:bg-dark-800"
                 style={{ paddingLeft: `${8 + (depth + 1) * 16}px` }}
-                onClick={() => toggleFolder(folder.id, folder.path)}
+                onClick={() => handleImageClick(image)}
               >
-                <ChevronRight className="w-3 h-3 mr-1 text-dark-300" />
-                <Folder className="w-4 h-4 mr-2 text-dark-300" />
-                <span className="text-sm text-dark-300">{folder.name}</span>
+                <Image className="w-4 h-4 mr-2 text-dark-400" />
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs text-dark-300 truncate">{image.name}</div>
+                  <div className="text-xs text-dark-400">
+                    {image.dimensions ? `${image.dimensions.width}×${image.dimensions.height}` : image.format}
+                    {' • '}
+                    {fileSystemService.formatFileSize(image.size)}
+                  </div>
+                </div>
               </div>
             ))}
+          </div>
+        )}
+      </div>
+    );
+  };
 
-            {/* Images */}
-            {contents.images.map(image => (
+  // Helper function to render subfolders recursively
+  const renderSubFolder = (folder: FolderInfo, depth: number) => {
+    const isExpanded = expandedFolders.has(folder.id);
+    const isLoading = loading === folder.id;
+    const contents = folderContents.get(folder.id);
+    const hasImages = contents && contents.images.length > 0;
+
+    return (
+      <div key={folder.id}>
+        <div
+          className={`flex items-center px-2 py-1 hover:bg-dark-800 cursor-pointer transition-professional ${
+            selectedFolder === folder.id ? 'bg-dark-700' : ''
+          }`}
+          style={{ paddingLeft: `${8 + depth * 16}px` }}
+          onClick={() => toggleFolder(folder.id, folder.path, depth > 1)}
+        >
+          {isLoading ? (
+            <div className="w-3 h-3 mr-1 animate-spin rounded-full border border-dark-300 border-t-transparent" />
+          ) : (
+            isExpanded ? (
+              <ChevronDown className="w-3 h-3 mr-1 text-dark-300" />
+            ) : (
+              <ChevronRight className="w-3 h-3 mr-1 text-dark-300" />
+            )
+          )}
+          {isExpanded ? (
+            <FolderOpen className="w-4 h-4 mr-2 text-dark-300" />
+          ) : (
+            <Folder className="w-4 h-4 mr-2 text-dark-300" />
+          )}
+          <span className="text-sm text-dark-300 flex-1 truncate">{folder.name}</span>
+          {hasImages && (
+            <span className="text-xs text-dark-400 ml-2">
+              {contents.images.length} images
+            </span>
+          )}
+        </div>
+
+        {/* Recursive rendering for infinite depth */}
+        {isExpanded && contents && (
+          <div>
+            {contents.folders.map(subfolder => renderSubFolder(subfolder, depth + 1))}
+            {selectedFolder === folder.id && contents.images.map(image => (
               <div
                 key={image.id}
                 className="flex items-center px-2 py-1 mx-2 rounded-md cursor-pointer transition-professional hover:bg-dark-800"

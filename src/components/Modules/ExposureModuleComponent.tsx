@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { RotateCcw, Info } from 'lucide-react';
+import { RotateCcw, Info, Zap } from 'lucide-react';
 import type { ExposureParams } from '../../types/darktable';
 import { ExposureModule } from '../../modules/ExposureModule';
 
@@ -18,7 +18,7 @@ export function ExposureModuleComponent({
   const constraints = module.getParamConstraints();
   const [showTooltip, setShowTooltip] = useState<string | null>(null);
 
-  const handleParamChange = useCallback((key: keyof ExposureParams, value: any) => {
+  const handleParamChange = useCallback((key: keyof ExposureParams, value: number | string | boolean) => {
     const newParams = { ...params, [key]: value };
     const validatedParams = module.validateParams(newParams);
     setParams(validatedParams);
@@ -49,14 +49,29 @@ export function ExposureModuleComponent({
             <Info className="w-3 h-3" />
           </button>
         </div>
-        <button
-          onClick={handleReset}
-          disabled={disabled}
-          className="p-1 hover:bg-dark-700 rounded transition-professional text-dark-300 disabled:opacity-50"
-          title="Reset to defaults"
-        >
-          <RotateCcw className="w-3 h-3" />
-        </button>
+        <div className="flex items-center space-x-1">
+          <button
+            onClick={() => {
+              // Auto adjust exposure based on histogram
+              const autoParams = module.autoExposure();
+              setParams(autoParams);
+              onParamsChange?.(autoParams);
+            }}
+            disabled={disabled}
+            className="p-1 hover:bg-dark-700 rounded text-dark-300 disabled:opacity-50"
+            title="Auto adjust exposure"
+          >
+            <Zap className="w-3 h-3" />
+          </button>
+          <button
+            onClick={handleReset}
+            disabled={disabled}
+            className="p-1 hover:bg-dark-700 rounded transition-professional text-dark-300 disabled:opacity-50"
+            title="Reset to defaults"
+          >
+            <RotateCcw className="w-3 h-3" />
+          </button>
+        </div>
       </div>
 
       {/* Tooltip */}
@@ -133,7 +148,7 @@ export function ExposureModuleComponent({
                 value={params.exposure}
                 onChange={(e) => handleParamChange('exposure', parseFloat(e.target.value))}
                 disabled={disabled}
-                className="slider w-full disabled:opacity-50"
+                className="slider visible-track w-full disabled:opacity-50"
                 step={0.1}
               />
               {/* Center mark at 0 */}
@@ -179,7 +194,7 @@ export function ExposureModuleComponent({
                 value={params.black}
                 onChange={(e) => handleParamChange('black', parseFloat(e.target.value))}
                 disabled={disabled}
-                className="slider w-full disabled:opacity-50"
+                className="slider visible-track w-full disabled:opacity-50"
                 step={0.01}
               />
               {/* Center mark at 0 */}

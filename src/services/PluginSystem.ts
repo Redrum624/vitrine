@@ -1,5 +1,11 @@
 import { logger } from '../utils/Logger';
 
+interface ProcessingModule {
+  getName(): string;
+  id: string;
+  [key: string]: unknown;
+}
+
 // Plugin API interfaces
 export interface PluginMetadata {
   id: string;
@@ -36,12 +42,12 @@ export interface PluginAPI {
   addToolbarButton: (icon: string, tooltip: string, action: () => void) => string;
 
   // Processing pipeline
-  addProcessingModule: (module: any) => void;
+  addProcessingModule: (module: ProcessingModule) => void;
   removeProcessingModule: (moduleId: string) => void;
 
   // Preferences
-  getPreference: (key: string) => any;
-  setPreference: (key: string, value: any) => void;
+  getPreference: (key: string) => unknown;
+  setPreference: (key: string, value: unknown) => void;
 
   // File operations
   openFile: (filters?: string[]) => Promise<string | null>;
@@ -83,7 +89,7 @@ export class PluginSystem {
         return null; // Placeholder
       },
 
-      setProcessedImage: (data: Float32Array) => {
+      setProcessedImage: (_data: Float32Array) => {
         logger.debug('Plugin set processed image data');
         // Would integrate with image processing pipeline
       },
@@ -94,7 +100,7 @@ export class PluginSystem {
       },
 
       // UI integration methods
-      addMenuItem: (menu: string, label: string, action: () => void) => {
+      addMenuItem: (menu: string, label: string, _action: () => void) => {
         const id = `plugin-menu-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
         logger.info(`Plugin added menu item: ${menu} -> ${label}`);
         // Would integrate with menu system
@@ -111,7 +117,7 @@ export class PluginSystem {
         // Would integrate with notification system
       },
 
-      addToolbarButton: (icon: string, tooltip: string, action: () => void) => {
+      addToolbarButton: (_icon: string, tooltip: string, _action: () => void) => {
         const id = `plugin-toolbar-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
         logger.info(`Plugin added toolbar button: ${tooltip}`);
         // Would integrate with toolbar
@@ -119,7 +125,7 @@ export class PluginSystem {
       },
 
       // Processing pipeline methods
-      addProcessingModule: (module: any) => {
+      addProcessingModule: (module: ProcessingModule) => {
         logger.info(`Plugin added processing module: ${module.getName?.() || 'unknown'}`);
         // Would integrate with ImageProcessingPipeline
       },
@@ -135,7 +141,7 @@ export class PluginSystem {
         return value ? JSON.parse(value) : null;
       },
 
-      setPreference: (key: string, value: any) => {
+      setPreference: (key: string, value: unknown) => {
         localStorage.setItem(`plugin-pref-${key}`, JSON.stringify(value));
       },
 
@@ -146,7 +152,7 @@ export class PluginSystem {
         return null; // Placeholder
       },
 
-      saveFile: async (data: Uint8Array, filename: string) => {
+      saveFile: async (_data: Uint8Array, filename: string) => {
         logger.info(`Plugin requested file save: ${filename}`);
         // Would integrate with file system
         return false; // Placeholder
@@ -180,7 +186,7 @@ export class PluginSystem {
       // Create plugin instance (would load from file in real implementation)
       const plugin: Plugin = {
         metadata: manifest.metadata,
-        activate: async (api: PluginAPI) => {
+        activate: async (_api: PluginAPI) => {
           logger.info(`Activating plugin: ${manifest.metadata.name}`);
           // Plugin activation logic would go here
         },
@@ -352,7 +358,7 @@ export class PluginSystem {
     return processedData;
   }
 
-  async onExport(imageData: Float32Array, format: string): Promise<Uint8Array> {
+  async onExport(_imageData: Float32Array, _format: string): Promise<Uint8Array> {
     // Default export implementation would go here
     // For now, return empty array as placeholder
     return new Uint8Array();

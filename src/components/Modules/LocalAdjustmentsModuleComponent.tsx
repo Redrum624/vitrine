@@ -1,12 +1,10 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { Brush, Move, Circle, Square, Layers, Trash2, Eye, EyeOff, Plus, Settings } from 'lucide-react';
-import { SliderControl } from '../Controls/SliderControl';
+import React, { useState, useCallback } from 'react';
+import { Brush, Move, Circle, Layers, Trash2, Eye, EyeOff, Plus, Settings } from 'lucide-react';
+import SliderControl from '../Controls/SliderControl';
 import {
   LocalAdjustmentLayer,
   LocalAdjustmentParams,
-  BrushParameters,
-  GradientParameters,
-  ParametricMaskParameters
+  BrushParameters
 } from '../../modules/LocalAdjustmentsModule';
 
 interface LocalAdjustmentsModuleComponentProps {
@@ -44,7 +42,6 @@ export const LocalAdjustmentsModuleComponent: React.FC<LocalAdjustmentsModuleCom
   const [activeTab, setActiveTab] = useState<TabType>('tools');
   const [activeTool, setActiveTool] = useState<ToolType>('brush');
   const [showAdvanced, setShowAdvanced] = useState(false);
-  const [newLayerName, setNewLayerName] = useState('');
   const [showNewLayerDialog, setShowNewLayerDialog] = useState(false);
 
   // Get active layer
@@ -138,7 +135,7 @@ export const LocalAdjustmentsModuleComponent: React.FC<LocalAdjustmentsModuleCom
             min={1}
             max={500}
             step={1}
-            onChange={(value) => handleBrushParamChange('size', value)}
+            onChange={(value: number) => handleBrushParamChange('size', value)}
             className="text-xs"
           />
 
@@ -148,7 +145,7 @@ export const LocalAdjustmentsModuleComponent: React.FC<LocalAdjustmentsModuleCom
             min={0}
             max={1}
             step={0.01}
-            onChange={(value) => handleBrushParamChange('hardness', value)}
+            onChange={(value: number) => handleBrushParamChange('hardness', value)}
             className="text-xs"
             showPercentage
           />
@@ -159,7 +156,7 @@ export const LocalAdjustmentsModuleComponent: React.FC<LocalAdjustmentsModuleCom
             min={0}
             max={1}
             step={0.01}
-            onChange={(value) => handleBrushParamChange('opacity', value)}
+            onChange={(value: number) => handleBrushParamChange('opacity', value)}
             className="text-xs"
             showPercentage
           />
@@ -170,7 +167,7 @@ export const LocalAdjustmentsModuleComponent: React.FC<LocalAdjustmentsModuleCom
             min={0}
             max={1}
             step={0.01}
-            onChange={(value) => handleBrushParamChange('flow', value)}
+            onChange={(value: number) => handleBrushParamChange('flow', value)}
             className="text-xs"
             showPercentage
           />
@@ -246,7 +243,7 @@ export const LocalAdjustmentsModuleComponent: React.FC<LocalAdjustmentsModuleCom
               min={0}
               max={1}
               step={0.01}
-              onChange={(value) => onUpdateLayerOpacity(layer.id, value)}
+              onChange={(value: number) => onUpdateLayerOpacity(layer.id, value)}
               className="text-xs"
               showPercentage
             />
@@ -332,7 +329,7 @@ export const LocalAdjustmentsModuleComponent: React.FC<LocalAdjustmentsModuleCom
               min={-4}
               max={4}
               step={0.01}
-              onChange={(value) => handleParameterChange('exposure', value)}
+              onChange={(value: number) => handleParameterChange('exposure', value)}
               className="text-xs"
             />
 
@@ -342,7 +339,7 @@ export const LocalAdjustmentsModuleComponent: React.FC<LocalAdjustmentsModuleCom
               min={-100}
               max={100}
               step={1}
-              onChange={(value) => handleParameterChange('shadows', value)}
+              onChange={(value: number) => handleParameterChange('shadows', value)}
               className="text-xs"
             />
 
@@ -352,7 +349,7 @@ export const LocalAdjustmentsModuleComponent: React.FC<LocalAdjustmentsModuleCom
               min={-100}
               max={100}
               step={1}
-              onChange={(value) => handleParameterChange('highlights', value)}
+              onChange={(value: number) => handleParameterChange('highlights', value)}
               className="text-xs"
             />
           </div>
@@ -367,7 +364,7 @@ export const LocalAdjustmentsModuleComponent: React.FC<LocalAdjustmentsModuleCom
               min={-100}
               max={100}
               step={1}
-              onChange={(value) => handleParameterChange('temperature', value)}
+              onChange={(value: number) => handleParameterChange('temperature', value)}
               className="text-xs"
             />
 
@@ -377,7 +374,7 @@ export const LocalAdjustmentsModuleComponent: React.FC<LocalAdjustmentsModuleCom
               min={-100}
               max={100}
               step={1}
-              onChange={(value) => handleParameterChange('tint', value)}
+              onChange={(value: number) => handleParameterChange('tint', value)}
               className="text-xs"
             />
 
@@ -387,7 +384,7 @@ export const LocalAdjustmentsModuleComponent: React.FC<LocalAdjustmentsModuleCom
               min={-100}
               max={100}
               step={1}
-              onChange={(value) => handleParameterChange('saturation', value)}
+              onChange={(value: number) => handleParameterChange('saturation', value)}
               className="text-xs"
             />
 
@@ -397,7 +394,7 @@ export const LocalAdjustmentsModuleComponent: React.FC<LocalAdjustmentsModuleCom
               min={-100}
               max={100}
               step={1}
-              onChange={(value) => handleParameterChange('vibrance', value)}
+              onChange={(value: number) => handleParameterChange('vibrance', value)}
               className="text-xs"
             />
           </div>
@@ -412,7 +409,7 @@ export const LocalAdjustmentsModuleComponent: React.FC<LocalAdjustmentsModuleCom
               min={-100}
               max={100}
               step={1}
-              onChange={(value) => handleParameterChange('contrast', value)}
+              onChange={(value: number) => handleParameterChange('contrast', value)}
               className="text-xs"
             />
 
@@ -422,7 +419,7 @@ export const LocalAdjustmentsModuleComponent: React.FC<LocalAdjustmentsModuleCom
               min={-100}
               max={100}
               step={1}
-              onChange={(value) => handleParameterChange('brightness', value)}
+              onChange={(value: number) => handleParameterChange('brightness', value)}
               className="text-xs"
             />
 
@@ -432,7 +429,7 @@ export const LocalAdjustmentsModuleComponent: React.FC<LocalAdjustmentsModuleCom
               min={-100}
               max={100}
               step={1}
-              onChange={(value) => handleParameterChange('clarity', value)}
+              onChange={(value: number) => handleParameterChange('clarity', value)}
               className="text-xs"
             />
           </div>
@@ -457,7 +454,7 @@ export const LocalAdjustmentsModuleComponent: React.FC<LocalAdjustmentsModuleCom
                   min={-180}
                   max={180}
                   step={1}
-                  onChange={(value) => handleParameterChange('hueShift', value)}
+                  onChange={(value: number) => handleParameterChange('hueShift', value)}
                   className="text-xs"
                 />
 
@@ -469,7 +466,7 @@ export const LocalAdjustmentsModuleComponent: React.FC<LocalAdjustmentsModuleCom
                     min={-1}
                     max={1}
                     step={0.01}
-                    onChange={(value) => handleParameterChange('colorBalance', [value, parameters.colorBalance[1], parameters.colorBalance[2]])}
+                    onChange={(value: number) => handleParameterChange('colorBalance', [value, parameters.colorBalance[1], parameters.colorBalance[2]])}
                     className="text-xs"
                   />
                   <SliderControl
@@ -478,7 +475,7 @@ export const LocalAdjustmentsModuleComponent: React.FC<LocalAdjustmentsModuleCom
                     min={-1}
                     max={1}
                     step={0.01}
-                    onChange={(value) => handleParameterChange('colorBalance', [parameters.colorBalance[0], value, parameters.colorBalance[2]])}
+                    onChange={(value: number) => handleParameterChange('colorBalance', [parameters.colorBalance[0], value, parameters.colorBalance[2]])}
                     className="text-xs"
                   />
                   <SliderControl
@@ -487,7 +484,7 @@ export const LocalAdjustmentsModuleComponent: React.FC<LocalAdjustmentsModuleCom
                     min={-1}
                     max={1}
                     step={0.01}
-                    onChange={(value) => handleParameterChange('colorBalance', [parameters.colorBalance[0], parameters.colorBalance[1], value])}
+                    onChange={(value: number) => handleParameterChange('colorBalance', [parameters.colorBalance[0], parameters.colorBalance[1], value])}
                     className="text-xs"
                   />
                 </div>

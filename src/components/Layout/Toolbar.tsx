@@ -2,9 +2,6 @@ import {
   Image,
   Layers,
   Settings,
-  ZoomIn,
-  ZoomOut,
-  RotateCcw,
   Crop,
   Move,
   MousePointer,
@@ -14,7 +11,10 @@ import {
   Play,
   BookOpen,
   HelpCircle,
-  Package
+  Package,
+  ZoomIn,
+  ZoomOut,
+  RotateCcw
 } from 'lucide-react';
 import { useAppStore } from '../../stores/appStore';
 import { electronService } from '../../services/ElectronService';
@@ -32,15 +32,15 @@ interface ToolbarProps {
   onOpenPresets?: () => void;
   onOpenPlugins?: () => void;
   onShowHelp?: () => void;
+  onZoomIn?: () => void;
+  onZoomOut?: () => void;
+  onFitWindow?: () => void;
+  onActualSize?: () => void;
+  zoom?: number;
 }
 
-export function Toolbar({ onExport, onBatchProcess, onOpenPresets, onOpenPlugins, onShowHelp }: ToolbarProps) {
-  const { selectedTool, setSelectedTool, viewport, setViewport, resetZoom } = useAppStore();
-
-  const handleZoom = (delta: number) => {
-    const newZoom = Math.max(0.1, Math.min(5, viewport.zoom + delta));
-    setViewport({ zoom: newZoom });
-  };
+export function Toolbar({ onExport, onBatchProcess, onOpenPresets, onOpenPlugins, onShowHelp, onZoomIn, onZoomOut, onFitWindow, onActualSize, zoom = 1 }: ToolbarProps) {
+  const { selectedTool, setSelectedTool } = useAppStore();
 
   return (
     <div className="h-12 bg-dark-850 border-b border-dark-700 flex items-center px-4 justify-between no-select rounded-t-lg">
@@ -94,43 +94,54 @@ export function Toolbar({ onExport, onBatchProcess, onOpenPresets, onOpenPlugins
         ))}
       </div>
 
-      {/* Center - Image info and app status */}
+      {/* Center - App title with zoom controls */}
       <div className="flex items-center space-x-4 text-sm text-dark-300">
         <div className="flex items-center space-x-2">
           <Image className="w-4 h-4" />
-          <span>No image loaded</span>
+          <span>Photo Editor Pro</span>
           {electronService.isElectron() && (
             <span className="text-xs bg-dark-800 px-2 py-1 rounded text-dark-300">Desktop</span>
           )}
         </div>
-        <div className="w-px h-4 bg-dark-700" />
-        <span>{Math.round(viewport.zoom * 100)}%</span>
+
+        {/* Zoom Controls */}
+        <div className="flex items-center space-x-2 border-l border-dark-700 pl-4">
+          <button
+            onClick={onZoomOut}
+            className="px-2 py-1 bg-dark-800 hover:bg-dark-700 rounded text-xs text-dark-300 transition-professional"
+            title="Zoom Out"
+          >
+            <ZoomOut className="w-3 h-3" />
+          </button>
+          <span className="text-xs text-dark-300 min-w-12 text-center font-mono">
+            {Math.round(zoom * 100)}%
+          </span>
+          <button
+            onClick={onZoomIn}
+            className="px-2 py-1 bg-dark-800 hover:bg-dark-700 rounded text-xs text-dark-300 transition-professional"
+            title="Zoom In"
+          >
+            <ZoomIn className="w-3 h-3" />
+          </button>
+          <button
+            onClick={onFitWindow}
+            className="px-2 py-1 bg-dark-800 hover:bg-dark-700 rounded text-xs text-dark-300 transition-professional"
+            title="Fit to Window"
+          >
+            Fit
+          </button>
+          <button
+            onClick={onActualSize}
+            className="px-2 py-1 bg-dark-800 hover:bg-dark-700 rounded text-xs text-dark-300 transition-professional"
+            title="Actual Size (100%)"
+          >
+            1:1
+          </button>
+        </div>
       </div>
 
       {/* Right side - View controls */}
       <div className="flex items-center space-x-1">
-        <button
-          onClick={() => handleZoom(-0.1)}
-          className="p-2 rounded-md transition-professional hover:bg-dark-700 text-dark-300"
-          title="Zoom Out"
-        >
-          <ZoomOut className="w-4 h-4" />
-        </button>
-        <button
-          onClick={() => handleZoom(0.1)}
-          className="p-2 rounded-md transition-professional hover:bg-dark-700 text-dark-300"
-          title="Zoom In"
-        >
-          <ZoomIn className="w-4 h-4" />
-        </button>
-        <button
-          onClick={resetZoom}
-          className="p-2 rounded-md transition-professional hover:bg-dark-700 text-dark-300"
-          title="Fit to Window"
-        >
-          <RotateCcw className="w-4 h-4" />
-        </button>
-        <div className="w-px h-4 bg-dark-700 mx-2" />
         <button
           className="p-2 rounded-md transition-professional hover:bg-dark-700 text-dark-300"
           title="Layers"

@@ -1,6 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import { Camera, Zap, Palette, Eye, RotateCcw, Target } from 'lucide-react';
-import { SliderControl } from '../Controls/SliderControl';
+import SliderControl from '../Controls/SliderControl';
 import { LensCorrectionsParams } from '../../modules/LensCorrectionsModule';
 
 interface LensCorrectionsModuleComponentProps {
@@ -174,7 +174,7 @@ export const LensCorrectionsModuleComponent: React.FC<LensCorrectionsModuleCompo
               min={-100}
               max={100}
               step={1}
-              onChange={(value) => handleVignettingChange('amount', value)}
+              onChange={(value: number) => handleVignettingChange('amount', value)}
               className="text-xs"
             />
 
@@ -184,7 +184,7 @@ export const LensCorrectionsModuleComponent: React.FC<LensCorrectionsModuleCompo
               min={0.1}
               max={2.0}
               step={0.01}
-              onChange={(value) => handleVignettingChange('midpoint', value)}
+              onChange={(value: number) => handleVignettingChange('midpoint', value)}
               className="text-xs"
             />
 
@@ -194,7 +194,7 @@ export const LensCorrectionsModuleComponent: React.FC<LensCorrectionsModuleCompo
               min={-100}
               max={100}
               step={1}
-              onChange={(value) => handleVignettingChange('roundness', value)}
+              onChange={(value: number) => handleVignettingChange('roundness', value)}
               className="text-xs"
             />
 
@@ -204,7 +204,7 @@ export const LensCorrectionsModuleComponent: React.FC<LensCorrectionsModuleCompo
               min={0}
               max={100}
               step={1}
-              onChange={(value) => handleVignettingChange('feather', value)}
+              onChange={(value: number) => handleVignettingChange('feather', value)}
               className="text-xs"
               showPercentage
             />
@@ -264,7 +264,7 @@ export const LensCorrectionsModuleComponent: React.FC<LensCorrectionsModuleCompo
               min={-100}
               max={100}
               step={1}
-              onChange={(value) => handleDistortionChange('barrel', value)}
+              onChange={(value: number) => handleDistortionChange('barrel', value)}
               className="text-xs"
               description="Negative = Barrel, Positive = Pincushion"
             />
@@ -275,7 +275,7 @@ export const LensCorrectionsModuleComponent: React.FC<LensCorrectionsModuleCompo
               min={0.5}
               max={2.0}
               step={0.01}
-              onChange={(value) => handleDistortionChange('scale', value)}
+              onChange={(value: number) => handleDistortionChange('scale', value)}
               className="text-xs"
             />
           </div>
@@ -290,7 +290,7 @@ export const LensCorrectionsModuleComponent: React.FC<LensCorrectionsModuleCompo
               min={-45}
               max={45}
               step={0.1}
-              onChange={(value) => handleDistortionChange('perspective', {
+              onChange={(value: number) => handleDistortionChange('perspective', {
                 ...parameters.distortion.perspective,
                 horizontal: value
               })}
@@ -304,7 +304,7 @@ export const LensCorrectionsModuleComponent: React.FC<LensCorrectionsModuleCompo
               min={-45}
               max={45}
               step={0.1}
-              onChange={(value) => handleDistortionChange('perspective', {
+              onChange={(value: number) => handleDistortionChange('perspective', {
                 ...parameters.distortion.perspective,
                 vertical: value
               })}
@@ -353,7 +353,7 @@ export const LensCorrectionsModuleComponent: React.FC<LensCorrectionsModuleCompo
               min={-100}
               max={100}
               step={1}
-              onChange={(value) => handleChromaticAberrationChange('redCyan', value)}
+              onChange={(value: number) => handleChromaticAberrationChange('redCyan', value)}
               className="text-xs"
             />
 
@@ -363,7 +363,7 @@ export const LensCorrectionsModuleComponent: React.FC<LensCorrectionsModuleCompo
               min={-100}
               max={100}
               step={1}
-              onChange={(value) => handleChromaticAberrationChange('blueMagenta', value)}
+              onChange={(value: number) => handleChromaticAberrationChange('blueMagenta', value)}
               className="text-xs"
             />
           </div>
@@ -382,7 +382,7 @@ export const LensCorrectionsModuleComponent: React.FC<LensCorrectionsModuleCompo
                 min={0}
                 max={100}
                 step={1}
-                onChange={(value) => handleChromaticAberrationChange('purple', {
+                onChange={(value: number) => handleChromaticAberrationChange('purple', {
                   ...parameters.chromaticAberration.purple,
                   amount: value
                 })}
@@ -398,7 +398,7 @@ export const LensCorrectionsModuleComponent: React.FC<LensCorrectionsModuleCompo
                     min={0}
                     max={360}
                     step={1}
-                    onChange={(value) => handleChromaticAberrationChange('purple', {
+                    onChange={(value: number) => handleChromaticAberrationChange('purple', {
                       ...parameters.chromaticAberration.purple,
                       hue: value
                     })}
@@ -412,7 +412,7 @@ export const LensCorrectionsModuleComponent: React.FC<LensCorrectionsModuleCompo
                     min={1}
                     max={100}
                     step={1}
-                    onChange={(value) => handleChromaticAberrationChange('purple', {
+                    onChange={(value: number) => handleChromaticAberrationChange('purple', {
                       ...parameters.chromaticAberration.purple,
                       range: value
                     })}
@@ -432,7 +432,7 @@ export const LensCorrectionsModuleComponent: React.FC<LensCorrectionsModuleCompo
                 min={0}
                 max={100}
                 step={1}
-                onChange={(value) => handleChromaticAberrationChange('green', {
+                onChange={(value: number) => handleChromaticAberrationChange('green', {
                   ...parameters.chromaticAberration.green,
                   amount: value
                 })}
@@ -448,7 +448,7 @@ export const LensCorrectionsModuleComponent: React.FC<LensCorrectionsModuleCompo
                     min={0}
                     max={360}
                     step={1}
-                    onChange={(value) => handleChromaticAberrationChange('green', {
+                    onChange={(value: number) => handleChromaticAberrationChange('green', {
                       ...parameters.chromaticAberration.green,
                       hue: value
                     })}
@@ -462,7 +462,7 @@ export const LensCorrectionsModuleComponent: React.FC<LensCorrectionsModuleCompo
                     min={1}
                     max={100}
                     step={1}
-                    onChange={(value) => handleChromaticAberrationChange('green', {
+                    onChange={(value: number) => handleChromaticAberrationChange('green', {
                       ...parameters.chromaticAberration.green,
                       range: value
                     })}
@@ -540,7 +540,7 @@ export const LensCorrectionsModuleComponent: React.FC<LensCorrectionsModuleCompo
             min={0}
             max={100}
             step={1}
-            onChange={(value) => handleProfileChange('strength', value)}
+            onChange={(value: number) => handleProfileChange('strength', value)}
             className="text-xs"
             showPercentage
           />

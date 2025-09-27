@@ -70,8 +70,26 @@ export interface LibRawProcessingParams {
   customProfile?: string;
 }
 
+interface WasmModule {
+  version: string;
+  supportedFormats: string[];
+  libraw_init(flags: number): { ptr: number };
+  libraw_open_file(processor: { ptr: number }, filePath: string): number;
+  libraw_unpack(processor: { ptr: number }): number;
+  libraw_raw2image(processor: { ptr: number }): number;
+  libraw_dcraw_process(processor: { ptr: number }): number;
+  libraw_dcraw_make_mem_image(processor: { ptr: number }): { data: Uint8Array; size: number };
+  libraw_close(processor: { ptr: number }): void;
+  libraw_recycle(processor: { ptr: number }): void;
+  _malloc(size: number): ArrayBuffer;
+  _free(ptr: ArrayBuffer): void;
+  HEAPU8: Uint8Array;
+  HEAP32: Int32Array;
+  HEAPF32: Float32Array;
+}
+
 export class LibRawWasm {
-  private wasmModule: any = null;
+  private wasmModule: WasmModule | null = null;
   private isInitialized = false;
   private _config: LibRawConfig;
 
@@ -111,18 +129,22 @@ export class LibRawWasm {
     }
   }
 
-  private async loadMockWasmModule(): Promise<any> {
+  private async loadMockWasmModule(): Promise<WasmModule> {
     try {
       // Try to load the actual WASM module first
       logger.info('Attempting to load LibRaw WebAssembly module...');
 
-      // For now, we'll skip the actual module loading since it's not compiled yet
-      // const wasmModule = await import('/wasm/libraw.js');
-      // const libraw = await wasmModule.default();
-      // logger.info('LibRaw WASM module loaded successfully');
-      // return libraw;
+      // Check if compiled WASM is available
+      const wasmPath = '/wasm/libraw.js';
+      const response = await fetch(wasmPath);
+      if (response.ok) {
+        const wasmModule = await import(wasmPath);
+        const libraw = await wasmModule.default();
+        logger.info('LibRaw WASM module loaded successfully');
+        return libraw;
+      }
 
-      throw new Error('LibRaw WASM module not yet compiled');
+      throw new Error('LibRaw WASM module not found');
     } catch (error) {
       // Fallback to mock implementation
       logger.warn('LibRaw WASM module not available, using mock implementation:', error);
@@ -152,7 +174,7 @@ export class LibRawWasm {
         HEAPU8: new Uint8Array(1024 * 1024), // 1MB mock heap
         HEAP32: new Int32Array(256 * 1024),  // 1MB mock heap
         HEAPF32: new Float32Array(256 * 1024) // 1MB mock heap
-      };
+      } as WasmModule;
     }
   }
 
@@ -169,17 +191,26 @@ export class LibRawWasm {
       const startTime = performance.now();
 
       // Initialize LibRaw processor
-      const processor = this.wasmModule.libraw_init(0);
+      const processor = this.wasmModule?.libraw_init(0);
+      if (!processor) {
+        throw new Error('Failed to initialize LibRaw processor');
+      }
 
       try {
         // Open RAW file
-        const openResult = this.wasmModule.libraw_open_file(processor, filePath);
+        const openResult = this.wasmModule?.libraw_open_file(processor, filePath);
+        if (openResult === undefined) {
+          throw new Error('LibRaw module not available for opening file');
+        }
         if (openResult !== 0) {
           throw new Error(`Failed to open RAW file: error code ${openResult}`);
         }
 
         // Unpack RAW data
-        const unpackResult = this.wasmModule.libraw_unpack(processor);
+        const unpackResult = this.wasmModule?.libraw_unpack(processor);
+        if (unpackResult === undefined) {
+          throw new Error('LibRaw module not available for unpacking');
+        }
         if (unpackResult !== 0) {
           throw new Error(`Failed to unpack RAW data: error code ${unpackResult}`);
         }
@@ -190,19 +221,28 @@ export class LibRawWasm {
         }
 
         // Convert raw data to image
-        const raw2imageResult = this.wasmModule.libraw_raw2image(processor);
+        const raw2imageResult = this.wasmModule?.libraw_raw2image(processor);
+        if (raw2imageResult === undefined) {
+          throw new Error('LibRaw module not available for raw2image conversion');
+        }
         if (raw2imageResult !== 0) {
           throw new Error(`Failed to convert raw to image: error code ${raw2imageResult}`);
         }
 
         // Process image (demosaicing, white balance, etc.)
-        const processResult = this.wasmModule.libraw_dcraw_process(processor);
+        const processResult = this.wasmModule?.libraw_dcraw_process(processor);
+        if (processResult === undefined) {
+          throw new Error('LibRaw module not available for processing');
+        }
         if (processResult !== 0) {
           throw new Error(`Failed to process image: error code ${processResult}`);
         }
 
         // Get processed image data
-        const imageResult = this.wasmModule.libraw_dcraw_make_mem_image(processor);
+        const imageResult = this.wasmModule?.libraw_dcraw_make_mem_image(processor);
+        if (!imageResult) {
+          throw new Error('Failed to create memory image from processed data');
+        }
 
         // Extract image data and metadata
         const imageData = this.extractImageData(processor, imageResult);
@@ -215,8 +255,8 @@ export class LibRawWasm {
 
       } finally {
         // Always clean up resources
-        this.wasmModule.libraw_recycle(processor);
-        this.wasmModule.libraw_close(processor);
+        this.wasmModule?.libraw_recycle(processor);
+        this.wasmModule?.libraw_close(processor);
       }
 
     } catch (error) {
@@ -225,7 +265,7 @@ export class LibRawWasm {
     }
   }
 
-  private applyProcessingParams(_processor: any, params: LibRawProcessingParams): void {
+  private applyProcessingParams(_processor: { ptr: number }, params: LibRawProcessingParams): void {
     logger.debug('Applying LibRaw processing parameters...');
 
     // In the real implementation, these would set parameters in the LibRaw processor
@@ -243,7 +283,7 @@ export class LibRawWasm {
     // Example: processor.imgdata.params.user_wb[0] = params.temperature / 2500.0;
   }
 
-  private extractImageData(_processor: any, _imageResult: any): LibRawImageData {
+  private extractImageData(_processor: { ptr: number }, _imageResult: { data: Uint8Array; size: number }): LibRawImageData {
     // Mock image data extraction - in production this would read from WASM memory
     const width = 4000;  // Mock dimensions
     const height = 3000;
@@ -276,7 +316,7 @@ export class LibRawWasm {
     };
   }
 
-  private extractMetadata(_processor: any): LibRawMetadata {
+  private extractMetadata(_processor: { ptr: number }): LibRawMetadata {
     // Mock metadata extraction - in production this would read from LibRaw structures
     return {
       make: 'Olympus',
@@ -311,14 +351,14 @@ export class LibRawWasm {
     if (!this.isInitialized) {
       await this.initialize();
     }
-    return this.wasmModule.supportedFormats;
+    return this.wasmModule?.supportedFormats || [];
   }
 
   async getVersion(): Promise<string> {
     if (!this.isInitialized) {
       await this.initialize();
     }
-    return this.wasmModule.version;
+    return this.wasmModule?.version || 'unknown';
   }
 
   getDefaultProcessingParams(): LibRawProcessingParams {

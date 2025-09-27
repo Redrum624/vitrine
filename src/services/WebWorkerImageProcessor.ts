@@ -10,7 +10,7 @@ export interface WorkerImageData {
 export interface WorkerModuleConfig {
   moduleId: string;
   enabled: boolean;
-  params: any;
+  params: Record<string, unknown>;
 }
 
 export interface ProcessingResult {
@@ -33,12 +33,17 @@ export class WebWorkerImageProcessor {
   private availableWorkers: Worker[] = [];
   private isInitialized = false;
   private messageId = 0;
-  private pendingMessages = new Map<number, { resolve: Function; reject: Function }>();
+  private pendingMessages = new Map<number, {
+    resolve: (value: unknown) => void;
+    reject: (reason?: unknown) => void;
+  }>();
 
-  // Configuration
-  private readonly maxWorkers = Math.min(4, navigator.hardwareConcurrency || 2);
-  private readonly tileSize = 512; // Process in 512x512 tiles for large images
-  private readonly largeImageThreshold = 4000 * 3000; // 12MP threshold
+  // Configuration - optimized for 30MP+ processing
+  private readonly maxWorkers = Math.min(8, navigator.hardwareConcurrency || 4); // Use more workers
+  private readonly tileSize = 2048; // Process in 2048x2048 tiles for large images (4x larger than before)
+  private readonly largeImageThreshold = 8000 * 6000; // 48MP threshold - much higher
+  private readonly hugeTileSize = 4096; // For 100MP+ images, use even larger tiles
+  private readonly hugeImageThreshold = 12000 * 8000; // 96MP threshold
 
   static getInstance(): WebWorkerImageProcessor {
     if (!WebWorkerImageProcessor.instance) {
@@ -95,7 +100,7 @@ export class WebWorkerImageProcessor {
       switch (type) {
         case 'INITIALIZE_COMPLETE':
           if (success) {
-            pendingMessage.resolve();
+            pendingMessage.resolve({ success: true });
           } else {
             pendingMessage.reject(new Error(error || 'Initialization failed'));
           }
@@ -128,7 +133,7 @@ export class WebWorkerImageProcessor {
     });
   }
 
-  private sendMessage(worker: Worker, type: string, data: any): Promise<any> {
+  private sendMessage(worker: Worker, type: string, data: unknown): Promise<unknown> {
     return new Promise((resolve, reject) => {
       const id = ++this.messageId;
       this.pendingMessages.set(id, { resolve, reject });
@@ -170,13 +175,17 @@ export class WebWorkerImageProcessor {
     }
 
     const pixelCount = imageData.width * imageData.height;
+    const isHugeImage = pixelCount > this.hugeImageThreshold;
     const isLargeImage = pixelCount > this.largeImageThreshold;
 
-    if (isLargeImage) {
-      logger.info(`Processing large image (${imageData.width}x${imageData.height}) with tiled approach`);
-      return this.processTiledImage(imageData, pipeline);
+    if (isHugeImage) {
+      logger.info(`Processing huge image (${imageData.width}x${imageData.height}, ${(pixelCount/1000000).toFixed(1)}MP) with large tiles`);
+      return this.processTiledImage(imageData, pipeline, this.hugeTileSize);
+    } else if (isLargeImage) {
+      logger.info(`Processing large image (${imageData.width}x${imageData.height}, ${(pixelCount/1000000).toFixed(1)}MP) with standard tiles`);
+      return this.processTiledImage(imageData, pipeline, this.tileSize);
     } else {
-      logger.info(`Processing image (${imageData.width}x${imageData.height}) in single worker`);
+      logger.info(`Processing image (${imageData.width}x${imageData.height}, ${(pixelCount/1000000).toFixed(1)}MP) in single worker`);
       return this.processSingleImage(imageData, pipeline);
     }
   }
@@ -186,12 +195,12 @@ export class WebWorkerImageProcessor {
 
     try {
       const worker = await this.getAvailableWorker();
-      const result = await this.sendMessage(worker, 'PROCESS_IMAGE', { imageData, pipeline });
+      const result = await this.sendMessage(worker, 'PROCESS_IMAGE', { imageData, pipeline }) as ProcessingResult;
 
       const totalTime = performance.now() - startTime;
       logger.info(`Single-worker processing completed in ${totalTime.toFixed(2)}ms (worker: ${result.processingTime?.toFixed(2)}ms)`);
 
-      return result;
+      return result as ProcessingResult;
 
     } catch (error) {
       logger.error('Single-worker processing failed:', error);
@@ -204,14 +213,14 @@ export class WebWorkerImageProcessor {
     }
   }
 
-  private async processTiledImage(imageData: WorkerImageData, pipeline: WorkerModuleConfig[]): Promise<ProcessingResult> {
+  private async processTiledImage(imageData: WorkerImageData, pipeline: WorkerModuleConfig[], tileSize: number = this.tileSize): Promise<ProcessingResult> {
     const startTime = performance.now();
     const { width, height, data } = imageData;
 
     try {
-      // Calculate tile dimensions
-      const tilesX = Math.ceil(width / this.tileSize);
-      const tilesY = Math.ceil(height / this.tileSize);
+      // Calculate tile dimensions using the specified tile size
+      const tilesX = Math.ceil(width / tileSize);
+      const tilesY = Math.ceil(height / tileSize);
       const totalTiles = tilesX * tilesY;
 
       logger.info(`Processing ${totalTiles} tiles (${tilesX}x${tilesY}) with ${this.maxWorkers} workers`);
@@ -228,6 +237,7 @@ export class WebWorkerImageProcessor {
             imageData,
             tileX,
             tileY,
+            tileSize,
             pipeline,
             processedData
           );
@@ -262,16 +272,17 @@ export class WebWorkerImageProcessor {
     imageData: WorkerImageData,
     tileX: number,
     tileY: number,
+    tileSize: number,
     pipeline: WorkerModuleConfig[],
     resultArray: Float32Array
   ): Promise<void> {
     const { width, height, data, channels } = imageData;
 
-    // Calculate tile bounds
-    const startX = tileX * this.tileSize;
-    const startY = tileY * this.tileSize;
-    const tileWidth = Math.min(this.tileSize, width - startX);
-    const tileHeight = Math.min(this.tileSize, height - startY);
+    // Calculate tile bounds using the specified tile size
+    const startX = tileX * tileSize;
+    const startY = tileY * tileSize;
+    const tileWidth = Math.min(tileSize, width - startX);
+    const tileHeight = Math.min(tileSize, height - startY);
 
     // Extract tile data
     const tileDataSize = tileWidth * tileHeight * channels;
@@ -291,7 +302,7 @@ export class WebWorkerImageProcessor {
     try {
       // Process tile
       const worker = await this.getAvailableWorker();
-      const result: TileProcessingResult = await this.sendMessage(worker, 'PROCESS_TILE', {
+      const result = await this.sendMessage(worker, 'PROCESS_TILE', {
         tileData,
         tileX,
         tileY,
@@ -300,7 +311,7 @@ export class WebWorkerImageProcessor {
         fullWidth: width,
         fullHeight: height,
         pipeline
-      });
+      }) as TileProcessingResult;
 
       if (!result.success) {
         throw new Error(result.error || 'Tile processing failed');

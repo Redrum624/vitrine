@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState } from 'react';
+import { useRef, useEffect, useState, useCallback } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { useAppStore } from '../../stores/appStore';
 import { fileSystemService, ImageFileInfo } from '../../services/FileSystemService';
@@ -22,77 +22,7 @@ export function Canvas({ onFitWindow, onActualSize, onZoomIn, onZoomOut, zoom, c
   const [displayImage, setDisplayImage] = useState<ImageFileInfo | null>(null);
   const [imageLoading, setImageLoading] = useState(false);
 
-  // Handle image loading from file system
-  useEffect(() => {
-    if (currentImage && currentImage !== displayImage) {
-      loadImage(currentImage);
-    }
-  }, [currentImage, displayImage]);
-
-  // Redraw canvas when processed image data changes
-  useEffect(() => {
-    redrawCanvas();
-  }, [processedImageData]);
-
-  const loadImage = async (image: ImageFileInfo) => {
-    try {
-      setImageLoading(true);
-      setDisplayImage(image);
-
-      // Load image using ImageService
-      await imageService.loadImage(image.path);
-
-      // Update canvas with loaded image
-      redrawCanvas();
-
-      // Trigger initial processing with the loaded image
-      // This will be handled by the AdjustmentPanel's useEffect
-    } catch (error) {
-      console.error('Failed to load image:', error);
-    } finally {
-      setImageLoading(false);
-    }
-  };
-
-  const navigateImage = async (direction: 'next' | 'prev') => {
-    const newImage = direction === 'next'
-      ? fileSystemService.nextImage()
-      : fileSystemService.previousImage();
-
-    if (newImage) {
-      await loadImage(newImage);
-    }
-  };
-
-  const redrawCanvas = () => {
-    const canvas = canvasRef.current;
-    const ctx = canvas?.getContext('2d');
-    if (!canvas || !ctx) return;
-
-    const container = containerRef.current;
-    if (!container) return;
-
-    // Set canvas size to match container
-    const rect = container.getBoundingClientRect();
-    canvas.width = rect.width;
-    canvas.height = rect.height;
-
-    // Clear canvas
-    ctx.fillStyle = '#1a1a1a';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    const currentImageData = imageService.getCurrentImage();
-    if (currentImageData && displayImage) {
-      // Use processed image data if available, otherwise use original
-      const imageDataToRender = processedImageData || currentImageData.data;
-      drawLoadedImage(ctx, canvas, currentImageData, imageDataToRender);
-    } else {
-      // Draw placeholder content
-      drawPlaceholder(ctx, canvas);
-    }
-  };
-
-  const drawLoadedImage = (ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, imageMetadata: any, imageData: Float32Array) => {
+  const drawLoadedImage = useCallback((ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, imageMetadata: { width: number; height: number }, imageData: Float32Array) => {
     const { width: imageWidth, height: imageHeight } = imageMetadata;
 
     // Create ImageData from Float32Array
@@ -159,9 +89,9 @@ export function Canvas({ onFitWindow, onActualSize, onZoomIn, onZoomOut, zoom, c
       displayWidth,
       displayHeight
     );
-  };
+  }, [viewport]);
 
-  const drawPlaceholder = (ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement) => {
+  const drawPlaceholder = useCallback((ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement) => {
     // Draw grid pattern
     ctx.strokeStyle = '#262626';
     ctx.lineWidth = 1;
@@ -185,18 +115,102 @@ export function Canvas({ onFitWindow, onActualSize, onZoomIn, onZoomOut, zoom, c
     const centerX = canvas.width / 2;
     const centerY = canvas.height / 2;
 
-    ctx.fillStyle = '#a0a0a0';
-    ctx.font = '16px monospace';
+    ctx.fillStyle = '#525252';
+    ctx.font = 'bold 24px system-ui';
     ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('No Image Selected', centerX, centerY);
-    ctx.fillText('Browse folders on the left to select images', centerX, centerY + 25);
+    ctx.fillText('No Image Loaded', centerX, centerY - 20);
+
+    ctx.fillStyle = '#404040';
+    ctx.font = '16px system-ui';
+    ctx.fillText('Select an image from the file browser', centerX, centerY + 10);
+    ctx.fillText('or drag and drop a file here', centerX, centerY + 30);
+  }, []);
+
+  const redrawCanvas = useCallback(() => {
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext('2d');
+    if (!canvas || !ctx) return;
+
+    const container = containerRef.current;
+    if (!container) return;
+
+    // Set canvas size to match container
+    const rect = container.getBoundingClientRect();
+    canvas.width = rect.width;
+    canvas.height = rect.height;
+
+    // Clear canvas
+    ctx.fillStyle = '#1a1a1a';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const currentImageData = imageService.getCurrentImage();
+    if (currentImageData && displayImage) {
+      // Use processed image data if available, otherwise use original
+      if (processedImageData && typeof processedImageData === 'object' && 'data' in processedImageData) {
+        // Handle new preview data structure
+        const previewData = processedImageData as { data: Float32Array; width: number; height: number; isPreview: boolean };
+        drawLoadedImage(ctx, canvas, { width: previewData.width, height: previewData.height }, previewData.data);
+      } else if (processedImageData && processedImageData instanceof Float32Array) {
+        // Handle legacy data structure
+        drawLoadedImage(ctx, canvas, currentImageData, processedImageData);
+      } else {
+        // Use original image data
+        drawLoadedImage(ctx, canvas, currentImageData, currentImageData.data);
+      }
+    } else {
+      // Draw placeholder content
+      drawPlaceholder(ctx, canvas);
+    }
+  }, [processedImageData, displayImage, drawLoadedImage, drawPlaceholder]);
+
+  const loadImage = useCallback(async (image: ImageFileInfo) => {
+    try {
+      setImageLoading(true);
+      setDisplayImage(image);
+
+      // Load image using ImageService
+      await imageService.loadImage(image.path);
+
+      // Update canvas with loaded image
+      redrawCanvas();
+
+      // Trigger initial processing with the loaded image
+      // This will be handled by the AdjustmentPanel's useEffect
+    } catch (error) {
+      console.error('Failed to load image:', error);
+    } finally {
+      setImageLoading(false);
+    }
+  }, [redrawCanvas]);
+
+  // Handle image loading from file system
+  useEffect(() => {
+    if (currentImage && currentImage !== displayImage) {
+      loadImage(currentImage);
+    }
+  }, [currentImage, displayImage, loadImage]);
+
+  // Redraw canvas when processed image data changes
+  useEffect(() => {
+    redrawCanvas();
+  }, [redrawCanvas]);
+
+
+  const navigateImage = async (direction: 'next' | 'prev') => {
+    const newImage = direction === 'next'
+      ? fileSystemService.nextImage()
+      : fileSystemService.previousImage();
+
+    if (newImage) {
+      await loadImage(newImage);
+    }
   };
+
 
   // Redraw canvas when viewport changes
   useEffect(() => {
     redrawCanvas();
-  }, [viewport]);
+  }, [viewport, redrawCanvas]);
 
   const handleMouseDown = (e: React.MouseEvent) => {
     setIsDragging(true);
@@ -223,11 +237,11 @@ export function Canvas({ onFitWindow, onActualSize, onZoomIn, onZoomOut, zoom, c
   };
 
   return (
-    <div className="flex flex-col h-full bg-dark-900">
+    <div className="h-full bg-dark-900">
       {/* Main Canvas Area */}
       <div
         ref={containerRef}
-        className="flex-1 relative overflow-hidden"
+        className="h-full relative overflow-hidden"
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
@@ -295,40 +309,6 @@ export function Canvas({ onFitWindow, onActualSize, onZoomIn, onZoomOut, zoom, c
         )}
       </div>
 
-      {/* Viewing Controls - Now part of the same component */}
-      <div className="h-16 bg-dark-850 flex items-center justify-center px-4">
-        <div className="flex items-center space-x-4">
-          <button
-            onClick={onFitWindow}
-            className="px-3 py-1 bg-dark-800 hover:bg-dark-700 rounded text-xs text-dark-300 transition-professional"
-          >
-            Fit to Window
-          </button>
-          <button
-            onClick={onActualSize}
-            className="px-3 py-1 bg-dark-800 hover:bg-dark-700 rounded text-xs text-dark-300 transition-professional"
-          >
-            Actual Size (100%)
-          </button>
-          <div className="flex items-center space-x-2">
-            <button
-              onClick={onZoomOut}
-              className="px-2 py-1 bg-dark-800 hover:bg-dark-700 rounded text-xs text-dark-300 transition-professional"
-            >
-              -
-            </button>
-            <span className="text-xs text-dark-300 min-w-16 text-center">
-              {Math.round(zoom * 100)}%
-            </span>
-            <button
-              onClick={onZoomIn}
-              className="px-2 py-1 bg-dark-800 hover:bg-dark-700 rounded text-xs text-dark-300 transition-professional"
-            >
-              +
-            </button>
-          </div>
-        </div>
-      </div>
     </div>
   );
 }

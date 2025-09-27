@@ -1,11 +1,28 @@
 import { logger } from '../utils/Logger';
 import { imageProcessingPipeline } from './ImageProcessingPipeline';
 
+interface ModuleState {
+  enabled: boolean;
+  parameters: Record<string, unknown>;
+}
+
+interface ModuleInterface {
+  isEnabled?(): boolean;
+  getParameters?(): Record<string, unknown>;
+  getParams?(): Record<string, unknown>;
+  getState?(): Record<string, unknown>;
+  setParameters?(params: Record<string, unknown>): void;
+  setParams?(params: Record<string, unknown>): void;
+  setState?(params: Record<string, unknown>): void;
+  resetToDefaults?(): void;
+  reset?(): void;
+}
+
 export interface HistoryState {
   id: string;
   name: string;
   timestamp: number;
-  moduleSettings: Record<string, any>;
+  moduleSettings: Record<string, ModuleState>;
 }
 
 export class HistoryService {
@@ -132,11 +149,12 @@ export class HistoryService {
 
       // Reset all modules to their default parameters
       const modules = imageProcessingPipeline.getModules();
-      for (const [moduleId, module] of modules) {
-        if ('resetToDefaults' in module && typeof module.resetToDefaults === 'function') {
-          (module as any).resetToDefaults();
-        } else if ('reset' in module && typeof module.reset === 'function') {
-          (module as any).reset();
+      for (const [, module] of modules) {
+        const moduleInterface = module as ModuleInterface;
+        if ('resetToDefaults' in module && typeof moduleInterface.resetToDefaults === 'function') {
+          moduleInterface.resetToDefaults();
+        } else if ('reset' in module && typeof moduleInterface.reset === 'function') {
+          moduleInterface.reset();
         }
       }
 
@@ -156,28 +174,29 @@ export class HistoryService {
   }
 
   // Capture current module settings
-  private captureCurrentModuleSettings(): Record<string, any> {
-    const settings: Record<string, any> = {};
+  private captureCurrentModuleSettings(): Record<string, ModuleState> {
+    const settings: Record<string, ModuleState> = {};
 
     try {
       const modules = imageProcessingPipeline.getModules();
 
       for (const [moduleId, module] of modules) {
         try {
-          let moduleSettings: any = null;
+          let moduleSettings: Record<string, unknown> | null = null;
+          const moduleInterface = module as ModuleInterface;
 
           // Try different parameter getter methods
-          if ('getParameters' in module && typeof module.getParameters === 'function') {
-            moduleSettings = (module as any).getParameters();
-          } else if ('getParams' in module && typeof module.getParams === 'function') {
-            moduleSettings = (module as any).getParams();
-          } else if ('getState' in module && typeof module.getState === 'function') {
-            moduleSettings = (module as any).getState();
+          if ('getParameters' in module && typeof moduleInterface.getParameters === 'function') {
+            moduleSettings = moduleInterface.getParameters();
+          } else if ('getParams' in module && typeof moduleInterface.getParams === 'function') {
+            moduleSettings = moduleInterface.getParams();
+          } else if ('getState' in module && typeof moduleInterface.getState === 'function') {
+            moduleSettings = moduleInterface.getState();
           }
 
           if (moduleSettings) {
             settings[moduleId] = {
-              enabled: (module as any).isEnabled?.() || true,
+              enabled: moduleInterface.isEnabled?.() || true,
               parameters: moduleSettings
             };
           }
@@ -209,12 +228,13 @@ export class HistoryService {
 
         // Set parameters
         if (moduleState.parameters) {
-          if ('setParameters' in module && typeof module.setParameters === 'function') {
-            (module as any).setParameters(moduleState.parameters);
-          } else if ('setParams' in module && typeof module.setParams === 'function') {
-            (module as any).setParams(moduleState.parameters);
-          } else if ('setState' in module && typeof module.setState === 'function') {
-            (module as any).setState(moduleState.parameters);
+          const moduleInterface = module as ModuleInterface;
+          if ('setParameters' in module && typeof moduleInterface.setParameters === 'function') {
+            moduleInterface.setParameters(moduleState.parameters);
+          } else if ('setParams' in module && typeof moduleInterface.setParams === 'function') {
+            moduleInterface.setParams(moduleState.parameters);
+          } else if ('setState' in module && typeof moduleInterface.setState === 'function') {
+            moduleInterface.setState(moduleState.parameters);
           }
         }
       } catch (error) {

@@ -65,7 +65,7 @@ export class LensCorrectionsPipelineModule implements PipelineModule {
     }
   };
 
-  isEnabled(): boolean {
+  get isEnabled(): boolean {
     const { lensCorrectionsParams } = this.params;
     return this.params.enabled && (
       lensCorrectionsParams.vignetting.enabled ||
@@ -101,7 +101,7 @@ export class LensCorrectionsPipelineModule implements PipelineModule {
   }
 
   process(imageData: Float32Array, context: ProcessingContext): Float32Array {
-    if (!this.isEnabled()) {
+    if (!this.isEnabled) {
       return imageData;
     }
 
@@ -246,7 +246,7 @@ export class LensCorrectionsPipelineModule implements PipelineModule {
     return {
       ...moduleStats,
       enabled: this.params.enabled,
-      moduleEnabled: this.isEnabled(),
+      moduleEnabled: this.isEnabled,
       vignettingEnabled: this.params.lensCorrectionsParams.vignetting.enabled,
       distortionEnabled: this.params.lensCorrectionsParams.distortion.enabled,
       chromaticAberrationEnabled: this.params.lensCorrectionsParams.chromaticAberration.enabled,

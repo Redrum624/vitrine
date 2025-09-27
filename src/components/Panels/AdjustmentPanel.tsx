@@ -1,6 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
-import { ChevronDown, ChevronRight, RotateCcw } from 'lucide-react';
-import { ExposureModule } from '../../modules/ExposureModule';
+import { ChevronDown, ChevronRight, RotateCcw, RefreshCw } from 'lucide-react';
 import { BasicAdjustmentsModule } from '../../modules/BasicAdjustmentsModule';
 import { WhiteBalanceModule } from '../../modules/WhiteBalanceModule';
 import { ToneCurvePipelineModule } from '../../modules/ToneCurvePipelineModule';
@@ -8,7 +7,6 @@ import { ColorBalancePipelineModule } from '../../modules/ColorBalancePipelineMo
 import { ShadowsHighlightsPipelineModule } from '../../modules/ShadowsHighlightsPipelineModule';
 import { LocalAdjustmentsPipelineModule } from '../../modules/LocalAdjustmentsPipelineModule';
 import { LensCorrectionsPipelineModule } from '../../modules/LensCorrectionsPipelineModule';
-import { ExposureModuleComponent } from '../Modules/ExposureModuleComponent';
 import { BasicAdjustmentsModuleComponent } from '../Modules/BasicAdjustmentsModuleComponent';
 import { WhiteBalanceModuleComponent } from '../Modules/WhiteBalanceModuleComponent';
 import { ToneCurveModuleComponent } from '../Modules/ToneCurveModuleComponent';
@@ -17,8 +15,17 @@ import { ShadowsHighlightsModuleComponent } from '../Modules/ShadowsHighlightsMo
 import { LocalAdjustmentsModuleComponent } from '../Modules/LocalAdjustmentsModuleComponent';
 import { LensCorrectionsModuleComponent } from '../Modules/LensCorrectionsModuleComponent';
 import { AdvancedRawModule } from '../Modules/AdvancedRawModule';
+import { NoiseReductionModule } from '../Modules/NoiseReductionModule';
+import { LensCorrectionModule } from '../Modules/LensCorrectionModule';
+import { PrintModule } from '../Modules/PrintModule';
+import { WebGalleryModule } from '../Modules/WebGalleryModule';
+import { WatermarkModule } from '../Modules/WatermarkModule';
+import { CopyrightModule } from '../Modules/CopyrightModule';
+import { OutputCollectionModule } from '../Modules/OutputCollectionModule';
+import { LuminosityMaskModule } from '../Modules/LuminosityMaskModule';
 import { imageProcessingPipeline } from '../../services/ImageProcessingPipeline';
 import { imageService } from '../../services/ImageService';
+import { autoRawAdjustmentService } from '../../services/AutoRawAdjustmentService';
 import { useAppStore } from '../../stores/appStore';
 import { logger } from '../../utils/Logger';
 
@@ -28,23 +35,40 @@ interface ModuleState {
 }
 
 export function AdjustmentPanel() {
-  const { setProcessedImageData } = useAppStore();
+  const { setProcessedImageData, currentImage } = useAppStore();
+  const [realTimeProcessing, setRealTimeProcessing] = useState(true);
   const [moduleStates, setModuleStates] = useState<Record<string, ModuleState>>({
-    advancedraw: { expanded: false, enabled: false },
+    // Core processing modules first (most commonly used)
     exposure: { expanded: true, enabled: true },
-    whitebalance: { expanded: false, enabled: true },
     basicadj: { expanded: false, enabled: true },
+    whitebalance: { expanded: false, enabled: true },
+    shadowshighlights: { expanded: false, enabled: true },
     tonecurve: { expanded: false, enabled: true },
     colorbalance: { expanded: false, enabled: true },
-    shadowshighlights: { expanded: false, enabled: true },
+    // Advanced processing
     localadjustments: { expanded: false, enabled: false },
-    lenscorrections: { expanded: false, enabled: false }
+    lenscorrections: { expanded: false, enabled: false },
+    noisereduction: { expanded: false, enabled: false },
+    lenscorrection: { expanded: false, enabled: false },
+    advancedraw: { expanded: false, enabled: false },
+    luminositymasks: { expanded: false, enabled: false },
+    // Output modules (bottom)
+    print: { expanded: false, enabled: false },
+    webgallery: { expanded: false, enabled: false },
+    watermark: { expanded: false, enabled: false },
+    copyright: { expanded: false, enabled: false },
+    outputcollections: { expanded: false, enabled: false }
   });
   const [isProcessing, setIsProcessing] = useState(false);
   const [lastProcessingTime, setLastProcessingTime] = useState(0);
 
+  // Connect the processing pipeline to image service for auto-adjustments
+  useEffect(() => {
+    imageService.setProcessingPipeline(imageProcessingPipeline);
+    logger.info('Processing pipeline connected to ImageService for auto-adjustments');
+  }, []);
+
   // Get module instances from pipeline
-  const exposureModule = imageProcessingPipeline.getModule<ExposureModule>('exposure');
   const whiteBalanceModule = imageProcessingPipeline.getModule<WhiteBalanceModule>('temperature');
   const basicAdjModule = imageProcessingPipeline.getModule<BasicAdjustmentsModule>('basicadj');
   const toneCurveModule = imageProcessingPipeline.getModule<ToneCurvePipelineModule>('tonecurve');
@@ -63,6 +87,72 @@ export function AdjustmentPanel() {
     }));
   }, []);
 
+  const processCurrentImageRealTime = useCallback(async () => {
+    const currentImage = imageService.getCurrentImage();
+    if (!currentImage) return;
+
+    // Skip processing if already processing
+    if (isProcessing) {
+      logger.debug('Skipping processing - already in progress');
+      return;
+    }
+
+    try {
+      setIsProcessing(true);
+      const startTime = performance.now();
+
+      // Use less aggressive downscaling for higher quality preview (2x downscale, min 512px)
+      const previewWidth = Math.max(512, Math.floor(currentImage.width / 2));
+      const previewHeight = Math.max(512, Math.floor(currentImage.height / 2));
+
+      logger.debug(`Processing preview: ${previewWidth}x${previewHeight} (downscaled from ${currentImage.width}x${currentImage.height})`);
+
+      // Create downscaled image data for faster processing
+      const scaleFactor = previewWidth / currentImage.width;
+      const previewData = new Float32Array(previewWidth * previewHeight * 4);
+
+      // Optimized nearest neighbor downsampling for speed
+      for (let y = 0; y < previewHeight; y++) {
+        for (let x = 0; x < previewWidth; x++) {
+          const srcX = Math.floor(x / scaleFactor);
+          const srcY = Math.floor(y / scaleFactor);
+          const srcIdx = (srcY * currentImage.width + srcX) * 4;
+          const dstIdx = (y * previewWidth + x) * 4;
+
+          // Direct copy for speed (nearest neighbor)
+          previewData[dstIdx] = currentImage.data[srcIdx];
+          previewData[dstIdx + 1] = currentImage.data[srcIdx + 1];
+          previewData[dstIdx + 2] = currentImage.data[srcIdx + 2];
+          previewData[dstIdx + 3] = currentImage.data[srcIdx + 3];
+        }
+      }
+
+      // Process with preview resolution - FORCE main thread to avoid worker overhead
+      const processedData = await imageProcessingPipeline.processImage(previewData, {
+        width: previewWidth,
+        height: previewHeight,
+        channels: 4 // RGBA
+      }, false); // Disable web workers for preview
+
+      const processTime = performance.now() - startTime;
+      setLastProcessingTime(processTime);
+      logger.debug(`Real-time preview processing completed in ${processTime.toFixed(2)}ms`);
+
+      // Store both original and processed data
+      setProcessedImageData({
+        data: processedData,
+        width: previewWidth,
+        height: previewHeight,
+        isPreview: true
+      });
+
+    } catch (error) {
+      logger.error('Real-time processing failed:', error);
+    } finally {
+      setIsProcessing(false);
+    }
+  }, [setProcessedImageData, isProcessing]);
+
   const toggleModuleEnabled = useCallback((moduleId: string) => {
     setModuleStates(prev => {
       const newEnabled = !prev[moduleId]?.enabled;
@@ -80,45 +170,30 @@ export function AdjustmentPanel() {
         }
       };
     });
-  }, []);
-
-  const processCurrentImageRealTime = useCallback(async () => {
-    const currentImage = imageService.getCurrentImage();
-    if (!currentImage) return;
-
-    try {
-      setIsProcessing(true);
-      const startTime = performance.now();
-
-      // Process with current pipeline settings
-      const processedData = await imageProcessingPipeline.processImage(currentImage.data, {
-        width: currentImage.width,
-        height: currentImage.height,
-        channels: 4 // RGBA
-      });
-
-      const processTime = performance.now() - startTime;
-      setLastProcessingTime(processTime);
-      logger.debug(`Real-time processing completed in ${processTime.toFixed(2)}ms`);
-
-      // Update store with processed image data for Canvas display
-      setProcessedImageData(processedData);
-
-    } catch (error) {
-      logger.error('Real-time processing failed:', error);
-    } finally {
-      setIsProcessing(false);
-    }
-  }, [setProcessedImageData]);
-
-  const handleModuleParamsChange = useCallback((moduleId: string, _params: any) => {
-    logger.debug(`Module ${moduleId} parameters changed, triggering real-time update`);
-
-    // Debounce rapid changes for performance
-    setTimeout(() => {
-      processCurrentImageRealTime();
-    }, 50); // 50ms debounce
   }, [processCurrentImageRealTime]);
+
+  const [debounceTimer, setDebounceTimer] = useState<NodeJS.Timeout | null>(null);
+
+  const handleModuleParamsChange = useCallback((moduleId: string, _params: Record<string, unknown>) => {
+    logger.debug(`Module ${moduleId} parameters changed`);
+
+    // Real-time processing is always enabled
+
+    logger.debug('Scheduling debounced update');
+
+    // Clear existing timer
+    if (debounceTimer) {
+      clearTimeout(debounceTimer);
+    }
+
+    // Set new timer with faster debounce for better responsiveness
+    const newTimer = setTimeout(() => {
+      processCurrentImageRealTime();
+      setDebounceTimer(null);
+    }, 100); // Reduced to 100ms debounce for better responsiveness
+
+    setDebounceTimer(newTimer);
+  }, [processCurrentImageRealTime, debounceTimer]);
 
   const handleAutoWhiteBalance = useCallback(() => {
     const currentImage = imageService.getCurrentImage();
@@ -172,6 +247,21 @@ export function AdjustmentPanel() {
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-medium text-dark-300">Develop</h2>
           <div className="flex items-center space-x-1">
+            {currentImage?.isRaw && (
+              <button
+                onClick={() => {
+                  if (currentImage && imageService.getProcessingPipeline()) {
+                    autoRawAdjustmentService.resetAutoAdjustments(imageService.getProcessingPipeline()!);
+                    processCurrentImageRealTime();
+                    logger.info('RAW auto-adjustments reset');
+                  }
+                }}
+                className="p-1 hover:bg-dark-700 rounded text-dark-300 transition-professional"
+                title="Reset RAW auto-adjustments"
+              >
+                <RefreshCw className="w-4 h-4" />
+              </button>
+            )}
             <button
               onClick={resetAllModules}
               className="p-1 hover:bg-dark-700 rounded text-dark-300 transition-professional"
@@ -186,16 +276,23 @@ export function AdjustmentPanel() {
       {/* Processing Pipeline Status */}
       <div className="px-3 py-2 bg-dark-850 border-b border-dark-800">
         <div className="flex items-center justify-between text-xs">
-          <div className="text-dark-400">
-            Real-time processing: {isProcessing ? (
-              <span className="text-yellow-400 animate-pulse">Processing...</span>
-            ) : (
-              <span className="text-green-400">Ready</span>
+          <div className="flex items-center gap-2">
+            <div className="text-dark-400">
+              {isProcessing ? (
+                <span className="text-yellow-400 animate-pulse">Processing...</span>
+              ) : (
+                <span className="text-green-400">Ready</span>
+              )}
+            </div>
+            {currentImage?.autoAdjustmentResult?.isRAW && (
+              <div className="text-blue-400 text-xs bg-blue-500/10 px-2 py-1 rounded">
+                RAW Auto-adjusted
+              </div>
             )}
           </div>
           {lastProcessingTime > 0 && !isProcessing && (
             <div className="text-dark-500">
-              {lastProcessingTime.toFixed(1)}ms
+              2x downscaled preview ({lastProcessingTime.toFixed(1)}ms)
             </div>
           )}
         </div>
@@ -204,136 +301,40 @@ export function AdjustmentPanel() {
       {/* Darktable Modules */}
       <div className="flex-1 overflow-y-auto">
 
-        {/* Lens Corrections Module */}
-        {lensCorrectionsModule && (
+
+        {/* Basic Adjustments Module */}
+        {basicAdjModule && (
           <div className="border-b border-dark-800">
             <div className="flex items-center">
               <button
-                onClick={() => toggleModule('lenscorrections')}
+                onClick={() => toggleModule('basicadj')}
                 className="flex-1 p-3 flex items-center justify-between hover:bg-dark-800 transition-professional text-left"
               >
-                <span className="text-sm font-medium text-dark-300">Lens Corrections</span>
-                {moduleStates.lenscorrections?.expanded ? (
+                <span className="text-sm font-medium text-dark-300">Basic Adjustments</span>
+                {moduleStates.basicadj?.expanded ? (
                   <ChevronDown className="w-4 h-4 text-dark-300" />
                 ) : (
                   <ChevronRight className="w-4 h-4 text-dark-300" />
                 )}
               </button>
               <button
-                onClick={() => toggleModuleEnabled('lenscorrections')}
+                onClick={() => toggleModuleEnabled('basicadj')}
                 className={`px-2 py-1 mx-2 rounded text-xs transition-professional ${
-                  moduleStates.lenscorrections?.enabled
+                  moduleStates.basicadj?.enabled
                     ? 'bg-green-600 text-white'
                     : 'bg-dark-700 text-dark-400'
                 }`}
-                title={`${moduleStates.lenscorrections?.enabled ? 'Disable' : 'Enable'} module`}
+                title={`${moduleStates.basicadj?.enabled ? 'Disable' : 'Enable'} module`}
               >
-                {moduleStates.lenscorrections?.enabled ? 'ON' : 'OFF'}
+                {moduleStates.basicadj?.enabled ? 'ON' : 'OFF'}
               </button>
             </div>
 
-            {moduleStates.lenscorrections?.expanded && (
+            {moduleStates.basicadj?.expanded && (
               <div className="px-3 pb-3">
-                <LensCorrectionsModuleComponent
-                  parameters={lensCorrectionsModule.getParameters().lensCorrectionsParams}
-                  onParametersChange={(params) => {
-                    lensCorrectionsModule.setParameters({ lensCorrectionsParams: params });
-                    handleModuleParamsChange('lenscorrections', params);
-                  }}
-                  onAutoDetectVignetting={() => {
-                    const currentImage = imageService.getCurrentImage();
-                    if (currentImage) {
-                      lensCorrectionsModule.autoDetectVignetting(
-                        currentImage.data,
-                        currentImage.width,
-                        currentImage.height
-                      );
-                      handleModuleParamsChange('lenscorrections', {});
-                    }
-                  }}
-                  onResetSection={(section) => {
-                    if (section === 'all') {
-                      lensCorrectionsModule.reset();
-                    } else if (section === 'vignetting') {
-                      lensCorrectionsModule.resetVignetting();
-                    } else if (section === 'distortion') {
-                      lensCorrectionsModule.resetDistortion();
-                    } else if (section === 'chromaticAberration') {
-                      lensCorrectionsModule.resetChromaticAberration();
-                    }
-                    handleModuleParamsChange('lenscorrections', {});
-                  }}
-                />
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Advanced RAW Processing Module */}
-        <div className="border-b border-dark-800">
-          <div className="flex items-center">
-            <button
-              onClick={() => toggleModule('advancedraw')}
-              className="flex-1 p-3 flex items-center justify-between hover:bg-dark-800 transition-professional text-left"
-            >
-              <span className="text-sm font-medium text-dark-300">Advanced RAW Processing</span>
-              {moduleStates.advancedraw?.expanded ? (
-                <ChevronDown className="w-4 h-4 text-dark-300" />
-              ) : (
-                <ChevronRight className="w-4 h-4 text-dark-300" />
-              )}
-            </button>
-          </div>
-
-          {moduleStates.advancedraw?.expanded && (
-            <div className="px-3 pb-3">
-              <AdvancedRawModule
-                isEnabled={moduleStates.advancedraw?.enabled || false}
-                onToggle={(enabled) => {
-                  setModuleStates(prev => ({
-                    ...prev,
-                    advancedraw: { ...prev.advancedraw, enabled }
-                  }));
-                  logger.info(`Advanced RAW processing ${enabled ? 'enabled' : 'disabled'}`);
-                }}
-              />
-            </div>
-          )}
-        </div>
-
-        {/* Exposure Module */}
-        {exposureModule && (
-          <div className="border-b border-dark-800">
-            <div className="flex items-center">
-              <button
-                onClick={() => toggleModule('exposure')}
-                className="flex-1 p-3 flex items-center justify-between hover:bg-dark-800 transition-professional text-left"
-              >
-                <span className="text-sm font-medium text-dark-300">Exposure</span>
-                {moduleStates.exposure?.expanded ? (
-                  <ChevronDown className="w-4 h-4 text-dark-300" />
-                ) : (
-                  <ChevronRight className="w-4 h-4 text-dark-300" />
-                )}
-              </button>
-              <button
-                onClick={() => toggleModuleEnabled('exposure')}
-                className={`px-2 py-1 mx-2 rounded text-xs transition-professional ${
-                  moduleStates.exposure?.enabled
-                    ? 'bg-green-600 text-white'
-                    : 'bg-dark-700 text-dark-400'
-                }`}
-                title={`${moduleStates.exposure?.enabled ? 'Disable' : 'Enable'} module`}
-              >
-                {moduleStates.exposure?.enabled ? 'ON' : 'OFF'}
-              </button>
-            </div>
-
-            {moduleStates.exposure?.expanded && (
-              <div className="px-3 pb-3">
-                <ExposureModuleComponent
-                  module={exposureModule}
-                  onParamsChange={(params) => handleModuleParamsChange('exposure', params)}
+                <BasicAdjustmentsModuleComponent
+                  module={basicAdjModule}
+                  onParamsChange={(params) => handleModuleParamsChange('basicadj', params)}
                 />
               </div>
             )}
@@ -380,39 +381,39 @@ export function AdjustmentPanel() {
           </div>
         )}
 
-        {/* Basic Adjustments Module */}
-        {basicAdjModule && (
+        {/* Shadows & Highlights Module */}
+        {shadowsHighlightsModule && (
           <div className="border-b border-dark-800">
             <div className="flex items-center">
               <button
-                onClick={() => toggleModule('basicadj')}
+                onClick={() => toggleModule('shadowshighlights')}
                 className="flex-1 p-3 flex items-center justify-between hover:bg-dark-800 transition-professional text-left"
               >
-                <span className="text-sm font-medium text-dark-300">Basic Adjustments</span>
-                {moduleStates.basicadj?.expanded ? (
+                <span className="text-sm font-medium text-dark-300">Shadows & Highlights</span>
+                {moduleStates.shadowshighlights?.expanded ? (
                   <ChevronDown className="w-4 h-4 text-dark-300" />
                 ) : (
                   <ChevronRight className="w-4 h-4 text-dark-300" />
                 )}
               </button>
               <button
-                onClick={() => toggleModuleEnabled('basicadj')}
+                onClick={() => toggleModuleEnabled('shadowshighlights')}
                 className={`px-2 py-1 mx-2 rounded text-xs transition-professional ${
-                  moduleStates.basicadj?.enabled
+                  moduleStates.shadowshighlights?.enabled
                     ? 'bg-green-600 text-white'
                     : 'bg-dark-700 text-dark-400'
                 }`}
-                title={`${moduleStates.basicadj?.enabled ? 'Disable' : 'Enable'} module`}
+                title={`${moduleStates.shadowshighlights?.enabled ? 'Disable' : 'Enable'} module`}
               >
-                {moduleStates.basicadj?.enabled ? 'ON' : 'OFF'}
+                {moduleStates.shadowshighlights?.enabled ? 'ON' : 'OFF'}
               </button>
             </div>
 
-            {moduleStates.basicadj?.expanded && (
+            {moduleStates.shadowshighlights?.expanded && (
               <div className="px-3 pb-3">
-                <BasicAdjustmentsModuleComponent
-                  module={basicAdjModule}
-                  onParamsChange={(params) => handleModuleParamsChange('basicadj', params)}
+                <ShadowsHighlightsModuleComponent
+                  module={shadowsHighlightsModule.getShadowsHighlightsModule()}
+                  onParamsChange={(params) => handleModuleParamsChange('shadowshighlights', params)}
                 />
               </div>
             )}
@@ -497,126 +498,12 @@ export function AdjustmentPanel() {
           </div>
         )}
 
-        {/* Shadows & Highlights Module */}
-        {shadowsHighlightsModule && (
-          <div className="border-b border-dark-800">
-            <div className="flex items-center">
-              <button
-                onClick={() => toggleModule('shadowshighlights')}
-                className="flex-1 p-3 flex items-center justify-between hover:bg-dark-800 transition-professional text-left"
-              >
-                <span className="text-sm font-medium text-dark-300">Shadows & Highlights</span>
-                {moduleStates.shadowshighlights?.expanded ? (
-                  <ChevronDown className="w-4 h-4 text-dark-300" />
-                ) : (
-                  <ChevronRight className="w-4 h-4 text-dark-300" />
-                )}
-              </button>
-              <button
-                onClick={() => toggleModuleEnabled('shadowshighlights')}
-                className={`px-2 py-1 mx-2 rounded text-xs transition-professional ${
-                  moduleStates.shadowshighlights?.enabled
-                    ? 'bg-green-600 text-white'
-                    : 'bg-dark-700 text-dark-400'
-                }`}
-                title={`${moduleStates.shadowshighlights?.enabled ? 'Disable' : 'Enable'} module`}
-              >
-                {moduleStates.shadowshighlights?.enabled ? 'ON' : 'OFF'}
-              </button>
-            </div>
-
-            {moduleStates.shadowshighlights?.expanded && (
-              <div className="px-3 pb-3">
-                <ShadowsHighlightsModuleComponent
-                  module={shadowsHighlightsModule.getShadowsHighlightsModule()}
-                  onParamsChange={(params) => handleModuleParamsChange('shadowshighlights', params)}
-                />
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Local Adjustments Module */}
-        {localAdjustmentsModule && (
-          <div className="border-b border-dark-800">
-            <div className="flex items-center">
-              <button
-                onClick={() => toggleModule('localadjustments')}
-                className="flex-1 p-3 flex items-center justify-between hover:bg-dark-800 transition-professional text-left"
-              >
-                <span className="text-sm font-medium text-dark-300">Local Adjustments</span>
-                {moduleStates.localadjustments?.expanded ? (
-                  <ChevronDown className="w-4 h-4 text-dark-300" />
-                ) : (
-                  <ChevronRight className="w-4 h-4 text-dark-300" />
-                )}
-              </button>
-              <button
-                onClick={() => toggleModuleEnabled('localadjustments')}
-                className={`px-2 py-1 mx-2 rounded text-xs transition-professional ${
-                  moduleStates.localadjustments?.enabled
-                    ? 'bg-green-600 text-white'
-                    : 'bg-dark-700 text-dark-400'
-                }`}
-                title={`${moduleStates.localadjustments?.enabled ? 'Disable' : 'Enable'} module`}
-              >
-                {moduleStates.localadjustments?.enabled ? 'ON' : 'OFF'}
-              </button>
-            </div>
-
-            {moduleStates.localadjustments?.expanded && (
-              <div className="px-3 pb-3">
-                <LocalAdjustmentsModuleComponent
-                  parameters={localAdjustmentsModule.getParameters().defaultParams}
-                  brushParams={localAdjustmentsModule.getParameters().brushParams}
-                  layers={localAdjustmentsModule.getParameters().layers}
-                  activeLayerId={localAdjustmentsModule.getParameters().activeLayerId}
-                  onParametersChange={(params) => {
-                    if (localAdjustmentsModule.getParameters().activeLayerId) {
-                      localAdjustmentsModule.updateLayerParameters(
-                        localAdjustmentsModule.getParameters().activeLayerId,
-                        params
-                      );
-                      handleModuleParamsChange('localadjustments', params);
-                    }
-                  }}
-                  onBrushParamsChange={(params) => {
-                    localAdjustmentsModule.updateBrushParameters(params);
-                    handleModuleParamsChange('localadjustments', params);
-                  }}
-                  onCreateLayer={(type, name) => {
-                    const currentImage = imageService.getCurrentImage();
-                    if (currentImage) {
-                      localAdjustmentsModule.createLayer(type, name, currentImage.width, currentImage.height);
-                      handleModuleParamsChange('localadjustments', {});
-                    }
-                  }}
-                  onRemoveLayer={(layerId) => {
-                    localAdjustmentsModule.removeLayer(layerId);
-                    handleModuleParamsChange('localadjustments', {});
-                  }}
-                  onToggleLayer={(layerId, enabled) => {
-                    localAdjustmentsModule.toggleLayer(layerId, enabled);
-                    handleModuleParamsChange('localadjustments', {});
-                  }}
-                  onSetActiveLayer={(layerId) => {
-                    localAdjustmentsModule.setActiveLayer(layerId);
-                  }}
-                  onUpdateLayerOpacity={(layerId, opacity) => {
-                    localAdjustmentsModule.updateLayerOpacity(layerId, opacity);
-                    handleModuleParamsChange('localadjustments', {});
-                  }}
-                />
-              </div>
-            )}
-          </div>
-        )}
 
         {/* Processing Stats */}
         <div className="p-3 bg-dark-850 text-xs text-dark-400">
           <div className="space-y-1">
             <div>Pipeline: {imageProcessingPipeline.getStats().enabledModules} modules active</div>
-            <div>Real-time: 50ms debounce</div>
+            <div>Real-time: 100ms debounce, 4x downscaled preview (main thread)</div>
           </div>
         </div>
       </div>

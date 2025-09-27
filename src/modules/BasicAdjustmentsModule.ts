@@ -7,6 +7,7 @@ export interface BasicAdjParams {
   brightness: number;     // -4.0 to 4.0, default: 0.0
   saturation: number;     // -1.0 to 1.0, default: 0.0
   vibrance: number;       // -1.0 to 1.0, default: 0.0
+  [key: string]: unknown; // Index signature for Record compatibility
 }
 
 export interface BasicAdjProcessingContext {
@@ -52,6 +53,23 @@ export class BasicAdjustmentsModule {
       vibrance: 0.0
     };
     logger.debug('BasicAdj params reset to defaults');
+  }
+
+  autoAdjust(): BasicAdjParams {
+    // Simple auto adjustment algorithm
+    // In a real implementation, this would analyze the image histogram
+    const autoParams: BasicAdjParams = {
+      black_point: 0.02,      // Slight black point lift
+      exposure: 0.2,          // Slight exposure boost
+      contrast: 0.15,         // Moderate contrast increase
+      brightness: 0.0,        // No brightness change
+      saturation: 0.1,        // Slight saturation boost
+      vibrance: 0.15          // Moderate vibrance increase
+    };
+
+    this.params = { ...autoParams };
+    logger.info('BasicAdj auto adjustments applied:', autoParams);
+    return { ...autoParams };
   }
 
   process(input: Float32Array, context: BasicAdjProcessingContext): Float32Array {

@@ -1,4 +1,5 @@
 import { logger } from '../utils/Logger';
+import { isElectron } from '../types/electron';
 
 export interface DriveInfo {
   id: string;
@@ -25,6 +26,8 @@ export interface ImageFileInfo {
   path: string;
   size: number;
   format: string;
+  type: string;
+  lastModified: number;
   dimensions?: { width: number; height: number };
   dateModified: Date;
 }
@@ -50,51 +53,34 @@ export class FileSystemService {
   // Get system drives (Windows)
   async getSystemDrives(): Promise<DriveInfo[]> {
     try {
-      // In Electron, we would use Node.js fs APIs
-      // For now, simulate common Windows drives
-      const drives: DriveInfo[] = [
-        {
-          id: 'c_drive',
-          name: 'Local Disk (C:)',
-          path: 'C:\\',
-          type: 'drive',
+      if (isElectron() && window.electronAPI) {
+        // Use actual Electron file system APIs
+        const drives = await window.electronAPI.getSystemDrives();
+        return drives.map(drive => ({
+          ...drive,
           expanded: false
-        },
-        {
-          id: 'd_drive',
-          name: 'Local Disk (D:)',
-          path: 'D:\\',
-          type: 'drive',
-          expanded: false
-        }
-      ];
-
-      // Add user folders
-      const userFolders: DriveInfo[] = [
-        {
-          id: 'pictures',
-          name: 'Pictures',
-          path: 'C:\\Users\\Pictures',
-          type: 'folder',
-          expanded: false
-        },
-        {
-          id: 'documents',
-          name: 'Documents',
-          path: 'C:\\Users\\Documents',
-          type: 'folder',
-          expanded: false
-        },
-        {
-          id: 'desktop',
-          name: 'Desktop',
-          path: 'C:\\Users\\Desktop',
-          type: 'folder',
-          expanded: false
-        }
-      ];
-
-      return [...drives, ...userFolders];
+        }));
+      } else {
+        // Fallback for browser/development
+        logger.warn('Running in browser mode - using mock data for file system');
+        const drives: DriveInfo[] = [
+          {
+            id: 'c_drive',
+            name: 'Local Disk (C:)',
+            path: 'C:\\',
+            type: 'drive',
+            expanded: false
+          },
+          {
+            id: 'pictures',
+            name: 'Pictures',
+            path: 'C:\\Users\\Pictures',
+            type: 'folder',
+            expanded: false
+          }
+        ];
+        return drives;
+      }
     } catch (error) {
       logger.error('Failed to get system drives:', error);
       return [];
@@ -106,60 +92,54 @@ export class FileSystemService {
     try {
       logger.info(`Getting contents of folder: ${folderPath}`);
 
-      // In Electron, we would use Node.js fs.readdir()
-      // For demo, return mock data based on common folders
-      if (folderPath.includes('Pictures')) {
-        return {
-          folders: [
-            {
-              id: 'camera_roll',
-              name: 'Camera Roll',
-              path: folderPath + '\\Camera Roll',
-              type: 'folder',
-              expanded: false
-            },
-            {
-              id: 'screenshots',
-              name: 'Screenshots',
-              path: folderPath + '\\Screenshots',
-              type: 'folder',
-              expanded: false
-            }
-          ],
-          images: [
-            {
-              id: 'img_001',
-              name: 'IMG_001.jpg',
-              path: folderPath + '\\IMG_001.jpg',
-              size: 2500000,
-              format: 'JPEG',
-              dimensions: { width: 4000, height: 3000 },
-              dateModified: new Date('2024-01-15')
-            },
-            {
-              id: 'raw_001',
-              name: 'DSC_001.orf',
-              path: folderPath + '\\DSC_001.orf',
-              size: 25000000,
-              format: 'ORF',
-              dimensions: { width: 5184, height: 3888 },
-              dateModified: new Date('2024-01-14')
-            },
-            {
-              id: 'img_002',
-              name: 'IMG_002.png',
-              path: folderPath + '\\IMG_002.png',
-              size: 8500000,
-              format: 'PNG',
-              dimensions: { width: 3840, height: 2160 },
-              dateModified: new Date('2024-01-13')
-            }
-          ]
-        };
-      }
+      if (isElectron() && window.electronAPI) {
+        // Use actual Electron file system APIs
+        const contents = await window.electronAPI.getFolderContents(folderPath);
 
-      // Default empty folder
-      return { folders: [], images: [] };
+        // Map the results to our interfaces
+        const folders: FolderInfo[] = contents.folders.map(folder => ({
+          ...folder,
+          expanded: false
+        }));
+
+        const images: ImageFileInfo[] = contents.images.map(image => ({
+          ...image,
+          dateModified: new Date(image.lastModified)
+        }));
+
+        logger.info(`Loaded folder contents: ${folders.length} folders, ${images.length} images`);
+        return { folders, images };
+      } else {
+        // Fallback for browser/development
+        logger.warn('Running in browser mode - using mock data for folder contents');
+        if (folderPath.includes('Pictures')) {
+          return {
+            folders: [
+              {
+                id: 'camera_roll',
+                name: 'Camera Roll',
+                path: folderPath + '\\Camera Roll',
+                type: 'folder',
+                expanded: false
+              }
+            ],
+            images: [
+              {
+                id: 'img_001',
+                name: 'IMG_001.jpg',
+                path: folderPath + '\\IMG_001.jpg',
+                size: 2500000,
+                format: 'JPEG',
+                type: 'image/jpeg',
+                lastModified: new Date('2024-01-15').getTime(),
+                dimensions: { width: 4000, height: 3000 },
+                dateModified: new Date('2024-01-15')
+              }
+            ]
+          };
+        }
+        return { folders: [], images: [] };
+      }
     } catch (error) {
       logger.error(`Failed to get folder contents for ${folderPath}:`, error);
       return { folders: [], images: [] };

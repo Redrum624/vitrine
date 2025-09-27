@@ -1,7 +1,7 @@
 // Darktable module types based on the C source code analysis
 
 export interface ModuleParams {
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 export interface ModuleMetadata {

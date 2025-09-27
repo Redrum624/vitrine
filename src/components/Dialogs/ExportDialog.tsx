@@ -1,17 +1,14 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import {
   Download,
-  Settings,
   Image,
   Palette,
   Zap,
   File,
   X,
-  Check,
-  AlertTriangle,
-  Info
+  AlertTriangle
 } from 'lucide-react';
-import { SliderControl } from '../Controls/SliderControl';
+import SliderControl from '../Controls/SliderControl';
 import { ExportOptions, ExportPreset, exportService } from '../../services/ExportService';
 
 interface ExportDialogProps {
@@ -100,7 +97,7 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
     }
   }, []);
 
-  const handleOptionChange = useCallback((key: keyof ExportOptions, value: any) => {
+  const handleOptionChange = useCallback((key: keyof ExportOptions, value: string | number | boolean | object | undefined) => {
     setExportOptions(prev => ({ ...prev, [key]: value }));
 
     // Clear preset selection if manually changing options
@@ -109,7 +106,7 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
     }
   }, [selectedPreset]);
 
-  const handleOutputSharpeningChange = useCallback((key: string, value: any) => {
+  const handleOutputSharpeningChange = useCallback((key: string, value: string | number | boolean) => {
     setExportOptions(prev => ({
       ...prev,
       outputSharpening: {
@@ -218,7 +215,7 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
             min={1}
             max={100}
             step={1}
-            onChange={(value) => handleOptionChange('quality', value)}
+            onChange={(value: number) => handleOptionChange('quality', value)}
             className="text-sm"
             showPercentage
           />
@@ -464,7 +461,7 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
             min={0}
             max={100}
             step={1}
-            onChange={(value) => handleOutputSharpeningChange('amount', value)}
+            onChange={(value: number) => handleOutputSharpeningChange('amount', value)}
             className="text-sm"
             showPercentage
           />
@@ -475,7 +472,7 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
             min={0.1}
             max={5.0}
             step={0.1}
-            onChange={(value) => handleOutputSharpeningChange('radius', value)}
+            onChange={(value: number) => handleOutputSharpeningChange('radius', value)}
             className="text-sm"
           />
 
@@ -485,7 +482,7 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
             min={0}
             max={255}
             step={1}
-            onChange={(value) => handleOutputSharpeningChange('threshold', value)}
+            onChange={(value: number) => handleOutputSharpeningChange('threshold', value)}
             className="text-sm"
           />
         </div>

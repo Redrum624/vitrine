@@ -30,6 +30,7 @@ export interface RawMetadata {
     camera_wb: number[];
     daylight_wb: number[];
   };
+  [key: string]: unknown; // Index signature for Record compatibility
 }
 
 export interface LibRawOptions {
@@ -101,7 +102,7 @@ export class LibRawService {
 
       // Import the LibRaw WebAssembly module
       const LibRawModule = await import('libraw-wasm');
-      this.LibRaw = LibRawModule.default || LibRawModule;
+      this.LibRaw = (LibRawModule.default || LibRawModule) as LibRawConstructor;
 
       this.isInitialized = true;
       const initTime = performance.now() - startTime;

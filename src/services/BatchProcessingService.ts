@@ -1,8 +1,19 @@
 import { logger } from '../utils/Logger';
 import { imageService } from './ImageService';
 import { imageProcessingPipeline } from './ImageProcessingPipeline';
-import { exportService, ExportOptions, ExportResult } from './ExportService';
+import { exportService, ExportOptions } from './ExportService';
 import { ImageFileInfo } from './FileSystemService';
+
+interface ModuleParameters {
+  [key: string]: unknown;
+}
+
+interface ModuleInterface {
+  getParameters?(): ModuleParameters;
+  getParams?(): ModuleParameters;
+  setParameters?(params: ModuleParameters): void;
+  setParams?(params: ModuleParameters): void;
+}
 
 export interface BatchJob {
   id: string;
@@ -24,7 +35,7 @@ export interface BatchJob {
 
 export interface BatchProcessingSettings {
   // Which modules to apply (if empty, apply all current settings)
-  moduleSettings?: Record<string, any>;
+  moduleSettings?: Record<string, ModuleParameters>;
 
   // Processing options
   useCurrentAdjustments: boolean;
@@ -163,7 +174,11 @@ export class BatchProcessingService {
         preserveMetadata: true,
         includeProcessingHistory: true,
         outputSharpening: {
-          enabled: false
+          enabled: false,
+          amount: 50,
+          radius: 1.0,
+          threshold: 0,
+          media: 'screen'
         }
       }
     }
@@ -235,14 +250,14 @@ export class BatchProcessingService {
 
     try {
       // Capture current pipeline settings if needed
-      let pipelineSettings: any = null;
+      let pipelineSettings: Record<string, ModuleParameters> | null = null;
       if (job.processingSettings.useCurrentAdjustments) {
         pipelineSettings = this.capturePipelineSettings();
       }
 
       // Process each image
       for (let i = 0; i < job.images.length; i++) {
-        if (job.status === 'cancelled') {
+        if ((job.status as string) === 'cancelled') {
           logger.info(`Batch job ${jobId} was cancelled`);
           break;
         }
@@ -272,7 +287,9 @@ export class BatchProcessingService {
       }
 
       // Mark as completed
-      job.status = job.status === 'cancelled' ? 'cancelled' : 'completed';
+      if ((job.status as string) !== 'cancelled') {
+        job.status = 'completed';
+      }
       job.progress.current = job.images.length;
 
       const successful = job.results.filter(r => r.success).length;
@@ -302,7 +319,7 @@ export class BatchProcessingService {
   private async processImage(
     image: ImageFileInfo,
     job: BatchJob,
-    pipelineSettings: any
+    pipelineSettings: Record<string, ModuleParameters> | null
   ): Promise<BatchJobResult> {
     const startTime = Date.now();
 
@@ -375,17 +392,18 @@ export class BatchProcessingService {
   }
 
   // Capture current pipeline settings
-  private capturePipelineSettings(): any {
-    const settings: any = {};
+  private capturePipelineSettings(): Record<string, ModuleParameters> {
+    const settings: Record<string, ModuleParameters> = {};
 
     // Get all pipeline modules and their current settings
     const modules = imageProcessingPipeline.getModules();
     for (const [moduleId, module] of modules) {
       try {
-        if ('getParameters' in module && typeof module.getParameters === 'function') {
-          settings[moduleId] = (module as any).getParameters();
-        } else if ('getParams' in module && typeof module.getParams === 'function') {
-          settings[moduleId] = (module as any).getParams();
+        const moduleInterface = module as ModuleInterface;
+        if ('getParameters' in module && typeof moduleInterface.getParameters === 'function') {
+          settings[moduleId] = moduleInterface.getParameters();
+        } else if ('getParams' in module && typeof moduleInterface.getParams === 'function') {
+          settings[moduleId] = moduleInterface.getParams();
         }
       } catch (error) {
         logger.warn(`Failed to capture settings for module ${moduleId}:`, error);
@@ -397,7 +415,7 @@ export class BatchProcessingService {
   }
 
   // Apply captured pipeline settings
-  private applyPipelineSettings(settings: any): void {
+  private applyPipelineSettings(settings: Record<string, ModuleParameters>): void {
     const modules = imageProcessingPipeline.getModules();
 
     for (const [moduleId, moduleSettings] of Object.entries(settings)) {
@@ -405,10 +423,11 @@ export class BatchProcessingService {
       if (!module) continue;
 
       try {
-        if ('setParameters' in module && typeof module.setParameters === 'function') {
-          (module as any).setParameters(moduleSettings);
-        } else if ('setParams' in module && typeof module.setParams === 'function') {
-          (module as any).setParams(moduleSettings);
+        const moduleInterface = module as ModuleInterface;
+        if ('setParameters' in module && typeof moduleInterface.setParameters === 'function') {
+          moduleInterface.setParameters(moduleSettings);
+        } else if ('setParams' in module && typeof moduleInterface.setParams === 'function') {
+          moduleInterface.setParams(moduleSettings);
         }
       } catch (error) {
         logger.warn(`Failed to apply settings for module ${moduleId}:`, error);

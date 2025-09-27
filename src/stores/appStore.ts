@@ -1,18 +1,25 @@
 import { create } from 'zustand';
 import type { AppState, ImageFile, Layer, ViewportState } from '../types';
 
+interface ProcessedImageData {
+  data: Float32Array;
+  width: number;
+  height: number;
+  isPreview: boolean;
+}
+
 interface AppStore extends AppState {
-  processedImageData: Float32Array | null;
+  processedImageData: Float32Array | ProcessedImageData | null;
   setCurrentImage: (image: ImageFile | null) => void;
   setSelectedTool: (toolId: string | null) => void;
   addLayer: (layer: Layer) => void;
   removeLayer: (layerId: string) => void;
   updateLayer: (layerId: string, updates: Partial<Layer>) => void;
   setViewport: (viewport: Partial<ViewportState>) => void;
-  setProcessedImageData: (data: Float32Array | null) => void;
+  setProcessedImageData: (data: Float32Array | ProcessedImageData | null) => void;
   toggleSidebar: () => void;
   resetZoom: () => void;
-  getCurrentPipelineSettings: () => any;
+  getCurrentPipelineSettings: () => Record<string, unknown>;
 }
 
 export const useAppStore = create<AppStore>((set) => ({

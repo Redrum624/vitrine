@@ -87,7 +87,7 @@ export class ExposureModule {
         validated[paramKey] = Math.max(
           constraint.min,
           Math.min(constraint.max, value)
-        ) as any;
+        ) as number;
       }
     });
 
@@ -198,7 +198,7 @@ export class ExposureModule {
     input: ProcessingContext,
     params: ExposureParams
   ): { output: ProcessingContext; computedExposure: number } {
-    let finalParams = { ...params };
+    const finalParams = { ...params };
     let computedExposure = 0;
 
     if (params.mode === 'automatic') {
@@ -216,6 +216,20 @@ export class ExposureModule {
     return {
       output,
       computedExposure
+    };
+  }
+
+  // Auto exposure adjustment method for UI
+  autoExposure(): ExposureParams {
+    // Simple auto exposure - adjust exposure to brighten mid-tones
+    const autoExposureValue = 0.5; // Start with slight positive exposure
+    const autoBlackLevel = 0.01; // Lift shadows slightly
+
+    return {
+      ...this.currentParams,
+      exposure: autoExposureValue,
+      black: autoBlackLevel,
+      mode: 'manual'
     };
   }
 }

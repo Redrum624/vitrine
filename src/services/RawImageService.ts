@@ -1,6 +1,14 @@
 import { logger } from '../utils/Logger';
 import { advancedRawProcessor, AdvancedRawProcessingOptions } from './AdvancedRawProcessor';
 import { libRawService, LibRawOptions } from './LibRawService';
+import { cameraProfileService } from './CameraProfileService';
+import { advancedDemosaicingService } from './AdvancedDemosaicingService';
+import { rawHistogramService, HistogramData } from './RawHistogramService';
+import { noiseReductionService, NoiseReductionOptions } from './NoiseReductionService';
+import { lensProfileService, LensProfile, LensCorrections } from './LensProfileService';
+import { colorManagementService } from './ColorManagementService';
+import { printService } from './PrintService';
+import { webGalleryService } from './WebGalleryService';
 
 export interface RawImageData {
   width: number;
@@ -10,6 +18,7 @@ export interface RawImageData {
   filePath: string;
   format: string;
   metadata: RawMetadata;
+  histogram?: HistogramData;
 }
 
 export interface RawMetadata {
@@ -24,6 +33,7 @@ export interface RawMetadata {
   orientation?: number;
   dateTime?: string;
   exposureBias?: number;
+  [key: string]: unknown; // Index signature for Record compatibility
 }
 
 // Supported RAW formats
@@ -77,7 +87,7 @@ export class RawImageService {
         logger.info(`RAW image loaded with LibRaw in ${loadTime.toFixed(2)}ms: ${rawData.width}x${rawData.height}`);
 
         return rawData;
-      } catch (libRawError) {
+      } catch (libRawError: unknown) {
         logger.warn('LibRaw processing failed, trying advanced processor fallback:', libRawError);
 
         // Fallback to old advanced processor if available
@@ -88,7 +98,7 @@ export class RawImageService {
           return rawData;
         } catch (advancedError) {
           logger.error('All RAW processing methods failed:', advancedError);
-          throw new Error(`Failed to process RAW file: ${libRawError.message}`);
+          throw new Error(`Failed to process RAW file: ${libRawError instanceof Error ? libRawError.message : String(libRawError)}`);
         }
       }
 
@@ -105,9 +115,9 @@ export class RawImageService {
       // Read the file buffer
       let buffer: ArrayBuffer;
 
-      if (typeof window !== 'undefined' && (window as any).electron) {
+      if (typeof window !== 'undefined' && (window as typeof window & { electron?: { fs: { readFile: (path: string) => Promise<ArrayBuffer> } } }).electron) {
         // Electron environment - use IPC to read file
-        buffer = await (window as any).electron.fs.readFile(filePath);
+        buffer = await (window as typeof window & { electron: { fs: { readFile: (path: string) => Promise<ArrayBuffer> } } }).electron.fs.readFile(filePath);
       } else {
         // Browser environment - file should be provided as ArrayBuffer
         throw new Error('Browser RAW processing requires file buffer, not file path');
@@ -126,7 +136,38 @@ export class RawImageService {
       );
 
       // Convert LibRaw output to our format
-      const floatData = this.convertUint8ToFloat32Array(result.imageData);
+      let floatData = this.convertUint8ToFloat32Array(result.imageData);
+
+      // Apply advanced camera profile if available
+      if (result.metadata.make && result.metadata.model) {
+        const cameraProfile = cameraProfileService.getProfile(result.metadata.make, result.metadata.model);
+        if (cameraProfile) {
+          logger.info(`Applying camera profile: ${cameraProfile.make} ${cameraProfile.model}`);
+          floatData = cameraProfileService.applyCameraProfile(
+            floatData,
+            result.width,
+            result.height,
+            cameraProfile,
+            'D65' // Standard illuminant for most cases
+          );
+        } else {
+          // Try to auto-detect camera profile from EXIF
+          const autoProfile = cameraProfileService.autoDetectProfile({
+            Make: result.metadata.make,
+            Model: result.metadata.model
+          });
+          if (autoProfile) {
+            logger.info(`Auto-detected camera profile: ${autoProfile.make} ${autoProfile.model}`);
+            floatData = cameraProfileService.applyCameraProfile(
+              floatData,
+              result.width,
+              result.height,
+              autoProfile,
+              'D65'
+            );
+          }
+        }
+      }
 
       const rawData: RawImageData = {
         width: result.width,
@@ -441,6 +482,466 @@ export class RawImageService {
   // Get LibRaw service statistics
   getLibRawStats() {
     return libRawService.getStats();
+  }
+
+  /**
+   * Apply advanced demosaicing to RAW data
+   * This method provides access to professional demosaicing algorithms
+   */
+  async applyAdvancedDemosaicing(
+    rawData: Float32Array,
+    width: number,
+    height: number,
+    algorithm: 'VNG' | 'AHD' | 'LMMSE' = 'VNG',
+    bayerPattern: 'RGGB' | 'BGGR' | 'GRBG' | 'GBRG' = 'RGGB'
+  ): Promise<Float32Array> {
+    logger.info(`Applying ${algorithm} demosaicing to ${width}x${height} image`);
+
+    try {
+      switch (algorithm) {
+        case 'VNG':
+          return await advancedDemosaicingService.demosaicVNG(rawData, width, height, bayerPattern);
+        case 'AHD':
+          return await advancedDemosaicingService.demosaicAHD(rawData, width, height, bayerPattern);
+        case 'LMMSE':
+          return await advancedDemosaicingService.demosaicLMMSE(rawData, width, height, bayerPattern, 0.01);
+        default:
+          throw new Error(`Unsupported demosaicing algorithm: ${algorithm}`);
+      }
+    } catch (error) {
+      logger.error(`Advanced demosaicing failed:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Process RAW file with professional-grade settings
+   * This method combines LibRaw processing with advanced camera profiles and demosaicing
+   */
+  async processRawWithProfessionalQuality(
+    filePath: string,
+    options: {
+      demosaicAlgorithm?: 'VNG' | 'AHD' | 'LMMSE';
+      bayerPattern?: 'RGGB' | 'BGGR' | 'GRBG' | 'GBRG';
+      applyNoiseProfiling?: boolean;
+      applyLensCorrection?: boolean;
+      whiteBalanceMode?: 'camera' | 'auto' | 'daylight' | 'tungsten';
+      applyNoiseReduction?: boolean;
+      noiseReductionOptions?: Partial<NoiseReductionOptions>;
+    } = {}
+  ): Promise<RawImageData> {
+    logger.info(`Processing RAW file with professional quality settings: ${filePath}`);
+
+    const {
+      demosaicAlgorithm = 'VNG',
+      bayerPattern = 'RGGB',
+      whiteBalanceMode = 'camera',
+      applyNoiseReduction = false,
+      noiseReductionOptions = {}
+    } = options;
+
+    try {
+      // First, load the RAW file with standard processing
+      const rawData = await this.loadRawImage(filePath);
+
+      // Apply advanced demosaicing if requested
+      if (demosaicAlgorithm !== 'VNG') {
+        logger.info(`Applying advanced ${demosaicAlgorithm} demosaicing`);
+        rawData.data = await this.applyAdvancedDemosaicing(
+          rawData.data,
+          rawData.width,
+          rawData.height,
+          demosaicAlgorithm,
+          bayerPattern
+        );
+      }
+
+      // Apply camera-specific white balance if available
+      if (rawData.metadata.make && rawData.metadata.model) {
+        const cameraProfile = cameraProfileService.getProfile(rawData.metadata.make, rawData.metadata.model);
+        if (cameraProfile && whiteBalanceMode !== 'camera') {
+          const wbType = whiteBalanceMode as keyof typeof cameraProfile.whiteBalance;
+          rawData.data = cameraProfileService.applyCameraWhiteBalance(
+            rawData.data,
+            cameraProfile,
+            wbType
+          );
+        }
+
+        // Apply camera tone curve if available
+        if (cameraProfile && cameraProfile.toneCurve) {
+          rawData.data = cameraProfileService.applyCameraToneCurve(rawData.data, cameraProfile);
+        }
+      }
+
+      // Apply noise reduction if requested
+      if (applyNoiseReduction) {
+        logger.info('Applying noise reduction to RAW image');
+
+        const defaultNoiseOptions: NoiseReductionOptions = {
+          algorithm: 'wavelet',
+          strength: 25,
+          detail: 75,
+          chromaStrength: 20,
+          luminanceStrength: 30,
+          edgeThreshold: 0.1,
+          iterations: 1
+        };
+
+        const finalNoiseOptions = { ...defaultNoiseOptions, ...noiseReductionOptions };
+
+        rawData.data = await noiseReductionService.applyNoiseReduction(
+          rawData.data,
+          rawData.width,
+          rawData.height,
+          finalNoiseOptions
+        );
+      }
+
+      logger.info(`Professional RAW processing completed for ${filePath}`);
+      return rawData;
+
+    } catch (error) {
+      logger.error(`Professional RAW processing failed:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get available camera profiles
+   */
+  getAvailableCameraProfiles() {
+    return cameraProfileService.getAllProfiles();
+  }
+
+  /**
+   * Get camera profiles by manufacturer
+   */
+  getCameraProfilesByMake(make: string) {
+    return cameraProfileService.getProfilesByMake(make);
+  }
+
+  /**
+   * Generate histogram for RAW image data
+   */
+  async generateHistogramForRawData(
+    imageData: Float32Array,
+    width: number,
+    height: number,
+    options?: {
+      bins?: number;
+      bitDepth?: 8 | 16;
+      shadowThreshold?: number;
+      highlightThreshold?: number;
+      enableClippingAnalysis?: boolean;
+    }
+  ): Promise<HistogramData> {
+    logger.info(`Generating histogram for ${width}x${height} RAW image`);
+
+    try {
+      const histogram = rawHistogramService.generateHistogram(
+        imageData,
+        width,
+        height,
+        {
+          bins: options?.bins || 256,
+          bitDepth: options?.bitDepth || 16,
+          shadowThreshold: options?.shadowThreshold || 0.02,
+          highlightThreshold: options?.highlightThreshold || 0.98,
+          enableClippingAnalysis: options?.enableClippingAnalysis !== false
+        }
+      );
+
+      return histogram;
+    } catch (error) {
+      logger.error('Failed to generate histogram:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Load RAW image with histogram generation
+   */
+  async loadRawImageWithHistogram(
+    filePath: string,
+    options?: Partial<AdvancedRawProcessingOptions>,
+    histogramOptions?: {
+      generateHistogram?: boolean;
+      bins?: number;
+      bitDepth?: 8 | 16;
+      shadowThreshold?: number;
+      highlightThreshold?: number;
+    }
+  ): Promise<RawImageData> {
+    const rawData = await this.loadRawImage(filePath, options);
+
+    // Generate histogram if requested
+    if (histogramOptions?.generateHistogram !== false) {
+      try {
+        const histogram = await this.generateHistogramForRawData(
+          rawData.data,
+          rawData.width,
+          rawData.height,
+          histogramOptions
+        );
+
+        return {
+          ...rawData,
+          histogram
+        };
+      } catch (error) {
+        logger.warn('Failed to generate histogram, returning image data without histogram:', error);
+        return rawData;
+      }
+    }
+
+    return rawData;
+  }
+
+  /**
+   * Analyze image exposure and get recommendations
+   */
+  analyzeImageExposure(imageData: Float32Array, width: number, height: number): {
+    exposureAdjustment: number;
+    shadowsAdjustment: number;
+    highlightsAdjustment: number;
+    reasoning: string;
+  } {
+    try {
+      const histogram = rawHistogramService.generateHistogram(imageData, width, height, {
+        bins: 256,
+        bitDepth: 16,
+        shadowThreshold: 0.02,
+        highlightThreshold: 0.98,
+        enableClippingAnalysis: true
+      });
+
+      return rawHistogramService.getRecommendedExposureAdjustment(histogram);
+    } catch (error) {
+      logger.error('Failed to analyze image exposure:', error);
+      return {
+        exposureAdjustment: 0,
+        shadowsAdjustment: 0,
+        highlightsAdjustment: 0,
+        reasoning: 'Unable to analyze exposure'
+      };
+    }
+  }
+
+  /**
+   * Apply noise reduction to image data
+   */
+  async applyNoiseReduction(
+    imageData: Float32Array,
+    width: number,
+    height: number,
+    options: NoiseReductionOptions
+  ): Promise<Float32Array> {
+    logger.info('Applying noise reduction to image data');
+
+    try {
+      return await noiseReductionService.applyNoiseReduction(imageData, width, height, options);
+    } catch (error) {
+      logger.error('Failed to apply noise reduction:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Estimate noise level in image
+   */
+  estimateImageNoise(imageData: Float32Array, width: number, height: number) {
+    try {
+      return noiseReductionService.estimateNoiseLevel(imageData, width, height);
+    } catch (error) {
+      logger.error('Failed to estimate noise level:', error);
+      return {
+        luminanceNoise: 0,
+        chrominanceNoise: 0,
+        channelNoise: { red: 0, green: 0, blue: 0 }
+      };
+    }
+  }
+
+  /**
+   * Get available noise profiles
+   */
+  getAvailableNoiseProfiles() {
+    return noiseReductionService.getAllNoiseProfiles();
+  }
+
+  /**
+   * Get noise profile for specific camera and ISO
+   */
+  getNoiseProfile(camera: string, model: string, iso: number) {
+    return noiseReductionService.getNoiseProfile(camera, model, iso);
+  }
+
+  /**
+   * Detect lens from image metadata
+   */
+  detectLensFromMetadata(metadata: RawMetadata) {
+    try {
+      return lensProfileService.detectLens(metadata);
+    } catch (error) {
+      logger.error('Failed to detect lens from metadata:', error);
+      return { confidence: 0 };
+    }
+  }
+
+  /**
+   * Get lens profile for specific camera and lens
+   */
+  getLensProfile(camera: string, lens: string, focalLength?: number, aperture?: number): LensProfile | null {
+    return lensProfileService.getLensProfile(camera, lens, focalLength, aperture);
+  }
+
+  /**
+   * Apply lens corrections to image data
+   */
+  async applyLensCorrections(
+    imageData: Float32Array,
+    width: number,
+    height: number,
+    profile: LensProfile,
+    corrections: LensCorrections
+  ): Promise<Float32Array> {
+    logger.info('Applying lens corrections to image data');
+
+    try {
+      return await lensProfileService.applyLensCorrections(imageData, width, height, profile, corrections);
+    } catch (error) {
+      logger.error('Failed to apply lens corrections:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get available lens profiles for a camera
+   */
+  getLensProfilesForCamera(camera: string) {
+    return lensProfileService.getLensProfilesForCamera(camera);
+  }
+
+  /**
+   * Get all supported cameras
+   */
+  getSupportedCameras() {
+    return lensProfileService.getSupportedCameras();
+  }
+
+  /**
+   * Estimate lens distortion from image content
+   */
+  estimateLensDistortion(imageData: Float32Array, width: number, height: number) {
+    try {
+      return lensProfileService.estimateDistortionFromImage(imageData, width, height);
+    } catch (error) {
+      logger.error('Failed to estimate lens distortion:', error);
+      return { k1: 0, k2: 0, confidence: 0 };
+    }
+  }
+
+  /**
+   * Get available color profiles
+   */
+  getColorProfiles(type?: 'input' | 'display' | 'output') {
+    return colorManagementService.getColorProfilesByType(type);
+  }
+
+  /**
+   * Get available print profiles
+   */
+  getPrintProfiles() {
+    return colorManagementService.getPrintProfiles();
+  }
+
+  /**
+   * Apply soft proofing for print preview
+   */
+  async applySoftProof(imageData: Float32Array, width: number, height: number, options: any) {
+    try {
+      return await colorManagementService.applySoftProof(imageData, width, height, options);
+    } catch (error) {
+      logger.error('Failed to apply soft proof:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Convert image to different color profile
+   */
+  async convertColorProfile(imageData: Float32Array, width: number, height: number, options: any) {
+    try {
+      return await colorManagementService.convertColorProfile(imageData, width, height, options);
+    } catch (error) {
+      logger.error('Failed to convert color profile:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get available paper sizes
+   */
+  getPaperSizes() {
+    return printService.getPaperSizes();
+  }
+
+  /**
+   * Get available print layouts
+   */
+  getPrintLayouts() {
+    return printService.getPrintLayouts();
+  }
+
+  /**
+   * Create print job
+   */
+  async createPrintJob(imageData: Float32Array, width: number, height: number, settings: any) {
+    try {
+      return await printService.createPrintJob(imageData, width, height, settings);
+    } catch (error) {
+      logger.error('Failed to create print job:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get print jobs
+   */
+  getPrintJobs() {
+    return printService.getAllPrintJobs();
+  }
+
+  /**
+   * Get available gallery themes
+   */
+  getGalleryThemes() {
+    return webGalleryService.getThemes();
+  }
+
+  /**
+   * Generate web gallery
+   */
+  async generateWebGallery(images: any[], settings: any) {
+    try {
+      return await webGalleryService.generateGallery(images, settings);
+    } catch (error) {
+      logger.error('Failed to generate web gallery:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Export gallery as downloadable file
+   */
+  async exportGallery(galleryOutput: any, filename: string) {
+    try {
+      return await webGalleryService.exportGallery(galleryOutput, filename);
+    } catch (error) {
+      logger.error('Failed to export gallery:', error);
+      throw error;
+    }
   }
 }
 

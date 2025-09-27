@@ -17,7 +17,7 @@ export function WhiteBalanceModuleComponent({
   const [params, setParams] = useState<WhiteBalanceParams>(module.getParams());
   const [showTooltip, setShowTooltip] = useState<string | null>(null);
 
-  const updateParam = useCallback((key: keyof WhiteBalanceParams, value: any) => {
+  const updateParam = useCallback((key: keyof WhiteBalanceParams, value: number | string) => {
     const newParams = { ...params, [key]: value };
     setParams(newParams);
     module.setParams({ [key]: value });
@@ -25,7 +25,7 @@ export function WhiteBalanceModuleComponent({
     logger.debug(`WhiteBalance ${key} updated:`, value);
   }, [params, module, onParamsChange]);
 
-  const resetParam = useCallback((key: keyof WhiteBalanceParams, defaultValue: any) => {
+  const resetParam = useCallback((key: keyof WhiteBalanceParams, defaultValue: number | string) => {
     updateParam(key, defaultValue);
   }, [updateParam]);
 
@@ -140,15 +140,15 @@ export function WhiteBalanceModuleComponent({
               <input
                 type="number"
                 value={Math.round(params.temperature)}
-                onChange={(e) => updateParam('temperature', Math.max(2000, Math.min(50000, parseInt(e.target.value) || 6500)))}
+                onChange={(e) => updateParam('temperature', Math.max(2000, Math.min(12000, parseInt(e.target.value) || 5500)))}
                 className="w-16 px-1 py-0.5 text-xs bg-dark-800 border border-dark-700 rounded text-dark-300 text-right disabled:opacity-50"
                 step="100"
                 min="2000"
-                max="50000"
+                max="12000"
               />
               <span className="text-xs text-dark-300">K</span>
               <button
-                onClick={() => resetParam('temperature', 6500)}
+                onClick={() => resetParam('temperature', 5500)}
                 className="p-1 hover:bg-dark-700 rounded text-dark-300"
                 title="Reset temperature"
               >
@@ -160,16 +160,17 @@ export function WhiteBalanceModuleComponent({
             <input
               type="range"
               min="2000"
-              max="50000"
+              max="12000"
               step="100"
-              value={params.temperature}
+              value={Math.min(12000, params.temperature)}
               onChange={(e) => updateParam('temperature', parseInt(e.target.value))}
-              className="w-full h-2 bg-gradient-to-r from-orange-400 via-white to-blue-400 rounded-lg appearance-none cursor-pointer slider-thumb"
+              className="w-full h-2 bg-gradient-to-r from-blue-400 via-white to-orange-400 rounded-lg appearance-none cursor-pointer slider-thumb"
             />
           </div>
           <div className="flex justify-between text-xs text-dark-400">
-            <span>Warm (2000K)</span>
-            <span>Cool (50000K)</span>
+            <span>Cool (2000K)</span>
+            <span>Neutral (5500K)</span>
+            <span>Warm (12000K)</span>
           </div>
         </div>
 

@@ -20,6 +20,8 @@ export interface PipelineModule {
   getName(): string;
   process(input: Float32Array, context: ProcessingContext): Float32Array;
   isEnabled?: boolean;
+  getParams?(): Record<string, unknown>;
+  resetParams?(): void;
 }
 
 export class ImageProcessingPipeline {
@@ -93,7 +95,7 @@ export class ImageProcessingPipeline {
   setModuleEnabled(moduleId: string, enabled: boolean): void {
     const module = this.modules.get(moduleId);
     if (module) {
-      (module as any).isEnabled = enabled;
+      module.isEnabled = enabled;
       logger.debug(`Module ${moduleId} ${enabled ? 'enabled' : 'disabled'}`);
     }
   }
@@ -106,8 +108,12 @@ export class ImageProcessingPipeline {
       channels: context.channels
     };
 
+    // For small preview images, always use main thread to avoid worker overhead
+    const imageSize = context.width * context.height;
+    const isSmallPreview = imageSize < 256 * 256; // Less than 256x256 pixels
+
     // Check if we should use Web Workers for performance
-    if (useWebWorkers && webWorkerImageProcessor.shouldUseWorkers(imageData)) {
+    if (useWebWorkers && !isSmallPreview && webWorkerImageProcessor.shouldUseWorkers(imageData)) {
       return this.processWithWebWorkers(input, context);
     } else {
       return this.processOnMainThread(input, context);
@@ -130,7 +136,7 @@ export class ImageProcessingPipeline {
           continue;
         }
 
-        const isEnabled = (module as any).isEnabled !== false;
+        const isEnabled = module.isEnabled !== false;
         const params = this.getModuleParams(module, moduleId);
 
         pipeline.push({
@@ -182,7 +188,7 @@ export class ImageProcessingPipeline {
         }
 
         // Check if module is enabled (default to true if not specified)
-        const isEnabled = (module as any).isEnabled !== false;
+        const isEnabled = module.isEnabled !== false;
         if (!isEnabled) {
           logger.debug(`Skipping disabled module: ${module.getName()}`);
           continue;
@@ -192,7 +198,7 @@ export class ImageProcessingPipeline {
 
         try {
           logger.debug(`Processing module: ${module.getName()} (${moduleId})`);
-          currentData = module.process(currentData, context) as any;
+          currentData = module.process(currentData, context);
 
           const moduleTime = performance.now() - moduleStartTime;
           logger.debug(`Module ${module.getName()} completed in ${moduleTime.toFixed(2)}ms`);
@@ -214,35 +220,45 @@ export class ImageProcessingPipeline {
     }
   }
 
-  private getModuleParams(module: PipelineModule, _moduleId: string): any {
+  private getModuleParams(module: PipelineModule, _moduleId: string): Record<string, unknown> {
     // Extract parameters from different module types
     try {
+      const moduleWithGetter = module as PipelineModule & {
+        getExposureModule?(): { getParams(): Record<string, unknown> };
+        getWhiteBalanceModule?(): { getParams(): Record<string, unknown> };
+        getBasicAdjustmentsModule?(): { getParams(): Record<string, unknown> };
+        getToneCurveModule?(): { getParams(): Record<string, unknown> };
+        getColorBalanceModule?(): { getParams(): Record<string, unknown> };
+        getShadowsHighlightsModule?(): { getParams(): Record<string, unknown> };
+        getParameters?(): Record<string, unknown>;
+      };
+
       // Handle pipeline adapter modules
-      if ('getExposureModule' in module) {
-        return (module as any).getExposureModule().getParams();
+      if (moduleWithGetter.getExposureModule) {
+        return moduleWithGetter.getExposureModule().getParams();
       }
-      if ('getWhiteBalanceModule' in module) {
-        return (module as any).getWhiteBalanceModule().getParams();
+      if (moduleWithGetter.getWhiteBalanceModule) {
+        return moduleWithGetter.getWhiteBalanceModule().getParams();
       }
-      if ('getBasicAdjustmentsModule' in module) {
-        return (module as any).getBasicAdjustmentsModule().getParams();
+      if (moduleWithGetter.getBasicAdjustmentsModule) {
+        return moduleWithGetter.getBasicAdjustmentsModule().getParams();
       }
-      if ('getToneCurveModule' in module) {
-        return (module as any).getToneCurveModule().getParams();
+      if (moduleWithGetter.getToneCurveModule) {
+        return moduleWithGetter.getToneCurveModule().getParams();
       }
-      if ('getColorBalanceModule' in module) {
-        return (module as any).getColorBalanceModule().getParams();
+      if (moduleWithGetter.getColorBalanceModule) {
+        return moduleWithGetter.getColorBalanceModule().getParams();
       }
-      if ('getShadowsHighlightsModule' in module) {
-        return (module as any).getShadowsHighlightsModule().getParams();
+      if (moduleWithGetter.getShadowsHighlightsModule) {
+        return moduleWithGetter.getShadowsHighlightsModule().getParams();
       }
-      if ('getParameters' in module) {
-        return (module as any).getParameters();
+      if (moduleWithGetter.getParameters) {
+        return moduleWithGetter.getParameters();
       }
 
       // Handle direct module types
-      if ('getParams' in module) {
-        return (module as any).getParams();
+      if (module.getParams) {
+        return module.getParams();
       }
 
       // Default empty params
@@ -273,7 +289,7 @@ export class ImageProcessingPipeline {
     moduleNames: string[];
   } {
     const enabledCount = Array.from(this.modules.values())
-      .filter(module => (module as any).isEnabled !== false)
+      .filter(module => module.isEnabled !== false)
       .length;
 
     return {
@@ -289,8 +305,8 @@ export class ImageProcessingPipeline {
     logger.info('Resetting all modules to default parameters');
 
     for (const module of this.modules.values()) {
-      if ('resetParams' in module && typeof module.resetParams === 'function') {
-        (module as any).resetParams();
+      if (module.resetParams) {
+        module.resetParams();
       }
     }
   }

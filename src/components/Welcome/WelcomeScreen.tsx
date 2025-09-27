@@ -1,9 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Camera,
   Image,
   Folder,
-  Download,
   BookOpen,
   Package,
   Star,
@@ -15,7 +14,6 @@ import {
   Printer,
   Globe
 } from 'lucide-react';
-import { electronService } from '../../services/ElectronService';
 import { logger } from '../../utils/Logger';
 
 interface WelcomeScreenProps {

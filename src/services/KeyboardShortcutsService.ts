@@ -7,15 +7,19 @@ export interface KeyboardShortcut {
   shiftKey?: boolean;
   altKey?: boolean;
   description: string;
-  category: 'file' | 'edit' | 'view' | 'tools' | 'processing';
+  category: 'file' | 'edit' | 'view' | 'tools' | 'processing' | 'help';
   action: () => void;
 }
 
 export class KeyboardShortcutsService {
   private shortcuts: Map<string, KeyboardShortcut> = new Map();
   private isEnabled = true;
+  // FIXED: Store bound reference for proper cleanup
+  private boundHandleKeyDown: (event: KeyboardEvent) => void;
 
   constructor() {
+    // FIXED: Create bound reference once
+    this.boundHandleKeyDown = this.handleKeyDown.bind(this);
     this.setupEventListeners();
   }
 
@@ -68,7 +72,8 @@ export class KeyboardShortcutsService {
   }
 
   private setupEventListeners(): void {
-    document.addEventListener('keydown', this.handleKeyDown.bind(this), true);
+    // FIXED: Use bound reference
+    document.addEventListener('keydown', this.boundHandleKeyDown, true);
   }
 
   private handleKeyDown(event: KeyboardEvent): void {
@@ -113,10 +118,11 @@ export class KeyboardShortcutsService {
     return parts.join('+');
   }
 
-  // Cleanup
+  // FIXED: Use bound reference for proper cleanup
   destroy(): void {
-    document.removeEventListener('keydown', this.handleKeyDown.bind(this), true);
+    document.removeEventListener('keydown', this.boundHandleKeyDown, true);
     this.shortcuts.clear();
+    logger.info('Keyboard shortcuts service destroyed');
   }
 }
 

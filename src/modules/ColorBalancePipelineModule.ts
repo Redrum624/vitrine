@@ -30,21 +30,20 @@ export class ColorBalancePipelineModule implements PipelineModule {
 
     const startTime = performance.now();
 
-    // Convert to darktable ImageData format
-    const imageData = {
+    // Create processing context for the color balance module
+    const colorBalanceContext = {
       width: context.width,
       height: context.height,
-      data: input,
       channels: context.channels
     };
 
     // Process using the color balance module
-    const processedImageData = this.colorBalanceModule.process(imageData);
+    const output = this.colorBalanceModule.process(input, colorBalanceContext);
 
     const processTime = performance.now() - startTime;
     logger.debug(`ColorBalance pipeline processing: ${processTime.toFixed(2)}ms`);
 
-    return processedImageData.data;
+    return output;
   }
 
   // Expose the underlying module for UI access
@@ -55,7 +54,6 @@ export class ColorBalancePipelineModule implements PipelineModule {
   // Enable/disable the module
   setEnabled(enabled: boolean): void {
     this.isEnabled = enabled;
-    this.colorBalanceModule.flags.enabled = enabled;
     logger.debug(`ColorBalance module ${enabled ? 'enabled' : 'disabled'}`);
   }
 
@@ -65,7 +63,7 @@ export class ColorBalancePipelineModule implements PipelineModule {
 
   // Reset module to defaults
   reset(): void {
-    this.colorBalanceModule.reset();
+    this.colorBalanceModule.resetParams();
     logger.info('ColorBalance module reset to defaults');
   }
 }

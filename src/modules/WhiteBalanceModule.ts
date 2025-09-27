@@ -1,10 +1,11 @@
 import { logger } from '../utils/Logger';
 
 export interface WhiteBalanceParams {
-  temperature: number;    // 2000K to 50000K, default: 6500K
+  temperature: number;    // 2000K to 50000K, default: 5500K (neutral daylight)
   tint: number;          // -100.0 to 100.0, default: 0.0
   auto: boolean;         // Auto white balance enabled
   preset: string;        // 'custom' | 'daylight' | 'cloudy' | 'tungsten' | 'fluorescent' | 'flash'
+  [key: string]: unknown; // Index signature for Record compatibility
 }
 
 export interface WhiteBalanceProcessingContext {
@@ -15,7 +16,7 @@ export interface WhiteBalanceProcessingContext {
 
 // White balance presets (approximate values)
 export const WHITE_BALANCE_PRESETS = {
-  custom: { temperature: 6500, tint: 0 },
+  custom: { temperature: 5500, tint: 0 }, // Changed to neutral daylight
   daylight: { temperature: 5500, tint: 0 },
   cloudy: { temperature: 6000, tint: 0 },
   shade: { temperature: 7500, tint: 0 },
@@ -26,7 +27,7 @@ export const WHITE_BALANCE_PRESETS = {
 
 export class WhiteBalanceModule {
   private params: WhiteBalanceParams = {
-    temperature: 6500,
+    temperature: 5500, // Changed to neutral daylight
     tint: 0.0,
     auto: false,
     preset: 'custom'
@@ -63,7 +64,7 @@ export class WhiteBalanceModule {
 
   resetParams(): void {
     this.params = {
-      temperature: 6500,
+      temperature: 5500, // Changed to neutral daylight
       tint: 0.0,
       auto: false,
       preset: 'custom'

@@ -1,7 +1,6 @@
 import React from 'react';
 import { Clock, Image, Cpu, HardDrive, Zap, Activity } from 'lucide-react';
 import { useAppStore } from '../../stores/appStore';
-import { imageService } from '../../services/ImageService';
 
 interface StatusBarProps {
   currentImage?: {
@@ -56,12 +55,22 @@ export function StatusBar({ currentImage, processingStats }: StatusBarProps) {
   // Get memory usage (if available)
   const getMemoryInfo = (): string => {
     if ('memory' in performance) {
-      const memory = (performance as any).memory;
-      const used = memory.usedJSHeapSize / 1024 / 1024;
-      return `${used.toFixed(1)} MB`;
+      const memory = (performance as PerformanceWithMemory).memory;
+      if (memory) {
+        const used = memory.usedJSHeapSize / 1024 / 1024;
+        return `${used.toFixed(1)} MB`;
+      }
     }
     return '';
   };
+
+  interface PerformanceWithMemory {
+    memory?: {
+      usedJSHeapSize: number;
+      totalJSHeapSize: number;
+      jsHeapSizeLimit: number;
+    };
+  }
 
   return (
     <div className="h-6 bg-dark-850 border-t border-dark-700 flex items-center justify-between px-4 text-xs text-dark-400 no-select">
@@ -122,10 +131,6 @@ export function StatusBar({ currentImage, processingStats }: StatusBarProps) {
 
       {/* Right side - System info */}
       <div className="flex items-center space-x-4">
-        {/* Zoom level */}
-        <span>{Math.round(viewport.zoom * 100)}%</span>
-
-        <div className="w-px h-3 bg-dark-600" />
 
         {/* Memory usage */}
         {getMemoryInfo() && (

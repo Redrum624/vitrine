@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { RotateCcw, Info } from 'lucide-react';
+import { RotateCcw, Info, Zap } from 'lucide-react';
 import { BasicAdjustmentsModule, BasicAdjParams } from '../../modules/BasicAdjustmentsModule';
 import { logger } from '../../utils/Logger';
 
@@ -53,13 +53,28 @@ export function BasicAdjustmentsModuleComponent({
             <Info className="w-4 h-4" />
           </button>
         </div>
-        <button
-          onClick={resetAll}
-          className="p-1 hover:bg-dark-700 rounded transition-professional text-dark-300 disabled:opacity-50"
-          title="Reset all parameters"
-        >
-          <RotateCcw className="w-4 h-4" />
-        </button>
+        <div className="flex items-center space-x-1">
+          <button
+            onClick={() => {
+              // Auto adjust based on histogram analysis
+              const autoParams = module.autoAdjust();
+              setParams(autoParams);
+              onParamsChange?.(autoParams);
+              logger.info('Auto adjustments applied');
+            }}
+            className="p-1 hover:bg-dark-700 rounded text-dark-300"
+            title="Auto adjust basic parameters"
+          >
+            <Zap className="w-4 h-4" />
+          </button>
+          <button
+            onClick={resetAll}
+            className="p-1 hover:bg-dark-700 rounded transition-professional text-dark-300 disabled:opacity-50"
+            title="Reset all parameters"
+          >
+            <RotateCcw className="w-4 h-4" />
+          </button>
+        </div>
       </div>
 
       {/* Tooltip */}
@@ -103,7 +118,7 @@ export function BasicAdjustmentsModuleComponent({
               step="0.1"
               value={params.exposure}
               onChange={(e) => updateParam('exposure', parseFloat(e.target.value))}
-              className="w-full h-2 bg-dark-700 rounded-lg appearance-none cursor-pointer slider-thumb"
+              className="w-full h-2 bg-gray-300 rounded-lg appearance-none cursor-pointer slider-thumb visible-track"
             />
           </div>
         </div>
@@ -139,7 +154,7 @@ export function BasicAdjustmentsModuleComponent({
               step="0.01"
               value={params.black_point}
               onChange={(e) => updateParam('black_point', parseFloat(e.target.value))}
-              className="w-full h-2 bg-dark-700 rounded-lg appearance-none cursor-pointer slider-thumb"
+              className="w-full h-2 bg-gray-300 rounded-lg appearance-none cursor-pointer slider-thumb visible-track"
             />
           </div>
         </div>
@@ -152,11 +167,11 @@ export function BasicAdjustmentsModuleComponent({
               <input
                 type="number"
                 value={formatValue(params.contrast, 2)}
-                onChange={(e) => updateParam('contrast', Math.max(-1, Math.min(5, parseFloat(e.target.value) || 0)))}
+                onChange={(e) => updateParam('contrast', Math.max(-2.5, Math.min(2.5, parseFloat(e.target.value) || 0)))}
                 className="w-16 px-1 py-0.5 text-xs bg-dark-800 border border-dark-700 rounded text-dark-300 text-right disabled:opacity-50"
                 step="0.1"
-                min="-1"
-                max="5"
+                min="-2.5"
+                max="2.5"
               />
               <button
                 onClick={() => resetParam('contrast', 0.0)}
@@ -170,12 +185,12 @@ export function BasicAdjustmentsModuleComponent({
           <div className="relative">
             <input
               type="range"
-              min="-1"
-              max="5"
+              min="-2.5"
+              max="2.5"
               step="0.1"
               value={params.contrast}
               onChange={(e) => updateParam('contrast', parseFloat(e.target.value))}
-              className="w-full h-2 bg-dark-700 rounded-lg appearance-none cursor-pointer slider-thumb"
+              className="w-full h-2 bg-gray-300 rounded-lg appearance-none cursor-pointer slider-thumb visible-track"
             />
           </div>
         </div>
@@ -211,7 +226,7 @@ export function BasicAdjustmentsModuleComponent({
               step="0.1"
               value={params.brightness}
               onChange={(e) => updateParam('brightness', parseFloat(e.target.value))}
-              className="w-full h-2 bg-dark-700 rounded-lg appearance-none cursor-pointer slider-thumb"
+              className="w-full h-2 bg-gray-300 rounded-lg appearance-none cursor-pointer slider-thumb visible-track"
             />
           </div>
         </div>
@@ -247,7 +262,7 @@ export function BasicAdjustmentsModuleComponent({
               step="0.05"
               value={params.saturation}
               onChange={(e) => updateParam('saturation', parseFloat(e.target.value))}
-              className="w-full h-2 bg-dark-700 rounded-lg appearance-none cursor-pointer slider-thumb"
+              className="w-full h-2 bg-gray-300 rounded-lg appearance-none cursor-pointer slider-thumb visible-track"
             />
           </div>
         </div>
@@ -283,7 +298,7 @@ export function BasicAdjustmentsModuleComponent({
               step="0.05"
               value={params.vibrance}
               onChange={(e) => updateParam('vibrance', parseFloat(e.target.value))}
-              className="w-full h-2 bg-dark-700 rounded-lg appearance-none cursor-pointer slider-thumb"
+              className="w-full h-2 bg-gray-300 rounded-lg appearance-none cursor-pointer slider-thumb visible-track"
             />
           </div>
         </div>

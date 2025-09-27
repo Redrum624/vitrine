@@ -1,11 +1,22 @@
 // Enhanced logging system with automatic log capture
+interface PerformanceWithMemory {
+  now(): number;
+  timeOrigin?: number;
+  memory?: {
+    usedJSHeapSize: number;
+    totalJSHeapSize: number;
+    jsHeapSizeLimit: number;
+  };
+}
+
 export interface LogEntry {
   timestamp: Date;
   level: 'debug' | 'info' | 'warn' | 'error';
   message: string;
-  data?: any;
+  data?: unknown;
   source: 'renderer' | 'main' | 'preload';
   stack?: string;
+  [key: string]: unknown; // Index signature for Record compatibility
 }
 
 class Logger {
@@ -73,7 +84,7 @@ class Logger {
     });
   }
 
-  private formatMessage(args: any[]): string {
+  private formatMessage(args: unknown[]): string {
     return args.map(arg => {
       if (typeof arg === 'string') return arg;
       if (arg instanceof Error) return arg.message;
@@ -153,7 +164,7 @@ class Logger {
   }
 
   // Manual logging methods (for structured logging)
-  public debug(message: string, data?: any) {
+  public debug(message: string, data?: unknown) {
     this.addLog('debug', message);
     if (data !== undefined) {
       this.originalConsole.debug(message, data);
@@ -162,7 +173,7 @@ class Logger {
     }
   }
 
-  public info(message: string, data?: any) {
+  public info(message: string, data?: unknown) {
     this.addLog('info', message);
     if (data !== undefined) {
       this.originalConsole.info(message, data);
@@ -171,7 +182,7 @@ class Logger {
     }
   }
 
-  public warn(message: string, data?: any) {
+  public warn(message: string, data?: unknown) {
     this.addLog('warn', message);
     if (data !== undefined) {
       this.originalConsole.warn(message, data);
@@ -180,7 +191,7 @@ class Logger {
     }
   }
 
-  public error(message: string, error?: Error | any) {
+  public error(message: string, error?: Error | unknown) {
     this.addLog('error', message, error instanceof Error ? error : undefined);
     if (error !== undefined) {
       this.originalConsole.error(message, error);
@@ -192,16 +203,17 @@ class Logger {
   // Get performance metrics
   public getPerformanceInfo() {
     const perf = performance;
+    const perfMemory = (performance as PerformanceWithMemory).memory;
     return {
       navigation: perf.getEntriesByType('navigation')[0],
-      memory: (performance as any).memory ? {
-        usedJSHeapSize: (performance as any).memory.usedJSHeapSize,
-        totalJSHeapSize: (performance as any).memory.totalJSHeapSize,
-        jsHeapSizeLimit: (performance as any).memory.jsHeapSizeLimit
+      memory: perfMemory ? {
+        usedJSHeapSize: perfMemory.usedJSHeapSize,
+        totalJSHeapSize: perfMemory.totalJSHeapSize,
+        jsHeapSizeLimit: perfMemory.jsHeapSizeLimit
       } : null,
       timing: {
-        domContentLoaded: perf.timing?.domContentLoadedEventEnd - perf.timing?.navigationStart,
-        loadComplete: perf.timing?.loadEventEnd - perf.timing?.navigationStart
+        domContentLoaded: perf.timing ? (perf.timing.domContentLoadedEventEnd - perf.timing.navigationStart) : 0,
+        loadComplete: perf.timing ? (perf.timing.loadEventEnd - perf.timing.navigationStart) : 0
       }
     };
   }
@@ -211,4 +223,4 @@ class Logger {
 export const logger = new Logger();
 
 // Global access for debugging
-(window as any).__logger = logger;
+(window as { __logger?: Logger }).__logger = logger;

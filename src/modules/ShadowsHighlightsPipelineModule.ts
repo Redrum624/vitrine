@@ -1,4 +1,4 @@
-import { ShadowsHighlightsModule } from './ShadowsHighlightsModule';
+import { ShadowsHighlightsModule, ShadowsHighlightsParams } from './ShadowsHighlightsModule';
 import { PipelineModule, ProcessingContext } from '../services/ImageProcessingPipeline';
 import { logger } from '../utils/Logger';
 
@@ -78,7 +78,7 @@ export class ShadowsHighlightsPipelineModule implements PipelineModule {
   }
 
   // Set parameters (for Web Worker processing)
-  setParams(params: any) {
+  setParams(params: Partial<ShadowsHighlightsParams>) {
     this.shadowsHighlightsModule.setParams(params);
   }
 }

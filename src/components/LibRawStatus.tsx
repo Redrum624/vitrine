@@ -16,7 +16,7 @@ export const LibRawStatus: React.FC<LibRawStatusProps> = ({
 }) => {
   const [status, setStatus] = useState<InitStatus>('uninit');
   const [error, setError] = useState<string | null>(null);
-  const [stats, setStats] = useState<any>(null);
+  const [stats, setStats] = useState<{ supportedFormats: number } | null>(null);
 
   useEffect(() => {
     // Only initialize if not already initialized

@@ -1,8 +1,10 @@
-import React, { useState, useEffect } from 'react';
-import { Settings, Cpu, Palette, Image, Zap } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Settings, Cpu, Palette, Image, Zap, Camera } from 'lucide-react';
 import { logger } from '../../utils/Logger';
 import { useAppStore } from '../../stores/appStore';
 import { advancedRawProcessor, AdvancedRawProcessingOptions, CameraProfile } from '../../services/AdvancedRawProcessor';
+import { rawImageService } from '../../services/RawImageService';
+import { CameraProfile as CameraProfileType } from '../../services/CameraProfileService';
 
 interface AdvancedRawModuleProps {
   isEnabled: boolean;
@@ -35,8 +37,14 @@ export const AdvancedRawModule: React.FC<AdvancedRawModuleProps> = ({
 
   // Camera profile info
   const [cameraProfile, setCameraProfile] = useState<CameraProfile | null>(null);
+  const [availableProfiles, setAvailableProfiles] = useState<CameraProfileType[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [supportedFormats, setSupportedFormats] = useState<string[]>([]);
+
+  // Advanced processing options
+  const [demosaicAlgorithm, setDemosaicAlgorithm] = useState<'VNG' | 'AHD' | 'LMMSE'>('VNG');
+  const [bayerPattern, setBayerPattern] = useState<'RGGB' | 'BGGR' | 'GRBG' | 'GBRG'>('RGGB');
+  const [professionalMode, setProfessionalMode] = useState(false);
 
   // Initialize advanced processor and load camera profile
   useEffect(() => {
@@ -44,6 +52,10 @@ export const AdvancedRawModule: React.FC<AdvancedRawModuleProps> = ({
       try {
         const formats = await advancedRawProcessor.getSupportedFormats();
         setSupportedFormats(formats);
+
+        // Load available camera profiles
+        const profiles = rawImageService.getAvailableCameraProfiles();
+        setAvailableProfiles(profiles);
 
         // Load camera profile if image is available
         if (currentImagePath) {
@@ -63,35 +75,54 @@ export const AdvancedRawModule: React.FC<AdvancedRawModuleProps> = ({
     initializeProcessor();
   }, [currentImagePath]);
 
-  // Apply processing when options change
-  useEffect(() => {
-    if (isEnabled && currentImagePath) {
-      applyProcessing();
-    }
-  }, [options, isEnabled, currentImagePath]);
-
-  const applyProcessing = async () => {
+  const applyProcessing = useCallback(async () => {
     if (!currentImagePath || !isEnabled) return;
 
     try {
       setIsProcessing(true);
       logger.info('Applying advanced RAW processing...');
 
-      // This would trigger reprocessing through the image service
-      // For now, we'll just log the parameters that would be applied
-      logger.debug('Advanced RAW processing parameters:', options);
+      if (professionalMode) {
+        // Use professional quality processing with advanced algorithms
+        logger.info(`Using professional mode with ${demosaicAlgorithm} demosaicing`);
 
-      // In a real implementation, this would:
-      // 1. Call advancedRawProcessor.processRawFile() with new options
-      // 2. Update the image store with the new processed data
-      // 3. Trigger canvas refresh
+        await rawImageService.processRawWithProfessionalQuality(
+          currentImagePath,
+          {
+            demosaicAlgorithm,
+            bayerPattern,
+            applyNoiseProfiling: options.denoiseThreshold > 0,
+            applyLensCorrection: options.applyLensCorrections,
+            whiteBalanceMode: options.whiteBalanceMode === 'camera' ? 'camera' : 'daylight'
+          }
+        );
+
+        // Update the image store with processed data
+        // This would be implemented based on your app store structure
+        logger.info('Professional RAW processing completed');
+      } else {
+        // Standard processing using the existing pipeline
+        logger.debug('Advanced RAW processing parameters:', options);
+
+        // In a real implementation, this would:
+        // 1. Call advancedRawProcessor.processRawFile() with new options
+        // 2. Update the image store with the new processed data
+        // 3. Trigger canvas refresh
+      }
 
     } catch (error) {
       logger.error('Advanced RAW processing failed:', error);
     } finally {
       setIsProcessing(false);
     }
-  };
+  }, [currentImagePath, isEnabled, options, professionalMode, demosaicAlgorithm, bayerPattern]);
+
+  // Apply processing when options change
+  useEffect(() => {
+    if (isEnabled && currentImagePath) {
+      applyProcessing();
+    }
+  }, [options, isEnabled, currentImagePath, applyProcessing]);
 
   const updateOption = <K extends keyof AdvancedRawProcessingOptions>(
     key: K,
@@ -154,6 +185,51 @@ export const AdvancedRawModule: React.FC<AdvancedRawModuleProps> = ({
             </div>
           )}
 
+          {/* Professional Camera Profiles */}
+          {professionalMode && availableProfiles.length > 0 && (
+            <div className="bg-purple-900/20 rounded-lg p-3 border border-purple-500/20">
+              <div className="flex items-center gap-2 mb-2">
+                <Camera className="w-4 h-4 text-purple-400" />
+                <span className="text-sm font-medium text-white">Available Camera Profiles</span>
+              </div>
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                {availableProfiles.slice(0, 8).map((profile) => (
+                  <div key={profile.id} className="bg-gray-800 rounded p-2 border border-gray-600">
+                    <div className="font-medium text-white">{profile.make}</div>
+                    <div className="text-gray-400 truncate">{profile.model}</div>
+                  </div>
+                ))}
+              </div>
+              {availableProfiles.length > 8 && (
+                <div className="text-xs text-gray-400 mt-2">
+                  And {availableProfiles.length - 8} more profiles...
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Professional Mode Toggle */}
+          <div className="bg-gray-700 rounded-lg p-3 border border-purple-500/20">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Camera className="w-4 h-4 text-purple-400" />
+                <span className="text-sm font-medium text-white">Professional Mode</span>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={professionalMode}
+                  onChange={(e) => setProfessionalMode(e.target.checked)}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-500"></div>
+              </label>
+            </div>
+            <p className="text-xs text-gray-400 mt-1">
+              Enables advanced demosaicing algorithms and professional camera profiles
+            </p>
+          </div>
+
           {/* Demosaicing Section */}
           <div className="space-y-3">
             <div className="flex items-center gap-2">
@@ -162,19 +238,52 @@ export const AdvancedRawModule: React.FC<AdvancedRawModuleProps> = ({
             </div>
 
             <div className="space-y-3">
-              <div>
-                <label className="block text-xs text-gray-400 mb-1">Quality</label>
-                <select
-                  value={options.demosaicQuality}
-                  onChange={(e) => updateOption('demosaicQuality', e.target.value as 'draft' | 'good' | 'best')}
-                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-purple-400 focus:outline-none"
-                  disabled={isProcessing}
-                >
-                  <option value="draft">Draft (Linear)</option>
-                  <option value="good">Good (VNG)</option>
-                  <option value="best">Best (AHD)</option>
-                </select>
-              </div>
+              {professionalMode ? (
+                <>
+                  <div>
+                    <label className="block text-xs text-gray-400 mb-1">Algorithm</label>
+                    <select
+                      value={demosaicAlgorithm}
+                      onChange={(e) => setDemosaicAlgorithm(e.target.value as 'VNG' | 'AHD' | 'LMMSE')}
+                      className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-purple-400 focus:outline-none"
+                      disabled={isProcessing}
+                    >
+                      <option value="VNG">VNG (Variable Number of Gradients)</option>
+                      <option value="AHD">AHD (Adaptive Homogeneity-Directed)</option>
+                      <option value="LMMSE">LMMSE (Linear Minimum Mean Square Error)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs text-gray-400 mb-1">Bayer Pattern</label>
+                    <select
+                      value={bayerPattern}
+                      onChange={(e) => setBayerPattern(e.target.value as 'RGGB' | 'BGGR' | 'GRBG' | 'GBRG')}
+                      className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-purple-400 focus:outline-none"
+                      disabled={isProcessing}
+                    >
+                      <option value="RGGB">RGGB</option>
+                      <option value="BGGR">BGGR</option>
+                      <option value="GRBG">GRBG</option>
+                      <option value="GBRG">GBRG</option>
+                    </select>
+                  </div>
+                </>
+              ) : (
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">Quality</label>
+                  <select
+                    value={options.demosaicQuality}
+                    onChange={(e) => updateOption('demosaicQuality', e.target.value as 'draft' | 'good' | 'best')}
+                    className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-purple-400 focus:outline-none"
+                    disabled={isProcessing}
+                  >
+                    <option value="draft">Draft (Linear)</option>
+                    <option value="good">Good (VNG)</option>
+                    <option value="best">Best (AHD)</option>
+                  </select>
+                </div>
+              )}
 
               <div>
                 <label className="block text-xs text-gray-400 mb-1">Output Size</label>

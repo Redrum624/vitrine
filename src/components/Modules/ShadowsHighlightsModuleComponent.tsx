@@ -18,7 +18,7 @@ export const ShadowsHighlightsModuleComponent: React.FC<ShadowsHighlightsModuleC
   const [activeSection, setActiveSection] = useState<'shadows' | 'highlights' | 'advanced'>('shadows');
   const [showAdvanced, setShowAdvanced] = useState(false);
 
-  const handleParamChange = useCallback((paramName: keyof ShadowsHighlightsParams, value: any) => {
+  const handleParamChange = useCallback((paramName: keyof ShadowsHighlightsParams, value: number) => {
     const newParams = { ...params, [paramName]: value };
     setParams(newParams);
     module.setParams({ [paramName]: value });
@@ -67,7 +67,7 @@ export const ShadowsHighlightsModuleComponent: React.FC<ShadowsHighlightsModuleC
         step={step}
         value={value}
         onChange={(e) => onChange(parseFloat(e.target.value))}
-        className="w-full h-2 bg-dark-700 rounded-lg appearance-none cursor-pointer slider-thumb"
+        className="w-full h-2 bg-gray-300 rounded-lg appearance-none cursor-pointer slider-thumb visible-track"
       />
     </div>
   );
@@ -75,49 +75,55 @@ export const ShadowsHighlightsModuleComponent: React.FC<ShadowsHighlightsModuleC
   return (
     <div className="space-y-4">
       {/* Preset Buttons */}
-      <div className="grid grid-cols-3 gap-1">
-        <button
-          onClick={() => handlePresetApply('subtle')}
-          className="px-2 py-1 text-xs bg-dark-700 hover:bg-dark-600 text-dark-300 rounded transition-professional"
-          title="Subtle shadow/highlight recovery"
-        >
-          Subtle
-        </button>
-        <button
-          onClick={() => handlePresetApply('moderate')}
-          className="px-2 py-1 text-xs bg-dark-700 hover:bg-dark-600 text-dark-300 rounded transition-professional"
-          title="Moderate shadow/highlight recovery"
-        >
-          Moderate
-        </button>
-        <button
-          onClick={() => handlePresetApply('strong')}
-          className="px-2 py-1 text-xs bg-dark-700 hover:bg-dark-600 text-dark-300 rounded transition-professional"
-          title="Strong shadow/highlight recovery"
-        >
-          Strong
-        </button>
-        <button
-          onClick={() => handlePresetApply('shadows-only')}
-          className="px-2 py-1 text-xs bg-dark-700 hover:bg-dark-600 text-dark-300 rounded transition-professional"
-          title="Shadow recovery only"
-        >
-          Shadows
-        </button>
-        <button
-          onClick={() => handlePresetApply('highlights-only')}
-          className="px-2 py-1 text-xs bg-dark-700 hover:bg-dark-600 text-dark-300 rounded transition-professional"
-          title="Highlight recovery only"
-        >
-          Highlights
-        </button>
-        <button
-          onClick={handleReset}
-          className="px-2 py-1 text-xs bg-dark-700 hover:bg-dark-600 text-dark-300 rounded transition-professional flex items-center justify-center"
-          title="Reset to defaults"
-        >
-          <RotateCcw className="w-3 h-3" />
-        </button>
+      <div className="space-y-2">
+        {/* Preset Row */}
+        <div className="grid grid-cols-3 gap-1">
+          <button
+            onClick={() => handlePresetApply('subtle')}
+            className="px-2 py-1 text-xs bg-dark-700 hover:bg-dark-600 text-dark-300 rounded transition-professional"
+            title="Subtle shadow/highlight recovery"
+          >
+            Subtle
+          </button>
+          <button
+            onClick={() => handlePresetApply('moderate')}
+            className="px-2 py-1 text-xs bg-dark-700 hover:bg-dark-600 text-dark-300 rounded transition-professional"
+            title="Moderate shadow/highlight recovery"
+          >
+            Moderate
+          </button>
+          <button
+            onClick={() => handlePresetApply('strong')}
+            className="px-2 py-1 text-xs bg-dark-700 hover:bg-dark-600 text-dark-300 rounded transition-professional"
+            title="Strong shadow/highlight recovery"
+          >
+            Strong
+          </button>
+        </div>
+
+        {/* Action Row */}
+        <div className="flex space-x-1">
+          <button
+            onClick={() => {
+              const autoParams = module.autoAdjust();
+              setParams(autoParams);
+              onParamsChange?.(autoParams);
+              logger.info('Auto shadows/highlights applied');
+            }}
+            className="flex-1 px-2 py-1 text-xs bg-dark-700 hover:bg-dark-600 text-dark-300 rounded transition-professional flex items-center justify-center space-x-1"
+            title="Auto shadows/highlights adjustment"
+          >
+            <Zap className="w-3 h-3" />
+            <span>Auto</span>
+          </button>
+          <button
+            onClick={handleReset}
+            className="px-2 py-1 text-xs bg-dark-700 hover:bg-dark-600 text-dark-300 rounded transition-professional flex items-center justify-center"
+            title="Reset to defaults"
+          >
+            <RotateCcw className="w-3 h-3" />
+          </button>
+        </div>
       </div>
 
       {/* Section Tabs */}
@@ -373,7 +379,7 @@ export const ShadowsHighlightsModuleComponent: React.FC<ShadowsHighlightsModuleC
                   <input
                     type="checkbox"
                     checked={params.preserveColor}
-                    onChange={(e) => handleParamChange('preserveColor', e.target.checked)}
+                    onChange={(e) => handleParamChange('preserveColor', e.target.checked ? 1 : 0)}
                     className="rounded border-dark-600 bg-dark-700 text-blue-500 focus:ring-blue-500 focus:ring-2"
                   />
                   <span className="text-xs text-dark-300">Preserve Color</span>
@@ -383,7 +389,7 @@ export const ShadowsHighlightsModuleComponent: React.FC<ShadowsHighlightsModuleC
                   <input
                     type="checkbox"
                     checked={params.bilateralFilter}
-                    onChange={(e) => handleParamChange('bilateralFilter', e.target.checked)}
+                    onChange={(e) => handleParamChange('bilateralFilter', e.target.checked ? 1 : 0)}
                     className="rounded border-dark-600 bg-dark-700 text-blue-500 focus:ring-blue-500 focus:ring-2"
                   />
                   <span className="text-xs text-dark-300">Bilateral Filter</span>

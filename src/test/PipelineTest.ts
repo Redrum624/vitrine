@@ -180,6 +180,6 @@ export async function testWebWorkerProcessing(): Promise<void> {
 
 // Export test functions for console access
 if (typeof window !== 'undefined') {
-  (window as any).testPipeline = testCompletePipeline;
-  (window as any).testWebWorkers = testWebWorkerProcessing;
+  (window as typeof window & { testPipeline?: typeof testCompletePipeline; testWebWorkers?: typeof testWebWorkerProcessing }).testPipeline = testCompletePipeline;
+  (window as typeof window & { testPipeline?: typeof testCompletePipeline; testWebWorkers?: typeof testWebWorkerProcessing }).testWebWorkers = testWebWorkerProcessing;
 }

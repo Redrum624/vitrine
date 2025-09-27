@@ -1,5 +1,13 @@
-import React, { useState, useEffect } from 'react';
-import { X, Package, Download, Trash2, Settings as SettingsIcon, Play, Square, Search, Filter, ExternalLink, Star, Shield } from 'lucide-react';
+import { useState, useEffect } from 'react';
+
+interface PerformanceWithMemory {
+  memory?: {
+    usedJSHeapSize: number;
+    totalJSHeapSize: number;
+    jsHeapSizeLimit: number;
+  };
+}
+import { X, Package, Download, Trash2, Play, Square, Search, ExternalLink, Shield } from 'lucide-react';
 import { pluginSystem, PluginMetadata, createExamplePlugins } from '../../services/PluginSystem';
 import { logger } from '../../utils/Logger';
 
@@ -349,8 +357,8 @@ export function PluginManagerDialog({ isOpen, onClose }: PluginManagerDialogProp
             <div className="flex items-center space-x-2">
               <span>System memory usage: </span>
               <span className="text-dark-200">
-                {typeof (performance as any).memory !== 'undefined'
-                  ? `${((performance as any).memory.usedJSHeapSize / 1024 / 1024).toFixed(1)} MB`
+                {typeof (performance as PerformanceWithMemory).memory !== 'undefined'
+                  ? `${((performance as PerformanceWithMemory).memory!.usedJSHeapSize / 1024 / 1024).toFixed(1)} MB`
                   : 'N/A'}
               </span>
             </div>

@@ -1,6 +1,5 @@
 const { spawn } = require('child_process');
-const { createRequire } = require('module');
-const require = createRequire(import.meta.url);
+// Development helper script for concurrent Vite + Electron
 
 let viteProcess;
 let electronProcess;
@@ -41,7 +40,7 @@ async function startDev() {
     // Wait for Vite to be ready before starting Electron
     if (output.includes('Local:') && !electronProcess) {
       console.log('Vite is ready, starting Electron...');
-      setTimeout(startElectron, 1000);
+      global.setTimeout(startElectron, 1000);
     }
   });
 

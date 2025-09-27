@@ -14,6 +14,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
   writeFile: (filePath, data) => ipcRenderer.invoke('write-file', filePath, data),
   writeLog: (logEntry) => ipcRenderer.invoke('write-log', logEntry),
 
+  // Directory operations
+  getSystemDrives: () => ipcRenderer.invoke('get-system-drives'),
+  getFolderContents: (folderPath) => ipcRenderer.invoke('get-folder-contents', folderPath),
+
+  // Advanced file operations
+  writeImageFile: (filePath, imageData, format, options) =>
+    ipcRenderer.invoke('write-image-file', filePath, imageData, format, options),
+  getFileStats: (filePath) => ipcRenderer.invoke('get-file-stats', filePath),
+
+  // Metadata operations
+  readImageMetadata: (filePath) => ipcRenderer.invoke('read-image-metadata', filePath),
+  writeImageMetadata: (filePath, metadata) => ipcRenderer.invoke('write-image-metadata', filePath, metadata),
+
   // Menu actions - listen for events from main process
   onFileOpen: (callback) => ipcRenderer.on('file-open', (event, filePath) => callback(filePath)),
   onFileImport: (callback) => ipcRenderer.on('file-import', (event, filePaths) => callback(filePaths)),

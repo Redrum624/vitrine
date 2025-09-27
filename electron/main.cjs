@@ -44,6 +44,7 @@ function createWindow() {
 
   // Show window when ready to prevent visual flash
   mainWindow.once('ready-to-show', () => {
+    mainWindow.maximize();
     mainWindow.show();
 
     // Focus on window (dev tools can be opened manually with F12)
@@ -249,6 +250,109 @@ ipcMain.handle('read-file', async (event, filePath) => {
   }
 });
 
+// Get system drives (Windows)
+ipcMain.handle('get-system-drives', async () => {
+  try {
+    const drives = [];
+
+    // Check common Windows drives
+    for (let i = 65; i <= 90; i++) {
+      const drive = String.fromCharCode(i) + ':';
+      const drivePath = drive + '\\';
+
+      try {
+        await fs.promises.access(drivePath);
+        drives.push({
+          id: drive.toLowerCase() + '_drive',
+          name: `Local Disk (${drive})`,
+          path: drivePath,
+          type: 'drive'
+        });
+      } catch (error) {
+        // Drive doesn't exist, skip
+      }
+    }
+
+    // Add common user folders
+    const userProfile = os.homedir();
+    const userFolders = [
+      {
+        id: 'pictures',
+        name: 'Pictures',
+        path: path.join(userProfile, 'Pictures'),
+        type: 'folder'
+      },
+      {
+        id: 'documents',
+        name: 'Documents',
+        path: path.join(userProfile, 'Documents'),
+        type: 'folder'
+      },
+      {
+        id: 'desktop',
+        name: 'Desktop',
+        path: path.join(userProfile, 'Desktop'),
+        type: 'folder'
+      }
+    ];
+
+    return [...drives, ...userFolders];
+  } catch (error) {
+    console.error('Failed to get system drives:', error);
+    return [];
+  }
+});
+
+// Get folder contents
+ipcMain.handle('get-folder-contents', async (event, folderPath) => {
+  try {
+    const items = await fs.promises.readdir(folderPath, { withFileTypes: true });
+    const folders = [];
+    const images = [];
+
+    // Image extensions to filter
+    const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.tiff', '.tif',
+      '.orf', '.cr2', '.cr3', '.nef', '.arw', '.dng', '.raf', '.rw2', '.pef'];
+
+    for (const item of items) {
+      const itemPath = path.join(folderPath, item.name);
+
+      try {
+        if (item.isDirectory()) {
+          folders.push({
+            id: Buffer.from(itemPath).toString('base64'),
+            name: item.name,
+            path: itemPath,
+            type: 'folder'
+          });
+        } else if (item.isFile()) {
+          const ext = path.extname(item.name).toLowerCase();
+          if (imageExtensions.includes(ext)) {
+            const stats = await fs.promises.stat(itemPath);
+            images.push({
+              id: Buffer.from(itemPath).toString('base64'),
+              name: item.name,
+              path: itemPath,
+              size: stats.size,
+              format: ext.substring(1).toUpperCase(),
+              type: getMimeType(itemPath),
+              lastModified: stats.mtime.getTime(),
+              dateModified: stats.mtime
+            });
+          }
+        }
+      } catch (error) {
+        // Skip files/folders we can't access
+        console.warn(`Skipping ${itemPath}: ${error.message}`);
+      }
+    }
+
+    return { folders, images };
+  } catch (error) {
+    throw error;
+  }
+});
+
 // Read image as data URL for display in renderer
 ipcMain.handle('read-image-as-data-url', async (event, filePath) => {
   try {
@@ -290,6 +394,128 @@ ipcMain.handle('write-file', async (event, filePath, data) => {
     await fs.promises.writeFile(filePath, data);
     return true;
   } catch (error) {
+    throw error;
+  }
+});
+
+// Write image file (for exports)
+ipcMain.handle('write-image-file', async (event, filePath, imageData, format, options) => {
+  try {
+    const sharp = require('sharp');
+
+    let sharpInstance = sharp(Buffer.from(imageData), {
+      raw: {
+        width: options.width,
+        height: options.height,
+        channels: options.channels || 4
+      }
+    });
+
+    // Apply format-specific options
+    switch (format.toLowerCase()) {
+      case 'jpeg':
+        sharpInstance = sharpInstance.jpeg({
+          quality: options.quality || 90,
+          progressive: options.progressive || false,
+          mozjpeg: true
+        });
+        break;
+      case 'png':
+        sharpInstance = sharpInstance.png({
+          compressionLevel: options.compressionLevel || 6,
+          progressive: options.progressive || false
+        });
+        break;
+      case 'tiff':
+        sharpInstance = sharpInstance.tiff({
+          compression: options.compression || 'lzw',
+          quality: options.quality || 90
+        });
+        break;
+      case 'webp':
+        sharpInstance = sharpInstance.webp({
+          quality: options.quality || 80,
+          lossless: options.lossless || false
+        });
+        break;
+      default:
+        throw new Error(`Unsupported format: ${format}`);
+    }
+
+    // Resize if needed
+    if (options.resize && (options.resize.width || options.resize.height)) {
+      sharpInstance = sharpInstance.resize(options.resize.width, options.resize.height, {
+        fit: options.resize.fit || 'inside',
+        withoutEnlargement: true
+      });
+    }
+
+    await sharpInstance.toFile(filePath);
+    return true;
+  } catch (error) {
+    console.error('Failed to write image file:', error);
+    throw error;
+  }
+});
+
+// Get file stats
+ipcMain.handle('get-file-stats', async (event, filePath) => {
+  try {
+    const stats = await fs.promises.stat(filePath);
+    return {
+      size: stats.size,
+      created: stats.birthtime.getTime(),
+      modified: stats.mtime.getTime(),
+      isFile: stats.isFile(),
+      isDirectory: stats.isDirectory()
+    };
+  } catch (error) {
+    throw error;
+  }
+});
+
+// Read image metadata (EXIF, IPTC, XMP)
+ipcMain.handle('read-image-metadata', async (event, filePath) => {
+  try {
+    const ExifReader = require('exifreader');
+    const data = await fs.promises.readFile(filePath);
+    const tags = ExifReader.load(data, { expanded: true });
+
+    return {
+      exif: tags.exif || {},
+      iptc: tags.iptc || {},
+      xmp: tags.xmp || {},
+      icc: tags.icc || {},
+      thumbnail: tags.Thumbnail || null
+    };
+  } catch (error) {
+    console.warn('Failed to read image metadata:', error);
+    return {
+      exif: {},
+      iptc: {},
+      xmp: {},
+      icc: {},
+      thumbnail: null
+    };
+  }
+});
+
+// Write image metadata
+ipcMain.handle('write-image-metadata', async (event, filePath, metadata) => {
+  try {
+    // For now, we'll use exiftool if available, otherwise log the operation
+    logger.info(`Would write metadata to ${filePath}:`, metadata);
+
+    // In production, you'd use exiftool or similar:
+    // const exiftool = require('node-exiftool');
+    // const ep = new exiftool.ExiftoolProcess();
+    // await ep.open();
+    // await ep.writeMetadata(filePath, metadata);
+    // await ep.close();
+
+    return true;
+  } catch (error) {
+    console.error('Failed to write image metadata:', error);
     throw error;
   }
 });

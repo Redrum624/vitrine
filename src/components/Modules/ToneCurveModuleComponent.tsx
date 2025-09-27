@@ -304,6 +304,18 @@ export const ToneCurveModuleComponent: React.FC<ToneCurveModuleComponentProps> =
           </div>
           <div className="flex items-center gap-1">
             <button
+              onClick={() => {
+                // Auto adjust tone curve
+                const autoParams = module.autoToneCurve();
+                setParams(autoParams);
+                onParamsChange(autoParams);
+              }}
+              className="p-1 hover:bg-gray-700 rounded text-gray-400 hover:text-white transition-colors"
+              title="Auto adjust tone curve"
+            >
+              <Zap className="w-3 h-3" />
+            </button>
+            <button
               onClick={resetCurve}
               className="p-1 hover:bg-gray-700 rounded text-gray-400 hover:text-white transition-colors"
               title="Reset curve"
@@ -357,7 +369,7 @@ export const ToneCurveModuleComponent: React.FC<ToneCurveModuleComponentProps> =
           ].map(preset => (
             <button
               key={preset.id}
-              onClick={() => loadPreset(preset.id as any)}
+              onClick={() => loadPreset(preset.id as 'linear' | 'contrast' | 'film' | 'vintage' | 'dramatic')}
               className="px-2 py-1.5 text-xs text-gray-300 bg-gray-700 hover:bg-gray-600 rounded transition-colors"
             >
               {preset.label}
@@ -411,7 +423,7 @@ export const ToneCurveModuleComponent: React.FC<ToneCurveModuleComponentProps> =
               step="0.01"
               value={params.exposureFusion}
               onChange={(e) => updateParams({ exposureFusion: parseFloat(e.target.value) })}
-              className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-purple-400"
+              className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer visible-track"
             />
           </div>
 
@@ -428,7 +440,7 @@ export const ToneCurveModuleComponent: React.FC<ToneCurveModuleComponentProps> =
                 step="0.1"
                 value={params.exposureStops}
                 onChange={(e) => updateParams({ exposureStops: parseFloat(e.target.value) })}
-                className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-purple-400"
+                className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer visible-track"
               />
             </div>
           )}

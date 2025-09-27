@@ -54,7 +54,7 @@ export class LocalAdjustmentsPipelineModule implements PipelineModule {
     }
   };
 
-  isEnabled(): boolean {
+  get isEnabled(): boolean {
     return this.params.enabled && this.params.layers.some(layer => layer.enabled);
   }
 
@@ -78,7 +78,7 @@ export class LocalAdjustmentsPipelineModule implements PipelineModule {
     // Sync layers with the local adjustments module
     if (params.layers) {
       localAdjustmentsModule.clearAllLayers();
-      for (const layer of params.layers) {
+      for (const _layer of params.layers) {
         // Note: In a full implementation, we'd need to recreate layers
         // For now, we'll update the module's internal state
       }
@@ -88,7 +88,7 @@ export class LocalAdjustmentsPipelineModule implements PipelineModule {
   }
 
   process(imageData: Float32Array, context: ProcessingContext): Float32Array {
-    if (!this.isEnabled()) {
+    if (!this.isEnabled) {
       return imageData;
     }
 

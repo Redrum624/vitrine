@@ -12,7 +12,7 @@ export interface ImageProcessingModule {
   id: string;
   name: string;
   group: string;
-  flags: any;
+  flags: Record<string, unknown>;
   process(imageData: ImageData): ImageData;
 }
 
@@ -56,24 +56,24 @@ export class ShadowsHighlightsModule implements ImageProcessingModule {
   private params: ShadowsHighlightsParams = {
     enabled: true,
 
-    // Shadow recovery
+    // Shadow recovery - start with neutral values
     shadows: 0.0,
     shadowsRadius: 50.0,
-    shadowsColorTransfer: 25.0,
+    shadowsColorTransfer: 0.0,
 
-    // Highlight recovery
+    // Highlight recovery - start with neutral values
     highlights: 0.0,
     highlightsRadius: 50.0,
-    highlightsColorTransfer: 25.0,
+    highlightsColorTransfer: 0.0,
 
     // White and black points
     whitePoint: 0.0,
     blackPoint: 0.0,
 
-    // Advanced controls
-    compress: 50.0,
-    shadowsColorCorrection: 100.0,
-    highlightsColorCorrection: 100.0,
+    // Advanced controls - neutral defaults
+    compress: 0.0,
+    shadowsColorCorrection: 0.0,
+    highlightsColorCorrection: 0.0,
 
     // Masking
     maskBlur: 1.0,
@@ -124,6 +124,25 @@ export class ShadowsHighlightsModule implements ImageProcessingModule {
       strength: 1.0
     };
     logger.debug('ShadowsHighlights params reset to defaults');
+  }
+
+  autoAdjust(): ShadowsHighlightsParams {
+    // Auto adjustment for shadows and highlights
+    const autoParams: ShadowsHighlightsParams = {
+      ...this.params,
+      shadows: 25.0,              // Moderate shadow recovery
+      shadowsRadius: 40.0,        // Slightly tighter radius
+      shadowsColorTransfer: 30.0, // Enhanced color transfer
+      highlights: 15.0,           // Mild highlight recovery
+      highlightsRadius: 45.0,     // Standard highlight radius
+      highlightsColorTransfer: 20.0, // Moderate color transfer
+      compress: 40.0,             // Reduced compression for more natural look
+      strength: 1.2               // Slightly enhanced strength
+    };
+
+    this.params = { ...autoParams };
+    logger.info('ShadowsHighlights auto adjustments applied:', autoParams);
+    return { ...autoParams };
   }
 
   process(imageData: ImageData): ImageData {

@@ -1,6 +1,14 @@
 import { logger } from '../utils/Logger';
 import { imageProcessingPipeline } from './ImageProcessingPipeline';
 
+interface ModuleInterface {
+  isEnabled?(): boolean;
+  getParameters?(): Record<string, unknown>;
+  getParams?(): Record<string, unknown>;
+  setParameters?(params: Record<string, unknown>): void;
+  setParams?(params: Record<string, unknown>): void;
+}
+
 export interface AdjustmentPreset {
   id: string;
   name: string;
@@ -121,6 +129,9 @@ export interface PresetSettings {
     enabled: boolean;
     layerCount: number;
   };
+
+  // Index signature for Record compatibility
+  [key: string]: unknown;
 }
 
 export class PresetService {
@@ -697,64 +708,67 @@ export class PresetService {
       // Capture each module's settings
       for (const [moduleId, module] of modules) {
         try {
-          let moduleSettings: any = null;
+          let moduleSettings: Record<string, unknown> | null = null;
+          const moduleInterface = module as ModuleInterface;
 
-          if ('getParameters' in module && typeof module.getParameters === 'function') {
-            moduleSettings = (module as any).getParameters();
-          } else if ('getParams' in module && typeof module.getParams === 'function') {
-            moduleSettings = (module as any).getParams();
+          if ('getParameters' in module && typeof moduleInterface.getParameters === 'function') {
+            moduleSettings = moduleInterface.getParameters();
+          } else if ('getParams' in module && typeof moduleInterface.getParams === 'function') {
+            moduleSettings = moduleInterface.getParams();
           }
 
           if (moduleSettings) {
             switch (moduleId) {
               case 'lenscorrections':
                 settings.lensCorrections = {
-                  enabled: (module as any).isEnabled?.() || false,
-                  ...moduleSettings.lensCorrectionsParams
-                };
+                  enabled: moduleInterface.isEnabled?.() || false,
+                  ...((moduleSettings as Record<string, unknown>).lensCorrectionsParams as Record<string, unknown> || {})
+                } as typeof settings.lensCorrections;
                 break;
               case 'exposure':
                 settings.exposure = {
-                  enabled: (module as any).isEnabled?.() || true,
+                  enabled: moduleInterface.isEnabled?.() || true,
                   ...moduleSettings
-                };
+                } as typeof settings.exposure;
                 break;
               case 'temperature':
                 settings.whiteBalance = {
-                  enabled: (module as any).isEnabled?.() || true,
+                  enabled: moduleInterface.isEnabled?.() || true,
                   ...moduleSettings
-                };
+                } as typeof settings.whiteBalance;
                 break;
               case 'basicadj':
                 settings.basicAdjustments = {
-                  enabled: (module as any).isEnabled?.() || true,
+                  enabled: moduleInterface.isEnabled?.() || true,
                   ...moduleSettings
-                };
+                } as typeof settings.basicAdjustments;
                 break;
               case 'tonecurve':
                 settings.toneCurve = {
-                  enabled: (module as any).isEnabled?.() || true,
+                  enabled: moduleInterface.isEnabled?.() || true,
                   ...moduleSettings
-                };
+                } as typeof settings.toneCurve;
                 break;
               case 'colorbalance':
                 settings.colorBalance = {
-                  enabled: (module as any).isEnabled?.() || true,
+                  enabled: moduleInterface.isEnabled?.() || true,
                   ...moduleSettings
-                };
+                } as typeof settings.colorBalance;
                 break;
               case 'shadowshighlights':
                 settings.shadowsHighlights = {
-                  enabled: (module as any).isEnabled?.() || true,
+                  enabled: moduleInterface.isEnabled?.() || true,
                   ...moduleSettings
-                };
+                } as typeof settings.shadowsHighlights;
                 break;
-              case 'localadjustments':
+              case 'localadjustments': {
+                const layersArray = (moduleSettings as Record<string, unknown>).layers;
                 settings.localAdjustments = {
-                  enabled: (module as any).isEnabled?.() || false,
-                  layerCount: moduleSettings.layers?.length || 0
+                  enabled: moduleInterface.isEnabled?.() || false,
+                  layerCount: Array.isArray(layersArray) ? layersArray.length : 0
                 };
                 break;
+              }
             }
           }
         } catch (error) {
@@ -777,29 +791,29 @@ export class PresetService {
     // Apply settings to each module
     for (const [moduleId, module] of modules) {
       try {
-        let moduleSettings: any = null;
+        let moduleSettings: Record<string, unknown> | null = null;
 
         switch (moduleId) {
           case 'lenscorrections':
-            moduleSettings = settings.lensCorrections;
+            moduleSettings = settings.lensCorrections as Record<string, unknown> | null;
             break;
           case 'exposure':
-            moduleSettings = settings.exposure;
+            moduleSettings = settings.exposure as Record<string, unknown> | null;
             break;
           case 'temperature':
-            moduleSettings = settings.whiteBalance;
+            moduleSettings = settings.whiteBalance as Record<string, unknown> | null;
             break;
           case 'basicadj':
-            moduleSettings = settings.basicAdjustments;
+            moduleSettings = settings.basicAdjustments as Record<string, unknown> | null;
             break;
           case 'tonecurve':
-            moduleSettings = settings.toneCurve;
+            moduleSettings = settings.toneCurve as Record<string, unknown> | null;
             break;
           case 'colorbalance':
-            moduleSettings = settings.colorBalance;
+            moduleSettings = settings.colorBalance as Record<string, unknown> | null;
             break;
           case 'shadowshighlights':
-            moduleSettings = settings.shadowsHighlights;
+            moduleSettings = settings.shadowsHighlights as Record<string, unknown> | null;
             break;
           case 'localadjustments':
             // Local adjustments are complex and not easily transferable
@@ -810,17 +824,18 @@ export class PresetService {
         if (moduleSettings) {
           // Enable/disable module
           if ('enabled' in moduleSettings) {
-            imageProcessingPipeline.setModuleEnabled(moduleId, moduleSettings.enabled);
+            imageProcessingPipeline.setModuleEnabled(moduleId, Boolean(moduleSettings.enabled));
           }
 
           // Apply parameters
           const params = { ...moduleSettings };
           delete params.enabled; // Remove enabled flag from params
 
-          if ('setParameters' in module && typeof module.setParameters === 'function') {
-            (module as any).setParameters(params);
-          } else if ('setParams' in module && typeof module.setParams === 'function') {
-            (module as any).setParams(params);
+          const moduleInterface = module as ModuleInterface;
+          if ('setParameters' in module && typeof moduleInterface.setParameters === 'function') {
+            moduleInterface.setParameters(params);
+          } else if ('setParams' in module && typeof moduleInterface.setParams === 'function') {
+            moduleInterface.setParams(params);
           }
         }
 

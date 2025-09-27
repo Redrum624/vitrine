@@ -287,8 +287,8 @@ export class LocalAdjustmentsModule {
     layerId: string,
     maskParams: ParametricMaskParameters,
     sourceImageData: Float32Array,
-    imageWidth: number,
-    imageHeight: number
+    _imageWidth: number,
+    _imageHeight: number
   ): boolean {
     const layer = this.getLayer(layerId);
     if (!layer || layer.type !== 'parametric') return false;
@@ -307,10 +307,10 @@ export class LocalAdjustmentsModule {
       const luminance = 0.299 * r + 0.587 * g + 0.114 * b;
 
       // Calculate HSV for color-based masking
-      const [h, s] = this.rgbToHS(r, g, b);
+      const [h] = this.rgbToHS(r, g, b);
 
       // Luminance mask
-      let lumMask = this.smoothStep(
+      const lumMask = this.smoothStep(
         luminanceMin - luminanceFeather,
         luminanceMin + luminanceFeather,
         luminance
@@ -359,8 +359,8 @@ export class LocalAdjustmentsModule {
   private applyLayerToImage(
     imageData: Float32Array,
     layer: LocalAdjustmentLayer,
-    width: number,
-    height: number
+    _width: number,
+    _height: number
   ): void {
     const { mask, parameters, opacity } = layer;
 
@@ -605,16 +605,18 @@ export class LocalAdjustmentsModule {
         return original + opacity * (original * adjusted - original);
       case 'screen':
         return original + opacity * (1 - (1 - original) * (1 - adjusted) - original);
-      case 'overlay':
+      case 'overlay': {
         const overlay = original < 0.5
           ? 2 * original * adjusted
           : 1 - 2 * (1 - original) * (1 - adjusted);
         return original + opacity * (overlay - original);
-      case 'soft_light':
+      }
+      case 'soft_light': {
         const softLight = original < 0.5
           ? 2 * original * adjusted + original * original * (1 - 2 * adjusted)
           : 2 * original * (1 - adjusted) + Math.sqrt(original) * (2 * adjusted - 1);
         return original + opacity * (softLight - original);
+      }
       default: // normal
         return original + opacity * (adjusted - original);
     }

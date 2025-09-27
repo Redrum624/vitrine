@@ -34,7 +34,7 @@ console.log('================================');
 try {
   const emccVersion = execSync('emcc --version', { encoding: 'utf8' });
   console.log('✓ Emscripten found:', emccVersion.split('\n')[0]);
-} catch (error) {
+} catch {
   console.error('✗ Emscripten not found. Please install Emscripten SDK:');
   console.error('  https://emscripten.org/docs/getting_started/downloads.html');
   console.error('');

@@ -4,6 +4,18 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Content-Security-Policy"
+          content="default-src 'self';
+                   script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval';
+                   style-src 'self' 'unsafe-inline';
+                   img-src 'self' data: blob: file:;
+                   media-src 'self' data: blob: file:;
+                   font-src 'self' data:;
+                   connect-src 'self' file:;
+                   worker-src 'self' blob:;
+                   child-src 'self' blob:;
+                   object-src 'none';
+                   base-uri 'self';">
     <title>Photo Editor Pro</title>
   </head>
   <body class="bg-dark-900 text-dark-300 overflow-hidden">

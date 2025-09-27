@@ -1,7 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { X, Save, FolderOpen, Download, Upload, Star, Search, Filter } from 'lucide-react';
 import { presetService, AdjustmentPreset } from '../../services/PresetService';
-import { useAppStore } from '../../stores/appStore';
 import { logger } from '../../utils/Logger';
 
 interface PresetDialogProps {

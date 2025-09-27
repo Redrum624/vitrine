@@ -1,7 +1,6 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import {
   Play,
-  Pause,
   Square,
   Plus,
   Trash2,
@@ -14,7 +13,7 @@ import {
   X,
   FolderOpen
 } from 'lucide-react';
-import { SliderControl } from '../Controls/SliderControl';
+import SliderControl from '../Controls/SliderControl';
 import { BatchJob, BatchPreset, batchProcessingService } from '../../services/BatchProcessingService';
 import { ImageFileInfo } from '../../services/FileSystemService';
 
@@ -30,7 +29,6 @@ type TabType = 'jobs' | 'create' | 'settings';
 export const BatchProcessingDialog: React.FC<BatchProcessingDialogProps> = ({
   isOpen,
   onClose,
-  availableImages,
   onSelectImages
 }) => {
   const [activeTab, setActiveTab] = useState<TabType>('jobs');
@@ -39,7 +37,7 @@ export const BatchProcessingDialog: React.FC<BatchProcessingDialogProps> = ({
   const [selectedPreset, setSelectedPreset] = useState<string>('');
   const [presets, setPresets] = useState<BatchPreset[]>([]);
   const [jobName, setJobName] = useState('');
-  const [refreshInterval, setRefreshInterval] = useState<NodeJS.Timeout>();
+  const [refreshInterval, setRefreshInterval] = useState<number>();
 
   // Load initial data
   useEffect(() => {
@@ -48,13 +46,14 @@ export const BatchProcessingDialog: React.FC<BatchProcessingDialogProps> = ({
       refreshJobs();
 
       // Set up auto-refresh for active jobs
-      const interval = setInterval(refreshJobs, 1000);
+      const interval = window.setInterval(refreshJobs, 1000);
       setRefreshInterval(interval);
 
       return () => {
-        if (interval) clearInterval(interval);
+        if (interval) window.clearInterval(interval);
       };
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
 
   // Cleanup on unmount
@@ -425,7 +424,7 @@ export const BatchProcessingDialog: React.FC<BatchProcessingDialogProps> = ({
             min={1}
             max={5}
             step={1}
-            onChange={(value) => batchProcessingService.setMaxConcurrentJobs(value)}
+            onChange={(value: number) => batchProcessingService.setMaxConcurrentJobs(value)}
             className="text-sm"
             description="Higher values use more system resources"
           />

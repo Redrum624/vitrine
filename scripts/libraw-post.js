@@ -221,8 +221,8 @@ Module.LibRaw = {
 };
 
 // Export for Node.js if available
-if (typeof module !== 'undefined' && module.exports) {
-  module.exports = Module;
+if (typeof globalThis !== 'undefined' && globalThis.module && globalThis.module.exports) {
+  globalThis.module.exports = Module;
 }
 
 console.log("LibRaw WebAssembly Post-JS loaded");
