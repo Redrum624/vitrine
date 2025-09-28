@@ -1,7 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import { RotateCcw } from 'lucide-react';
 import { ColorBalanceModule, ColorBalanceParams } from '../../modules/ColorBalanceModule';
-import SliderControl from '../Controls/SliderControl';
 import ColorWheel from '../Controls/ColorWheel';
 import ColoredSliderControl from '../Controls/ColoredSliderControl';
 import { logger } from '../../utils/Logger';
@@ -144,15 +143,35 @@ export const ColorBalanceModuleComponent: React.FC<ColorBalanceModuleComponentPr
 
           {/* Yellow-Blue Slider */}
           <div className="w-full py-4 max-w-xs">
-            <SliderControl
-              label="Yellow ↔ Blue"
-              value={rangeParams.yellow_blue}
-              min={-1}
-              max={1}
-              step={0.01}
-              onChange={(value) => updateTraditionalParam(activeRange, 'yellow_blue', value)}
-              precision={2}
-            />
+            <div className="flex flex-col space-y-1">
+              <div className="flex justify-between items-center">
+                <label className="text-xs text-dark-300">Yellow ↔ Blue</label>
+                <span className="text-xs text-dark-400">{rangeParams.yellow_blue.toFixed(2)}</span>
+              </div>
+              <div className="relative">
+                <div
+                  className="w-full h-2 rounded-lg relative overflow-hidden border border-dark-700"
+                  style={{
+                    background: 'linear-gradient(to right, #eab308, #6b7280, #3b82f6)'
+                  }}
+                >
+                  {/* Center line indicator */}
+                  <div className="absolute top-0 h-full w-0.5 bg-white opacity-50" style={{ left: '50%' }} />
+                </div>
+                <input
+                  type="range"
+                  min={-1}
+                  max={1}
+                  step={0.01}
+                  value={rangeParams.yellow_blue}
+                  onChange={(e) => updateTraditionalParam(activeRange, 'yellow_blue', parseFloat(e.target.value))}
+                  onDoubleClick={() => updateTraditionalParam(activeRange, 'yellow_blue', 0)}
+                  className="absolute top-0 w-full h-2 appearance-none bg-transparent cursor-pointer slider-thumb"
+                  style={{ background: 'transparent' }}
+                  title="Double-click to reset to 0"
+                />
+              </div>
+            </div>
           </div>
         </div>
       </div>

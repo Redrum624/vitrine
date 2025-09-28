@@ -129,9 +129,19 @@ export class ImageService {
             throw new Error(`Invalid image dimensions: ${dimensionValidation.error}`);
           }
 
-          // Apply automatic RAW adjustments if pipeline is available
+          // Skip auto-adjustments when LibRaw successfully processes the file
+          // LibRaw already provides properly processed RGB data with accurate colors
           let autoAdjustmentResult: RAWDetectionResult | undefined;
-          if (this.processingPipeline) {
+
+          // Check if this was processed by LibRaw (has proper color range and valid data)
+          const isLibRawProcessed = rawData.data.length > 0 &&
+            Math.max(...rawData.data.slice(0, 1000)) <= 1.0 &&
+            Math.min(...rawData.data.slice(0, 1000)) > 0.0;
+
+          if (isLibRawProcessed) {
+            logger.info('LibRaw processed file detected, skipping all auto-adjustments to preserve accurate colors');
+          } else if (this.processingPipeline) {
+            // Only apply auto-adjustments for fallback processing methods
             try {
               autoAdjustmentResult = await autoRawAdjustmentService.detectAndApplyRAWAdjustments(
                 filePath,
@@ -139,7 +149,7 @@ export class ImageService {
               );
 
               if (autoAdjustmentResult.isRAW && autoAdjustmentResult.confidence > 0.5) {
-                logger.info(`Auto-adjustments applied for RAW file:`, {
+                logger.info(`Auto-adjustments applied for RAW file (fallback processing):`, {
                   camera: `${rawData.metadata.make} ${rawData.metadata.model}`,
                   adjustments: autoAdjustmentResult.reasoning
                 });
@@ -174,7 +184,10 @@ export class ImageService {
 
           logger.info(`RAW image loaded successfully: ${result.width}x${result.height}`);
         } else {
-          // Handle regular image files
+          // Handle regular image files (double-check this is not a RAW file)
+          if (rawImageService.isRawFile(filePath)) {
+            throw new Error(`RAW file ${filePath} should not reach regular image loading path`);
+          }
           result = await this.loadRegularImage(filePath);
 
           // Cache the result
@@ -256,9 +269,9 @@ export class ImageService {
       };
 
       // Load the image using Electron's secure file reading for images
-      if (typeof window !== 'undefined' && (window as typeof window & { electronAPI?: { readImageAsDataURL: (path: string) => Promise<string> } }).electronAPI) {
+      if (typeof window !== 'undefined' && window.electronAPI) {
         // Electron environment - read as data URL
-        (window as typeof window & { electronAPI: { readImageAsDataURL: (path: string) => Promise<string> } }).electronAPI.readImageAsDataURL(filePath)
+        window.electronAPI.readImageAsDataURL(filePath)
           .then((dataUrl: string) => {
             img.src = dataUrl;
           })
@@ -267,8 +280,10 @@ export class ImageService {
             reject(error);
           });
       } else {
-        // Browser environment - use file path directly
-        img.src = filePath;
+        // Browser environment - cannot load local files directly due to security restrictions
+        const error = new Error('Cannot load local files in browser environment without proper file handling');
+        logger.error('Browser security restriction:', error);
+        reject(error);
       }
     });
   }

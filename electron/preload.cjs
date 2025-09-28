@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // File system
   readFile: (filePath) => ipcRenderer.invoke('read-file', filePath),
+  readFileBuffer: (filePath) => ipcRenderer.invoke('read-file-buffer', filePath),
   readImageAsDataURL: (filePath) => ipcRenderer.invoke('read-image-as-data-url', filePath),
   writeFile: (filePath, data) => ipcRenderer.invoke('write-file', filePath, data),
   writeLog: (logEntry) => ipcRenderer.invoke('write-log', logEntry),
@@ -40,6 +41,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onViewZoomOut: (callback) => ipcRenderer.on('view-zoom-out', () => callback()),
   onViewFitWindow: (callback) => ipcRenderer.on('view-fit-window', () => callback()),
   onViewActualSize: (callback) => ipcRenderer.on('view-actual-size', () => callback()),
+
+  // App lifecycle events
+  onAppCloseRequest: (callback) => ipcRenderer.on('app-close-request', () => callback()),
+  onAppCleanup: (callback) => ipcRenderer.on('app-cleanup', () => callback()),
+  sendAppCloseResponse: (shouldClose, reason) => ipcRenderer.send('app-close-response', shouldClose, reason),
 
   // Platform info
   platform: process.platform,

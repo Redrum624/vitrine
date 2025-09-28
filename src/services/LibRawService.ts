@@ -1,12 +1,10 @@
 import { logger } from '../utils/Logger';
 
-// Define the LibRaw interface based on the package documentation
+// Define the LibRaw interface based on the actual libraw-wasm API
 interface LibRawInstance {
-  open(buffer: Uint8Array): Promise<void>;
-  metadata(): Promise<RawMetadata>;
+  open(buffer: Uint8Array, options?: LibRawOptions): Promise<void>;
+  metadata(fullOutput?: boolean): Promise<RawMetadata>;
   imageData(): Promise<Uint8Array>;
-  configure(options: LibRawOptions): void;
-  close(): void;
 }
 
 interface LibRawConstructor {
@@ -34,39 +32,36 @@ export interface RawMetadata {
 }
 
 export interface LibRawOptions {
-  // White balance settings
-  use_camera_wb?: boolean;
-  use_auto_wb?: boolean;
-  greybox?: [number, number, number, number]; // x, y, width, height
-  user_wb?: number[]; // [r_multiplier, g_multiplier, b_multiplier, g2_multiplier]
+  // Basic settings
+  bright?: number; // brightness
+  threshold?: number; // wavelet denoise threshold
 
-  // Quality settings
-  user_qual?: number; // 0=linear, 1=VNG, 2=PPG, 3=AHD, 4=DCB, 11=DHT, 12=AAHD
-  half_size?: boolean;
-  four_color_rgb?: boolean;
+  // Size and quality
+  halfSize?: boolean; // output at 1/2 size
+  fourColorRgb?: boolean; // separate interpolation for two green channels
+  highlight?: number; // highlight mode (0..9)
+  userQual?: number; // interpolation quality (0..12)
 
-  // Color settings
-  user_cspace?: number; // 0=raw, 1=sRGB, 2=Adobe, 3=Wide, 4=ProPhoto, 5=XYZ
-  output_color?: number;
-  output_bps?: number; // 8 or 16
+  // White balance
+  useAutoWb?: boolean; // auto white balance
+  useCameraWb?: boolean; // camera's recorded WB
+  userMul?: number[]; // user WB multipliers (r, g, b, g2)
 
-  // Exposure correction
-  exp_correc?: boolean;
-  exp_shift?: number;
-  exp_preser?: number;
+  // Color space
+  outputColor?: number; // output colorspace (0..8) (0=raw,1=sRGB,2=Adobe, etc.)
+  outputBps?: number; // 8 or 16 bits per sample
 
-  // Brightness and gamma
-  bright?: number;
-  user_gamma?: number[];
+  // Advanced
+  userBlack?: number; // user black level
+  userSat?: number; // saturation level
+  expCorrec?: boolean; // enable exposure correction
+  expShift?: number; // exposure shift in linear scale
+  expPreser?: number; // preserve highlights when expShift>1 (0..1)
 
-  // Noise reduction and sharpening
-  threshold?: number;
-  aber?: number[];
-  user_black?: number;
-  user_sat?: number;
-
-  // Cropping
-  cropbox?: [number, number, number, number]; // x, y, width, height
+  // Geometry
+  greybox?: number[]; // rectangle (x,y,width,height) for WB calc
+  cropbox?: number[]; // cropping rectangle (left, top, w, h)
+  gamm?: number[]; // gamma correction [power, toe_slope]
 }
 
 export interface ProcessedRawData {
@@ -102,7 +97,7 @@ export class LibRawService {
 
       // Import the LibRaw WebAssembly module
       const LibRawModule = await import('libraw-wasm');
-      this.LibRaw = (LibRawModule.default || LibRawModule) as LibRawConstructor;
+      this.LibRaw = (LibRawModule.default || LibRawModule) as unknown as LibRawConstructor;
 
       this.isInitialized = true;
       const initTime = performance.now() - startTime;
@@ -141,36 +136,33 @@ export class LibRawService {
       // Configure processing options with professional defaults
       const defaultOptions: LibRawOptions = {
         // Quality settings - use high-quality demosaicing
-        user_qual: 3, // AHD (Adaptive Homogeneity-Directed)
-        half_size: false, // Full resolution
-        four_color_rgb: false, // Standard RGB
+        userQual: 3, // AHD (Adaptive Homogeneity-Directed)
+        halfSize: false, // Full resolution
+        fourColorRgb: false, // Standard RGB
 
-        // Color settings - sRGB output for web compatibility
-        user_cspace: 1, // sRGB
-        output_color: 1, // sRGB
-        output_bps: 8, // 8-bit output for web
+        // Color settings - most neutral processing
+        outputColor: 0, // RAW colorspace (no color conversion)
+        outputBps: 8, // 8-bit output for web
 
-        // White balance - use camera settings by default
-        use_camera_wb: true,
-        use_auto_wb: false,
+        // White balance - disable all white balance to preserve original colors
+        useCameraWb: false,
+        useAutoWb: false,
 
-        // Exposure and gamma correction
-        exp_correc: false, // Let our modules handle exposure
+        // Exposure and gamma correction - completely linear processing
+        expCorrec: false, // Disable exposure correction
         bright: 1.0, // Default brightness
-        user_gamma: [1.0, 4.5], // Standard sRGB gamma
+        gamm: [1.0, 1.0], // Linear gamma (no tone curve applied)
 
         // Noise and enhancement
         threshold: 100, // Wavelet denoising threshold
-        user_black: 0, // Auto black level
-        user_sat: 32767, // Auto saturation
+        userBlack: 0, // Auto black level
+        userSat: 32767, // Auto saturation
 
         ...options // Override with user-provided options
       };
 
-      rawInstance.configure(defaultOptions);
-
-      // Open the RAW file
-      await rawInstance.open(uint8Buffer);
+      // Open the RAW file with settings (libraw-wasm combines open and configure)
+      await rawInstance.open(uint8Buffer, defaultOptions);
 
       // Get metadata
       const metadata = await rawInstance.metadata();
@@ -179,7 +171,7 @@ export class LibRawService {
         model: metadata.model,
         dimensions: `${metadata.width}x${metadata.height}`,
         iso: metadata.iso,
-        colors: metadata.colors
+        // colors: metadata.colors // may not be available in all versions
       });
 
       // Process and get image data
@@ -188,8 +180,8 @@ export class LibRawService {
       const processingTime = performance.now() - startTime;
       logger.info(`RAW processing completed in ${processingTime.toFixed(2)}ms`);
 
-      // Determine channels from metadata
-      const channels = metadata.colors === 1 ? 1 : (defaultOptions.output_bps === 16 ? 3 : 3);
+      // RGB channels (libraw-wasm typically outputs RGB)
+      const channels = 3;
 
       return {
         imageData: processedData,
@@ -206,16 +198,8 @@ export class LibRawService {
 
       throw new Error(`LibRaw processing failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
 
-    } finally {
-      // Clean up LibRaw instance
-      if (rawInstance) {
-        try {
-          rawInstance.close();
-        } catch (closeError) {
-          logger.warn('Error closing LibRaw instance:', closeError);
-        }
-      }
     }
+    // Note: libraw-wasm handles cleanup automatically
   }
 
   // Convenience method for common RAW formats
@@ -229,20 +213,20 @@ export class LibRawService {
     switch (preset) {
       case 'fast':
         options = {
-          user_qual: 0, // Linear interpolation (fastest)
-          half_size: true, // Half resolution for speed
-          use_camera_wb: true,
-          output_bps: 8,
+          userQual: 0, // Linear interpolation (fastest)
+          halfSize: true, // Half resolution for speed
+          useCameraWb: true,
+          outputBps: 8,
           bright: 1.0
         };
         break;
 
       case 'balanced':
         options = {
-          user_qual: 1, // VNG interpolation (good balance)
-          half_size: false,
-          use_camera_wb: true,
-          output_bps: 8,
+          userQual: 1, // VNG interpolation (good balance)
+          halfSize: false,
+          useCameraWb: true,
+          outputBps: 8,
           bright: 1.0,
           threshold: 100
         };
@@ -250,14 +234,14 @@ export class LibRawService {
 
       case 'quality':
         options = {
-          user_qual: 3, // AHD interpolation (highest quality)
-          half_size: false,
-          four_color_rgb: false,
-          use_camera_wb: true,
-          output_bps: 8, // Keep 8-bit for web compatibility
+          userQual: 3, // AHD interpolation (highest quality)
+          halfSize: false,
+          fourColorRgb: false,
+          useCameraWb: true,
+          outputBps: 8, // Keep 8-bit for web compatibility
           bright: 1.0,
           threshold: 50, // Lower threshold for better noise reduction
-          user_gamma: [1.0, 4.5]
+          gamm: [1.0, 4.5]
         };
         break;
 

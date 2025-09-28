@@ -53,6 +53,22 @@ function createWindow() {
     // }
   });
 
+  // Handle window close request
+  mainWindow.on('close', async (event) => {
+    event.preventDefault(); // Prevent immediate close
+
+    // Ask the renderer to prepare for closing
+    const shouldClose = await requestAppClose();
+
+    if (shouldClose) {
+      // Perform cleanup
+      await performAppCleanup();
+
+      // Actually close the window
+      mainWindow.destroy();
+    }
+  });
+
   // Emitted when the window is closed
   mainWindow.on('closed', () => {
     mainWindow = null;
@@ -542,6 +558,18 @@ ipcMain.handle('get-log-file', async () => {
   return logFile;
 });
 
+// Read file as ArrayBuffer for RAW files
+ipcMain.handle('read-file-buffer', async (event, filePath) => {
+  try {
+    const buffer = await fs.promises.readFile(filePath);
+    // Convert Node.js Buffer to ArrayBuffer
+    return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
+  } catch (error) {
+    console.error('Error reading file as buffer:', error);
+    throw new Error(`Failed to read file as buffer: ${error.message}`);
+  }
+});
+
 // App event handlers
 app.whenReady().then(() => {
   createWindow();
@@ -571,3 +599,63 @@ app.on('web-contents-created', (event, contents) => {
     shell.openExternal(navigationUrl);
   });
 });
+
+// App closing cycle functions
+async function requestAppClose() {
+  try {
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      return true;
+    }
+
+    console.log('Requesting app close from renderer...');
+
+    // Send close request to renderer and wait for response
+    const result = await new Promise((resolve) => {
+      // Set up timeout in case renderer doesn't respond
+      const timeout = global.setTimeout(() => {
+        console.warn('Renderer did not respond to close request, proceeding with close');
+        resolve(true);
+      }, 5000); // 5 second timeout
+
+      // Set up response listener
+      const handleCloseResponse = (event, shouldClose, reason) => {
+        global.clearTimeout(timeout);
+        ipcMain.removeListener('app-close-response', handleCloseResponse);
+        console.log(`Renderer close response: ${shouldClose ? 'proceed' : 'cancel'} - ${reason || 'no reason'}`);
+        resolve(shouldClose);
+      };
+
+      ipcMain.on('app-close-response', handleCloseResponse);
+
+      // Send the close request
+      mainWindow.webContents.send('app-close-request');
+    });
+
+    return result;
+  } catch (error) {
+    console.error('Error during close request:', error);
+    return true; // Default to allowing close on error
+  }
+}
+
+async function performAppCleanup() {
+  try {
+    console.log('Performing app cleanup...');
+
+    // Clean up any background processes, timers, etc.
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      // Send cleanup signal to renderer
+      mainWindow.webContents.send('app-cleanup');
+
+      // Give renderer time to clean up (but don't wait too long)
+      await new Promise(resolve => global.setTimeout(resolve, 1000));
+    }
+
+    // Close log file handles if any
+    // Additional cleanup can be added here
+
+    console.log('App cleanup completed');
+  } catch (error) {
+    console.error('Error during app cleanup:', error);
+  }
+}

@@ -22,7 +22,7 @@ interface ModuleState {
 }
 
 export function AdjustmentPanel() {
-  const { setProcessedImageData, currentImage } = useAppStore();
+  const { setProcessedImageData, currentImage, viewport } = useAppStore();
   const [moduleStates, setModuleStates] = useState<Record<string, ModuleState>>({
     // Core processing modules first (most commonly used)
     exposure: { expanded: true, enabled: true },
@@ -47,6 +47,7 @@ export function AdjustmentPanel() {
   });
   const [isProcessing, setIsProcessing] = useState(false);
   const [lastProcessingTime, setLastProcessingTime] = useState(0);
+  const [shouldForceProcessing] = useState(false);
 
   // Connect the processing pipeline to image service for auto-adjustments
   useEffect(() => {
@@ -73,6 +74,7 @@ export function AdjustmentPanel() {
 
   const processCurrentImageRealTime = useCallback(async () => {
     const currentImage = imageService.getCurrentImage();
+    console.log('AdjustmentPanel: processCurrentImageRealTime called, currentImage:', currentImage ? `${currentImage.width}x${currentImage.height}` : 'null');
     if (!currentImage) return;
 
     // Skip processing if already processing
@@ -91,38 +93,85 @@ export function AdjustmentPanel() {
 
       logger.debug(`Processing preview: ${previewWidth}x${previewHeight} (downscaled from ${currentImage.width}x${currentImage.height})`);
 
-      // Create downscaled image data for faster processing
+      // Detect channel count from image data
+      const expectedPixels = currentImage.width * currentImage.height;
+      const actualChannels = currentImage.data.length / expectedPixels;
+      const isRGB = Math.abs(actualChannels - 3) < 0.1; // Tolerance for floating point
+      const sourceChannels = isRGB ? 3 : 4;
+
+      logger.debug(`Image format detected: ${sourceChannels} channels (${isRGB ? 'RGB' : 'RGBA'})`);
+
+      // Create downscaled image data for faster processing (always output RGBA)
       const scaleFactor = previewWidth / currentImage.width;
       const previewData = new Float32Array(previewWidth * previewHeight * 4);
 
-      // Optimized nearest neighbor downsampling for speed
+      // Debug original image data
+      const origMax = Math.max(...currentImage.data.slice(0, 1000));
+      const origMin = Math.min(...currentImage.data.slice(0, 1000));
+      const origSample = currentImage.data.slice(0, 8);
+      console.log('AdjustmentPanel: Original data - min:', origMin, 'max:', origMax, 'sample:', Array.from(origSample), 'scaleFactor:', scaleFactor);
+
+      // Optimized nearest neighbor downsampling with channel conversion
       for (let y = 0; y < previewHeight; y++) {
         for (let x = 0; x < previewWidth; x++) {
           const srcX = Math.floor(x / scaleFactor);
           const srcY = Math.floor(y / scaleFactor);
-          const srcIdx = (srcY * currentImage.width + srcX) * 4;
+          const srcIdx = (srcY * currentImage.width + srcX) * sourceChannels;
           const dstIdx = (y * previewWidth + x) * 4;
 
-          // Direct copy for speed (nearest neighbor)
-          previewData[dstIdx] = currentImage.data[srcIdx];
-          previewData[dstIdx + 1] = currentImage.data[srcIdx + 1];
-          previewData[dstIdx + 2] = currentImage.data[srcIdx + 2];
-          previewData[dstIdx + 3] = currentImage.data[srcIdx + 3];
+          // Copy RGB channels
+          previewData[dstIdx] = currentImage.data[srcIdx] || 0;     // R
+          previewData[dstIdx + 1] = currentImage.data[srcIdx + 1] || 0; // G
+          previewData[dstIdx + 2] = currentImage.data[srcIdx + 2] || 0; // B
+
+          // Handle alpha channel
+          if (sourceChannels === 4) {
+            previewData[dstIdx + 3] = currentImage.data[srcIdx + 3] || 1.0; // A from source
+          } else {
+            previewData[dstIdx + 3] = 1.0; // Full opacity for RGB images
+          }
         }
       }
 
-      // Process with preview resolution - FORCE main thread to avoid worker overhead
-      const processedData = await imageProcessingPipeline.processImage(previewData, {
-        width: previewWidth,
-        height: previewHeight,
-        channels: 4 // RGBA
-      }, false); // Disable web workers for preview
+      // Debug preview data after downsampling
+      const previewMax = Math.max(...previewData.slice(0, 1000));
+      const previewMin = Math.min(...previewData.slice(0, 1000));
+      const previewSample = previewData.slice(0, 8);
+      console.log('AdjustmentPanel: Preview data - min:', previewMin, 'max:', previewMax, 'sample:', Array.from(previewSample));
+
+      // Check if this is a LibRaw-processed image (skip pipeline processing to preserve colors)
+      const isLibRawProcessed = currentImage.data.length > 0 &&
+        Math.max(...currentImage.data.slice(0, 1000)) <= 1.0 &&
+        Math.min(...currentImage.data.slice(0, 1000)) > 0.0 &&
+        // Additional check: LibRaw typically has good dynamic range distribution
+        (previewMax - previewMin) > 0.5;
+
+      let processedData: Float32Array;
+
+      // Check if any modules are enabled (user made manual adjustments)
+      const hasManualAdjustments = Object.values(moduleStates).some(state => state.enabled);
+
+      if (isLibRawProcessed && !hasManualAdjustments && !shouldForceProcessing) {
+        // LibRaw-processed image with no manual adjustments: skip pipeline to preserve accurate colors
+        console.log('AdjustmentPanel: LibRaw-processed image detected with no manual adjustments, bypassing pipeline processing');
+        processedData = previewData; // Use the image directly without pipeline processing
+      } else {
+        // Normal image, or LibRaw with manual adjustments, or forced processing: run through pipeline
+        console.log('AdjustmentPanel: Running image through processing pipeline',
+          isLibRawProcessed ? '(LibRaw with manual adjustments)' : '(normal processing)');
+        processedData = await imageProcessingPipeline.processImage(previewData, {
+          width: previewWidth,
+          height: previewHeight,
+          channels: 4 // RGBA
+        }, false); // Disable web workers for preview
+      }
 
       const processTime = performance.now() - startTime;
       setLastProcessingTime(processTime);
       logger.debug(`Real-time preview processing completed in ${processTime.toFixed(2)}ms`);
 
       // Store both original and processed data
+      console.log('AdjustmentPanel: Setting processed data', previewWidth, 'x', previewHeight, 'channels:', sourceChannels, '->', 4);
       setProcessedImageData({
         data: processedData,
         width: previewWidth,
@@ -135,8 +184,15 @@ export function AdjustmentPanel() {
     } finally {
       setIsProcessing(false);
     }
-  }, [setProcessedImageData, isProcessing]);
+  }, [setProcessedImageData, isProcessing, moduleStates, shouldForceProcessing]);
 
+  // Trigger reprocessing when viewport changes (for zoom, pan, etc.)
+  useEffect(() => {
+    if (currentImage) {
+      logger.debug('Viewport changed, triggering reprocessing');
+      processCurrentImageRealTime();
+    }
+  }, [viewport, currentImage, processCurrentImageRealTime]);
 
   const [debounceTimer, setDebounceTimer] = useState<NodeJS.Timeout | null>(null);
 

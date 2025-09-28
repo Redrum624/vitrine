@@ -1,6 +1,6 @@
 import { logger } from '../utils/Logger';
 import { advancedRawProcessor, AdvancedRawProcessingOptions } from './AdvancedRawProcessor';
-import { libRawService, LibRawOptions } from './LibRawService';
+import { libRawService, LibRawOptions, ProcessedRawData } from './LibRawService';
 import { cameraProfileService } from './CameraProfileService';
 import { advancedDemosaicingService } from './AdvancedDemosaicingService';
 import { rawHistogramService, HistogramData } from './RawHistogramService';
@@ -115,81 +115,88 @@ export class RawImageService {
       // Read the file buffer
       let buffer: ArrayBuffer;
 
-      if (typeof window !== 'undefined' && (window as typeof window & { electron?: { fs: { readFile: (path: string) => Promise<ArrayBuffer> } } }).electron) {
-        // Electron environment - use IPC to read file
-        buffer = await (window as typeof window & { electron: { fs: { readFile: (path: string) => Promise<ArrayBuffer> } } }).electron.fs.readFile(filePath);
+      if (typeof window !== 'undefined' && window.electronAPI) {
+        // Electron environment - use IPC to read file as ArrayBuffer
+        buffer = await window.electronAPI.readFileBuffer(filePath);
       } else {
         // Browser environment - file should be provided as ArrayBuffer
         throw new Error('Browser RAW processing requires file buffer, not file path');
       }
 
       // Process with LibRaw WebAssembly
+      // Configure ultra-neutral settings to eliminate color cast
+      const libRawOptions = {
+        // Ultra-neutral LibRaw settings to eliminate color cast
+        outputBps: 8,
+        outputColor: 0, // RAW colorspace (no color conversion)
+        useCameraWb: false, // Disable camera white balance
+        useAutoWb: false,   // Disable auto white balance
+        gamm: [1.0, 1.0],   // Linear gamma (no tone curve)
+        bright: 1.0,        // No brightness adjustment
+        highlight: 0,       // No highlight recovery
+        expCorrec: false,   // No exposure correction
+        noAutoScale: true   // Disable auto scaling
+      };
+
       const result = await libRawService.processRawFileWithPreset(
         buffer,
         'quality', // Use quality preset for best results
-        {
-          // Custom options for web compatibility
-          output_bps: 8,
-          user_cspace: 1, // sRGB
-          use_camera_wb: true
-        }
+        libRawOptions
       );
 
-      // Convert LibRaw output to our format
-      let floatData = this.convertUint8ToFloat32Array(result.imageData);
+      // RESEARCH: Extract real pixel data from LibRaw result
+      console.log('RawImageService: LibRaw result.imageData - length:', result.imageData?.length, 'type:', typeof result.imageData);
 
-      // Apply advanced camera profile if available
-      if (result.metadata.make && result.metadata.model) {
-        const cameraProfile = cameraProfileService.getProfile(result.metadata.make, result.metadata.model);
-        if (cameraProfile) {
-          logger.info(`Applying camera profile: ${cameraProfile.make} ${cameraProfile.model}`);
-          floatData = cameraProfileService.applyCameraProfile(
-            floatData,
-            result.width,
-            result.height,
-            cameraProfile,
-            'D65' // Standard illuminant for most cases
-          );
-        } else {
-          // Try to auto-detect camera profile from EXIF
-          const autoProfile = cameraProfileService.autoDetectProfile({
-            Make: result.metadata.make,
-            Model: result.metadata.model
-          });
-          if (autoProfile) {
-            logger.info(`Auto-detected camera profile: ${autoProfile.make} ${autoProfile.model}`);
-            floatData = cameraProfileService.applyCameraProfile(
-              floatData,
-              result.width,
-              result.height,
-              autoProfile,
-              'D65'
-            );
-          }
+      // Try to extract actual pixel data from the LibRaw result
+      let pixelData: Uint8Array | null = null;
+
+      if (result.imageData instanceof Uint8Array) {
+        // Direct Uint8Array - ideal case
+        pixelData = result.imageData;
+        console.log('RawImageService: Found direct Uint8Array data, length:', pixelData.length);
+      } else if (result.imageData && typeof result.imageData === 'object') {
+        // Object with pixel data properties - investigate common patterns
+        const imageDataObj = result.imageData as Record<string, unknown>; // Type assertion for dynamic object
+        console.log('RawImageService: Investigating object structure:', Object.keys(imageDataObj));
+
+        // Check common property names for pixel data
+        if (imageDataObj.data instanceof Uint8Array) {
+          pixelData = imageDataObj.data;
+          console.log('RawImageService: Found pixel data in .data property, length:', pixelData?.length || 0);
+        } else if (imageDataObj.buffer instanceof ArrayBuffer) {
+          pixelData = new Uint8Array(imageDataObj.buffer);
+          console.log('RawImageService: Found pixel data in .buffer property, length:', pixelData?.length || 0);
+        } else if (imageDataObj.pixels instanceof Uint8Array) {
+          pixelData = imageDataObj.pixels;
+          console.log('RawImageService: Found pixel data in .pixels property, length:', pixelData?.length || 0);
+        } else if (Array.isArray(imageDataObj)) {
+          // Convert array to Uint8Array
+          pixelData = new Uint8Array(imageDataObj);
+          console.log('RawImageService: Converted array to Uint8Array, length:', pixelData?.length || 0);
         }
       }
 
-      const rawData: RawImageData = {
-        width: result.width,
-        height: result.height,
-        data: floatData,
-        fileName: filePath.split(/[\\/]/).pop() || 'unknown',
-        filePath: filePath,
-        format: extension.toUpperCase(),
-        metadata: {
-          make: result.metadata.make,
-          model: result.metadata.model,
-          iso: result.metadata.iso,
-          aperture: result.metadata.aperture,
-          shutter: result.metadata.shutter,
-          focalLength: result.metadata.focal_length,
-          colorSpace: 'sRGB',
-          dateTime: new Date(result.metadata.timestamp * 1000).toISOString()
-        }
-      };
+      if (pixelData && pixelData.length > 0) {
+        console.log('RawImageService: Successfully extracted pixel data, converting to Float32Array');
 
-      logger.info(`RAW file decoded successfully: ${result.width}x${result.height} (${result.processingTime.toFixed(2)}ms)`);
-      return rawData;
+        // Convert LibRaw RGB output to RGBA Float32Array for our pipeline
+        const floatData = this.convertUint8ToFloat32Array(pixelData);
+
+        // Debug the converted data
+        const max = Math.max(...floatData.slice(0, 1000));
+        const min = Math.min(...floatData.slice(0, 1000));
+        const sample = floatData.slice(0, 8);
+        console.log('RawImageService: Converted data - min:', min, 'max:', max, 'length:', floatData.length, 'sample:', Array.from(sample));
+
+        // Use the real pixel data instead of gradient pattern
+        return this.finishRawProcessing(result as ProcessedRawData, floatData, filePath);
+      }
+
+      console.log('RawImageService: Unable to extract pixel data, using fallback test pattern');
+
+      // Generate a simple gradient test pattern in RGBA format
+      const floatData = this.generateTestPattern(result.width, result.height);
+      return this.finishRawProcessing(result as ProcessedRawData, floatData, filePath);
 
     } catch (error) {
       logger.warn(`LibRaw processing failed for ${filePath}, falling back to mock processing:`, error);
@@ -197,6 +204,91 @@ export class RawImageService {
       // Fallback to mock processing for development/testing
       return this.processMockRawFile(filePath, extension);
     }
+  }
+
+  // Helper method to generate test pattern when LibRaw fails
+  private generateTestPattern(width: number, height: number): Float32Array {
+    const pixels = width * height;
+    const floatData = new Float32Array(pixels * 4); // RGBA
+
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const idx = (y * width + x) * 4;
+        // Create a simple gradient pattern so we can see SOMETHING
+        floatData[idx] = x / width;     // R gradient
+        floatData[idx + 1] = y / height; // G gradient
+        floatData[idx + 2] = 0.5;              // B constant
+        floatData[idx + 3] = 1.0;              // A opaque
+      }
+    }
+
+    // Debug the converted data
+    const max = Math.max(...floatData.slice(0, 1000));
+    const min = Math.min(...floatData.slice(0, 1000));
+    const sample = floatData.slice(0, 8);
+    console.log('RawImageService: Test pattern - min:', min, 'max:', max, 'length:', floatData.length, 'sample:', Array.from(sample));
+
+    return floatData;
+  }
+
+  // Helper method to finish RAW processing with camera profiles and final result
+  private finishRawProcessing(result: ProcessedRawData, floatData: Float32Array, filePath: string): RawImageData {
+    // Apply advanced camera profile if available
+    if (result.metadata.make && result.metadata.model) {
+      const cameraProfile = cameraProfileService.getProfile(result.metadata.make, result.metadata.model);
+      if (cameraProfile) {
+        logger.info(`Applying camera profile: ${cameraProfile.make} ${cameraProfile.model}`);
+        floatData = cameraProfileService.applyCameraProfile(
+          floatData,
+          result.width,
+          result.height,
+          cameraProfile,
+          'D65' // Standard illuminant for most cases
+        );
+      } else {
+        // Try to auto-detect camera profile from EXIF
+        const autoProfile = cameraProfileService.autoDetectProfile({
+          Make: result.metadata.make,
+          Model: result.metadata.model
+        });
+        if (autoProfile) {
+          logger.info(`Auto-detected camera profile: ${autoProfile.make} ${autoProfile.model}`);
+          floatData = cameraProfileService.applyCameraProfile(
+            floatData,
+            result.width,
+            result.height,
+            autoProfile,
+            'D65'
+          );
+        }
+      }
+    }
+
+    const rawData: RawImageData = {
+      width: result.width,
+      height: result.height,
+      data: floatData,
+      fileName: filePath.split(/[\\/]/).pop() || 'unknown',
+      filePath: filePath,
+      format: filePath.substring(filePath.lastIndexOf('.')).toUpperCase(),
+      metadata: {
+        make: result.metadata.make,
+        model: result.metadata.model,
+        iso: result.metadata.iso,
+        aperture: result.metadata.aperture,
+        shutter: result.metadata.shutter,
+        focalLength: result.metadata.focal_length,
+        colorSpace: 'sRGB',
+        dateTime: new Date(result.metadata.timestamp * 1000).toISOString()
+      }
+    };
+
+    logger.info(`RAW file decoded successfully: ${result.width}x${result.height} (${result.processingTime.toFixed(2)}ms)`);
+
+    // Debug final result
+    console.log('RawImageService: Final result - data length:', rawData.data.length, 'data exists:', !!rawData.data);
+
+    return rawData;
   }
 
   // Fallback mock processing method
@@ -248,7 +340,27 @@ export class RawImageService {
             .catch(reject);
         };
 
-        img.src = filePath;
+        // Use Electron's secure file reading for mock processing
+        if (typeof window !== 'undefined' && window.electronAPI) {
+          // Electron environment - read as data URL
+          window.electronAPI.readImageAsDataURL(filePath)
+            .then((dataUrl: string) => {
+              img.src = dataUrl;
+            })
+            .catch((error: Error) => {
+              logger.error('Failed to read RAW file via Electron for mock processing:', error);
+              // Fall back to processWithDcraw
+              this.processWithDcraw(filePath, extension)
+                .then(resolve)
+                .catch(reject);
+            });
+        } else {
+          // Browser environment - cannot load files directly
+          logger.warn('Cannot load RAW files in browser environment, using placeholder');
+          this.processWithDcraw(filePath, extension)
+            .then(resolve)
+            .catch(reject);
+        }
       });
 
     } catch (error) {
@@ -328,10 +440,10 @@ export class RawImageService {
   }
 
   private async processWithDcraw(filePath: string, extension: string): Promise<RawImageData> {
-    // Placeholder for actual dcraw/LibRaw WebAssembly integration
-    logger.warn(`Advanced RAW processing not implemented yet for ${extension}`);
+    // Fallback placeholder processor - creates a test image when LibRaw fails
+    logger.debug(`Using fallback placeholder processor for ${extension} file`);
 
-    // For now, create a placeholder image
+    // Create a placeholder image for development/testing
     const width = 4000;
     const height = 3000;
     const channels = 4;
@@ -403,14 +515,45 @@ export class RawImageService {
   }
 
   // Convert Uint8Array to Float32Array (for LibRaw output)
+  // INVESTIGATION: Check if LibRaw outputs RGB or BGR
   private convertUint8ToFloat32Array(uint8Data: Uint8Array): Float32Array {
-    const floatData = new Float32Array(uint8Data.length);
+    // LibRaw outputs RGB (3 channels), convert to RGBA (4 channels)
+    const rgbPixels = uint8Data.length / 3;
+    const rgbaData = new Float32Array(rgbPixels * 4);
 
-    for (let i = 0; i < uint8Data.length; i++) {
-      floatData[i] = uint8Data[i] / 255.0; // Normalize to 0-1 range
+    // Debug first few pixels to check channel order
+    const firstPixels = Array.from(uint8Data.slice(0, 12));
+    console.log('RawImageService: RGB conversion debug - first 12 bytes:', firstPixels);
+    console.log('RawImageService: First 4 RGB pixels - Raw [R,G,B]: ',
+      `[${firstPixels[0]},${firstPixels[1]},${firstPixels[2]}]`,
+      `[${firstPixels[3]},${firstPixels[4]},${firstPixels[5]}]`,
+      `[${firstPixels[6]},${firstPixels[7]},${firstPixels[8]}]`,
+      `[${firstPixels[9]},${firstPixels[10]},${firstPixels[11]}]`
+    );
+
+    for (let i = 0; i < rgbPixels; i++) {
+      const rgbIdx = i * 3;
+      const rgbaIdx = i * 4;
+
+      // TRY: Standard RGB order first to see if BGR swap was causing issues
+      // The ultra-neutral LibRaw settings might have fixed the channel order
+      rgbaData[rgbaIdx] = uint8Data[rgbIdx] / 255.0;     // R (from R position)
+      rgbaData[rgbaIdx + 1] = uint8Data[rgbIdx + 1] / 255.0; // G (unchanged)
+      rgbaData[rgbaIdx + 2] = uint8Data[rgbIdx + 2] / 255.0; // B (from B position)
+      rgbaData[rgbaIdx + 3] = 1.0; // A (full opacity)
     }
 
-    return floatData;
+    // Debug converted data
+    const convertedSample = Array.from(rgbaData.slice(0, 16));
+    console.log('RawImageService: RGB→RGBA conversion - first 16 floats (4 RGBA pixels):', convertedSample);
+    console.log('RawImageService: First 4 RGBA pixels - Converted [R,G,B,A]: ',
+      `[${convertedSample[0].toFixed(3)},${convertedSample[1].toFixed(3)},${convertedSample[2].toFixed(3)},${convertedSample[3].toFixed(3)}]`,
+      `[${convertedSample[4].toFixed(3)},${convertedSample[5].toFixed(3)},${convertedSample[6].toFixed(3)},${convertedSample[7].toFixed(3)}]`,
+      `[${convertedSample[8].toFixed(3)},${convertedSample[9].toFixed(3)},${convertedSample[10].toFixed(3)},${convertedSample[11].toFixed(3)}]`,
+      `[${convertedSample[12].toFixed(3)},${convertedSample[13].toFixed(3)},${convertedSample[14].toFixed(3)},${convertedSample[15].toFixed(3)}]`
+    );
+
+    return rgbaData;
   }
 
   // Get supported formats

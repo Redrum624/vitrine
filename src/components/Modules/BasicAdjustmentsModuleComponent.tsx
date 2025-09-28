@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { RotateCcw, Zap } from 'lucide-react';
 import { BasicAdjustmentsModule, BasicAdjParams } from '../../modules/BasicAdjustmentsModule';
 import { logger } from '../../utils/Logger';
@@ -14,14 +14,44 @@ export function BasicAdjustmentsModuleComponent({
   onParamsChange
 }: BasicAdjustmentsModuleComponentProps) {
   const [params, setParams] = useState<BasicAdjParams>(module.getParams());
+  const updateTimeoutRef = useRef<Record<string, NodeJS.Timeout>>({});
 
-  const updateParam = useCallback((key: keyof BasicAdjParams, value: number) => {
+  // Immediate UI update for smooth slider movement
+  const updateParamImmediate = useCallback((key: keyof BasicAdjParams, value: number) => {
     const newParams = { ...params, [key]: value };
     setParams(newParams);
+  }, [params]);
+
+  // Throttled module update for performance
+  const updateParam = useCallback((key: keyof BasicAdjParams, value: number) => {
+    // Clear any existing timeout for this parameter
+    if (updateTimeoutRef.current[key]) {
+      clearTimeout(updateTimeoutRef.current[key]);
+    }
+
+    // Update UI immediately for smooth feedback
+    updateParamImmediate(key, value);
+
+    // Throttle the actual module and processing updates
+    updateTimeoutRef.current[key] = setTimeout(() => {
+      const newParams = { ...params, [key]: value };
+      module.setParams({ [key]: value });
+      onParamsChange?.(newParams);
+      logger.debug(`BasicAdj ${key} updated:`, value);
+      delete updateTimeoutRef.current[key];
+    }, 16); // ~60fps for smooth updates
+  }, [params, module, onParamsChange, updateParamImmediate]);
+
+  // Real-time update for slider dragging
+  const updateParamRealTime = useCallback((key: keyof BasicAdjParams, value: number) => {
+    // Update UI immediately
+    updateParamImmediate(key, value);
+
+    // Also update module for real-time preview (no throttling)
     module.setParams({ [key]: value });
+    const newParams = { ...params, [key]: value };
     onParamsChange?.(newParams);
-    logger.debug(`BasicAdj ${key} updated:`, value);
-  }, [params, module, onParamsChange]);
+  }, [params, module, onParamsChange, updateParamImmediate]);
 
   const resetParam = useCallback((key: keyof BasicAdjParams, defaultValue: number) => {
     updateParam(key, defaultValue);
@@ -79,9 +109,9 @@ export function BasicAdjustmentsModuleComponent({
               <DelayedInputControl
                 value={params.exposure}
                 onChange={(value) => updateParam('exposure', value)}
-                min={-18}
-                max={18}
-                step={0.1}
+                min={-6}
+                max={6}
+                step={0.01}
                 precision={2}
               />
               <span className="text-xs text-dark-300">EV</span>
@@ -97,12 +127,19 @@ export function BasicAdjustmentsModuleComponent({
           <div className="relative">
             <input
               type="range"
-              min="-18"
-              max="18"
-              step="0.1"
+              min="-6"
+              max="6"
+              step="0.01"
               value={params.exposure}
+              onInput={(e) => updateParamRealTime('exposure', parseFloat((e.target as HTMLInputElement).value))}
               onChange={(e) => updateParam('exposure', parseFloat(e.target.value))}
-              className="w-full h-2 border border-dark-700 rounded-lg appearance-none cursor-pointer slider-thumb visible-track"
+              onDoubleClick={() => updateParam('exposure', 0.0)}
+              className="w-full h-2 rounded-lg appearance-none cursor-pointer slider-thumb"
+              style={{
+                background: 'linear-gradient(to right, #000000, #6b7280, #ffffff)',
+                border: '1px solid #374151'
+              }}
+              title="Double-click to reset to 0"
             />
           </div>
         </div>
@@ -118,7 +155,7 @@ export function BasicAdjustmentsModuleComponent({
                 min={-1}
                 max={1}
                 step={0.01}
-                precision={3}
+                precision={2}
               />
               <button
                 onClick={() => resetParam('black_point', 0.0)}
@@ -136,8 +173,15 @@ export function BasicAdjustmentsModuleComponent({
               max="1"
               step="0.01"
               value={params.black_point}
+              onInput={(e) => updateParamRealTime('black_point', parseFloat((e.target as HTMLInputElement).value))}
               onChange={(e) => updateParam('black_point', parseFloat(e.target.value))}
-              className="w-full h-2 border border-dark-700 rounded-lg appearance-none cursor-pointer slider-thumb visible-track"
+              onDoubleClick={() => updateParam('black_point', 0.0)}
+              className="w-full h-2 rounded-lg appearance-none cursor-pointer slider-thumb"
+              style={{
+                background: 'linear-gradient(to right, #000000, #4b5563)',
+                border: '1px solid #374151'
+              }}
+              title="Double-click to reset to 0"
             />
           </div>
         </div>
@@ -152,7 +196,7 @@ export function BasicAdjustmentsModuleComponent({
                 onChange={(value) => updateParam('contrast', value)}
                 min={-2.5}
                 max={2.5}
-                step={0.1}
+                step={0.01}
                 precision={2}
               />
               <button
@@ -169,10 +213,17 @@ export function BasicAdjustmentsModuleComponent({
               type="range"
               min="-2.5"
               max="2.5"
-              step="0.1"
+              step="0.01"
               value={params.contrast}
+              onInput={(e) => updateParamRealTime('contrast', parseFloat((e.target as HTMLInputElement).value))}
               onChange={(e) => updateParam('contrast', parseFloat(e.target.value))}
-              className="w-full h-2 border border-dark-700 rounded-lg appearance-none cursor-pointer slider-thumb visible-track"
+              onDoubleClick={() => updateParam('contrast', 0.0)}
+              className="w-full h-2 rounded-lg appearance-none cursor-pointer slider-thumb"
+              style={{
+                background: 'linear-gradient(to right, #ffffff, #000000)',
+                border: '1px solid #374151'
+              }}
+              title="Double-click to reset to 0"
             />
           </div>
         </div>
@@ -185,9 +236,9 @@ export function BasicAdjustmentsModuleComponent({
               <DelayedInputControl
                 value={params.brightness}
                 onChange={(value) => updateParam('brightness', value)}
-                min={-4}
-                max={4}
-                step={0.1}
+                min={-2}
+                max={2}
+                step={0.01}
                 precision={2}
               />
               <button
@@ -202,12 +253,19 @@ export function BasicAdjustmentsModuleComponent({
           <div className="relative">
             <input
               type="range"
-              min="-4"
-              max="4"
-              step="0.1"
+              min="-2"
+              max="2"
+              step="0.01"
               value={params.brightness}
+              onInput={(e) => updateParamRealTime('brightness', parseFloat((e.target as HTMLInputElement).value))}
               onChange={(e) => updateParam('brightness', parseFloat(e.target.value))}
-              className="w-full h-2 border border-dark-700 rounded-lg appearance-none cursor-pointer slider-thumb visible-track"
+              onDoubleClick={() => updateParam('brightness', 0.0)}
+              className="w-full h-2 rounded-lg appearance-none cursor-pointer slider-thumb"
+              style={{
+                background: 'linear-gradient(to right, #000000, #6b7280, #ffffff)',
+                border: '1px solid #374151'
+              }}
+              title="Double-click to reset to 0"
             />
           </div>
         </div>
@@ -222,7 +280,7 @@ export function BasicAdjustmentsModuleComponent({
                 onChange={(value) => updateParam('saturation', value)}
                 min={-1}
                 max={1}
-                step={0.05}
+                step={0.01}
                 precision={2}
               />
               <button
@@ -241,8 +299,15 @@ export function BasicAdjustmentsModuleComponent({
               max="1"
               step="0.05"
               value={params.saturation}
+              onInput={(e) => updateParamRealTime('saturation', parseFloat((e.target as HTMLInputElement).value))}
               onChange={(e) => updateParam('saturation', parseFloat(e.target.value))}
-              className="w-full h-2 border border-dark-700 rounded-lg appearance-none cursor-pointer slider-thumb visible-track"
+              onDoubleClick={() => updateParam('saturation', 0.0)}
+              className="w-full h-2 rounded-lg appearance-none cursor-pointer slider-thumb"
+              style={{
+                background: 'linear-gradient(to right, #9ca3af, #3b82f6, #10b981, #eab308, #f97316, #ef4444)',
+                border: '1px solid #374151'
+              }}
+              title="Double-click to reset to 0"
             />
           </div>
         </div>
@@ -257,7 +322,7 @@ export function BasicAdjustmentsModuleComponent({
                 onChange={(value) => updateParam('vibrance', value)}
                 min={-1}
                 max={1}
-                step={0.05}
+                step={0.01}
                 precision={2}
               />
               <button
@@ -276,8 +341,15 @@ export function BasicAdjustmentsModuleComponent({
               max="1"
               step="0.05"
               value={params.vibrance}
+              onInput={(e) => updateParamRealTime('vibrance', parseFloat((e.target as HTMLInputElement).value))}
               onChange={(e) => updateParam('vibrance', parseFloat(e.target.value))}
-              className="w-full h-2 border border-dark-700 rounded-lg appearance-none cursor-pointer slider-thumb visible-track"
+              onDoubleClick={() => updateParam('vibrance', 0.0)}
+              className="w-full h-2 rounded-lg appearance-none cursor-pointer slider-thumb"
+              style={{
+                background: 'linear-gradient(to right, #64748b, #a855f7, #ec4899, #f43f5e, #f97316)',
+                border: '1px solid #374151'
+              }}
+              title="Double-click to reset to 0"
             />
           </div>
         </div>

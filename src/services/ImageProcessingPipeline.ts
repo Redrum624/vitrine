@@ -175,7 +175,13 @@ export class ImageProcessingPipeline {
   private async processOnMainThread(input: Float32Array, context: ProcessingContext): Promise<Float32Array> {
     let currentData: Float32Array = new Float32Array(input);
 
-    // Debug logging removed - issue resolved
+    // Debug input data
+    const inputSample = input.slice(0, 12);
+    const inputMax = Math.max(...input.slice(0, 1000));
+    const inputMin = Math.min(...input.slice(0, 1000));
+    const inputAvg = input.slice(0, 1000).reduce((sum, val) => sum + val, 0) / 1000;
+    const nonZeroCount = input.slice(0, 1000).filter(val => val > 0).length;
+    console.log('Pipeline: Input data - min:', inputMin, 'max:', inputMax, 'avg:', inputAvg, 'nonZero:', nonZeroCount, 'sample:', Array.from(inputSample.slice(0, 8)));
 
     logger.info(`Processing on main thread: ${context.width}x${context.height} (${this.processingOrder.length} modules)`);
     const startTime = performance.now();
@@ -216,7 +222,11 @@ export class ImageProcessingPipeline {
       const totalTime = performance.now() - startTime;
       logger.info(`Main thread processing completed in ${totalTime.toFixed(2)}ms`);
 
-      // Debug logging removed - issue resolved
+      // Debug output data
+      const outputMax = Math.max(...currentData.slice(0, 1000));
+      const outputMin = Math.min(...currentData.slice(0, 1000));
+      const outputSample = currentData.slice(0, 4);
+      console.log('Pipeline: Output data - min:', outputMin, 'max:', outputMax, 'sample:', Array.from(outputSample));
 
       return currentData;
 

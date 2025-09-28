@@ -52,7 +52,9 @@ export const ShadowsHighlightsModuleComponent: React.FC<ShadowsHighlightsModuleC
     step?: number;
     suffix?: string;
     precision?: number;
-  }> = ({ label, value, onChange, min, max, step = 0.1, suffix = '', precision = 1 }) => (
+    gradient?: string;
+    defaultValue?: number;
+  }> = ({ label, value, onChange, min, max, step = 0.1, suffix = '', precision = 1, gradient, defaultValue = 0 }) => (
     <div className="space-y-1">
       <div className="flex justify-between items-center">
         <label className="text-xs font-medium text-dark-300">{label}</label>
@@ -67,7 +69,15 @@ export const ShadowsHighlightsModuleComponent: React.FC<ShadowsHighlightsModuleC
         step={step}
         value={value}
         onChange={(e) => onChange(parseFloat(e.target.value))}
-        className="w-full h-2 border border-dark-700 rounded-lg appearance-none cursor-pointer slider-thumb visible-track"
+        onDoubleClick={() => onChange(defaultValue)}
+        className="w-full h-2 rounded-lg appearance-none cursor-pointer slider-thumb"
+        style={gradient ? {
+          background: gradient,
+          border: '1px solid #374151'
+        } : {
+          border: '1px solid #374151'
+        }}
+        title={`Double-click to reset to ${defaultValue}${suffix}`}
       />
     </div>
   );
@@ -177,9 +187,10 @@ export const ShadowsHighlightsModuleComponent: React.FC<ShadowsHighlightsModuleC
             onChange={(value) => handleParamChange('shadows', value)}
             min={0}
             max={100}
-            step={1}
+            step={0.01}
             suffix="%"
-            precision={0}
+            precision={2}
+            gradient="linear-gradient(to right, #000000, #4b5563, #9ca3af)"
           />
 
           <SliderControl
@@ -188,9 +199,10 @@ export const ShadowsHighlightsModuleComponent: React.FC<ShadowsHighlightsModuleC
             onChange={(value) => handleParamChange('shadowsRadius', value)}
             min={0.1}
             max={100}
-            step={0.1}
+            step={0.01}
             suffix="%"
-            precision={1}
+            precision={2}
+            gradient="linear-gradient(to right, #1f2937, #374151, #6b7280)"
           />
 
           <SliderControl
@@ -199,9 +211,10 @@ export const ShadowsHighlightsModuleComponent: React.FC<ShadowsHighlightsModuleC
             onChange={(value) => handleParamChange('shadowsColorTransfer', value)}
             min={0}
             max={100}
-            step={1}
+            step={0.01}
             suffix="%"
-            precision={0}
+            precision={2}
+            gradient="linear-gradient(to right, #374151, #3b82f6, #1d4ed8)"
           />
 
           <SliderControl
@@ -210,9 +223,10 @@ export const ShadowsHighlightsModuleComponent: React.FC<ShadowsHighlightsModuleC
             onChange={(value) => handleParamChange('shadowsColorCorrection', value)}
             min={0}
             max={100}
-            step={1}
+            step={0.01}
             suffix="%"
-            precision={0}
+            precision={2}
+            gradient="linear-gradient(to right, #374151, #8b5cf6, #7c3aed)"
           />
         </div>
       )}
@@ -231,9 +245,10 @@ export const ShadowsHighlightsModuleComponent: React.FC<ShadowsHighlightsModuleC
             onChange={(value) => handleParamChange('highlights', value)}
             min={0}
             max={100}
-            step={1}
+            step={0.01}
             suffix="%"
-            precision={0}
+            precision={2}
+            gradient="linear-gradient(to right, #9ca3af, #f3f4f6, #ffffff)"
           />
 
           <SliderControl
@@ -242,9 +257,10 @@ export const ShadowsHighlightsModuleComponent: React.FC<ShadowsHighlightsModuleC
             onChange={(value) => handleParamChange('highlightsRadius', value)}
             min={0.1}
             max={100}
-            step={0.1}
+            step={0.01}
             suffix="%"
-            precision={1}
+            precision={2}
+            gradient="linear-gradient(to right, #d1d5db, #f3f4f6, #ffffff)"
           />
 
           <SliderControl
@@ -253,9 +269,10 @@ export const ShadowsHighlightsModuleComponent: React.FC<ShadowsHighlightsModuleC
             onChange={(value) => handleParamChange('highlightsColorTransfer', value)}
             min={0}
             max={100}
-            step={1}
+            step={0.01}
             suffix="%"
-            precision={0}
+            precision={2}
+            gradient="linear-gradient(to right, #d1d5db, #fbbf24, #f59e0b)"
           />
 
           <SliderControl
@@ -264,9 +281,10 @@ export const ShadowsHighlightsModuleComponent: React.FC<ShadowsHighlightsModuleC
             onChange={(value) => handleParamChange('highlightsColorCorrection', value)}
             min={0}
             max={100}
-            step={1}
+            step={0.01}
             suffix="%"
-            precision={0}
+            precision={2}
+            gradient="linear-gradient(to right, #d1d5db, #f97316, #ea580c)"
           />
         </div>
       )}
@@ -288,9 +306,10 @@ export const ShadowsHighlightsModuleComponent: React.FC<ShadowsHighlightsModuleC
               onChange={(value) => handleParamChange('whitePoint', value)}
               min={-4}
               max={4}
-              step={0.1}
+              step={0.01}
               suffix=" EV"
-              precision={1}
+              precision={2}
+              gradient="linear-gradient(to right, #6b7280, #d1d5db, #ffffff)"
             />
             <SliderControl
               label="Black Point"
@@ -298,9 +317,10 @@ export const ShadowsHighlightsModuleComponent: React.FC<ShadowsHighlightsModuleC
               onChange={(value) => handleParamChange('blackPoint', value)}
               min={-4}
               max={4}
-              step={0.1}
+              step={0.01}
               suffix=" EV"
-              precision={1}
+              precision={2}
+              gradient="linear-gradient(to right, #000000, #374151, #6b7280)"
             />
           </div>
 
@@ -311,9 +331,10 @@ export const ShadowsHighlightsModuleComponent: React.FC<ShadowsHighlightsModuleC
             onChange={(value) => handleParamChange('compress', value)}
             min={0}
             max={100}
-            step={1}
+            step={0.01}
             suffix="%"
-            precision={0}
+            precision={2}
+            gradient="linear-gradient(to right, #374151, #dc2626, #991b1b)"
           />
 
           {/* Processing Controls */}
@@ -325,9 +346,10 @@ export const ShadowsHighlightsModuleComponent: React.FC<ShadowsHighlightsModuleC
               onChange={(value) => handleParamChange('strength', value)}
               min={0}
               max={2}
-              step={0.1}
+              step={0.01}
               suffix="x"
-              precision={1}
+              precision={2}
+              gradient="linear-gradient(to right, #374151, #10b981, #059669)"
             />
             <SliderControl
               label="Iterations"
@@ -338,6 +360,7 @@ export const ShadowsHighlightsModuleComponent: React.FC<ShadowsHighlightsModuleC
               step={1}
               suffix=""
               precision={0}
+              gradient="linear-gradient(to right, #6b7280, #3b82f6, #1d4ed8)"
             />
           </div>
 
@@ -358,19 +381,21 @@ export const ShadowsHighlightsModuleComponent: React.FC<ShadowsHighlightsModuleC
                 onChange={(value) => handleParamChange('maskBlur', value)}
                 min={0}
                 max={10}
-                step={0.1}
+                step={0.01}
                 suffix="px"
-                precision={1}
+                precision={2}
+                gradient="linear-gradient(to right, #374151, #6366f1, #4f46e5)"
               />
               <SliderControl
                 label="Mask Falloff"
                 value={params.maskFalloff}
                 onChange={(value) => handleParamChange('maskFalloff', value)}
                 min={0.1}
-                max={10}
-                step={0.1}
+                max={5}
+                step={0.01}
                 suffix=""
-                precision={1}
+                precision={2}
+                gradient="linear-gradient(to right, #6b7280, #8b5cf6, #7c3aed)"
               />
 
               {/* Toggle Switches */}

@@ -242,6 +242,67 @@ export class HistoryService {
       }
     }
   }
+
+  // Check if there are unsaved changes since the last save
+  hasUnsavedChanges(): boolean {
+    try {
+      // If there's no history, consider there are no unsaved changes
+      if (this.history.length === 0) {
+        return false;
+      }
+
+      // Get current module settings
+      const currentSettings = this.captureCurrentModuleSettings();
+
+      // If we're at the latest state in history, check if current differs from saved
+      if (this.currentIndex === this.history.length - 1) {
+        const lastSavedState = this.history[this.currentIndex];
+        return !this.settingsAreEqual(currentSettings, lastSavedState.moduleSettings);
+      }
+
+      // If we're not at the latest state, we definitely have unsaved changes
+      return true;
+    } catch (error) {
+      logger.error('Error checking for unsaved changes:', error);
+      // Default to having unsaved changes on error to be safe
+      return true;
+    }
+  }
+
+  // Compare two module settings objects for equality
+  private settingsAreEqual(settings1: Record<string, ModuleState>, settings2: Record<string, ModuleState>): boolean {
+    try {
+      const keys1 = Object.keys(settings1);
+      const keys2 = Object.keys(settings2);
+
+      if (keys1.length !== keys2.length) {
+        return false;
+      }
+
+      for (const key of keys1) {
+        if (!keys2.includes(key)) {
+          return false;
+        }
+
+        const state1 = settings1[key];
+        const state2 = settings2[key];
+
+        if (state1.enabled !== state2.enabled) {
+          return false;
+        }
+
+        // Deep compare parameters
+        if (JSON.stringify(state1.parameters) !== JSON.stringify(state2.parameters)) {
+          return false;
+        }
+      }
+
+      return true;
+    } catch (error) {
+      logger.error('Error comparing settings:', error);
+      return false;
+    }
+  }
 }
 
 // Export singleton

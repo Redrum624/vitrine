@@ -59,6 +59,15 @@ class ElectronService {
     this.electronAPI.onViewActualSize(() => {
       this.handleActualSize();
     });
+
+    // App lifecycle handlers
+    this.electronAPI.onAppCloseRequest(() => {
+      this.handleAppCloseRequest();
+    });
+
+    this.electronAPI.onAppCleanup(() => {
+      this.handleAppCleanup();
+    });
   }
 
   // File operations
@@ -170,6 +179,20 @@ class ElectronService {
 
   private handleActualSize() {
     window.dispatchEvent(new CustomEvent('electron-view-actual-size'));
+  }
+
+  private handleAppCloseRequest() {
+    window.dispatchEvent(new CustomEvent('electron-app-close-request'));
+  }
+
+  private handleAppCleanup() {
+    window.dispatchEvent(new CustomEvent('electron-app-cleanup'));
+  }
+
+  public sendCloseResponse(shouldClose: boolean, reason?: string) {
+    if (this.electronAPI) {
+      this.electronAPI.sendAppCloseResponse(shouldClose, reason);
+    }
   }
 
   // Web fallbacks

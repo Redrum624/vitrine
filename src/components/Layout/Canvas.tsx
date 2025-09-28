@@ -4,6 +4,7 @@ import { useAppStore } from '../../stores/appStore';
 import { fileSystemService, ImageFileInfo } from '../../services/FileSystemService';
 import { imageService } from '../../services/ImageService';
 
+
 interface CanvasProps {
   onFitWindow: () => void;
   onActualSize: () => void;
@@ -25,7 +26,29 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
   const drawLoadedImage = useCallback((ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, imageMetadata: { width: number; height: number }, imageData: Float32Array) => {
     const { width: imageWidth, height: imageHeight } = imageMetadata;
 
-    // Debug logging removed - issue resolved
+    // Validate image dimensions
+    if (imageWidth <= 0 || imageHeight <= 0) {
+      console.error('Canvas: Invalid image dimensions:', imageWidth, 'x', imageHeight);
+      return;
+    }
+
+    // Validate and convert image data if needed
+    const expectedDataLength = imageWidth * imageHeight * 4; // RGBA
+    if (imageData.length !== expectedDataLength) {
+      // Try to handle common cases like RGB to RGBA conversion
+      if (imageData.length === imageWidth * imageHeight * 3) {
+        const rgbaData = new Float32Array(expectedDataLength);
+        for (let i = 0; i < imageWidth * imageHeight; i++) {
+          rgbaData[i * 4] = imageData[i * 3];     // R
+          rgbaData[i * 4 + 1] = imageData[i * 3 + 1]; // G
+          rgbaData[i * 4 + 2] = imageData[i * 3 + 2]; // B
+          rgbaData[i * 4 + 3] = 1.0;  // A (opaque) - use 1.0 for normalized data
+        }
+        imageData = rgbaData;
+      } else {
+        console.warn('Canvas: Unexpected image data format, length:', imageData.length, 'expected:', expectedDataLength);
+      }
+    }
 
     // Create ImageData from Float32Array
     const imgData = ctx.createImageData(imageWidth, imageHeight);
@@ -33,10 +56,19 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
 
     // Convert float data to uint8 for canvas display
     // Check if data is already in 0-255 range or needs scaling from 0-1
-    const maxValue = Math.max(...imageData.slice(0, Math.min(1000, imageData.length)));
-    const isNormalized = maxValue <= 1.0;
+    const sampleSize = Math.min(1000, imageData.length);
+    const maxValue = Math.max(...imageData.slice(0, sampleSize));
+    const minValue = Math.min(...imageData.slice(0, sampleSize));
+    const isNormalized = maxValue <= 1.0 && minValue >= 0;
 
-    for (let i = 0; i < imageData.length; i++) {
+    console.log('Canvas: Data analysis - min:', minValue, 'max:', maxValue, 'isNormalized:', isNormalized, 'sampleSize:', sampleSize);
+
+    // Validate data range
+    if (maxValue > 255 || minValue < 0) {
+      console.warn('Canvas: Unusual data range detected:', minValue, 'to', maxValue);
+    }
+
+    for (let i = 0; i < Math.min(imageData.length, data.length); i++) {
       if (isNormalized) {
         // Data is in 0-1 range, scale to 0-255
         data[i] = Math.round(Math.max(0, Math.min(1, imageData[i])) * 255);
@@ -46,30 +78,30 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
       }
     }
 
-    // Debug logging removed - issue resolved
+    // Validate converted data
+    if (data.length !== expectedDataLength) {
+      console.error('Canvas: Failed to create proper ImageData');
+      return;
+    }
 
     // Calculate display dimensions and position
     const centerX = canvas.width / 2;
     const centerY = canvas.height / 2;
 
-    // Calculate fit-to-window size
-    const imageAspectRatio = imageWidth / imageHeight;
-    const canvasAspectRatio = canvas.width / canvas.height;
-
-    let displayWidth, displayHeight;
-    if (imageAspectRatio > canvasAspectRatio) {
-      // Image is wider - fit to width with margin
-      displayWidth = canvas.width * 0.9; // 90% of canvas width for margin
-      displayHeight = displayWidth / imageAspectRatio;
-    } else {
-      // Image is taller - fit to height with margin
-      displayHeight = canvas.height * 0.9; // 90% of canvas height for margin
-      displayWidth = displayHeight * imageAspectRatio;
-    }
+    // Since canvas is already sized to match image aspect ratio,
+    // we can draw the image to fill the entire canvas
+    let displayWidth = canvas.width;
+    let displayHeight = canvas.height;
 
     // Apply zoom
     displayWidth *= viewport.zoom;
     displayHeight *= viewport.zoom;
+
+    // Ensure display dimensions are valid
+    if (displayWidth <= 0 || displayHeight <= 0) {
+      console.error('Canvas: Invalid display dimensions:', displayWidth, 'x', displayHeight);
+      return;
+    }
 
     // Create temporary canvas for the image
     const tempCanvas = document.createElement('canvas');
@@ -84,12 +116,14 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
     ctx.save();
     ctx.translate(centerX + viewport.panX, centerY + viewport.panY);
 
+    // Ensure the image is drawn with correct aspect ratio
     ctx.drawImage(
       tempCanvas,
-      -displayWidth / 2,
-      -displayHeight / 2,
-      displayWidth,
-      displayHeight
+      0, 0, imageWidth, imageHeight,  // Source rectangle (full image)
+      -displayWidth / 2,              // Destination x
+      -displayHeight / 2,             // Destination y
+      displayWidth,                   // Destination width
+      displayHeight                   // Destination height
     );
 
     ctx.restore();
@@ -148,27 +182,61 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
     const container = containerRef.current;
     if (!container) return;
 
-    // Set canvas size to match container
+    const currentImageData = imageService.getCurrentImage();
+
+    // Calculate proper canvas dimensions based on image aspect ratio
     const rect = container.getBoundingClientRect();
-    canvas.width = rect.width;
-    canvas.height = rect.height;
+    const containerWidth = rect.width;
+    const containerHeight = rect.height;
+
+    let canvasWidth, canvasHeight;
+
+    if (currentImageData && displayImage) {
+      // Use image dimensions to determine proper aspect ratio
+      const imageAspectRatio = currentImageData.width / currentImageData.height;
+      const containerAspectRatio = containerWidth / containerHeight;
+
+      if (imageAspectRatio > containerAspectRatio) {
+        // Image is wider - fit to width
+        canvasWidth = containerWidth * 0.95; // Leave small margin
+        canvasHeight = canvasWidth / imageAspectRatio;
+      } else {
+        // Image is taller - fit to height
+        canvasHeight = containerHeight * 0.95; // Leave small margin
+        canvasWidth = canvasHeight * imageAspectRatio;
+      }
+    } else {
+      // No image loaded - use container size for placeholder
+      canvasWidth = containerWidth;
+      canvasHeight = containerHeight;
+    }
+
+    // Set canvas size to calculated dimensions
+    canvas.width = canvasWidth;
+    canvas.height = canvasHeight;
+
+    // Update canvas CSS size to match calculated dimensions
+    canvas.style.width = `${canvasWidth}px`;
+    canvas.style.height = `${canvasHeight}px`;
 
     // Clear canvas
     ctx.fillStyle = '#1a1a1a';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    const currentImageData = imageService.getCurrentImage();
     if (currentImageData && displayImage) {
       // Use processed image data if available, otherwise use original
       if (processedImageData && typeof processedImageData === 'object' && 'data' in processedImageData) {
         // Handle new preview data structure
         const previewData = processedImageData as { data: Float32Array; width: number; height: number; isPreview: boolean };
+        console.log('Canvas: Using processed preview data', previewData.width, 'x', previewData.height);
         drawLoadedImage(ctx, canvas, { width: previewData.width, height: previewData.height }, previewData.data);
       } else if (processedImageData && processedImageData instanceof Float32Array) {
         // Handle legacy data structure
+        console.log('Canvas: Using legacy processed data', currentImageData.width, 'x', currentImageData.height);
         drawLoadedImage(ctx, canvas, currentImageData, processedImageData);
       } else {
         // Use original image data
+        console.log('Canvas: Using original image data', currentImageData.width, 'x', currentImageData.height, 'channels detected');
         drawLoadedImage(ctx, canvas, currentImageData, currentImageData.data);
       }
     } else {
@@ -196,7 +264,6 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
     } finally {
       setImageLoading(false);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Handle image loading from file system
@@ -229,6 +296,22 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
     redrawCanvas();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewport]);
+
+  // Handle window/container resize
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const resizeObserver = new window.ResizeObserver(() => {
+      redrawCanvas();
+    });
+
+    resizeObserver.observe(container);
+
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, [redrawCanvas]);
 
   const handleMouseDown = (e: React.MouseEvent) => {
     setIsDragging(true);
@@ -266,10 +349,19 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
         onMouseLeave={handleMouseUp}
         onWheel={handleWheel}
       >
-        <canvas
-          ref={canvasRef}
-          className={`w-full h-full ${isDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
-        />
+        {/* Aspect ratio preserving canvas container */}
+        <div className="flex items-center justify-center w-full h-full">
+          <canvas
+            ref={canvasRef}
+            className={`max-w-full max-h-full ${isDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
+            style={{
+              // Maintain aspect ratio while fitting in container
+              objectFit: 'contain',
+              width: 'auto',
+              height: 'auto'
+            }}
+          />
+        </div>
 
         {/* Optional debug info - can be removed */}
         {process.env.NODE_ENV === 'development' && (

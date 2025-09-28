@@ -43,6 +43,7 @@ export interface ElectronAPI {
 
   // File system
   readFile: (filePath: string) => Promise<Buffer>;
+  readFileBuffer: (filePath: string) => Promise<ArrayBuffer>;
   readImageAsDataURL: (filePath: string) => Promise<string>;
   writeFile: (filePath: string, data: Buffer | string) => Promise<boolean>;
   writeLog: (logEntry: Record<string, unknown>) => Promise<boolean>;
@@ -121,6 +122,11 @@ export interface ElectronAPI {
   onViewZoomOut: (callback: () => void) => void;
   onViewFitWindow: (callback: () => void) => void;
   onViewActualSize: (callback: () => void) => void;
+
+  // App lifecycle events
+  onAppCloseRequest: (callback: () => void) => void;
+  onAppCleanup: (callback: () => void) => void;
+  sendAppCloseResponse: (shouldClose: boolean, reason?: string) => void;
 
   // Platform info
   platform: string;

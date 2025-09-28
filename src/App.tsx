@@ -25,6 +25,7 @@ import { logger } from './utils/Logger';
 import { historyService } from './services/HistoryService';
 import { AdjustmentPreset } from './services/PresetService';
 import { errorHandlingService } from './services/ErrorHandlingService';
+import { appLifecycleService } from './services/AppLifecycleService';
 
 // Import pipeline tests for development
 if (process.env.NODE_ENV === 'development') {
@@ -293,6 +294,22 @@ function App() {
     });
 
     logger.info(`Initialized ${shortcuts.length + 2} keyboard shortcuts`);
+
+    // Setup app lifecycle service for proper closing
+    appLifecycleService.registerUnsavedChangesChecker({
+      hasUnsavedChanges: () => historyService.hasUnsavedChanges(),
+      getDescription: () => 'You have unsaved edits to the current image'
+    });
+
+    appLifecycleService.registerCleanupTask(async () => {
+      logger.info('Cleaning up keyboard shortcuts service...');
+      keyboardShortcutsService.destroy();
+    });
+
+    appLifecycleService.registerCleanupTask(async () => {
+      logger.info('Cleaning up image service...');
+      // Additional cleanup for image service if needed
+    });
 
     // Show welcome screen for first-time users
     const welcomeDismissed = localStorage.getItem('photo-editor-welcome-dismissed');
