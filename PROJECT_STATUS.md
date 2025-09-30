@@ -74,28 +74,47 @@ All critical fixes completed and verified. Now integrating additional profession
 - ✅ Also enables Auto Contrast automatically
 - ✅ Checkboxes available in advanced section
 
-### Phase 3: Complete Existing Modules
+### Phase 3: UI Panels for New Modules
 
-#### 3A. Local Adjustments Module ⏳
-**Status:** Module complete, needs UI
+#### 3A. Crop UI Panel ✅
+**Status:** Complete
+- ✅ CropModuleComponent.tsx created
+- ✅ Aspect ratio selector (9 presets + custom)
+- ✅ Quick apply buttons (Square, 16:9, 4:3)
+- ✅ Position & size sliders with live preview
+- ✅ Uncrop button to restore original
+- ✅ Output dimensions display
+- ✅ Enable/disable crop toggle
+
+#### 3B. Transform UI Panel ✅
+**Status:** Complete
+- ✅ TransformModuleComponent.tsx created
+- ✅ Rotation slider (-45° to +45°)
+- ✅ Auto-straighten button with horizon detection
+- ✅ Quick rotation buttons
+- ✅ Flip horizontal/vertical toggles
+- ✅ Canvas expansion toggle
+- ✅ Interpolation method selector
+- ✅ Fill color picker
+- ✅ Output dimensions display
+
+#### 3C. Local Adjustments Module ⏳
+**Status:** Module complete, needs UI integration
 - ✅ Module implementation with brush, gradients, parametric masks
 - ✅ Pipeline adapter exists
-- [ ] Create LocalAdjustmentsPanel.tsx
-- [ ] Layer management UI
-- [ ] Brush tool controls
-- [ ] Gradient tools (linear/radial)
-- [ ] Parametric mask controls
+- ✅ LocalAdjustmentsModuleComponent.tsx exists
+- [ ] Integrate into main UI workflow
+- [ ] Test brush tool interaction
+- [ ] Test gradient tools
 
-#### 3B. Lens Corrections Module ⏳
-**Status:** Module complete, needs UI
+#### 3D. Lens Corrections Module ⏳
+**Status:** Module complete, needs UI integration
 - ✅ Module implementation (vignetting, distortion, CA)
 - ✅ Pipeline adapter exists
+- ✅ LensCorrectionsModuleComponent.tsx exists
 - ✅ Auto-detection algorithms present
-- [ ] Create LensCorrectionsPanel.tsx
-- [ ] Vignetting controls
-- [ ] Distortion controls
-- [ ] Chromatic aberration controls
-- [ ] Auto-detect button
+- [ ] Integrate into main UI workflow
+- [ ] Test vignetting auto-detect
 
 ---
 
