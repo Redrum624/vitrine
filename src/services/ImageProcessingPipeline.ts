@@ -1,4 +1,6 @@
 import { logger } from '../utils/Logger';
+import { CropPipelineModule } from '../modules/CropPipelineModule';
+import { TransformPipelineModule } from '../modules/TransformPipelineModule';
 import { ExposureModule } from '../modules/ExposureModule';
 import { BasicAdjustmentsModule } from '../modules/BasicAdjustmentsModule';
 import { WhiteBalanceModule } from '../modules/WhiteBalanceModule';
@@ -34,7 +36,11 @@ export class ImageProcessingPipeline {
   }
 
   private initializeModules(): void {
-    // Initialize modules in darktable processing order
+    // Initialize modules in processing order
+    // Geometric operations MUST come first before color/tone adjustments
+    const cropModule = new CropPipelineModule();
+    const transformModule = new TransformPipelineModule();
+    const lensCorrectionsModule = new LensCorrectionsPipelineModule();
     const exposureModule = new ExposureModule();
     const whiteBalanceModule = new WhiteBalanceModule();
     const basicAdjModule = new BasicAdjustmentsModule();
@@ -42,18 +48,20 @@ export class ImageProcessingPipeline {
     const colorBalanceModule = new ColorBalancePipelineModule();
     const shadowsHighlightsModule = new ShadowsHighlightsPipelineModule();
     const localAdjustmentsModule = new LocalAdjustmentsPipelineModule();
-    const lensCorrectionsModule = new LensCorrectionsPipelineModule();
 
-    this.addModule(lensCorrectionsModule, 0); // First - lens corrections (geometric)
-    this.addModule(exposureModule, 1); // Second - exposure correction
-    this.addModule(whiteBalanceModule, 2); // Third - white balance
-    this.addModule(basicAdjModule, 3); // Fourth - basic adjustments
-    this.addModule(toneCurveModule, 4); // Fifth - tone curve
-    this.addModule(colorBalanceModule, 5); // Sixth - color balance
-    this.addModule(shadowsHighlightsModule, 6); // Seventh - shadows/highlights recovery
-    this.addModule(localAdjustmentsModule, 7); // Eighth - local adjustments
+    // Pipeline order: Geometric → Color/Tone → Local
+    this.addModule(cropModule, 0); // First - crop/composition
+    this.addModule(transformModule, 1); // Second - rotate/straighten/flip
+    this.addModule(lensCorrectionsModule, 2); // Third - lens corrections (geometric)
+    this.addModule(exposureModule, 3); // Fourth - exposure correction
+    this.addModule(whiteBalanceModule, 4); // Fifth - white balance
+    this.addModule(basicAdjModule, 5); // Sixth - basic adjustments
+    this.addModule(toneCurveModule, 6); // Seventh - tone curve
+    this.addModule(colorBalanceModule, 7); // Eighth - color balance
+    this.addModule(shadowsHighlightsModule, 8); // Ninth - shadows/highlights recovery
+    this.addModule(localAdjustmentsModule, 9); // Tenth - local adjustments
 
-    logger.info('Image processing pipeline initialized with modules:', this.processingOrder);
+    logger.info('Image processing pipeline initialized with 10 modules:', this.processingOrder);
   }
 
   addModule(module: PipelineModule, position?: number): void {
