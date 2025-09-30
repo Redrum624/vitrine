@@ -67,11 +67,12 @@ All critical fixes completed and verified. Now integrating additional profession
 - ✅ Automatic crop calculation for rotation
 - ✅ Added to pipeline at position 1
 
-#### 2C. Auto-Level UI ⏳
-**Status:** Algorithm exists, needs UI button
-- [ ] Add "Auto Levels" button to UI
-- [ ] Wire to ToneCurveModule.autoLevels parameter
-- [ ] Test histogram-based adjustment
+#### 2C. Auto-Level UI ✅
+**Status:** Complete
+- ✅ Add "Auto Levels" button to UI (prominent gradient button)
+- ✅ Wire to ToneCurveModule.autoLevels parameter
+- ✅ Also enables Auto Contrast automatically
+- ✅ Checkboxes available in advanced section
 
 ### Phase 3: Complete Existing Modules
 

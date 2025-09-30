@@ -363,6 +363,27 @@ export const ToneCurveModuleComponent: React.FC<ToneCurveModuleComponentProps> =
         </div>
       </div>
 
+      {/* Quick Actions */}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <label className="block text-xs text-gray-400">Quick Actions</label>
+          <button
+            onClick={() => {
+              // Apply auto levels and auto contrast
+              updateParams({
+                autoLevels: true,
+                autoContrast: true
+              });
+            }}
+            className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-white bg-gradient-to-r from-purple-500 to-blue-500 hover:from-purple-600 hover:to-blue-600 rounded transition-all shadow-sm"
+            title="Automatically adjust levels and contrast based on histogram"
+          >
+            <Zap className="w-3 h-3" />
+            Auto Levels
+          </button>
+        </div>
+      </div>
+
       {/* Curve Presets */}
       <div className="space-y-2">
         <label className="block text-xs text-gray-400 mb-2">Presets</label>
