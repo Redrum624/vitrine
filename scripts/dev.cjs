@@ -8,16 +8,32 @@ function cleanup() {
   console.log('\nCleaning up processes...');
 
   if (viteProcess) {
-    viteProcess.kill();
+    console.log('Terminating Vite development server...');
+    if (process.platform === 'win32') {
+      // On Windows, use taskkill to properly terminate the process tree
+      spawn('taskkill', ['/pid', viteProcess.pid, '/t', '/f'], { shell: true });
+    } else {
+      viteProcess.kill('SIGTERM');
+    }
     viteProcess = null;
   }
 
   if (electronProcess) {
-    electronProcess.kill();
+    console.log('Terminating Electron process...');
+    if (process.platform === 'win32') {
+      // On Windows, use taskkill to properly terminate the process tree
+      spawn('taskkill', ['/pid', electronProcess.pid, '/t', '/f'], { shell: true });
+    } else {
+      electronProcess.kill('SIGTERM');
+    }
     electronProcess = null;
   }
 
-  process.exit(0);
+  // Give processes time to clean up before exiting
+  setTimeout(() => {
+    console.log('Development environment stopped.');
+    process.exit(0);
+  }, 1000);
 }
 
 // Handle cleanup on various exit conditions
@@ -28,9 +44,10 @@ process.on('exit', cleanup);
 async function startDev() {
   console.log('Starting Vite development server...');
 
-  viteProcess = spawn('npm', ['run', 'dev'], {
+  viteProcess = spawn('npm', ['run', 'dev-server-only'], {
     stdio: ['inherit', 'pipe', 'pipe'],
-    shell: true
+    shell: true,
+    windowsHide: true
   });
 
   viteProcess.stdout.on('data', (data) => {
@@ -38,7 +55,9 @@ async function startDev() {
     console.log(`[VITE] ${output}`);
 
     // Wait for Vite to be ready before starting Electron
-    if (output.includes('Local:') && !electronProcess) {
+    // Strip ANSI color codes to match the pattern properly
+    const cleanOutput = output.replace(/\x1b\[[0-9;]*m/g, '');
+    if (cleanOutput.includes('Local:') && !electronProcess) {
       console.log('Vite is ready, starting Electron...');
       global.setTimeout(startElectron, 1000);
     }
@@ -50,6 +69,16 @@ async function startDev() {
 
   viteProcess.on('exit', (code) => {
     console.log(`Vite process exited with code ${code}`);
+    if (code === 0) {
+      console.log('Vite server stopped normally, shutting down development environment...');
+    } else {
+      console.log('Vite server crashed or was terminated, shutting down development environment...');
+    }
+    cleanup();
+  });
+
+  viteProcess.on('error', (error) => {
+    console.error('Failed to start Vite:', error);
     cleanup();
   });
 }
@@ -61,7 +90,8 @@ function startElectron() {
 
   electronProcess = spawn('npm', ['run', 'electron'], {
     stdio: ['inherit', 'pipe', 'pipe'],
-    shell: true
+    shell: true,
+    windowsHide: true
   });
 
   electronProcess.stdout.on('data', (data) => {
@@ -74,6 +104,16 @@ function startElectron() {
 
   electronProcess.on('exit', (code) => {
     console.log(`Electron process exited with code ${code}`);
+    if (code === 0) {
+      console.log('Electron closed normally, shutting down development environment...');
+    } else {
+      console.log('Electron crashed or was terminated, shutting down development environment...');
+    }
+    cleanup();
+  });
+
+  electronProcess.on('error', (error) => {
+    console.error('Failed to start Electron:', error);
     cleanup();
   });
 }

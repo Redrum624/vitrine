@@ -239,6 +239,14 @@ export class LensCorrectionsPipelineModule implements PipelineModule {
     return lensCorrectionsModule;
   }
 
+  // Get current parameters (required by pipeline)
+  getParams(): Record<string, unknown> {
+    return {
+      ...this.params,
+      lensCorrections: lensCorrectionsModule.getParams()
+    };
+  }
+
   // Get module statistics
   getStats() {
     const moduleStats = lensCorrectionsModule.getStats();

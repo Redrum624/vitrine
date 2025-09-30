@@ -14,6 +14,7 @@ interface SliderControlProps {
   showPercentage?: boolean;
   description?: string;
   suffix?: string;
+  defaultValue?: number;
 }
 
 const SliderControl: React.FC<SliderControlProps> = ({
@@ -30,6 +31,7 @@ const SliderControl: React.FC<SliderControlProps> = ({
   showPercentage = false,
   description = '',
   suffix = '',
+  defaultValue = 0,
 }) => {
   const displayValue = precision > 0 ? value.toFixed(precision) : Math.round(value);
   const displayUnit = suffix || (showPercentage ? '%' : unit);
@@ -57,6 +59,7 @@ const SliderControl: React.FC<SliderControlProps> = ({
         step={step}
         value={value}
         onChange={(e) => onChange(parseFloat(e.target.value))}
+        onDoubleClick={() => onChange(defaultValue)}
         disabled={disabled}
         className="w-full h-2 border border-dark-700 rounded-lg appearance-none cursor-pointer slider-thumb visible-track disabled:opacity-50"
         aria-labelledby={labelId}
@@ -66,6 +69,7 @@ const SliderControl: React.FC<SliderControlProps> = ({
         aria-valuenow={value}
         aria-valuetext={`${displayValue}${displayUnit}`}
         role="slider"
+        title="Double-click to reset to default"
       />
       {description && (
         <div

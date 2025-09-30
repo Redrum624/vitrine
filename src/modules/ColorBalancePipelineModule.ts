@@ -61,6 +61,11 @@ export class ColorBalancePipelineModule implements PipelineModule {
     return this.isEnabled;
   }
 
+  // Get current parameters (required by pipeline)
+  getParams(): Record<string, unknown> {
+    return this.colorBalanceModule.getParams();
+  }
+
   // Reset module to defaults
   reset(): void {
     this.colorBalanceModule.resetParams();

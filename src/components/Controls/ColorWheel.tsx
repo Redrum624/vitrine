@@ -18,7 +18,9 @@ const ColorWheel: React.FC<ColorWheelProps> = ({
   disabled = false
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const isDraggingRef = useRef(false);
+  const [canvasSize, setCanvasSize] = React.useState(size);
 
   const drawWheel = useCallback(() => {
     const canvas = canvasRef.current;
@@ -27,19 +29,19 @@ const ColorWheel: React.FC<ColorWheelProps> = ({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const centerX = size / 2;
-    const centerY = size / 2;
-    const radius = size / 2 - 10;
+    const centerX = canvasSize / 2;
+    const centerY = canvasSize / 2;
+    const radius = canvasSize / 2 - 5;
 
     // Clear canvas
-    ctx.clearRect(0, 0, size, size);
+    ctx.clearRect(0, 0, canvasSize, canvasSize);
 
     // Draw color wheel background
-    const imageData = ctx.createImageData(size, size);
+    const imageData = ctx.createImageData(canvasSize, canvasSize);
     const data = imageData.data;
 
-    for (let y = 0; y < size; y++) {
-      for (let x = 0; x < size; x++) {
+    for (let y = 0; y < canvasSize; y++) {
+      for (let x = 0; x < canvasSize; x++) {
         const dx = x - centerX;
         const dy = y - centerY;
         const distance = Math.sqrt(dx * dx + dy * dy);
@@ -67,27 +69,20 @@ const ColorWheel: React.FC<ColorWheelProps> = ({
           else if (h < 5) { r = x1; g = 0; b = c; }
           else { r = c; g = 0; b = x1; }
 
-          const pixelIndex = (y * size + x) * 4;
+          const pixelIndex = (y * canvasSize + x) * 4;
           data[pixelIndex] = Math.round((r + m) * 255);
           data[pixelIndex + 1] = Math.round((g + m) * 255);
           data[pixelIndex + 2] = Math.round((b + m) * 255);
           data[pixelIndex + 3] = 255;
         } else {
           // Outside circle - transparent
-          const pixelIndex = (y * size + x) * 4;
+          const pixelIndex = (y * canvasSize + x) * 4;
           data[pixelIndex + 3] = 0;
         }
       }
     }
 
     ctx.putImageData(imageData, 0, 0);
-
-    // Draw outer ring
-    ctx.strokeStyle = '#6b7280';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.arc(centerX, centerY, radius, 0, 2 * Math.PI);
-    ctx.stroke();
 
     // Calculate point position from cyan-red and magenta-green values
     // Convert to polar coordinates
@@ -105,7 +100,7 @@ const ColorWheel: React.FC<ColorWheelProps> = ({
     ctx.arc(x, y, 8, 0, 2 * Math.PI);
     ctx.fill();
     ctx.stroke();
-  }, [cyanRed, magentaGreen, size]);
+  }, [cyanRed, magentaGreen, canvasSize]);
 
   const handleMouseMove = useCallback((e: React.MouseEvent | MouseEvent) => {
     if (!isDraggingRef.current || disabled) return;
@@ -114,9 +109,9 @@ const ColorWheel: React.FC<ColorWheelProps> = ({
     if (!canvas) return;
 
     const rect = canvas.getBoundingClientRect();
-    const centerX = size / 2;
-    const centerY = size / 2;
-    const radius = size / 2 - 10;
+    const centerX = canvasSize / 2;
+    const centerY = canvasSize / 2;
+    const radius = canvasSize / 2 - 5;
 
     const x = e.clientX - rect.left - centerX;
     const y = e.clientY - rect.top - centerY;
@@ -137,13 +132,23 @@ const ColorWheel: React.FC<ColorWheelProps> = ({
       magentaGreen: Math.max(-1, Math.min(1, newMagentaGreen)),
       yellowBlue
     });
-  }, [disabled, size, yellowBlue, onChange]);
+  }, [disabled, canvasSize, yellowBlue, onChange]);
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     if (disabled) return;
     isDraggingRef.current = true;
     handleMouseMove(e);
   }, [disabled, handleMouseMove]);
+
+  const handleDoubleClick = useCallback(() => {
+    if (disabled) return;
+    // Reset to center (0, 0)
+    onChange({
+      cyanRed: 0,
+      magentaGreen: 0,
+      yellowBlue
+    });
+  }, [disabled, yellowBlue, onChange]);
 
   const handleMouseUp = useCallback(() => {
     isDraggingRef.current = false;
@@ -168,18 +173,36 @@ const ColorWheel: React.FC<ColorWheelProps> = ({
     drawWheel();
   }, [drawWheel]);
 
+  // Update canvas size based on container
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const updateSize = () => {
+      const width = container.clientWidth;
+      // Make it square and leave some padding
+      const newSize = Math.min(width, 300);
+      setCanvasSize(newSize);
+    };
+
+    updateSize();
+    const resizeObserver = new window.ResizeObserver(updateSize);
+    resizeObserver.observe(container);
+
+    return () => resizeObserver.disconnect();
+  }, []);
+
   return (
-    <div className="flex flex-col items-center space-y-2">
+    <div ref={containerRef} className="flex flex-col items-center w-full">
       <canvas
         ref={canvasRef}
-        width={size}
-        height={size}
-        className={`border border-gray-600 rounded ${disabled ? 'opacity-50' : 'cursor-pointer'}`}
+        width={canvasSize}
+        height={canvasSize}
+        className={`${disabled ? 'opacity-50' : 'cursor-pointer'}`}
         onMouseDown={handleMouseDown}
+        onDoubleClick={handleDoubleClick}
+        title="Double-click to reset to center"
       />
-      <div className="text-xs text-gray-400 text-center">
-        Yellow ↔ Blue: {yellowBlue.toFixed(2)}
-      </div>
     </div>
   );
 };

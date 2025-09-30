@@ -22,6 +22,8 @@ export interface LogEntry {
 class Logger {
   private logs: LogEntry[] = [];
   private maxLogs = 1000;
+  private lastLogTime = new Map<string, number>();
+  private throttleMs = 50; // Throttle identical messages within 50ms
   private originalConsole: {
     log: typeof console.log;
     info: typeof console.info;
@@ -97,6 +99,18 @@ class Logger {
   }
 
   private addLog(level: LogEntry['level'], message: string, error?: Error) {
+    // Throttle identical messages to prevent spam
+    const messageKey = `${level}:${message}`;
+    const now = Date.now();
+    const lastTime = this.lastLogTime.get(messageKey) || 0;
+
+    // Skip throttled messages except for errors
+    if (level !== 'error' && now - lastTime < this.throttleMs) {
+      return;
+    }
+
+    this.lastLogTime.set(messageKey, now);
+
     const entry: LogEntry = {
       timestamp: new Date(),
       level,

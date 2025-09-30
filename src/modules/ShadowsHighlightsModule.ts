@@ -107,15 +107,15 @@ export class ShadowsHighlightsModule implements ImageProcessingModule {
       enabled: true,
       shadows: 0.0,
       shadowsRadius: 50.0,
-      shadowsColorTransfer: 25.0,
+      shadowsColorTransfer: 0.0,
       highlights: 0.0,
       highlightsRadius: 50.0,
-      highlightsColorTransfer: 25.0,
+      highlightsColorTransfer: 0.0,
       whitePoint: 0.0,
       blackPoint: 0.0,
-      compress: 50.0,
-      shadowsColorCorrection: 100.0,
-      highlightsColorCorrection: 100.0,
+      compress: 0.0,
+      shadowsColorCorrection: 0.0,
+      highlightsColorCorrection: 0.0,
       maskBlur: 1.0,
       maskFalloff: 2.0,
       preserveColor: true,
@@ -150,9 +150,39 @@ export class ShadowsHighlightsModule implements ImageProcessingModule {
       return imageData;
     }
 
+    // Check if all parameters are at neutral values - if so, pass through unchanged
+    const isNeutral = this.params.shadows === 0 &&
+                     this.params.highlights === 0 &&
+                     this.params.whitePoint === 0 &&
+                     this.params.blackPoint === 0 &&
+                     this.params.compress === 0 &&
+                     this.params.shadowsColorCorrection === 0 &&
+                     this.params.highlightsColorCorrection === 0;
+
+    if (isNeutral) {
+      logger.debug('ShadowsHighlights: All parameters neutral, passing through unchanged');
+      return imageData;
+    }
+
     const startTime = performance.now();
     const { width, height, data } = imageData;
     const processedData = new Float32Array(data);
+
+    // Debug input data
+    const inputStats = { min: Infinity, max: -Infinity, nonZero: 0 };
+    for (let i = 0; i < processedData.length; i += 4) {
+      const r = processedData[i], g = processedData[i + 1], b = processedData[i + 2];
+      inputStats.min = Math.min(inputStats.min, r, g, b);
+      inputStats.max = Math.max(inputStats.max, r, g, b);
+      if (r > 0.001 || g > 0.001 || b > 0.001) inputStats.nonZero++;
+    }
+    logger.info(`ShadowsHighlights INPUT: range=${inputStats.min.toFixed(4)}-${inputStats.max.toFixed(4)}, nonZero=${inputStats.nonZero}/${processedData.length/4}, params:`, {
+      shadows: this.params.shadows,
+      highlights: this.params.highlights,
+      shadowsColorCorrection: this.params.shadowsColorCorrection,
+      highlightsColorCorrection: this.params.highlightsColorCorrection,
+      compress: this.params.compress
+    });
 
     try {
       // Generate luminance and tone masks
@@ -190,6 +220,16 @@ export class ShadowsHighlightsModule implements ImageProcessingModule {
 
       // Apply color correction
       this.applyColorCorrection(processedData, shadowMask, highlightMask, width, height);
+
+      // Debug output data
+      const outputStats = { min: Infinity, max: -Infinity, nonZero: 0 };
+      for (let i = 0; i < processedData.length; i += 4) {
+        const r = processedData[i], g = processedData[i + 1], b = processedData[i + 2];
+        outputStats.min = Math.min(outputStats.min, r, g, b);
+        outputStats.max = Math.max(outputStats.max, r, g, b);
+        if (r > 0.001 || g > 0.001 || b > 0.001) outputStats.nonZero++;
+      }
+      logger.info(`ShadowsHighlights OUTPUT: range=${outputStats.min.toFixed(4)}-${outputStats.max.toFixed(4)}, nonZero=${outputStats.nonZero}/${processedData.length/4}`);
 
       const processingTime = performance.now() - startTime;
       logger.debug(`ShadowsHighlights processing completed in ${processingTime.toFixed(2)}ms`);
@@ -253,18 +293,19 @@ export class ShadowsHighlightsModule implements ImageProcessingModule {
 
   private generateHighlightMask(luminance: Float32Array, width: number, height: number): Float32Array {
     const mask = new Float32Array(width * height);
-    const radius = 1.0 - (this.params.highlightsRadius / 100.0);
+    const radius = this.params.highlightsRadius / 100.0;
     const falloff = this.params.maskFalloff;
+    const threshold = 1.0 - radius; // Highlights are bright areas
 
     for (let i = 0; i < mask.length; i++) {
       const lum = luminance[i];
 
       // Highlight mask: stronger for brighter areas
-      if (lum > radius) {
+      if (lum > threshold) {
         mask[i] = 1.0;
-      } else if (lum > radius / 2) {
+      } else if (lum > threshold * 0.5) {
         // Smooth falloff
-        const t = (radius - lum) / (radius / 2);
+        const t = (threshold - lum) / (threshold * 0.5);
         mask[i] = 1.0 - Math.pow(t, falloff);
       } else {
         mask[i] = 0.0;
@@ -363,23 +404,22 @@ export class ShadowsHighlightsModule implements ImageProcessingModule {
         const b = data[i + 2];
         const lum = r * this.luminanceWeights.r + g * this.luminanceWeights.g + b * this.luminanceWeights.b;
 
-        // Highlight recovery with tone mapping
-        const recovery = Math.pow(lum, 0.5) * effect;
+        // Highlight recovery - reduce highlights without darkening
+        const recovery = Math.pow(lum, 0.5) * effect * 0.3; // Gentler recovery
 
         if (this.params.preserveColor) {
-          // Preserve color ratios while recovering highlights
-          const compress = 1.0 - recovery * 0.5;
-          data[i] = Math.max(0.0, r * compress);
-          data[i + 1] = Math.max(0.0, g * compress);
-          data[i + 2] = Math.max(0.0, b * compress);
+          // Preserve color ratios - use subtractive recovery
+          data[i] = Math.max(0.0, Math.min(1.0, r - recovery));
+          data[i + 1] = Math.max(0.0, Math.min(1.0, g - recovery));
+          data[i + 2] = Math.max(0.0, Math.min(1.0, b - recovery));
         } else {
           // Apply color transfer for more natural highlight recovery
-          const mixAmount = colorTransfer * effect;
+          const mixAmount = colorTransfer * effect * 0.3; // Reduced strength
           const avgColor = (r + g + b) / 3;
 
-          data[i] = Math.max(0.0, r - recovery + (avgColor - r) * mixAmount);
-          data[i + 1] = Math.max(0.0, g - recovery + (avgColor - g) * mixAmount);
-          data[i + 2] = Math.max(0.0, b - recovery + (avgColor - b) * mixAmount);
+          data[i] = Math.max(0.0, Math.min(1.0, r - recovery + (avgColor - r) * mixAmount));
+          data[i + 1] = Math.max(0.0, Math.min(1.0, g - recovery + (avgColor - g) * mixAmount));
+          data[i + 2] = Math.max(0.0, Math.min(1.0, b - recovery + (avgColor - b) * mixAmount));
         }
       }
     }
@@ -404,12 +444,18 @@ export class ShadowsHighlightsModule implements ImageProcessingModule {
 
   private applyCompression(data: Float32Array, _width: number, _height: number): void {
     const compress = this.params.compress / 100.0;
-    const compressionCurve = (x: number) => x / (1 + x * compress);
+
+    // Only apply compression if parameter is significant
+    if (compress < 0.01) return;
+
+    // Simple linear compression that preserves dynamic range
+    const compressionFactor = 1.0 - compress * 0.3; // Gentle compression
 
     for (let i = 0; i < data.length; i += 4) {
-      data[i] = compressionCurve(data[i]);
-      data[i + 1] = compressionCurve(data[i + 1]);
-      data[i + 2] = compressionCurve(data[i + 2]);
+      // Apply gentle linear compression
+      data[i] = Math.max(0.0, Math.min(1.0, data[i] * compressionFactor));
+      data[i + 1] = Math.max(0.0, Math.min(1.0, data[i + 1] * compressionFactor));
+      data[i + 2] = Math.max(0.0, Math.min(1.0, data[i + 2] * compressionFactor));
     }
   }
 
@@ -423,23 +469,29 @@ export class ShadowsHighlightsModule implements ImageProcessingModule {
     const shadowCorrection = this.params.shadowsColorCorrection / 100.0;
     const highlightCorrection = this.params.highlightsColorCorrection / 100.0;
 
+    // Skip color correction if both parameters are at neutral values
+    if (Math.abs(shadowCorrection) < 0.001 && Math.abs(highlightCorrection) < 0.001) {
+      return;
+    }
+
     for (let i = 0; i < data.length; i += 4) {
       const shadowMaskValue = shadowMask[i / 4];
       const highlightMaskValue = highlightMask[i / 4];
 
-      // Apply color correction based on masks
-      if (shadowMaskValue > 0 && shadowCorrection < 1.0) {
-        const correction = 1.0 - (1.0 - shadowCorrection) * shadowMaskValue;
-        data[i] *= correction;
-        data[i + 1] *= correction;
-        data[i + 2] *= correction;
+      // Apply color correction based on masks - only if parameters are non-zero
+      // 0 = no correction, 100 = maximum correction
+      if (shadowMaskValue > 0 && Math.abs(shadowCorrection) > 0.001) {
+        const correction = 1.0 + (shadowCorrection * shadowMaskValue);
+        data[i] = Math.max(0.0, Math.min(1.0, data[i] * correction));
+        data[i + 1] = Math.max(0.0, Math.min(1.0, data[i + 1] * correction));
+        data[i + 2] = Math.max(0.0, Math.min(1.0, data[i + 2] * correction));
       }
 
-      if (highlightMaskValue > 0 && highlightCorrection < 1.0) {
-        const correction = 1.0 - (1.0 - highlightCorrection) * highlightMaskValue;
-        data[i] *= correction;
-        data[i + 1] *= correction;
-        data[i + 2] *= correction;
+      if (highlightMaskValue > 0 && Math.abs(highlightCorrection) > 0.001) {
+        const correction = 1.0 - (highlightCorrection * highlightMaskValue);
+        data[i] = Math.max(0.0, Math.min(1.0, data[i] * correction));
+        data[i + 1] = Math.max(0.0, Math.min(1.0, data[i + 1] * correction));
+        data[i + 2] = Math.max(0.0, Math.min(1.0, data[i + 2] * correction));
       }
     }
   }

@@ -42,6 +42,11 @@ export class ExposureModule {
     return { ...this.currentParams };
   }
 
+  // Pipeline-compatible method
+  getParams(): Record<string, unknown> {
+    return { ...this.currentParams };
+  }
+
   setCurrentParams(params: Partial<ExposureParams>): void {
     this.currentParams = { ...this.currentParams, ...this.validateParams(params) };
   }
@@ -60,7 +65,7 @@ export class ExposureModule {
     return {
       mode: { min: 0, max: 1, default: 0 },
       black: { min: -1.0, max: 1.0, default: 0.0, step: 0.01 },
-      exposure: { min: -18.0, max: 18.0, default: 0.0, step: 0.1, unit: 'EV' },
+      exposure: { min: -1.0, max: 1.0, default: 0.0, step: 0.1, unit: 'EV' },
       deflicker_percentile: { min: 0.0, max: 100.0, default: 50.0, step: 1.0, unit: '%' },
       deflicker_target_level: { min: -18.0, max: 18.0, default: -4.0, step: 0.1, unit: 'EV' },
       compensate_exposure_bias: { min: 0, max: 1, default: 0 }

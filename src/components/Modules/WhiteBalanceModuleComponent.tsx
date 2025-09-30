@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { RotateCcw, Zap } from 'lucide-react';
 import { WhiteBalanceModule, WhiteBalanceParams, WHITE_BALANCE_PRESETS } from '../../modules/WhiteBalanceModule';
 import { logger } from '../../utils/Logger';
@@ -16,13 +16,21 @@ export function WhiteBalanceModuleComponent({
   onAutoDetect
 }: WhiteBalanceModuleComponentProps) {
   const [params, setParams] = useState<WhiteBalanceParams>(module.getParams());
+  const paramsRef = useRef<WhiteBalanceParams>(params);
+
+  // Keep ref in sync
+  useEffect(() => {
+    paramsRef.current = params;
+  }, [params]);
+
   const updateParam = useCallback((key: keyof WhiteBalanceParams, value: number | string) => {
-    const newParams = { ...params, [key]: value };
+    const newParams = { ...paramsRef.current, [key]: value };
+    paramsRef.current = newParams;
     setParams(newParams);
     module.setParams({ [key]: value });
     onParamsChange?.(newParams);
     logger.debug(`WhiteBalance ${key} updated:`, value);
-  }, [params, module, onParamsChange]);
+  }, [module, onParamsChange]);
 
   const resetParam = useCallback((key: keyof WhiteBalanceParams, defaultValue: number | string) => {
     updateParam(key, defaultValue);

@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { RotateCcw, Info, Zap } from 'lucide-react';
 import type { ExposureParams } from '../../types/darktable';
 import { ExposureModule } from '../../modules/ExposureModule';
@@ -16,15 +16,22 @@ export function ExposureModuleComponent({
   disabled = false
 }: ExposureModuleComponentProps) {
   const [params, setParams] = useState<ExposureParams>(module.defaultParams);
+  const paramsRef = useRef<ExposureParams>(params);
   const constraints = module.getParamConstraints();
   const [showTooltip, setShowTooltip] = useState<string | null>(null);
 
+  // Keep ref in sync
+  useEffect(() => {
+    paramsRef.current = params;
+  }, [params]);
+
   const handleParamChange = useCallback((key: keyof ExposureParams, value: number | string | boolean) => {
-    const newParams = { ...params, [key]: value };
+    const newParams = { ...paramsRef.current, [key]: value };
     const validatedParams = module.validateParams(newParams);
+    paramsRef.current = validatedParams;
     setParams(validatedParams);
     onParamsChange?.(validatedParams);
-  }, [params, onParamsChange, module]);
+  }, [onParamsChange, module]);
 
   const handleReset = useCallback(() => {
     const resetParams = module.defaultParams;

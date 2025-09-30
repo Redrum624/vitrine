@@ -2,7 +2,7 @@ import { logger } from '../utils/Logger';
 
 export interface BasicAdjParams {
   black_point: number;    // -1.0 to 1.0, default: 0.0
-  exposure: number;       // -18.0 to 18.0, default: 0.0
+  exposure: number;       // -1.0 to 1.0, default: 0.0
   contrast: number;       // -1.0 to 5.0, default: 0.0
   brightness: number;     // -4.0 to 4.0, default: 0.0
   saturation: number;     // -1.0 to 1.0, default: 0.0
@@ -19,8 +19,8 @@ export interface BasicAdjProcessingContext {
 export class BasicAdjustmentsModule {
   private params: BasicAdjParams = {
     black_point: 0.0,
-    exposure: 0.0,
-    contrast: 0.0,
+    exposure: 0.0,      // Neutral starting point
+    contrast: 0.0,      // Neutral starting point
     brightness: 0.0,
     saturation: 0.0,
     vibrance: 0.0
@@ -46,13 +46,13 @@ export class BasicAdjustmentsModule {
   resetParams(): void {
     this.params = {
       black_point: 0.0,
-      exposure: 0.0,
-      contrast: 0.0,
+      exposure: 0.0,      // Neutral defaults
+      contrast: 0.0,      // Neutral defaults
       brightness: 0.0,
       saturation: 0.0,
       vibrance: 0.0
     };
-    logger.debug('BasicAdj params reset to defaults');
+    logger.debug('BasicAdj params reset to neutral defaults');
   }
 
   autoAdjust(): BasicAdjParams {
@@ -79,6 +79,9 @@ export class BasicAdjustmentsModule {
     // Copy input to output
     output.set(input);
 
+    // Log key parameters for monitoring
+    logger.info(`BasicAdj processing with exposure: ${this.params.exposure}, contrast: ${this.params.contrast}`);
+
     logger.debug(`Processing BasicAdj: ${width}x${height}, channels: ${channels}`);
 
     for (let y = 0; y < height; y++) {
@@ -90,8 +93,16 @@ export class BasicAdjustmentsModule {
 
           // Apply exposure adjustment (multiplicative)
           if (this.params.exposure !== 0.0) {
-            const exposureFactor = Math.pow(2.0, this.params.exposure);
+            // Clamp exposure to reasonable range to prevent data corruption
+            const clampedExposure = Math.max(-1.0, Math.min(1.0, this.params.exposure));
+            const exposureFactor = Math.pow(2.0, clampedExposure);
             pixel *= exposureFactor;
+
+
+            // Warn if exposure was clamped
+            if (clampedExposure !== this.params.exposure) {
+              logger.warn(`BasicAdj: Exposure clamped from ${this.params.exposure} to ${clampedExposure} to prevent data corruption`);
+            }
           }
 
           // Apply black point adjustment
@@ -111,8 +122,14 @@ export class BasicAdjustmentsModule {
             pixel = 0.5 + (pixel - 0.5) * contrastFactor;
           }
 
-          // Clamp to valid range
+          // Clamp to valid range and ensure minimum visibility
           pixel = Math.max(0.0, Math.min(1.0, pixel));
+
+          // Prevent very small values from being lost in subsequent processing
+          if (pixel > 0.0 && pixel < 0.001) {
+            pixel = 0.001;
+          }
+
           output[pixelIndex + c] = pixel;
         }
 
@@ -150,6 +167,16 @@ export class BasicAdjustmentsModule {
         }
       }
     }
+
+    // Quick statistics for monitoring
+    let minVal = Infinity, maxVal = -Infinity, nonZeroCount = 0;
+    for (let i = 0; i < output.length; i += 4) {
+      const r = output[i], g = output[i + 1], b = output[i + 2];
+      minVal = Math.min(minVal, r, g, b);
+      maxVal = Math.max(maxVal, r, g, b);
+      if (r > 0.001 || g > 0.001 || b > 0.001) nonZeroCount++;
+    }
+    logger.info(`BasicAdj OUTPUT: range=${minVal.toFixed(4)}-${maxVal.toFixed(4)}, nonZero=${nonZeroCount}/${output.length/4}`);
 
     logger.debug('BasicAdj processing completed');
     return output;

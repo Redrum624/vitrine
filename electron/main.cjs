@@ -543,13 +543,53 @@ const logFile = path.join(logDir, `app-${new Date().toISOString().split('T')[0]}
 // Ensure log directory exists
 fs.mkdirSync(logDir, { recursive: true });
 
+// Batch logging to prevent file handle exhaustion
+let logQueue = [];
+let isWriting = false;
+let flushTimer = null;
+
+const flushLogs = async () => {
+  if (isWriting || logQueue.length === 0) return;
+
+  isWriting = true;
+  const logsToWrite = [...logQueue]; // Copy the queue
+  logQueue = []; // Clear the queue
+
+  try {
+    const logLines = logsToWrite.map(entry =>
+      `[${entry.timestamp}] ${entry.level.toUpperCase()}: ${entry.message}\n`
+    ).join('');
+
+    await fs.promises.appendFile(logFile, logLines);
+  } catch (error) {
+    console.error('Failed to write batch logs:', error);
+  } finally {
+    isWriting = false;
+  }
+};
+
+// Schedule periodic flushing
+const scheduleFlush = () => {
+  if (flushTimer) return;
+  flushTimer = setTimeout(() => {
+    flushTimer = null;
+    flushLogs();
+  }, 100);
+};
+
 ipcMain.handle('write-log', async (event, logEntry) => {
   try {
-    const logLine = `[${logEntry.timestamp}] ${logEntry.level.toUpperCase()}: ${logEntry.message}\n`;
-    await fs.promises.appendFile(logFile, logLine);
+    logQueue.push(logEntry);
+    scheduleFlush();
+
+    // For critical errors, flush immediately
+    if (logEntry.level === 'error' && !isWriting) {
+      flushLogs();
+    }
+
     return true;
   } catch (error) {
-    console.error('Failed to write log:', error);
+    console.error('Failed to queue log:', error);
     return false;
   }
 });

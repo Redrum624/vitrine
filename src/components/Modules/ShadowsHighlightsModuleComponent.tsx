@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import { Sun, Moon, Sliders, RotateCcw, Zap, Settings, Eye, EyeOff } from 'lucide-react';
 import { ShadowsHighlightsModule, ShadowsHighlightsParams } from '../../modules/ShadowsHighlightsModule';
 import { logger } from '../../utils/Logger';
@@ -17,15 +17,37 @@ export const ShadowsHighlightsModuleComponent: React.FC<ShadowsHighlightsModuleC
   const [params, setParams] = useState<ShadowsHighlightsParams>(module.getParams());
   const [activeSection, setActiveSection] = useState<'shadows' | 'highlights' | 'advanced'>('shadows');
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const paramsRef = useRef<ShadowsHighlightsParams>(params);
 
+  // Keep ref in sync
+  React.useEffect(() => {
+    paramsRef.current = params;
+  }, [params]);
+
+  // Real-time update with processing (for smooth dragging with live preview)
+  const handleParamChangeRealTime = useCallback((paramName: keyof ShadowsHighlightsParams, value: number) => {
+    // Update ref immediately without re-render
+    const newParams = { ...paramsRef.current, [paramName]: value };
+    paramsRef.current = newParams;
+
+    // Update module and trigger processing
+    module.setParams({ [paramName]: value });
+    onParamsChange?.(newParams);
+
+    // Update state for display (this may lag behind but won't block dragging)
+    setParams(newParams);
+  }, [module, onParamsChange]);
+
+  // Final update (same as real-time, kept for consistency)
   const handleParamChange = useCallback((paramName: keyof ShadowsHighlightsParams, value: number) => {
-    const newParams = { ...params, [paramName]: value };
+    const newParams = { ...paramsRef.current, [paramName]: value };
+    paramsRef.current = newParams;
     setParams(newParams);
     module.setParams({ [paramName]: value });
     onParamsChange?.(newParams);
 
     logger.debug(`ShadowsHighlights ${paramName} changed to:`, value);
-  }, [params, module, onParamsChange]);
+  }, [module, onParamsChange]);
 
   const handlePresetApply = useCallback((preset: PresetType) => {
     module.applyPreset(preset);
@@ -47,6 +69,7 @@ export const ShadowsHighlightsModuleComponent: React.FC<ShadowsHighlightsModuleC
     label: string;
     value: number;
     onChange: (value: number) => void;
+    onChangeRealTime?: (value: number) => void;
     min: number;
     max: number;
     step?: number;
@@ -54,7 +77,7 @@ export const ShadowsHighlightsModuleComponent: React.FC<ShadowsHighlightsModuleC
     precision?: number;
     gradient?: string;
     defaultValue?: number;
-  }> = ({ label, value, onChange, min, max, step = 0.1, suffix = '', precision = 1, gradient, defaultValue = 0 }) => (
+  }> = ({ label, value, onChange, onChangeRealTime, min, max, step = 0.1, suffix = '', precision = 1, gradient, defaultValue = 0 }) => (
     <div className="space-y-1">
       <div className="flex justify-between items-center">
         <label className="text-xs font-medium text-dark-300">{label}</label>
@@ -68,6 +91,7 @@ export const ShadowsHighlightsModuleComponent: React.FC<ShadowsHighlightsModuleC
         max={max}
         step={step}
         value={value}
+        onInput={(e) => (onChangeRealTime || onChange)(parseFloat((e.target as HTMLInputElement).value))}
         onChange={(e) => onChange(parseFloat(e.target.value))}
         onDoubleClick={() => onChange(defaultValue)}
         className="w-full h-2 rounded-lg appearance-none cursor-pointer slider-thumb"
@@ -185,11 +209,12 @@ export const ShadowsHighlightsModuleComponent: React.FC<ShadowsHighlightsModuleC
             label="Amount"
             value={params.shadows}
             onChange={(value) => handleParamChange('shadows', value)}
+            onChangeRealTime={(value) => handleParamChangeRealTime('shadows', value)}
             min={0}
             max={100}
-            step={0.01}
+            step={1}
             suffix="%"
-            precision={2}
+            precision={0}
             gradient="linear-gradient(to right, #000000, #4b5563, #9ca3af)"
           />
 
@@ -197,11 +222,12 @@ export const ShadowsHighlightsModuleComponent: React.FC<ShadowsHighlightsModuleC
             label="Radius"
             value={params.shadowsRadius}
             onChange={(value) => handleParamChange('shadowsRadius', value)}
+            onChangeRealTime={(value) => handleParamChangeRealTime('shadowsRadius', value)}
             min={0.1}
             max={100}
-            step={0.01}
+            step={1}
             suffix="%"
-            precision={2}
+            precision={0}
             gradient="linear-gradient(to right, #1f2937, #374151, #6b7280)"
           />
 
@@ -209,9 +235,10 @@ export const ShadowsHighlightsModuleComponent: React.FC<ShadowsHighlightsModuleC
             label="Color Transfer"
             value={params.shadowsColorTransfer}
             onChange={(value) => handleParamChange('shadowsColorTransfer', value)}
+            onChangeRealTime={(value) => handleParamChangeRealTime('shadowsColorTransfer', value)}
             min={0}
             max={100}
-            step={0.01}
+            step={1}
             suffix="%"
             precision={2}
             gradient="linear-gradient(to right, #374151, #3b82f6, #1d4ed8)"
@@ -221,11 +248,12 @@ export const ShadowsHighlightsModuleComponent: React.FC<ShadowsHighlightsModuleC
             label="Color Correction"
             value={params.shadowsColorCorrection}
             onChange={(value) => handleParamChange('shadowsColorCorrection', value)}
+            onChangeRealTime={(value) => handleParamChangeRealTime('shadowsColorCorrection', value)}
             min={0}
             max={100}
-            step={0.01}
+            step={1}
             suffix="%"
-            precision={2}
+            precision={0}
             gradient="linear-gradient(to right, #374151, #8b5cf6, #7c3aed)"
           />
         </div>
@@ -243,11 +271,12 @@ export const ShadowsHighlightsModuleComponent: React.FC<ShadowsHighlightsModuleC
             label="Amount"
             value={params.highlights}
             onChange={(value) => handleParamChange('highlights', value)}
+            onChangeRealTime={(value) => handleParamChangeRealTime('highlights', value)}
             min={0}
             max={100}
-            step={0.01}
+            step={1}
             suffix="%"
-            precision={2}
+            precision={0}
             gradient="linear-gradient(to right, #9ca3af, #f3f4f6, #ffffff)"
           />
 
@@ -255,11 +284,12 @@ export const ShadowsHighlightsModuleComponent: React.FC<ShadowsHighlightsModuleC
             label="Radius"
             value={params.highlightsRadius}
             onChange={(value) => handleParamChange('highlightsRadius', value)}
+            onChangeRealTime={(value) => handleParamChangeRealTime('highlightsRadius', value)}
             min={0.1}
             max={100}
-            step={0.01}
+            step={1}
             suffix="%"
-            precision={2}
+            precision={0}
             gradient="linear-gradient(to right, #d1d5db, #f3f4f6, #ffffff)"
           />
 
@@ -267,11 +297,12 @@ export const ShadowsHighlightsModuleComponent: React.FC<ShadowsHighlightsModuleC
             label="Color Transfer"
             value={params.highlightsColorTransfer}
             onChange={(value) => handleParamChange('highlightsColorTransfer', value)}
+            onChangeRealTime={(value) => handleParamChangeRealTime('highlightsColorTransfer', value)}
             min={0}
             max={100}
-            step={0.01}
+            step={1}
             suffix="%"
-            precision={2}
+            precision={0}
             gradient="linear-gradient(to right, #d1d5db, #fbbf24, #f59e0b)"
           />
 
@@ -279,11 +310,12 @@ export const ShadowsHighlightsModuleComponent: React.FC<ShadowsHighlightsModuleC
             label="Color Correction"
             value={params.highlightsColorCorrection}
             onChange={(value) => handleParamChange('highlightsColorCorrection', value)}
+            onChangeRealTime={(value) => handleParamChangeRealTime('highlightsColorCorrection', value)}
             min={0}
             max={100}
-            step={0.01}
+            step={1}
             suffix="%"
-            precision={2}
+            precision={0}
             gradient="linear-gradient(to right, #d1d5db, #f97316, #ea580c)"
           />
         </div>
@@ -304,6 +336,7 @@ export const ShadowsHighlightsModuleComponent: React.FC<ShadowsHighlightsModuleC
               label="White Point"
               value={params.whitePoint}
               onChange={(value) => handleParamChange('whitePoint', value)}
+              onChangeRealTime={(value) => handleParamChangeRealTime('whitePoint', value)}
               min={-4}
               max={4}
               step={0.01}
@@ -315,6 +348,7 @@ export const ShadowsHighlightsModuleComponent: React.FC<ShadowsHighlightsModuleC
               label="Black Point"
               value={params.blackPoint}
               onChange={(value) => handleParamChange('blackPoint', value)}
+              onChangeRealTime={(value) => handleParamChangeRealTime('blackPoint', value)}
               min={-4}
               max={4}
               step={0.01}
@@ -329,11 +363,12 @@ export const ShadowsHighlightsModuleComponent: React.FC<ShadowsHighlightsModuleC
             label="Compression"
             value={params.compress}
             onChange={(value) => handleParamChange('compress', value)}
+            onChangeRealTime={(value) => handleParamChangeRealTime('compress', value)}
             min={0}
             max={100}
-            step={0.01}
+            step={1}
             suffix="%"
-            precision={2}
+            precision={0}
             gradient="linear-gradient(to right, #374151, #dc2626, #991b1b)"
           />
 
@@ -344,6 +379,7 @@ export const ShadowsHighlightsModuleComponent: React.FC<ShadowsHighlightsModuleC
               label="Strength"
               value={params.strength}
               onChange={(value) => handleParamChange('strength', value)}
+              onChangeRealTime={(value) => handleParamChangeRealTime('strength', value)}
               min={0}
               max={2}
               step={0.01}
@@ -355,6 +391,7 @@ export const ShadowsHighlightsModuleComponent: React.FC<ShadowsHighlightsModuleC
               label="Iterations"
               value={params.iterations}
               onChange={(value) => handleParamChange('iterations', value)}
+              onChangeRealTime={(value) => handleParamChangeRealTime('iterations', value)}
               min={1}
               max={5}
               step={1}
@@ -379,6 +416,7 @@ export const ShadowsHighlightsModuleComponent: React.FC<ShadowsHighlightsModuleC
                 label="Mask Blur"
                 value={params.maskBlur}
                 onChange={(value) => handleParamChange('maskBlur', value)}
+                onChangeRealTime={(value) => handleParamChangeRealTime('maskBlur', value)}
                 min={0}
                 max={10}
                 step={0.01}
@@ -390,6 +428,7 @@ export const ShadowsHighlightsModuleComponent: React.FC<ShadowsHighlightsModuleC
                 label="Mask Falloff"
                 value={params.maskFalloff}
                 onChange={(value) => handleParamChange('maskFalloff', value)}
+                onChangeRealTime={(value) => handleParamChangeRealTime('maskFalloff', value)}
                 min={0.1}
                 max={5}
                 step={0.01}

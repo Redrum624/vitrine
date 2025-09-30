@@ -13,6 +13,8 @@ interface ColoredSliderControlProps {
   className?: string;
   color: string;
   description?: string;
+  defaultValue?: number;
+  sliderType?: 'saturation' | 'luminance' | 'hue';
 }
 
 const ColoredSliderControl: React.FC<ColoredSliderControlProps> = ({
@@ -28,6 +30,8 @@ const ColoredSliderControl: React.FC<ColoredSliderControlProps> = ({
   className = '',
   color,
   description = '',
+  defaultValue = 0,
+  sliderType,
 }) => {
   const displayValue = precision > 0 ? value.toFixed(precision) : Math.round(value);
   const sliderId = React.useId();
@@ -40,20 +44,61 @@ const ColoredSliderControl: React.FC<ColoredSliderControlProps> = ({
 
   // Create gradient for the slider track
   const getGradientStyle = () => {
-    if (unit === '%') {
-      // For saturation/luminance: gray to color to gray
+    // Use sliderType if provided, otherwise infer from unit
+    const type = sliderType || (unit === '°' ? 'hue' : 'saturation');
+
+    if (type === 'saturation') {
+      // For saturation: gray to color to gray
       return {
         background: `linear-gradient(to right, #6b7280 0%, ${color} 50%, #6b7280 100%)`
       };
-    } else if (unit === '°') {
-      // For hue: full color spectrum around this hue
+    } else if (type === 'luminance') {
+      // For luminance: black to color to white
+      return {
+        background: `linear-gradient(to right, #000000 0%, ${color} 50%, #ffffff 100%)`
+      };
+    } else if (type === 'hue') {
+      // For hue: show hue shift spectrum
+      // Extract RGB from hex color
       const hexValue = parseInt(color.replace('#', ''), 16);
-      const baseHue = ((hexValue >> 16) * 0.3 + ((hexValue >> 8) & 0xFF) * 0.59 + (hexValue & 0xFF) * 0.11) / 255 * 360;
+      const r = ((hexValue >> 16) & 0xFF) / 255;
+      const g = ((hexValue >> 8) & 0xFF) / 255;
+      const b = (hexValue & 0xFF) / 255;
+
+      // Convert RGB to HSL to get base hue and saturation
+      const max = Math.max(r, g, b);
+      const min = Math.min(r, g, b);
+      const l = (max + min) / 2;
+      let baseHue = 0;
+      let baseSat = 0;
+
+      if (max !== min) {
+        const delta = max - min;
+        baseSat = l > 0.5 ? delta / (2 - max - min) : delta / (max + min);
+
+        if (max === r) {
+          baseHue = ((g - b) / delta + (g < b ? 6 : 0)) / 6;
+        } else if (max === g) {
+          baseHue = ((b - r) / delta + 2) / 6;
+        } else {
+          baseHue = ((r - g) / delta + 4) / 6;
+        }
+      }
+      baseHue *= 360;
+      baseSat *= 100;
+
+      // Use higher saturation and fixed lightness for more vibrant gradient
+      const saturation = Math.max(70, baseSat);
+      const lightness = 50;
+
+      // Create gradient showing hue shift with more steps for smoother transition
       return {
         background: `linear-gradient(to right,
-          hsl(${(baseHue - 180 + 360) % 360}, 80%, 50%) 0%,
-          hsl(${baseHue}, 80%, 50%) 50%,
-          hsl(${(baseHue + 180) % 360}, 80%, 50%) 100%)`
+          hsl(${(baseHue - 180 + 360) % 360}, ${saturation}%, ${lightness}%) 0%,
+          hsl(${(baseHue - 90 + 360) % 360}, ${saturation}%, ${lightness}%) 25%,
+          hsl(${baseHue}, ${saturation}%, ${lightness}%) 50%,
+          hsl(${(baseHue + 90) % 360}, ${saturation}%, ${lightness}%) 75%,
+          hsl(${(baseHue + 180) % 360}, ${saturation}%, ${lightness}%) 100%)`
       };
     }
     return { background: `linear-gradient(to right, #6b7280 0%, ${color} 50%, #6b7280 100%)` };
@@ -93,6 +138,7 @@ const ColoredSliderControl: React.FC<ColoredSliderControlProps> = ({
           step={step}
           value={value}
           onChange={(e) => onChange(parseFloat(e.target.value))}
+          onDoubleClick={() => onChange(defaultValue)}
           disabled={disabled}
           className="absolute top-0 w-full h-2 appearance-none bg-transparent cursor-pointer slider-thumb disabled:opacity-50"
           style={{
@@ -105,6 +151,7 @@ const ColoredSliderControl: React.FC<ColoredSliderControlProps> = ({
           aria-valuenow={value}
           aria-valuetext={`${displayValue}${unit}`}
           role="slider"
+          title="Double-click to reset to default"
         />
       </div>
       {description && (

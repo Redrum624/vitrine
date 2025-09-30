@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import { RotateCcw, Zap } from 'lucide-react';
 import { BasicAdjustmentsModule, BasicAdjParams } from '../../modules/BasicAdjustmentsModule';
 import { logger } from '../../utils/Logger';
@@ -14,13 +14,20 @@ export function BasicAdjustmentsModuleComponent({
   onParamsChange
 }: BasicAdjustmentsModuleComponentProps) {
   const [params, setParams] = useState<BasicAdjParams>(module.getParams());
+  const paramsRef = useRef<BasicAdjParams>(params);
   const updateTimeoutRef = useRef<Record<string, NodeJS.Timeout>>({});
+
+  // Keep ref in sync
+  React.useEffect(() => {
+    paramsRef.current = params;
+  }, [params]);
 
   // Immediate UI update for smooth slider movement
   const updateParamImmediate = useCallback((key: keyof BasicAdjParams, value: number) => {
-    const newParams = { ...params, [key]: value };
+    const newParams = { ...paramsRef.current, [key]: value };
+    paramsRef.current = newParams;
     setParams(newParams);
-  }, [params]);
+  }, []);
 
   // Throttled module update for performance
   const updateParam = useCallback((key: keyof BasicAdjParams, value: number) => {
@@ -34,24 +41,25 @@ export function BasicAdjustmentsModuleComponent({
 
     // Throttle the actual module and processing updates
     updateTimeoutRef.current[key] = setTimeout(() => {
-      const newParams = { ...params, [key]: value };
+      const newParams = { ...paramsRef.current, [key]: value };
       module.setParams({ [key]: value });
       onParamsChange?.(newParams);
       logger.debug(`BasicAdj ${key} updated:`, value);
       delete updateTimeoutRef.current[key];
     }, 16); // ~60fps for smooth updates
-  }, [params, module, onParamsChange, updateParamImmediate]);
+  }, [module, onParamsChange, updateParamImmediate]);
 
   // Real-time update for slider dragging
   const updateParamRealTime = useCallback((key: keyof BasicAdjParams, value: number) => {
-    // Update UI immediately
-    updateParamImmediate(key, value);
+    // Update ref and UI immediately without blocking
+    const newParams = { ...paramsRef.current, [key]: value };
+    paramsRef.current = newParams;
+    setParams(newParams);
 
-    // Also update module for real-time preview (no throttling)
+    // Trigger module update and processing
     module.setParams({ [key]: value });
-    const newParams = { ...params, [key]: value };
     onParamsChange?.(newParams);
-  }, [params, module, onParamsChange, updateParamImmediate]);
+  }, [module, onParamsChange]);
 
   const resetParam = useCallback((key: keyof BasicAdjParams, defaultValue: number) => {
     updateParam(key, defaultValue);
@@ -109,8 +117,8 @@ export function BasicAdjustmentsModuleComponent({
               <DelayedInputControl
                 value={params.exposure}
                 onChange={(value) => updateParam('exposure', value)}
-                min={-6}
-                max={6}
+                min={-1}
+                max={1}
                 step={0.01}
                 precision={2}
               />
@@ -127,8 +135,8 @@ export function BasicAdjustmentsModuleComponent({
           <div className="relative">
             <input
               type="range"
-              min="-6"
-              max="6"
+              min="-1"
+              max="1"
               step="0.01"
               value={params.exposure}
               onInput={(e) => updateParamRealTime('exposure', parseFloat((e.target as HTMLInputElement).value))}
@@ -178,7 +186,7 @@ export function BasicAdjustmentsModuleComponent({
               onDoubleClick={() => updateParam('black_point', 0.0)}
               className="w-full h-2 rounded-lg appearance-none cursor-pointer slider-thumb"
               style={{
-                background: 'linear-gradient(to right, #000000, #4b5563)',
+                background: 'linear-gradient(to right, #ffffff, #000000)',
                 border: '1px solid #374151'
               }}
               title="Double-click to reset to 0"

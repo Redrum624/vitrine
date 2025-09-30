@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { ChevronDown, ChevronRight, RotateCcw, RefreshCw, Expand, Minimize2 } from 'lucide-react';
 import { BasicAdjustmentsModule } from '../../modules/BasicAdjustmentsModule';
 import { WhiteBalanceModule } from '../../modules/WhiteBalanceModule';
@@ -13,6 +13,8 @@ import { ShadowsHighlightsModuleComponent } from '../Modules/ShadowsHighlightsMo
 import { imageProcessingPipeline } from '../../services/ImageProcessingPipeline';
 import { imageService } from '../../services/ImageService';
 import { autoRawAdjustmentService } from '../../services/AutoRawAdjustmentService';
+import { progressivePreviewService } from '../../services/ProgressivePreviewService';
+import { adaptiveDebounceService } from '../../services/AdaptiveDebounceService';
 import { useAppStore } from '../../stores/appStore';
 import { logger } from '../../utils/Logger';
 
@@ -22,7 +24,8 @@ interface ModuleState {
 }
 
 export function AdjustmentPanel() {
-  const { setProcessedImageData, currentImage, viewport } = useAppStore();
+  const { setProcessedImageData, currentImage } = useAppStore();
+  const [resetCounter, setResetCounter] = useState(0);
   const [moduleStates, setModuleStates] = useState<Record<string, ModuleState>>({
     // Core processing modules first (most commonly used)
     exposure: { expanded: true, enabled: true },
@@ -47,7 +50,8 @@ export function AdjustmentPanel() {
   });
   const [isProcessing, setIsProcessing] = useState(false);
   const [lastProcessingTime, setLastProcessingTime] = useState(0);
-  const [shouldForceProcessing] = useState(false);
+  const processingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const lastProcessingTimeRef = useRef<number>(0);
 
   // Connect the processing pipeline to image service for auto-adjustments
   useEffect(() => {
@@ -75,6 +79,7 @@ export function AdjustmentPanel() {
   const processCurrentImageRealTime = useCallback(async () => {
     const currentImage = imageService.getCurrentImage();
     console.log('AdjustmentPanel: processCurrentImageRealTime called, currentImage:', currentImage ? `${currentImage.width}x${currentImage.height}` : 'null');
+
     if (!currentImage) return;
 
     // Skip processing if already processing
@@ -83,95 +88,141 @@ export function AdjustmentPanel() {
       return;
     }
 
+    // Only prevent rapid-fire calls within a short time window (not based on parameter changes)
+    const now = performance.now();
+    const lastProcessingTime = lastProcessingTimeRef.current;
+
+    if (lastProcessingTime && (now - lastProcessingTime) < 50) {
+      logger.debug('Skipping processing - too soon since last processing (50ms throttle)');
+      return;
+    }
+
+    // Track this processing attempt
+    lastProcessingTimeRef.current = now;
+
+    // Clear any pending timeout
+    if (processingTimeoutRef.current) {
+      clearTimeout(processingTimeoutRef.current);
+      processingTimeoutRef.current = null;
+    }
+
     try {
       setIsProcessing(true);
       const startTime = performance.now();
 
-      // Use less aggressive downscaling for higher quality preview (2x downscale, min 512px)
-      const previewWidth = Math.max(512, Math.floor(currentImage.width / 2));
-      const previewHeight = Math.max(512, Math.floor(currentImage.height / 2));
-
-      logger.debug(`Processing preview: ${previewWidth}x${previewHeight} (downscaled from ${currentImage.width}x${currentImage.height})`);
-
       // Detect channel count from image data
       const expectedPixels = currentImage.width * currentImage.height;
       const actualChannels = currentImage.data.length / expectedPixels;
-      const isRGB = Math.abs(actualChannels - 3) < 0.1; // Tolerance for floating point
+      const isRGB = Math.abs(actualChannels - 3) < 0.1;
       const sourceChannels = isRGB ? 3 : 4;
 
       logger.debug(`Image format detected: ${sourceChannels} channels (${isRGB ? 'RGB' : 'RGBA'})`);
 
-      // Create downscaled image data for faster processing (always output RGBA)
-      const scaleFactor = previewWidth / currentImage.width;
-      const previewData = new Float32Array(previewWidth * previewHeight * 4);
-
-      // Debug original image data
-      const origMax = Math.max(...currentImage.data.slice(0, 1000));
-      const origMin = Math.min(...currentImage.data.slice(0, 1000));
-      const origSample = currentImage.data.slice(0, 8);
-      console.log('AdjustmentPanel: Original data - min:', origMin, 'max:', origMax, 'sample:', Array.from(origSample), 'scaleFactor:', scaleFactor);
-
-      // Optimized nearest neighbor downsampling with channel conversion
-      for (let y = 0; y < previewHeight; y++) {
-        for (let x = 0; x < previewWidth; x++) {
-          const srcX = Math.floor(x / scaleFactor);
-          const srcY = Math.floor(y / scaleFactor);
-          const srcIdx = (srcY * currentImage.width + srcX) * sourceChannels;
-          const dstIdx = (y * previewWidth + x) * 4;
-
-          // Copy RGB channels
-          previewData[dstIdx] = currentImage.data[srcIdx] || 0;     // R
-          previewData[dstIdx + 1] = currentImage.data[srcIdx + 1] || 0; // G
-          previewData[dstIdx + 2] = currentImage.data[srcIdx + 2] || 0; // B
-
-          // Handle alpha channel
-          if (sourceChannels === 4) {
-            previewData[dstIdx + 3] = currentImage.data[srcIdx + 3] || 1.0; // A from source
-          } else {
-            previewData[dstIdx + 3] = 1.0; // Full opacity for RGB images
-          }
-        }
-      }
-
-      // Debug preview data after downsampling
-      const previewMax = Math.max(...previewData.slice(0, 1000));
-      const previewMin = Math.min(...previewData.slice(0, 1000));
-      const previewSample = previewData.slice(0, 8);
-      console.log('AdjustmentPanel: Preview data - min:', previewMin, 'max:', previewMax, 'sample:', Array.from(previewSample));
-
-      // Check if this is a LibRaw-processed image (skip pipeline processing to preserve colors)
-      const isLibRawProcessed = currentImage.data.length > 0 &&
-        Math.max(...currentImage.data.slice(0, 1000)) <= 1.0 &&
-        Math.min(...currentImage.data.slice(0, 1000)) > 0.0 &&
-        // Additional check: LibRaw typically has good dynamic range distribution
-        (previewMax - previewMin) > 0.5;
-
-      let processedData: Float32Array;
+      // Cancel any previous progressive preview requests
+      progressivePreviewService.cancelActiveRequests();
 
       // Check if any modules are enabled (user made manual adjustments)
       const hasManualAdjustments = Object.values(moduleStates).some(state => state.enabled);
 
-      if (isLibRawProcessed && !hasManualAdjustments && !shouldForceProcessing) {
-        // LibRaw-processed image with no manual adjustments: skip pipeline to preserve accurate colors
-        console.log('AdjustmentPanel: LibRaw-processed image detected with no manual adjustments, bypassing pipeline processing');
-        processedData = previewData; // Use the image directly without pipeline processing
+
+      // Temporarily use smaller downsampling to avoid issues
+      // TODO: Fix downsampling algorithm properly later
+      const MAX_PREVIEW_SIZE = 1024; // Smaller size for now to test fix
+      const aspectRatio = currentImage.width / currentImage.height;
+
+      let previewWidth, previewHeight;
+      if (currentImage.width > currentImage.height) {
+        previewWidth = Math.min(MAX_PREVIEW_SIZE, currentImage.width);
+        previewHeight = Math.round(previewWidth / aspectRatio);
       } else {
-        // Normal image, or LibRaw with manual adjustments, or forced processing: run through pipeline
-        console.log('AdjustmentPanel: Running image through processing pipeline',
-          isLibRawProcessed ? '(LibRaw with manual adjustments)' : '(normal processing)');
-        processedData = await imageProcessingPipeline.processImage(previewData, {
-          width: previewWidth,
-          height: previewHeight,
-          channels: 4 // RGBA
-        }, false); // Disable web workers for preview
+        previewHeight = Math.min(MAX_PREVIEW_SIZE, currentImage.height);
+        previewWidth = Math.round(previewHeight * aspectRatio);
       }
 
-      const processTime = performance.now() - startTime;
-      setLastProcessingTime(processTime);
-      logger.debug(`Real-time preview processing completed in ${processTime.toFixed(2)}ms`);
+      console.log(`AdjustmentPanel: Creating preview ${previewWidth}x${previewHeight} from ${currentImage.width}x${currentImage.height}`);
 
-      // Store both original and processed data
-      console.log('AdjustmentPanel: Setting processed data', previewWidth, 'x', previewHeight, 'channels:', sourceChannels, '->', 4);
+      // For now, use original image data directly if it's not too large
+      let previewData: Float32Array;
+
+      if (currentImage.width <= MAX_PREVIEW_SIZE && currentImage.height <= MAX_PREVIEW_SIZE) {
+        // Use original data directly if it's small enough
+        console.log('AdjustmentPanel: Using original image data directly (small image)');
+        previewData = currentImage.data.slice(); // Copy to avoid modifying original
+        previewWidth = currentImage.width;
+        previewHeight = currentImage.height;
+
+        // Ensure RGBA format
+        if (sourceChannels === 3) {
+          const rgbaData = new Float32Array(currentImage.width * currentImage.height * 4);
+          for (let i = 0; i < currentImage.width * currentImage.height; i++) {
+            rgbaData[i * 4] = previewData[i * 3];
+            rgbaData[i * 4 + 1] = previewData[i * 3 + 1];
+            rgbaData[i * 4 + 2] = previewData[i * 3 + 2];
+            rgbaData[i * 4 + 3] = 1.0;
+          }
+          previewData = rgbaData;
+        }
+      } else {
+        // CRITICAL FIX: Recalculate preview dimensions to EXACTLY match source aspect ratio
+        // This prevents stretching artifacts
+        const actualPreviewWidth = previewWidth;
+        const actualPreviewHeight = Math.round(previewWidth / aspectRatio);
+
+        // Update preview dimensions to exact aspect ratio match
+        previewWidth = actualPreviewWidth;
+        previewHeight = actualPreviewHeight;
+
+        console.log(`AdjustmentPanel: Downsampling ${currentImage.width}x${currentImage.height} to EXACT aspect ratio ${previewWidth}x${previewHeight}`);
+
+        // Simple downsampling - use every Nth pixel
+        const scaleX = currentImage.width / previewWidth;
+        const scaleY = currentImage.height / previewHeight;
+
+        console.log(`AdjustmentPanel: Scale factors: ${scaleX.toFixed(2)}x horizontally, ${scaleY.toFixed(2)}x vertically`);
+
+        previewData = new Float32Array(previewWidth * previewHeight * 4);
+
+        for (let y = 0; y < previewHeight; y++) {
+          for (let x = 0; x < previewWidth; x++) {
+            // Use exact mapping to avoid aspect ratio distortion
+            const srcX = Math.min(Math.floor(x * scaleX), currentImage.width - 1);
+            const srcY = Math.min(Math.floor(y * scaleY), currentImage.height - 1);
+            const srcIdx = (srcY * currentImage.width + srcX) * sourceChannels;
+            const dstIdx = (y * previewWidth + x) * 4;
+
+            previewData[dstIdx] = currentImage.data[srcIdx] || 0;
+            previewData[dstIdx + 1] = currentImage.data[srcIdx + 1] || 0;
+            previewData[dstIdx + 2] = currentImage.data[srcIdx + 2] || 0;
+            previewData[dstIdx + 3] = sourceChannels === 4 ? (currentImage.data[srcIdx + 3] || 1.0) : 1.0;
+          }
+        }
+      }
+
+      // Debug the preview data
+      const samplePreview = previewData.slice(0, 100);
+      const previewNonZero = samplePreview.filter(val => val > 0).length;
+      console.log(`AdjustmentPanel: Preview data created - nonZero: ${previewNonZero}/100, range: ${Math.min(...samplePreview)} - ${Math.max(...samplePreview)}, sample:`, samplePreview.slice(0, 8));
+
+      // Always run through processing pipeline to ensure module effects are applied
+      // The pipeline has its own optimizations to skip unchanged modules
+      console.log('AdjustmentPanel: Processing preview', previewWidth, 'x', previewHeight, 'hasAdjustments:', hasManualAdjustments);
+      const processedData = await imageProcessingPipeline.processImage(previewData, {
+        width: previewWidth,
+        height: previewHeight,
+        channels: 4
+      }, false); // Disable web workers for preview
+
+      // Critical debugging: Track data before passing to Canvas
+      const stats = { min: Infinity, max: -Infinity, nonZero: 0 };
+      for (let i = 0; i < processedData.length; i += 4) {
+        const r = processedData[i], g = processedData[i + 1], b = processedData[i + 2];
+        stats.min = Math.min(stats.min, r, g, b);
+        stats.max = Math.max(stats.max, r, g, b);
+        if (r > 0.001 || g > 0.001 || b > 0.001) stats.nonZero++;
+      }
+      logger.info(`AdjustmentPanel: FINAL DATA before Canvas - range=${stats.min.toFixed(4)}-${stats.max.toFixed(4)}, nonZero=${stats.nonZero}/${processedData.length/4}`);
+
+      // Update UI once with final result
       setProcessedImageData({
         data: processedData,
         width: previewWidth,
@@ -179,43 +230,46 @@ export function AdjustmentPanel() {
         isPreview: true
       });
 
+      const processTime = performance.now() - startTime;
+      setLastProcessingTime(processTime);
+
+      logger.debug(`Preview processing completed in ${processTime.toFixed(2)}ms, size: ${previewWidth}x${previewHeight}`);
+
     } catch (error) {
       logger.error('Real-time processing failed:', error);
     } finally {
       setIsProcessing(false);
     }
-  }, [setProcessedImageData, isProcessing, moduleStates, shouldForceProcessing]);
+  }, [setProcessedImageData, isProcessing, moduleStates]);
 
-  // Trigger reprocessing when viewport changes (for zoom, pan, etc.)
-  useEffect(() => {
-    if (currentImage) {
-      logger.debug('Viewport changed, triggering reprocessing');
-      processCurrentImageRealTime();
-    }
-  }, [viewport, currentImage, processCurrentImageRealTime]);
+  // Note: Removed viewport-triggered reprocessing as viewport changes (zoom, pan)
+  // should not trigger image reprocessing - only display changes
 
-  const [debounceTimer, setDebounceTimer] = useState<NodeJS.Timeout | null>(null);
+  const handleModuleParamsChange = useCallback((moduleId: string, params: Record<string, unknown>, changeType: 'slider' | 'input' | 'button' | 'auto' = 'slider') => {
+    logger.debug(`Module ${moduleId} parameters changed:`, params);
 
-  const handleModuleParamsChange = useCallback((moduleId: string, _params: Record<string, unknown>) => {
-    logger.debug(`Module ${moduleId} parameters changed`);
+    // Invalidate cache for this module to ensure changes are processed
+    imageProcessingPipeline.invalidateModuleCache(moduleId);
 
-    // Real-time processing is always enabled
-
-    logger.debug('Scheduling debounced update');
-
-    // Clear existing timer
-    if (debounceTimer) {
-      clearTimeout(debounceTimer);
-    }
-
-    // Set new timer with faster debounce for better responsiveness
-    const newTimer = setTimeout(() => {
-      processCurrentImageRealTime();
-      setDebounceTimer(null);
-    }, 100); // Reduced to 100ms debounce for better responsiveness
-
-    setDebounceTimer(newTimer);
-  }, [processCurrentImageRealTime, debounceTimer]);
+    // Use adaptive debouncing for better responsiveness
+    adaptiveDebounceService.debounce(
+      `module-${moduleId}`,
+      () => {
+        console.log('Debounced processing triggered for module:', moduleId);
+        processCurrentImageRealTime();
+      },
+      {
+        moduleId,
+        parameterName: Object.keys(params)[0] || 'unknown',
+        changeType
+      },
+      {
+        priority: 'normal',
+        adaptiveDelay: true,
+        maxWait: 300 // Faster response for better UX
+      }
+    );
+  }, [processCurrentImageRealTime]);
 
   const handleAutoWhiteBalance = useCallback(() => {
     const currentImage = imageService.getCurrentImage();
@@ -228,8 +282,21 @@ export function AdjustmentPanel() {
         channels: 4
       });
 
-      // Trigger real-time update after auto detection
-      processCurrentImageRealTime();
+      // Trigger immediate update after auto detection
+      adaptiveDebounceService.debounce(
+        'auto-white-balance',
+        processCurrentImageRealTime,
+        {
+          moduleId: 'whitebalance',
+          parameterName: 'auto',
+          changeType: 'auto'
+        },
+        {
+          priority: 'high', // High priority for auto operations
+          immediate: false,
+          adaptiveDelay: true
+        }
+      );
 
       logger.info('Auto white balance applied');
     } catch (error) {
@@ -238,10 +305,50 @@ export function AdjustmentPanel() {
   }, [whiteBalanceModule, processCurrentImageRealTime]);
 
   const resetAllModules = useCallback(() => {
+    // Call resetParams() on each module individually, just like individual reset buttons do
+    // This ensures the exact same behavior as clicking each reset button
+
+    if (basicAdjModule) {
+      basicAdjModule.resetParams();
+      const basicAdjParams = basicAdjModule.getParams();
+      handleModuleParamsChange('basicadj', basicAdjParams, 'button');
+    }
+
+    if (whiteBalanceModule) {
+      whiteBalanceModule.resetParams();
+      const whiteBalanceParams = whiteBalanceModule.getParams();
+      handleModuleParamsChange('temperature', whiteBalanceParams, 'button');
+    }
+
+    // ToneCurve, ColorBalance, and ShadowsHighlights are pipeline modules
+    // They need to be reset through the pipeline's resetAllModules method
+    // since they don't have individual resetParams methods
     imageProcessingPipeline.resetAllModules();
-    processCurrentImageRealTime();
+
+    // Increment reset counter to force all module components to refresh
+    setResetCounter(prev => prev + 1);
+
+    // Clear debounce history since we're resetting everything
+    adaptiveDebounceService.clearHistory();
+
+    // Immediate processing for reset operations
+    adaptiveDebounceService.debounce(
+      'reset-all-modules',
+      processCurrentImageRealTime,
+      {
+        moduleId: 'all',
+        parameterName: 'reset',
+        changeType: 'button'
+      },
+      {
+        priority: 'high',
+        immediate: false,
+        adaptiveDelay: false
+      }
+    );
+
     logger.info('All modules reset to defaults');
-  }, [processCurrentImageRealTime]);
+  }, [processCurrentImageRealTime, basicAdjModule, whiteBalanceModule, handleModuleParamsChange]);
 
   // Check if all modules are expanded
   const areAllModulesExpanded = useCallback(() => {
@@ -282,8 +389,12 @@ export function AdjustmentPanel() {
       processCurrentImageRealTime();
     }
 
-    // Cleanup listener on unmount
-    return cleanup;
+    // Cleanup listener and debounce service on unmount
+    return () => {
+      cleanup();
+      adaptiveDebounceService.cancelAll();
+      progressivePreviewService.cancelActiveRequests();
+    };
   }, [processCurrentImageRealTime]);
 
   return (
@@ -295,7 +406,7 @@ export function AdjustmentPanel() {
             <h2 className="text-sm font-medium text-dark-300">Develop</h2>
             {lastProcessingTime > 0 && !isProcessing && (
               <div className="text-xs text-center text-dark-500">
-                2x downscaled preview ({lastProcessingTime.toFixed(1)}ms)
+                High quality preview ({lastProcessingTime.toFixed(1)}ms)
               </div>
             )}
           </div>
@@ -359,6 +470,7 @@ export function AdjustmentPanel() {
             {moduleStates.basicadj?.expanded && (
               <div className="px-3 pb-3">
                 <BasicAdjustmentsModuleComponent
+                  key={`basicadj-${resetCounter}`}
                   module={basicAdjModule}
                   onParamsChange={(params) => handleModuleParamsChange('basicadj', params)}
                 />
@@ -385,6 +497,7 @@ export function AdjustmentPanel() {
             {moduleStates.whitebalance?.expanded && (
               <div className="px-3 pb-3">
                 <WhiteBalanceModuleComponent
+                  key={`whitebalance-${resetCounter}`}
                   module={whiteBalanceModule}
                   onParamsChange={(params) => handleModuleParamsChange('temperature', params)}
                   onAutoDetect={handleAutoWhiteBalance}
@@ -412,6 +525,7 @@ export function AdjustmentPanel() {
             {moduleStates.shadowshighlights?.expanded && (
               <div className="px-3 pb-3">
                 <ShadowsHighlightsModuleComponent
+                  key={`shadowshighlights-${resetCounter}`}
                   module={shadowsHighlightsModule.getShadowsHighlightsModule()}
                   onParamsChange={(params) => handleModuleParamsChange('shadowshighlights', params)}
                 />
@@ -438,6 +552,7 @@ export function AdjustmentPanel() {
             {moduleStates.tonecurve?.expanded && (
               <div className="px-3 pb-3">
                 <ToneCurveModuleComponent
+                  key={`tonecurve-${resetCounter}`}
                   module={toneCurveModule.getToneCurveModule()}
                   onParamsChange={(params) => handleModuleParamsChange('tonecurve', params)}
                 />
@@ -464,6 +579,7 @@ export function AdjustmentPanel() {
             {moduleStates.colorbalance?.expanded && (
               <div className="px-3 pb-3">
                 <ColorBalanceModuleComponent
+                  key={`colorbalance-${resetCounter}`}
                   module={colorBalanceModule.getColorBalanceModule()}
                   onParamsChange={(params) => handleModuleParamsChange('colorbalance', params)}
                 />

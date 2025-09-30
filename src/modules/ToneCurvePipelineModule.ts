@@ -8,7 +8,7 @@ import { logger } from '../utils/Logger';
  */
 export class ToneCurvePipelineModule implements PipelineModule {
   private toneCurveModule: ToneCurveModule;
-  public isEnabled = false; // Temporarily disabled to test if this is causing black images
+  public isEnabled = true;
 
   constructor() {
     this.toneCurveModule = new ToneCurveModule();
@@ -61,6 +61,11 @@ export class ToneCurvePipelineModule implements PipelineModule {
 
   getEnabled(): boolean {
     return this.isEnabled;
+  }
+
+  // Get current parameters (required by pipeline)
+  getParams(): Record<string, unknown> {
+    return this.toneCurveModule.getParams();
   }
 
   // Reset module to defaults

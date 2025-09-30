@@ -337,6 +337,14 @@ export class LocalAdjustmentsPipelineModule implements PipelineModule {
     // In a full implementation, this would sync pipeline state to module state
   }
 
+  // Get current parameters (required by pipeline)
+  getParams(): Record<string, unknown> {
+    return {
+      ...this.params,
+      moduleStats: localAdjustmentsModule.getStats()
+    };
+  }
+
   // Get module statistics
   getStats() {
     const moduleStats = localAdjustmentsModule.getStats();

@@ -27,6 +27,7 @@ export interface PipelineModule {
 export class ImageProcessingPipeline {
   private modules: Map<string, PipelineModule> = new Map();
   private processingOrder: string[] = [];
+  private moduleCache: Map<string, { params: string; result: Float32Array; context: ProcessingContext }> = new Map();
 
   constructor() {
     this.initializeModules();
@@ -96,9 +97,158 @@ export class ImageProcessingPipeline {
     const module = this.modules.get(moduleId);
     if (module) {
       module.isEnabled = enabled;
-      logger.debug(`Module ${moduleId} ${enabled ? 'enabled' : 'disabled'}`);
+      // Clear cache for this module and all subsequent modules
+      this.invalidateCacheFromModule(moduleId);
+      logger.debug(`Module ${moduleId} ${enabled ? 'enabled' : 'disabled'} - cache invalidated`);
     }
   }
+
+  // Public method to invalidate cache when parameters change externally
+  invalidateModuleCache(moduleId: string): void {
+    logger.info(`🗑️ MANUAL CACHE INVALIDATION for module: ${moduleId}`);
+    const sizeBefore = this.moduleCache.size;
+    this.invalidateCacheFromModule(moduleId);
+    const sizeAfter = this.moduleCache.size;
+    logger.debug(`  Cache size: ${sizeBefore} → ${sizeAfter} (cleared ${sizeBefore - sizeAfter} entries)`);
+  }
+
+  // Check if module parameters have default/identity values
+  private isModuleIdentity(module: PipelineModule): boolean {
+    try {
+      const params = this.getModuleParams(module, module.getId());
+      const moduleId = module.getId();
+
+      // Module-specific identity checks with correct defaults
+      switch (moduleId) {
+        case 'tonecurve': {
+          const tc = params as any;
+          // Check if curve is linear (identity transformation)
+          if (!tc.baseCurve || tc.baseCurve.length < 2) return false;
+
+          // For a truly linear curve, ALL points must lie on y=x line
+          const isLinear = tc.baseCurve.every((node: any) => {
+            if (!node || typeof node.x !== 'number' || typeof node.y !== 'number') return false;
+            // Check if point lies on y=x line (with small tolerance)
+            return Math.abs(node.x - node.y) < 0.01;
+          });
+
+          const noAuto = !tc.autoLevels && !tc.autoContrast;
+          const noFusion = !tc.exposureFusion || tc.exposureFusion === 0;
+
+          // Also check RGB curves are linear
+          const rgbLinear = (!tc.rgbCurve ||
+            (this.isCurveLinear(tc.rgbCurve.red) &&
+             this.isCurveLinear(tc.rgbCurve.green) &&
+             this.isCurveLinear(tc.rgbCurve.blue)));
+
+          return isLinear && rgbLinear && noAuto && noFusion;
+        }
+
+        case 'colorbalance': {
+          const cb = params as any;
+          // Check all color ranges are at 0
+          const checkRange = (range: any) => {
+            if (!range) return true;
+            return (range.cyan_red === 0 || range.cyan_red === undefined) &&
+                   (range.magenta_green === 0 || range.magenta_green === undefined) &&
+                   (range.yellow_blue === 0 || range.yellow_blue === undefined);
+          };
+          const shadowsNeutral = checkRange(cb.shadows);
+          const midtonesNeutral = checkRange(cb.midtones);
+          const highlightsNeutral = checkRange(cb.highlights);
+
+          // Check global color controls if they exist
+          const colors = ['red', 'orange', 'yellow', 'green', 'cyan', 'blue', 'purple', 'magenta'];
+          const globalNeutral = colors.every(c => {
+            const sat = cb[`${c}_saturation`];
+            const lum = cb[`${c}_luminance`];
+            const hue = cb[`${c}_hue`];
+            return (sat === undefined || sat === 0) &&
+                   (lum === undefined || lum === 0) &&
+                   (hue === undefined || hue === 0);
+          });
+
+          return shadowsNeutral && midtonesNeutral && highlightsNeutral && globalNeutral;
+        }
+
+        case 'temperature': {
+          const wb = params as any;
+          // 5500K is neutral daylight, tint 0 is neutral
+          const tempNeutral = Math.abs((wb.temperature || 5500) - 5500) < 10;
+          const tintNeutral = Math.abs(wb.tint || 0) < 0.1;
+          return tempNeutral && tintNeutral;
+        }
+
+        case 'basicadj': {
+          // All numeric parameters should be 0 for identity
+          return Object.entries(params).every(([key, val]) => {
+            if (key === 'enabled' || typeof val !== 'number') return true;
+            return Math.abs(val as number) < 0.001;
+          });
+        }
+
+        case 'shadowshighlights': {
+          // Check main effect parameters only
+          const sh = params as any;
+          return (sh.shadows === undefined || sh.shadows === 0) &&
+                 (sh.highlights === undefined || sh.highlights === 0) &&
+                 (sh.whitePoint === undefined || sh.whitePoint === 0) &&
+                 (sh.blackPoint === undefined || sh.blackPoint === 0) &&
+                 (sh.compress === undefined || sh.compress === 0);
+        }
+
+        default:
+          // For unknown modules, check if all numeric params are 0
+          return Object.entries(params).every(([key, val]) => {
+            if (key === 'enabled' || typeof val !== 'number') return true;
+            return Math.abs(val as number) < 0.001;
+          });
+      }
+    } catch (error) {
+      logger.warn(`Identity check failed for module ${module.getId()}:`, error);
+      return false; // Process on error
+    }
+  }
+
+  // Helper method to check if a curve array represents a linear (identity) transformation
+  private isCurveLinear(curve: any[]): boolean {
+    if (!curve || curve.length < 2) return true;
+    return curve.every((node: any) =>
+      node && typeof node.x === 'number' && typeof node.y === 'number' &&
+      Math.abs(node.x - node.y) < 0.01
+    );
+  }
+
+  // Generate cache key for module parameters (disabled for debugging)
+  // @ts-ignore - temporarily unused during debugging
+  private getModuleCacheKey(module: PipelineModule): string {
+    const params = this.getModuleParams(module, module.getId());
+    return JSON.stringify(params);
+  }
+
+  // Invalidate cache from a specific module onwards
+  private invalidateCacheFromModule(moduleId: string): void {
+    const moduleIndex = this.processingOrder.indexOf(moduleId);
+    if (moduleIndex === -1) {
+      logger.warn(`Cannot invalidate cache: module ${moduleId} not found in processing order`);
+      return;
+    }
+
+    // Clear cache for this module and all subsequent modules
+    const clearedModules: string[] = [];
+    for (let i = moduleIndex; i < this.processingOrder.length; i++) {
+      const moduleToDelete = this.processingOrder[i];
+      if (this.moduleCache.delete(moduleToDelete)) {
+        clearedModules.push(moduleToDelete);
+      }
+    }
+
+    if (clearedModules.length > 0) {
+      logger.debug(`  Cleared cache for modules: ${clearedModules.join(', ')}`);
+    }
+  }
+
+  // Context change detection method removed for now - will be re-added when needed
 
   async processImage(input: Float32Array, context: ProcessingContext, useWebWorkers = true): Promise<Float32Array> {
     const imageData = {
@@ -121,8 +271,6 @@ export class ImageProcessingPipeline {
   }
 
   private async processWithWebWorkers(input: Float32Array, context: ProcessingContext): Promise<Float32Array> {
-    logger.info(`Processing with Web Workers: ${context.width}x${context.height} (${this.processingOrder.length} modules)`);
-    const startTime = performance.now();
 
     try {
       // Build pipeline configuration for workers
@@ -161,9 +309,6 @@ export class ImageProcessingPipeline {
         return this.processOnMainThread(input, context);
       }
 
-      const totalTime = performance.now() - startTime;
-      logger.info(`Web Worker processing completed in ${totalTime.toFixed(2)}ms (worker: ${result.processingTime?.toFixed(2)}ms)`);
-
       return result.data;
 
     } catch (error) {
@@ -175,43 +320,68 @@ export class ImageProcessingPipeline {
   private async processOnMainThread(input: Float32Array, context: ProcessingContext): Promise<Float32Array> {
     let currentData: Float32Array = new Float32Array(input);
 
-    // Debug input data
-    const inputSample = input.slice(0, 12);
-    const inputMax = Math.max(...input.slice(0, 1000));
-    const inputMin = Math.min(...input.slice(0, 1000));
-    const inputAvg = input.slice(0, 1000).reduce((sum, val) => sum + val, 0) / 1000;
-    const nonZeroCount = input.slice(0, 1000).filter(val => val > 0).length;
-    console.log('Pipeline: Input data - min:', inputMin, 'max:', inputMax, 'avg:', inputAvg, 'nonZero:', nonZeroCount, 'sample:', Array.from(inputSample.slice(0, 8)));
-
-    logger.info(`Processing on main thread: ${context.width}x${context.height} (${this.processingOrder.length} modules)`);
-    const startTime = performance.now();
+    // Track processing statistics
+    let modulesProcessed = 0;
 
     try {
       for (const moduleId of this.processingOrder) {
         const module = this.modules.get(moduleId);
 
         if (!module) {
-          logger.warn(`Module not found: ${moduleId}`);
           continue;
         }
 
         // Check if module is enabled (default to true if not specified)
         const isEnabled = module.isEnabled !== false;
         if (!isEnabled) {
-          logger.debug(`Skipping disabled module: ${module.getName()}`);
           continue;
         }
 
-        const moduleStartTime = performance.now();
+        // Smart skipping: check if module has identity parameters
+        if (this.isModuleIdentity(module)) {
+          logger.debug(`Module ${module.getName()} skipped - identity parameters`);
+          continue;
+        }
+
+        // Check cache for this module
+        const cacheKey = this.getModuleCacheKey(module);
+        const cached = this.moduleCache.get(moduleId);
+
+        if (cached &&
+            cached.params === cacheKey &&
+            cached.context.width === context.width &&
+            cached.context.height === context.height &&
+            cached.context.channels === context.channels &&
+            cached.result.length === currentData.length) {
+          // Use cached result
+          logger.debug(`Module ${module.getName()} used cached result`);
+          currentData = new Float32Array(cached.result);
+          continue;
+        }
 
         try {
-          logger.debug(`Processing module: ${module.getName()} (${moduleId})`);
+          logger.info(`Processing module: ${module.getName()}`);
           currentData = module.process(currentData, context);
+          modulesProcessed++;
 
-          // Debug logging removed - issue resolved
+          // CRITICAL DEBUG: Track data after each module
+          const moduleStats = { min: Infinity, max: -Infinity, nonZero: 0 };
+          for (let i = 0; i < currentData.length; i += 4) {
+            const r = currentData[i], g = currentData[i + 1], b = currentData[i + 2];
+            moduleStats.min = Math.min(moduleStats.min, r, g, b);
+            moduleStats.max = Math.max(moduleStats.max, r, g, b);
+            if (r > 0.001 || g > 0.001 || b > 0.001) moduleStats.nonZero++;
+          }
+          logger.info(`${module.getName()} OUTPUT: range=${moduleStats.min.toFixed(4)}-${moduleStats.max.toFixed(4)}, nonZero=${moduleStats.nonZero}/${currentData.length/4}`);
 
-          const moduleTime = performance.now() - moduleStartTime;
-          logger.debug(`Module ${module.getName()} completed in ${moduleTime.toFixed(2)}ms`);
+          // Cache the result for future use
+          this.moduleCache.set(moduleId, {
+            params: cacheKey,
+            result: new Float32Array(currentData),
+            context: { ...context }
+          });
+
+          logger.info(`✅ Module ${module.getName()} processed successfully`);
 
         } catch (error) {
           logger.error(`Error in module ${module.getName()}:`, error);
@@ -219,14 +389,20 @@ export class ImageProcessingPipeline {
         }
       }
 
-      const totalTime = performance.now() - startTime;
-      logger.info(`Main thread processing completed in ${totalTime.toFixed(2)}ms`);
+      // Only log if there were issues
+      if (modulesProcessed === 0) {
+        logger.warn('No modules were processed - image unchanged');
+      }
 
-      // Debug output data
-      const outputMax = Math.max(...currentData.slice(0, 1000));
-      const outputMin = Math.min(...currentData.slice(0, 1000));
-      const outputSample = currentData.slice(0, 4);
-      console.log('Pipeline: Output data - min:', outputMin, 'max:', outputMax, 'sample:', Array.from(outputSample));
+      // Critical debugging: Track final pipeline output
+      const finalStats = { min: Infinity, max: -Infinity, nonZero: 0 };
+      for (let i = 0; i < currentData.length; i += 4) {
+        const r = currentData[i], g = currentData[i + 1], b = currentData[i + 2];
+        finalStats.min = Math.min(finalStats.min, r, g, b);
+        finalStats.max = Math.max(finalStats.max, r, g, b);
+        if (r > 0.001 || g > 0.001 || b > 0.001) finalStats.nonZero++;
+      }
+      logger.info(`Pipeline: FINAL OUTPUT - range=${finalStats.min.toFixed(4)}-${finalStats.max.toFixed(4)}, nonZero=${finalStats.nonZero}/${currentData.length/4}`);
 
       return currentData;
 
@@ -236,9 +412,19 @@ export class ImageProcessingPipeline {
     }
   }
 
-  private getModuleParams(module: PipelineModule, _moduleId: string): Record<string, unknown> {
+  private getModuleParams(module: PipelineModule, moduleId: string): Record<string, unknown> {
     // Extract parameters from different module types
     try {
+      logger.debug(`Getting params for module ${moduleId}`);
+
+      // First, try the direct getParams method (most common)
+      if (typeof module.getParams === 'function') {
+        const params = module.getParams();
+        logger.debug(`Direct getParams for ${moduleId}:`, params);
+        return params;
+      }
+
+      // Handle pipeline adapter modules (if they exist)
       const moduleWithGetter = module as PipelineModule & {
         getExposureModule?(): { getParams(): Record<string, unknown> };
         getWhiteBalanceModule?(): { getParams(): Record<string, unknown> };
@@ -251,37 +437,47 @@ export class ImageProcessingPipeline {
 
       // Handle pipeline adapter modules
       if (moduleWithGetter.getExposureModule) {
-        return moduleWithGetter.getExposureModule().getParams();
+        const params = moduleWithGetter.getExposureModule().getParams();
+        logger.debug(`Adapter getExposureModule for ${moduleId}:`, params);
+        return params;
       }
       if (moduleWithGetter.getWhiteBalanceModule) {
-        return moduleWithGetter.getWhiteBalanceModule().getParams();
+        const params = moduleWithGetter.getWhiteBalanceModule().getParams();
+        logger.debug(`Adapter getWhiteBalanceModule for ${moduleId}:`, params);
+        return params;
       }
       if (moduleWithGetter.getBasicAdjustmentsModule) {
-        return moduleWithGetter.getBasicAdjustmentsModule().getParams();
+        const params = moduleWithGetter.getBasicAdjustmentsModule().getParams();
+        logger.debug(`Adapter getBasicAdjustmentsModule for ${moduleId}:`, params);
+        return params;
       }
       if (moduleWithGetter.getToneCurveModule) {
-        return moduleWithGetter.getToneCurveModule().getParams();
+        const params = moduleWithGetter.getToneCurveModule().getParams();
+        logger.debug(`Adapter getToneCurveModule for ${moduleId}:`, params);
+        return params;
       }
       if (moduleWithGetter.getColorBalanceModule) {
-        return moduleWithGetter.getColorBalanceModule().getParams();
+        const params = moduleWithGetter.getColorBalanceModule().getParams();
+        logger.debug(`Adapter getColorBalanceModule for ${moduleId}:`, params);
+        return params;
       }
       if (moduleWithGetter.getShadowsHighlightsModule) {
-        return moduleWithGetter.getShadowsHighlightsModule().getParams();
+        const params = moduleWithGetter.getShadowsHighlightsModule().getParams();
+        logger.debug(`Adapter getShadowsHighlightsModule for ${moduleId}:`, params);
+        return params;
       }
       if (moduleWithGetter.getParameters) {
-        return moduleWithGetter.getParameters();
+        const params = moduleWithGetter.getParameters();
+        logger.debug(`Adapter getParameters for ${moduleId}:`, params);
+        return params;
       }
 
-      // Handle direct module types
-      if (module.getParams) {
-        return module.getParams();
-      }
-
-      // Default empty params
+      // No parameter getter found
+      logger.warn(`No parameter getter found for module ${moduleId}`);
       return {};
 
     } catch (error) {
-      logger.warn(`Failed to get params for module ${_moduleId}:`, error);
+      logger.warn(`Failed to get params for module ${moduleId}:`, error);
       return {};
     }
   }
@@ -319,6 +515,9 @@ export class ImageProcessingPipeline {
   // Reset all modules to default parameters
   resetAllModules(): void {
     logger.info('Resetting all modules to default parameters');
+
+    // Clear all cached results
+    this.moduleCache.clear();
 
     for (const module of this.modules.values()) {
       if (module.resetParams) {

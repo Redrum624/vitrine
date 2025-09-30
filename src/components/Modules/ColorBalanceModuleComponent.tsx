@@ -29,16 +29,23 @@ export const ColorBalanceModuleComponent: React.FC<ColorBalanceModuleComponentPr
   onParamsChange
 }) => {
   const [params, setParams] = useState<ColorBalanceParams>(module.getParams());
+  const paramsRef = React.useRef<ColorBalanceParams>(params);
   const [activeTab, setActiveTab] = useState<TabType>('traditional');
   const [globalTab, setGlobalTab] = useState<GlobalTabType>('saturation');
 
+  // Keep ref in sync
+  React.useEffect(() => {
+    paramsRef.current = params;
+  }, [params]);
+
   const updateParams = useCallback((newParams: Partial<ColorBalanceParams>) => {
-    const updatedParams = { ...params, ...newParams };
+    const updatedParams = { ...paramsRef.current, ...newParams };
+    paramsRef.current = updatedParams;
     setParams(updatedParams);
     module.setParams(updatedParams);
     onParamsChange(updatedParams);
     logger.debug('Color balance updated:', newParams);
-  }, [params, module, onParamsChange]);
+  }, [module, onParamsChange]);
 
   const resetParams = useCallback(() => {
     module.resetParams();
@@ -225,6 +232,7 @@ export const ColorBalanceModuleComponent: React.FC<ColorBalanceModuleComponentPr
                     unit={sliderProps.unit}
                     color={color.color}
                     className="mb-0"
+                    sliderType={globalTab}
                   />
                 </div>
               </div>

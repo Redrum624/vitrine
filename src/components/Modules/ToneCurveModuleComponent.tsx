@@ -15,6 +15,7 @@ export const ToneCurveModuleComponent: React.FC<ToneCurveModuleComponentProps> =
   onParamsChange
 }) => {
   const [params, setParams] = useState<ToneCurveParams>(module.getParams());
+  const paramsRef = useRef<ToneCurveParams>(params);
   const [activeChannel, setActiveChannel] = useState<CurveChannel>('base');
   const [draggedPoint, setDraggedPoint] = useState<{ channel: CurveChannel; index: number } | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -22,13 +23,19 @@ export const ToneCurveModuleComponent: React.FC<ToneCurveModuleComponentProps> =
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const canvasSize = 256;
 
+  // Keep ref in sync
+  useEffect(() => {
+    paramsRef.current = params;
+  }, [params]);
+
   const updateParams = useCallback((newParams: Partial<ToneCurveParams>) => {
-    const updatedParams = { ...params, ...newParams };
+    const updatedParams = { ...paramsRef.current, ...newParams };
+    paramsRef.current = updatedParams;
     setParams(updatedParams);
     module.setParams(newParams);
     onParamsChange(updatedParams);
     logger.debug('ToneCurve params updated:', newParams);
-  }, [module, onParamsChange, params]);
+  }, [module, onParamsChange]);
 
   // Draw the curve editor
   useEffect(() => {
@@ -251,16 +258,16 @@ export const ToneCurveModuleComponent: React.FC<ToneCurveModuleComponentProps> =
     } else {
       updateParams({
         rgbCurve: {
-          ...params.rgbCurve,
+          ...paramsRef.current.rgbCurve,
           [activeChannel]: [{ x: 0, y: 0 }, { x: 1, y: 1 }]
         },
         rgbCurveNodes: {
-          ...params.rgbCurveNodes,
+          ...paramsRef.current.rgbCurveNodes,
           [activeChannel]: 2
         }
       });
     }
-  }, [activeChannel, params, updateParams]);
+  }, [activeChannel, updateParams]);
 
   const loadPreset = useCallback((preset: 'linear' | 'contrast' | 'film' | 'vintage' | 'dramatic') => {
     module.loadPreset(preset);

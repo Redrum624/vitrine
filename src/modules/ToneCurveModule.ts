@@ -415,8 +415,12 @@ export class ToneCurveModule implements ImageProcessingModule {
     // Apply levels adjustment
     const range = whitePoint - blackPoint;
     if (range > 0) {
-      for (let i = 0; i < input.length; i++) {
-        output[i] = Math.max(0, Math.min(1, (input[i] - blackPoint) / range));
+      for (let i = 0; i < input.length; i += 4) {
+        // Apply levels to RGB channels only, preserve alpha
+        output[i] = Math.max(0, Math.min(1, (input[i] - blackPoint) / range));     // R
+        output[i + 1] = Math.max(0, Math.min(1, (input[i + 1] - blackPoint) / range)); // G
+        output[i + 2] = Math.max(0, Math.min(1, (input[i + 2] - blackPoint) / range)); // B
+        output[i + 3] = input[i + 3]; // Preserve alpha channel
       }
     } else {
       output.set(input);

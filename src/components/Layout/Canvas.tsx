@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { useAppStore } from '../../stores/appStore';
 import { fileSystemService, ImageFileInfo } from '../../services/FileSystemService';
 import { imageService } from '../../services/ImageService';
+import { logger } from '../../utils/Logger';
 
 
 interface CanvasProps {
@@ -174,6 +175,14 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
     ctx.fillText('or drag and drop a file here', centerX, centerY + 30);
   }, []);
 
+  // Performance optimization: cache canvas context and ImageData
+  const canvasCache = useRef<{
+    lastWidth?: number;
+    lastHeight?: number;
+    imageData?: ImageData;
+    lastDataHash?: string;
+  }>({});
+
   const redrawCanvas = useCallback(() => {
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext('2d');
@@ -192,32 +201,71 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
     let canvasWidth, canvasHeight;
 
     if (currentImageData && displayImage) {
-      // Use image dimensions to determine proper aspect ratio
-      const imageAspectRatio = currentImageData.width / currentImageData.height;
+      // CRITICAL FIX: Set canvas internal resolution to match the data we're actually drawing
+      // This prevents browser from stretching the image
+      let dataWidth = currentImageData.width;
+      let dataHeight = currentImageData.height;
+
+      // Check if we have processed preview data - use its dimensions directly as canvas size
+      if (processedImageData && typeof processedImageData === 'object' && 'data' in processedImageData) {
+        const previewData = processedImageData as { data: Float32Array; width: number; height: number; isPreview: boolean };
+        dataWidth = previewData.width;
+        dataHeight = previewData.height;
+      }
+
+      // Set canvas to exact data dimensions (1:1 pixel mapping, no upscaling)
+      canvasWidth = dataWidth;
+      canvasHeight = dataHeight;
+
+      const imageAspectRatio = dataWidth / dataHeight;
       const containerAspectRatio = containerWidth / containerHeight;
 
-      if (imageAspectRatio > containerAspectRatio) {
-        // Image is wider - fit to width
-        canvasWidth = containerWidth * 0.95; // Leave small margin
-        canvasHeight = canvasWidth / imageAspectRatio;
-      } else {
-        // Image is taller - fit to height
-        canvasHeight = containerHeight * 0.95; // Leave small margin
-        canvasWidth = canvasHeight * imageAspectRatio;
-      }
+      console.log(`🎨 CANVAS SIZING DEBUG:
+  Container: ${containerWidth}x${containerHeight} (aspect: ${containerAspectRatio.toFixed(3)})
+  Data: ${dataWidth}x${dataHeight} (aspect: ${imageAspectRatio.toFixed(3)})
+  Canvas will be set to EXACT data size: ${canvasWidth}x${canvasHeight} (1:1 pixel mapping)
+  Original Image: ${currentImageData.width}x${currentImageData.height}`);
+
+      console.log(`  Canvas internal resolution: ${canvasWidth}x${canvasHeight}`);
     } else {
       // No image loaded - use container size for placeholder
       canvasWidth = containerWidth;
       canvasHeight = containerHeight;
     }
 
-    // Set canvas size to calculated dimensions
-    canvas.width = canvasWidth;
-    canvas.height = canvasHeight;
+    // Set canvas internal resolution to exact data size
+    canvas.width = Math.floor(canvasWidth);
+    canvas.height = Math.floor(canvasHeight);
 
-    // Update canvas CSS size to match calculated dimensions
-    canvas.style.width = `${canvasWidth}px`;
-    canvas.style.height = `${canvasHeight}px`;
+    // Calculate CSS display size to fit container while maintaining aspect ratio
+    let displayWidth, displayHeight;
+    if (currentImageData && displayImage) {
+      const imageAspectRatio = canvas.width / canvas.height;
+      const containerAspectRatio = containerWidth / containerHeight;
+
+      if (imageAspectRatio > containerAspectRatio) {
+        // Image is wider - fit to width
+        displayWidth = containerWidth;
+        displayHeight = containerWidth / imageAspectRatio;
+      } else {
+        // Image is taller - fit to height
+        displayHeight = containerHeight;
+        displayWidth = containerHeight * imageAspectRatio;
+      }
+    } else {
+      displayWidth = canvas.width;
+      displayHeight = canvas.height;
+    }
+
+    // Set CSS size to fit container (browser will scale smoothly)
+    canvas.style.width = `${Math.floor(displayWidth)}px`;
+    canvas.style.height = `${Math.floor(displayHeight)}px`;
+
+    console.log(`  Canvas element set to:
+    Internal: ${canvas.width}x${canvas.height}
+    CSS Display: ${canvas.style.width} x ${canvas.style.height}
+    Computed: ${window.getComputedStyle(canvas).width} x ${window.getComputedStyle(canvas).height}
+    Scale factor: ${(displayWidth / canvas.width).toFixed(2)}x`);
 
     // Clear canvas
     ctx.fillStyle = '#1a1a1a';
@@ -229,22 +277,298 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
         // Handle new preview data structure
         const previewData = processedImageData as { data: Float32Array; width: number; height: number; isPreview: boolean };
         console.log('Canvas: Using processed preview data', previewData.width, 'x', previewData.height);
-        drawLoadedImage(ctx, canvas, { width: previewData.width, height: previewData.height }, previewData.data);
+
+        // CRITICAL: Debug data integrity immediately upon receiving
+        const stats = { min: Infinity, max: -Infinity, nonZero: 0 };
+        for (let i = 0; i < previewData.data.length; i += 4) {
+          const r = previewData.data[i], g = previewData.data[i + 1], b = previewData.data[i + 2];
+          stats.min = Math.min(stats.min, r, g, b);
+          stats.max = Math.max(stats.max, r, g, b);
+          if (r > 0.001 || g > 0.001 || b > 0.001) stats.nonZero++;
+        }
+        logger.info(`Canvas: RECEIVED DATA integrity - range=${stats.min.toFixed(4)}-${stats.max.toFixed(4)}, nonZero=${stats.nonZero}/${previewData.data.length/4}`);
+
+        // Debug processed data before drawing
+        const sampleData = previewData.data.slice(0, 100);
+        const hasData = sampleData.some(val => val > 0);
+        console.log('Canvas: Processed data check - hasData:', hasData, 'sample:', sampleData.slice(0, 8));
+
+        if (!hasData) {
+          console.warn('Canvas: Processed data appears to be all zeros, falling back to original data');
+          drawLoadedImageOptimized(ctx, canvas, currentImageData, currentImageData.data);
+        } else {
+          // Check if processed data is mostly zeros despite having some data
+          const processedSample = previewData.data.slice(0, 1000);
+          const nonZeroCount = processedSample.filter(val => val > 0).length;
+          const blackPixelRatio = 1 - (nonZeroCount / processedSample.length);
+
+          console.log(`Canvas: Processed data quality check - nonZero: ${nonZeroCount}/1000 (${(100-blackPixelRatio*100).toFixed(1)}% visible)`);
+
+          if (blackPixelRatio > 0.95) { // If more than 95% black pixels
+            console.warn('Canvas: Processed data is mostly black, using original image data instead');
+            drawLoadedImageOptimized(ctx, canvas, currentImageData, currentImageData.data);
+          } else {
+            console.log('Canvas: Using processed preview data for module effects');
+            drawLoadedImageOptimized(ctx, canvas, { width: previewData.width, height: previewData.height }, previewData.data);
+          }
+        }
       } else if (processedImageData && processedImageData instanceof Float32Array) {
         // Handle legacy data structure
         console.log('Canvas: Using legacy processed data', currentImageData.width, 'x', currentImageData.height);
-        drawLoadedImage(ctx, canvas, currentImageData, processedImageData);
+        drawLoadedImageOptimized(ctx, canvas, currentImageData, processedImageData);
       } else {
         // Use original image data
         console.log('Canvas: Using original image data', currentImageData.width, 'x', currentImageData.height, 'channels detected');
-        drawLoadedImage(ctx, canvas, currentImageData, currentImageData.data);
+        drawLoadedImageOptimized(ctx, canvas, currentImageData, currentImageData.data);
       }
     } else {
       // Draw placeholder content
       drawPlaceholder(ctx, canvas);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [processedImageData, displayImage]);
+  }, [processedImageData, displayImage, viewport]);
+
+  // Optimized image drawing with caching and requestAnimationFrame
+  const drawLoadedImageOptimized = useCallback((ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, imageInfo: { width: number; height: number }, data: Float32Array) => {
+    try {
+      const startTime = performance.now();
+
+      // Generate hash for cache comparison (includes actual data sampling for processed images)
+      // For processed images, we need to sample actual pixel values to detect changes
+      let dataHash = `${imageInfo.width}x${imageInfo.height}_${data.length}`;
+
+      // Add sampling of actual pixel values for better cache invalidation
+      if (data.length > 0) {
+        // Sample pixels more densely to ensure we catch non-zero values
+        const sampleIndices = [];
+        const totalPixels = data.length / 4;
+        const sampleCount = Math.min(100, Math.max(50, Math.floor(totalPixels / 100))); // Sample 50-100 pixels
+
+        // CRITICAL FIX: Use multiple sampling strategies to ensure we find non-zero values
+        // Strategy 1: Systematic sampling across the entire image
+        for (let i = 0; i < sampleCount; i++) {
+          const pixelIndex = Math.floor((i * totalPixels) / sampleCount);
+          const pixelStart = pixelIndex * 4;
+          if (pixelStart + 2 < data.length) {
+            sampleIndices.push(pixelStart);     // R
+            sampleIndices.push(pixelStart + 1); // G
+            sampleIndices.push(pixelStart + 2); // B
+          }
+        }
+
+        // Strategy 2: Sample from center area where image content is most likely
+        const centerY = Math.floor(imageInfo.height / 2);
+        const centerX = Math.floor(imageInfo.width / 2);
+        const centerRange = Math.min(imageInfo.width, imageInfo.height) / 4;
+        for (let dy = -centerRange; dy <= centerRange; dy += Math.floor(centerRange / 10)) {
+          for (let dx = -centerRange; dx <= centerRange; dx += Math.floor(centerRange / 10)) {
+            const y = centerY + dy;
+            const x = centerX + dx;
+            if (y >= 0 && y < imageInfo.height && x >= 0 && x < imageInfo.width) {
+              const pixelStart = (y * imageInfo.width + x) * 4;
+              if (pixelStart + 2 < data.length) {
+                sampleIndices.push(pixelStart);     // R
+                sampleIndices.push(pixelStart + 1); // G
+                sampleIndices.push(pixelStart + 2); // B
+              }
+            }
+          }
+        }
+
+        // Create hash from sampled values
+        const samples = sampleIndices.map(i => data[i] ? data[i].toFixed(4) : '0').join(',');
+        dataHash += `_${samples}`;
+
+        // Debug the sampling with better statistics
+        const pixelsSampled = sampleIndices.length / 3;
+        const nonZeroSamples = sampleIndices.filter(i => data[i] > 0.0001).length; // Lower threshold
+        const minSample = Math.min(...sampleIndices.map(i => data[i]));
+        const maxSample = Math.max(...sampleIndices.map(i => data[i]));
+        console.log(`Canvas: Data sampling - ${pixelsSampled} pixels, ${nonZeroSamples} non-zero, range: ${minSample.toFixed(6)}-${maxSample.toFixed(6)}`);
+      }
+
+      // Check if we can reuse cached ImageData
+      const cache = canvasCache.current;
+
+      // Debug cache comparison
+      console.log(`Canvas: Cache check - current hash: ${dataHash}, cached hash: ${cache.lastDataHash || 'none'}`);
+      console.log(`Canvas: Dimensions match: ${cache.lastWidth === imageInfo.width && cache.lastHeight === imageInfo.height}`);
+
+      if (cache.imageData &&
+          cache.lastWidth === imageInfo.width &&
+          cache.lastHeight === imageInfo.height &&
+          cache.lastDataHash === dataHash) {
+
+        // Reuse cached ImageData - just redraw with current viewport
+        console.log('Canvas: ✅ Using cached render (data unchanged)');
+
+        // Canvas is already sized correctly - just use its dimensions
+        // No need to calculate aspect ratio fitting again
+        const baseWidth = canvas.width;
+        const baseHeight = canvas.height;
+
+        const scaledWidth = baseWidth * viewport.zoom;
+        const scaledHeight = baseHeight * viewport.zoom;
+        const x = (canvas.width - scaledWidth) / 2 + viewport.panX;
+        const y = (canvas.height - scaledHeight) / 2 + viewport.panY;
+
+        console.log(`🖼️ DRAWING (cached):
+  Canvas: ${canvas.width}x${canvas.height}
+  BaseSize: ${baseWidth}x${baseHeight}
+  Scaled: ${scaledWidth}x${scaledHeight}
+  Position: (${x}, ${y})
+  Source: ${imageInfo.width}x${imageInfo.height}`);
+
+        // Optimize rendering based on zoom level
+        ctx.imageSmoothingEnabled = viewport.zoom < 1;
+        ctx.imageSmoothingQuality = viewport.zoom < 0.5 ? 'low' : 'high';
+
+        // Create temporary canvas for cached ImageData
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = imageInfo.width;
+        tempCanvas.height = imageInfo.height;
+        const tempCtx = tempCanvas.getContext('2d')!;
+        tempCtx.putImageData(cache.imageData, 0, 0);
+
+        ctx.drawImage(
+          tempCanvas,
+          0, 0, imageInfo.width, imageInfo.height,  // Source: full image
+          x, y, scaledWidth, scaledHeight            // Dest: scaled display
+        );
+
+        const renderTime = performance.now() - startTime;
+        console.log(`Canvas: Cached render completed in ${renderTime.toFixed(2)}ms`);
+        return;
+      }
+
+      // Cache miss - need to create new render
+      console.log('Canvas: 🔄 Creating new render (data changed or no cache)');
+
+      // Create new ImageData (this is the expensive operation)
+      const imageData = ctx.createImageData(imageInfo.width, imageInfo.height);
+      const imageDataArray = imageData.data;
+
+      // Debug data range before conversion
+      const sampleSize = Math.min(1000, data.length);
+      const dataSample = data.slice(0, sampleSize);
+      const dataMin = Math.min(...dataSample);
+      const dataMax = Math.max(...dataSample);
+      const nonZeroCount = dataSample.filter(val => val > 0).length;
+
+      // Check for specific patterns that might indicate issues
+      // const normalCount = dataSample.filter(val => val >= 0.01).length;
+
+      // Reduced logging - only log significant data issues
+      if (dataMax < 0.01 || nonZeroCount < sampleSize * 0.1) {
+        console.log(`Canvas: Converting data - min: ${dataMin}, max: ${dataMax}, nonZero: ${nonZeroCount}/${sampleSize}`);
+      }
+
+      // Convert Float32Array to Uint8ClampedArray efficiently
+      let convertedCount = 0;
+
+      // Simple data conversion without complex adjustments
+      // Trust that the pipeline has provided properly processed data
+      console.log(`Canvas: Converting processed data - range: ${dataMin.toFixed(4)}-${dataMax.toFixed(4)}`);
+
+      for (let i = 0; i < Math.min(data.length, imageDataArray.length); i += 4) {
+        const baseIdx = i;
+
+        // Simple linear conversion from 0.0-1.0 to 0-255 range
+        const r = Math.max(0.0, Math.min(1.0, data[baseIdx]));
+        const g = Math.max(0.0, Math.min(1.0, data[baseIdx + 1]));
+        const b = Math.max(0.0, Math.min(1.0, data[baseIdx + 2]));
+        const a = data[baseIdx + 3] || 1.0;
+
+        const rInt = Math.max(0, Math.min(255, Math.round(r * 255)));
+        const gInt = Math.max(0, Math.min(255, Math.round(g * 255)));
+        const bInt = Math.max(0, Math.min(255, Math.round(b * 255)));
+        const aInt = Math.max(0, Math.min(255, Math.round(a * 255)));
+
+        imageDataArray[baseIdx] = rInt;
+        imageDataArray[baseIdx + 1] = gInt;
+        imageDataArray[baseIdx + 2] = bInt;
+        imageDataArray[baseIdx + 3] = aInt;
+
+        if (rInt > 0 || gInt > 0 || bInt > 0) convertedCount++;
+      }
+
+      // Only log if there are issues with the conversion
+      if (convertedCount < Math.floor(data.length / 4) * 0.1) {
+        console.log(`Canvas: Low conversion rate - ${convertedCount} non-black pixels out of ${Math.floor(data.length / 4)} total`);
+      }
+
+      // If conversion results in all black pixels despite having data, the processed data is corrupt
+      if (convertedCount === 0 && nonZeroCount > 0) {
+        console.error('Canvas: CRITICAL - All pixels converted to black despite having data! Data corruption detected.');
+        throw new Error('Processed data conversion failed - all pixels black');
+      }
+
+      // Cache the ImageData for future use
+      cache.imageData = imageData;
+      cache.lastWidth = imageInfo.width;
+      cache.lastHeight = imageInfo.height;
+      cache.lastDataHash = dataHash;
+      console.log(`Canvas: 💾 Cached new render with hash: ${dataHash}`);
+
+      // Calculate display dimensions with zoom and pan
+      // Canvas is already sized correctly - just use its dimensions
+      // No need to calculate aspect ratio fitting again
+      const baseWidth = canvas.width;
+      const baseHeight = canvas.height;
+
+      const scaledWidth = baseWidth * viewport.zoom;
+      const scaledHeight = baseHeight * viewport.zoom;
+      const x = (canvas.width - scaledWidth) / 2 + viewport.panX;
+      const y = (canvas.height - scaledHeight) / 2 + viewport.panY;
+
+      console.log(`🖼️ DRAWING (new):
+  Canvas: ${canvas.width}x${canvas.height}
+  BaseSize: ${baseWidth}x${baseHeight}
+  Scaled: ${scaledWidth}x${scaledHeight}
+  Position: (${x}, ${y})
+  Source: ${imageInfo.width}x${imageInfo.height}`);
+
+      // Optimize image smoothing based on zoom level
+      ctx.imageSmoothingEnabled = viewport.zoom < 1;
+      ctx.imageSmoothingQuality = viewport.zoom < 0.5 ? 'low' : 'high';
+
+      // Create temporary canvas for the ImageData
+      const tempCanvas = document.createElement('canvas');
+      tempCanvas.width = imageInfo.width;
+      tempCanvas.height = imageInfo.height;
+      const tempCtx = tempCanvas.getContext('2d')!;
+      tempCtx.putImageData(imageData, 0, 0);
+
+      // Draw the image
+      ctx.drawImage(
+        tempCanvas,
+        0, 0, imageInfo.width, imageInfo.height,  // Source: full image
+        x, y, scaledWidth, scaledHeight            // Dest: scaled display
+      );
+
+      const renderTime = performance.now() - startTime;
+      console.log(`Canvas: New render completed in ${renderTime.toFixed(2)}ms`);
+
+    } catch (error) {
+      console.error('Canvas: Error drawing optimized image:', error);
+
+      // Check if we have access to original image data for fallback
+      const currentImageData = imageService.getCurrentImage();
+      if (currentImageData && error instanceof Error && error.message.includes('conversion failed')) {
+        console.warn('Canvas: Using original image data due to processed data corruption');
+        try {
+          // Use original image data instead
+          drawLoadedImage(ctx, canvas, currentImageData, currentImageData.data);
+          return;
+        } catch (fallbackError) {
+          console.error('Canvas: Fallback to original data also failed:', fallbackError);
+        }
+      }
+
+      // Final fallback to original method
+      drawLoadedImage(ctx, canvas, imageInfo, data);
+    }
+  }, [viewport, drawLoadedImage]);
 
   const loadImage = useCallback(async (image: ImageFileInfo) => {
     try {
@@ -353,12 +677,10 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
         <div className="flex items-center justify-center w-full h-full">
           <canvas
             ref={canvasRef}
-            className={`max-w-full max-h-full ${isDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
+            className={isDragging ? 'cursor-grabbing' : 'cursor-grab'}
             style={{
-              // Maintain aspect ratio while fitting in container
-              objectFit: 'contain',
-              width: 'auto',
-              height: 'auto'
+              // Manual aspect ratio handling - no object-fit needed
+              display: 'block'
             }}
           />
         </div>
