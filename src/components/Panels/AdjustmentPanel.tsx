@@ -5,11 +5,15 @@ import { WhiteBalanceModule } from '../../modules/WhiteBalanceModule';
 import { ToneCurvePipelineModule } from '../../modules/ToneCurvePipelineModule';
 import { ColorBalancePipelineModule } from '../../modules/ColorBalancePipelineModule';
 import { ShadowsHighlightsPipelineModule } from '../../modules/ShadowsHighlightsPipelineModule';
+import { CropPipelineModule } from '../../modules/CropPipelineModule';
+import { TransformPipelineModule } from '../../modules/TransformPipelineModule';
 import { BasicAdjustmentsModuleComponent } from '../Modules/BasicAdjustmentsModuleComponent';
 import { WhiteBalanceModuleComponent } from '../Modules/WhiteBalanceModuleComponent';
 import { ToneCurveModuleComponent } from '../Modules/ToneCurveModuleComponent';
 import { ColorBalanceModuleComponent } from '../Modules/ColorBalanceModuleComponent';
 import { ShadowsHighlightsModuleComponent } from '../Modules/ShadowsHighlightsModuleComponent';
+import { CropModuleComponent } from '../Modules/CropModuleComponent';
+import { TransformModuleComponent } from '../Modules/TransformModuleComponent';
 import { imageProcessingPipeline } from '../../services/ImageProcessingPipeline';
 import { imageService } from '../../services/ImageService';
 import { autoRawAdjustmentService } from '../../services/AutoRawAdjustmentService';
@@ -27,7 +31,10 @@ export function AdjustmentPanel() {
   const { setProcessedImageData, currentImage } = useAppStore();
   const [resetCounter, setResetCounter] = useState(0);
   const [moduleStates, setModuleStates] = useState<Record<string, ModuleState>>({
-    // Core processing modules first (most commonly used)
+    // Geometric operations (first)
+    crop: { expanded: false, enabled: false },
+    transform: { expanded: false, enabled: false },
+    // Core processing modules
     exposure: { expanded: true, enabled: true },
     basicadj: { expanded: false, enabled: true },
     whitebalance: { expanded: false, enabled: true },
@@ -60,6 +67,8 @@ export function AdjustmentPanel() {
   }, []);
 
   // Get module instances from pipeline
+  const cropModule = imageProcessingPipeline.getModule<CropPipelineModule>('crop');
+  const transformModule = imageProcessingPipeline.getModule<TransformPipelineModule>('transform');
   const whiteBalanceModule = imageProcessingPipeline.getModule<WhiteBalanceModule>('temperature');
   const basicAdjModule = imageProcessingPipeline.getModule<BasicAdjustmentsModule>('basicadj');
   const toneCurveModule = imageProcessingPipeline.getModule<ToneCurvePipelineModule>('tonecurve');
@@ -352,7 +361,7 @@ export function AdjustmentPanel() {
 
   // Check if all modules are expanded
   const areAllModulesExpanded = useCallback(() => {
-    const visibleModules = ['basicadj', 'whitebalance', 'shadowshighlights', 'tonecurve', 'colorbalance'];
+    const visibleModules = ['crop', 'transform', 'basicadj', 'whitebalance', 'shadowshighlights', 'tonecurve', 'colorbalance'];
     return visibleModules.every(moduleId => moduleStates[moduleId]?.expanded === true);
   }, [moduleStates]);
 
@@ -361,7 +370,7 @@ export function AdjustmentPanel() {
 
     setModuleStates(prev => {
       const newStates = { ...prev };
-      const visibleModules = ['basicadj', 'whitebalance', 'shadowshighlights', 'tonecurve', 'colorbalance'];
+      const visibleModules = ['crop', 'transform', 'basicadj', 'whitebalance', 'shadowshighlights', 'tonecurve', 'colorbalance'];
 
       visibleModules.forEach(key => {
         if (newStates[key]) {
@@ -451,6 +460,76 @@ export function AdjustmentPanel() {
       {/* Darktable Modules */}
       <div className="flex-1 overflow-y-auto">
 
+        {/* Crop Module */}
+        {cropModule && (() => {
+          const img = imageService.getCurrentImage();
+          if (!img) return null;
+          return (
+            <div className="border-b border-dark-800">
+              <button
+                onClick={() => toggleModule('crop')}
+                className="w-full p-3 flex items-center justify-between hover:bg-dark-800 transition-professional text-left"
+              >
+                <span className="text-sm font-medium text-dark-300">Crop</span>
+                {moduleStates.crop?.expanded ? (
+                  <ChevronDown className="w-4 h-4 text-dark-300" />
+                ) : (
+                  <ChevronRight className="w-4 h-4 text-dark-300" />
+                )}
+              </button>
+
+              {moduleStates.crop?.expanded && (
+                <div className="px-3 pb-3">
+                  <CropModuleComponent
+                    key={`crop-${resetCounter}`}
+                    module={cropModule.getCropModule()}
+                    onParamsChange={(params) => handleModuleParamsChange('crop', params)}
+                    imageWidth={img.width}
+                    imageHeight={img.height}
+                  />
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
+        {/* Transform Module */}
+        {transformModule && (() => {
+          const img = imageService.getCurrentImage();
+          if (!img) return null;
+          return (
+            <div className="border-b border-dark-800">
+              <button
+                onClick={() => toggleModule('transform')}
+                className="w-full p-3 flex items-center justify-between hover:bg-dark-800 transition-professional text-left"
+              >
+                <span className="text-sm font-medium text-dark-300">Transform</span>
+                {moduleStates.transform?.expanded ? (
+                  <ChevronDown className="w-4 h-4 text-dark-300" />
+                ) : (
+                  <ChevronRight className="w-4 h-4 text-dark-300" />
+                )}
+              </button>
+
+              {moduleStates.transform?.expanded && (
+                <div className="px-3 pb-3">
+                  <TransformModuleComponent
+                    key={`transform-${resetCounter}`}
+                    module={transformModule.getTransformModule()}
+                    onParamsChange={(params) => handleModuleParamsChange('transform', params)}
+                    onAutoStraighten={() => {
+                      // Re-process after auto-straighten
+                      processCurrentImageRealTime();
+                    }}
+                    imageData={img.data}
+                    imageWidth={img.width}
+                    imageHeight={img.height}
+                  />
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
         {/* Basic Adjustments Module */}
         {basicAdjModule && (
