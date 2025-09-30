@@ -45,6 +45,9 @@ export interface LensCorrectionsParams {
     profileName: string;   // Lens profile name if available
     strength: number;      // 0 to 100, default: 100
   };
+
+  // Index signature for Record compatibility
+  [key: string]: unknown;
 }
 
 export interface LensProfile {

@@ -7,6 +7,8 @@ import { ColorBalancePipelineModule } from '../../modules/ColorBalancePipelineMo
 import { ShadowsHighlightsPipelineModule } from '../../modules/ShadowsHighlightsPipelineModule';
 import { CropPipelineModule } from '../../modules/CropPipelineModule';
 import { TransformPipelineModule } from '../../modules/TransformPipelineModule';
+import { LocalAdjustmentsPipelineModule } from '../../modules/LocalAdjustmentsPipelineModule';
+import { LensCorrectionsPipelineModule } from '../../modules/LensCorrectionsPipelineModule';
 import { BasicAdjustmentsModuleComponent } from '../Modules/BasicAdjustmentsModuleComponent';
 import { WhiteBalanceModuleComponent } from '../Modules/WhiteBalanceModuleComponent';
 import { ToneCurveModuleComponent } from '../Modules/ToneCurveModuleComponent';
@@ -14,6 +16,8 @@ import { ColorBalanceModuleComponent } from '../Modules/ColorBalanceModuleCompon
 import { ShadowsHighlightsModuleComponent } from '../Modules/ShadowsHighlightsModuleComponent';
 import { CropModuleComponent } from '../Modules/CropModuleComponent';
 import { TransformModuleComponent } from '../Modules/TransformModuleComponent';
+import { LocalAdjustmentsModuleComponent } from '../Modules/LocalAdjustmentsModuleComponent';
+import { LensCorrectionsModuleComponent } from '../Modules/LensCorrectionsModuleComponent';
 import { imageProcessingPipeline } from '../../services/ImageProcessingPipeline';
 import { imageService } from '../../services/ImageService';
 import { autoRawAdjustmentService } from '../../services/AutoRawAdjustmentService';
@@ -69,11 +73,13 @@ export function AdjustmentPanel() {
   // Get module instances from pipeline
   const cropModule = imageProcessingPipeline.getModule<CropPipelineModule>('crop');
   const transformModule = imageProcessingPipeline.getModule<TransformPipelineModule>('transform');
+  const lensCorrectionsModule = imageProcessingPipeline.getModule<LensCorrectionsPipelineModule>('lenscorrections');
   const whiteBalanceModule = imageProcessingPipeline.getModule<WhiteBalanceModule>('temperature');
   const basicAdjModule = imageProcessingPipeline.getModule<BasicAdjustmentsModule>('basicadj');
   const toneCurveModule = imageProcessingPipeline.getModule<ToneCurvePipelineModule>('tonecurve');
   const colorBalanceModule = imageProcessingPipeline.getModule<ColorBalancePipelineModule>('colorbalance');
   const shadowsHighlightsModule = imageProcessingPipeline.getModule<ShadowsHighlightsPipelineModule>('shadowshighlights');
+  const localAdjustmentsModule = imageProcessingPipeline.getModule<LocalAdjustmentsPipelineModule>('localadjustments');
 
   const toggleModule = useCallback((moduleId: string) => {
     setModuleStates(prev => ({
@@ -361,7 +367,7 @@ export function AdjustmentPanel() {
 
   // Check if all modules are expanded
   const areAllModulesExpanded = useCallback(() => {
-    const visibleModules = ['crop', 'transform', 'basicadj', 'whitebalance', 'shadowshighlights', 'tonecurve', 'colorbalance'];
+    const visibleModules = ['crop', 'transform', 'lenscorrections', 'basicadj', 'whitebalance', 'shadowshighlights', 'tonecurve', 'colorbalance', 'localadjustments'];
     return visibleModules.every(moduleId => moduleStates[moduleId]?.expanded === true);
   }, [moduleStates]);
 
@@ -370,7 +376,7 @@ export function AdjustmentPanel() {
 
     setModuleStates(prev => {
       const newStates = { ...prev };
-      const visibleModules = ['crop', 'transform', 'basicadj', 'whitebalance', 'shadowshighlights', 'tonecurve', 'colorbalance'];
+      const visibleModules = ['crop', 'transform', 'lenscorrections', 'basicadj', 'whitebalance', 'shadowshighlights', 'tonecurve', 'colorbalance', 'localadjustments'];
 
       visibleModules.forEach(key => {
         if (newStates[key]) {
@@ -664,6 +670,109 @@ export function AdjustmentPanel() {
                 />
               </div>
             )}
+          </div>
+        )}
+
+        {/* LensCorrections Module */}
+        {lensCorrectionsModule && (
+          <div className="border-b border-dark-800">
+            <button
+              onClick={() => toggleModule('lenscorrections')}
+              className="w-full p-3 flex items-center justify-between hover:bg-dark-800 transition-professional text-left"
+            >
+              <span className="text-sm font-medium text-dark-300">Lens Corrections</span>
+              {moduleStates.lenscorrections?.expanded ? (
+                <ChevronDown className="w-4 h-4 text-dark-300" />
+              ) : (
+                <ChevronRight className="w-4 h-4 text-dark-300" />
+              )}
+            </button>
+
+            {moduleStates.lenscorrections?.expanded && (
+              <div className="px-3 pb-3">
+                <LensCorrectionsModuleComponent
+                  key={`lenscorrections-${resetCounter}`}
+                  parameters={lensCorrectionsModule.getParameters().lensCorrectionsParams}
+                  onParametersChange={(params) => handleModuleParamsChange('lenscorrections', params)}
+                  onAutoDetectVignetting={() => {
+                    const img = imageService.getCurrentImage();
+                    if (img?.data) {
+                      lensCorrectionsModule.autoDetectVignetting(img.data, img.width, img.height);
+                      handleModuleParamsChange('lenscorrections', lensCorrectionsModule.getParameters().lensCorrectionsParams);
+                    }
+                  }}
+                  onResetSection={(section) => {
+                    if (section === 'vignetting') {
+                      lensCorrectionsModule.resetVignetting();
+                    } else if (section === 'distortion') {
+                      lensCorrectionsModule.resetDistortion();
+                    } else if (section === 'chromaticAberration') {
+                      lensCorrectionsModule.resetChromaticAberration();
+                    } else if (section === 'all') {
+                      lensCorrectionsModule.reset();
+                    }
+                    handleModuleParamsChange('lenscorrections', lensCorrectionsModule.getParameters().lensCorrectionsParams);
+                  }}
+                />
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* LocalAdjustments Module */}
+        {localAdjustmentsModule && (
+          <div className="border-b border-dark-800">
+            <button
+              onClick={() => toggleModule('localadjustments')}
+              className="w-full p-3 flex items-center justify-between hover:bg-dark-800 transition-professional text-left"
+            >
+              <span className="text-sm font-medium text-dark-300">Local Adjustments</span>
+              {moduleStates.localadjustments?.expanded ? (
+                <ChevronDown className="w-4 h-4 text-dark-300" />
+              ) : (
+                <ChevronRight className="w-4 h-4 text-dark-300" />
+              )}
+            </button>
+
+            {moduleStates.localadjustments?.expanded && (() => {
+              const img = imageService.getCurrentImage();
+              if (!img) return null;
+
+              return (
+                <div className="px-3 pb-3">
+                  <LocalAdjustmentsModuleComponent
+                    key={`localadjustments-${resetCounter}`}
+                    parameters={localAdjustmentsModule.getParameters().defaultParams}
+                    brushParams={localAdjustmentsModule.getParameters().brushParams}
+                    layers={localAdjustmentsModule.getParameters().layers}
+                    activeLayerId={localAdjustmentsModule.getParameters().activeLayerId}
+                    onParametersChange={(params) => handleModuleParamsChange('localadjustments', params)}
+                    onBrushParamsChange={(params) => {
+                      localAdjustmentsModule.updateBrushParameters(params);
+                    }}
+                    onCreateLayer={(type, name) => {
+                      localAdjustmentsModule.createLayer(type, name, img.width, img.height);
+                      handleModuleParamsChange('localadjustments', localAdjustmentsModule.getParameters().defaultParams);
+                    }}
+                    onRemoveLayer={(layerId) => {
+                      localAdjustmentsModule.removeLayer(layerId);
+                      handleModuleParamsChange('localadjustments', localAdjustmentsModule.getParameters().defaultParams);
+                    }}
+                    onToggleLayer={(layerId, enabled) => {
+                      localAdjustmentsModule.toggleLayer(layerId, enabled);
+                      handleModuleParamsChange('localadjustments', localAdjustmentsModule.getParameters().defaultParams);
+                    }}
+                    onSetActiveLayer={(layerId) => {
+                      localAdjustmentsModule.setActiveLayer(layerId);
+                    }}
+                    onUpdateLayerOpacity={(layerId, opacity) => {
+                      localAdjustmentsModule.updateLayerOpacity(layerId, opacity);
+                      handleModuleParamsChange('localadjustments', localAdjustmentsModule.getParameters().defaultParams);
+                    }}
+                  />
+                </div>
+              );
+            })()}
           </div>
         )}
 

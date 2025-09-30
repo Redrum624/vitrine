@@ -31,6 +31,9 @@ export interface LocalAdjustmentParams {
   // Color grading
   hueShift: number;      // -180 to 180, default: 0
   colorBalance: [number, number, number]; // RGB color shift, -1 to 1
+
+  // Index signature for Record compatibility
+  [key: string]: unknown;
 }
 
 export interface BrushParameters {
