@@ -256,12 +256,96 @@ pkill -f "electron"
 
 ## 🚀 Next Steps
 
-### Immediate Tasks (Current Sprint)
-1. ⏳ Create CropModule + UI
-2. ⏳ Create TransformModule + UI with auto-straighten
-3. ⏳ Add Auto-Levels button to UI
-4. ⏳ Create LocalAdjustmentsPanel UI
-5. ⏳ Create LensCorrectionsPanel UI
+### Phase 5: Testing & Validation (Current)
+
+**Application Running:** ✅ `npm run dev` started successfully
+
+#### Critical Testing Checklist
+
+**1. Basic Functionality (30 min)**
+- [ ] Load a test image (RAW or JPEG)
+- [ ] Verify all 7 modules appear in sidebar
+- [ ] Expand/collapse each module
+- [ ] Test "Expand All" / "Collapse All" buttons
+- [ ] Test "Reset All Modules" button
+
+**2. Crop Module Testing (30 min)**
+- [ ] Open Crop module
+- [ ] Test aspect ratio selector (try 1:1, 16:9, 4:3)
+- [ ] Test quick apply buttons
+- [ ] Adjust position/size sliders
+- [ ] Verify real-time preview updates
+- [ ] Test Uncrop button
+- [ ] Verify output dimensions display
+- [ ] Check crop percentage calculation
+
+**3. Transform Module Testing (30 min)**
+- [ ] Open Transform module
+- [ ] Test rotation slider (-45° to +45°)
+- [ ] Test quick rotation buttons
+- [ ] Test Flip Horizontal
+- [ ] Test Flip Vertical
+- [ ] **Test Auto-Straighten** (critical feature)
+- [ ] Test interpolation methods (nearest/bilinear/bicubic)
+- [ ] Verify canvas expansion toggle
+- [ ] Test fill color picker
+
+**4. Auto-Levels Testing (10 min)**
+- [ ] Open Tone Curve module
+- [ ] Click "Auto Levels" button
+- [ ] Verify histogram-based adjustment
+- [ ] Check before/after comparison
+- [ ] Test on different images
+
+**5. Crop-Rotation Integration (20 min)**
+- [ ] Rotate image by 15°
+- [ ] Verify black borders appear (if canvas not expanded)
+- [ ] Check if crop automatically adjusts (feature requirement)
+- [ ] Test uncrop after rotation
+- [ ] Verify dimension tracking through pipeline
+
+**6. Pipeline Integration (30 min)**
+- [ ] Enable multiple modules simultaneously
+- [ ] Verify processing order (Crop → Transform → Color/Tone)
+- [ ] Check real-time preview performance
+- [ ] Monitor console for errors
+- [ ] Verify caching works (check processing times)
+- [ ] Test with large images (4000x3000+)
+
+**7. Edge Cases (30 min)**
+- [ ] Very small rotation angles (< 1°)
+- [ ] Maximum rotation (45°)
+- [ ] Extreme aspect ratios
+- [ ] Crop very small region (< 10%)
+- [ ] Multiple flips in succession
+- [ ] Reset module while processing
+
+#### Known Issues to Watch For
+- ⚠️ Auto-straighten may not detect horizon on all images
+- ⚠️ Large rotations with bicubic may be slow
+- ⚠️ Crop-rotation interaction timing (verify auto-crop triggers)
+
+### Phase 6: Advanced Module Integration (4-6 hours)
+
+**LocalAdjustments** (1-2 hours)
+- [ ] Verify LocalAdjustmentsModuleComponent exists
+- [ ] Add to AdjustmentPanel at position 9
+- [ ] Test brush tool interaction
+- [ ] Test gradient tools
+- [ ] Verify layer management
+
+**LensCorrections** (1 hour)
+- [ ] Verify LensCorrectionsModuleComponent exists
+- [ ] Add to AdjustmentPanel at position 2 (after Transform)
+- [ ] Test vignetting controls
+- [ ] Test auto-detect vignetting
+- [ ] Test distortion correction
+
+**Polish & Documentation** (1-2 hours)
+- [ ] Update user-facing documentation
+- [ ] Create usage examples
+- [ ] Performance optimization if needed
+- [ ] Final testing pass
 
 ### Future Enhancements
 - [ ] Noise reduction module
