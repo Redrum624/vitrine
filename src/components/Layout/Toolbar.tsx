@@ -1,29 +1,19 @@
 import {
   Image,
-  Layers,
-  Settings,
-  Crop,
-  Move,
-  MousePointer,
-  Brush,
   FolderOpen,
   Download,
   Play,
   BookOpen,
-  HelpCircle,
-  Package,
   ZoomIn,
-  ZoomOut
+  ZoomOut,
+  Layers,
+  Package,
+  Settings,
+  HelpCircle
 } from 'lucide-react';
-import { useAppStore } from '../../stores/appStore';
 import { electronService } from '../../services/ElectronService';
 
-const tools = [
-  { id: 'select', icon: MousePointer, name: 'Select' },
-  { id: 'move', icon: Move, name: 'Move' },
-  { id: 'crop', icon: Crop, name: 'Crop' },
-  { id: 'brush', icon: Brush, name: 'Brush' },
-];
+// Tools removed - functionality now in modules (Crop, Local Adjustments)
 
 interface ToolbarProps {
   onExport?: () => void;
@@ -39,7 +29,7 @@ interface ToolbarProps {
 }
 
 export function Toolbar({ onExport, onBatchProcess, onOpenPresets, onOpenPlugins, onShowHelp, onZoomIn, onZoomOut, onFitWindow, onActualSize, zoom = 1 }: ToolbarProps) {
-  const { selectedTool, setSelectedTool } = useAppStore();
+  // selectedTool removed - tools now in modules
 
   return (
     <div className="h-12 bg-dark-850 border-b border-dark-700 flex items-center px-4 justify-between no-select rounded-t-lg">
@@ -76,21 +66,8 @@ export function Toolbar({ onExport, onBatchProcess, onOpenPresets, onOpenPlugins
             >
               <BookOpen className="w-4 h-4" />
             </button>
-            <div className="w-px h-4 bg-dark-700 mx-2" />
           </>
         )}
-        {tools.map((tool) => (
-          <button
-            key={tool.id}
-            onClick={() => setSelectedTool(selectedTool === tool.id ? null : tool.id)}
-            className={`p-2 rounded-md transition-professional hover:bg-dark-700 ${
-              selectedTool === tool.id ? 'bg-dark-600 text-dark-200' : 'text-dark-300'
-            }`}
-            title={tool.name}
-          >
-            <tool.icon className="w-4 h-4" />
-          </button>
-        ))}
       </div>
 
       {/* Center - App title with zoom controls */}

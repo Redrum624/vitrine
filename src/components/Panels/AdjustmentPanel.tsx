@@ -323,6 +323,32 @@ export function AdjustmentPanel() {
     // Call resetParams() on each module individually, just like individual reset buttons do
     // This ensures the exact same behavior as clicking each reset button
 
+    // Reset new modules first (Crop, Transform, Lens Corrections, Local Adjustments)
+    if (cropModule) {
+      cropModule.reset();
+      const cropParams = cropModule.getParams();
+      handleModuleParamsChange('crop', cropParams, 'button');
+    }
+
+    if (transformModule) {
+      transformModule.reset();
+      const transformParams = transformModule.getParams();
+      handleModuleParamsChange('transform', transformParams, 'button');
+    }
+
+    if (lensCorrectionsModule) {
+      lensCorrectionsModule.reset();
+      const lensParams = lensCorrectionsModule.getParameters();
+      handleModuleParamsChange('lenscorrections', lensParams.lensCorrectionsParams, 'button');
+    }
+
+    if (localAdjustmentsModule) {
+      localAdjustmentsModule.reset();
+      const localParams = localAdjustmentsModule.getParameters();
+      handleModuleParamsChange('localadjustments', localParams.defaultParams, 'button');
+    }
+
+    // Reset core modules
     if (basicAdjModule) {
       basicAdjModule.resetParams();
       const basicAdjParams = basicAdjModule.getParams();

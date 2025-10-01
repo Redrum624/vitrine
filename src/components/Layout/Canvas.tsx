@@ -645,8 +645,32 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
   const handleMouseMove = (e: React.MouseEvent) => {
     if (!isDragging) return;
 
-    const newPanX = e.clientX - lastPan.x;
-    const newPanY = e.clientY - lastPan.y;
+    // Only allow panning when zoomed in (> 100%)
+    if (viewport.zoom <= 1.0) {
+      return; // No panning at fit or 100% zoom
+    }
+
+    const canvas = canvasRef.current;
+    const container = containerRef.current;
+    if (!canvas || !container) return;
+
+    // Calculate how much the image extends beyond the visible area
+    const containerRect = container.getBoundingClientRect();
+    const displayWidth = canvas.offsetWidth * viewport.zoom;
+    const displayHeight = canvas.offsetHeight * viewport.zoom;
+
+    // Calculate maximum pan boundaries
+    // The image can only be panned until its edges meet the canvas edges
+    const maxPanX = Math.max(0, (displayWidth - containerRect.width) / 2);
+    const maxPanY = Math.max(0, (displayHeight - containerRect.height) / 2);
+
+    let newPanX = e.clientX - lastPan.x;
+    let newPanY = e.clientY - lastPan.y;
+
+    // Clamp pan values to keep image edges at canvas edges
+    newPanX = Math.max(-maxPanX, Math.min(maxPanX, newPanX));
+    newPanY = Math.max(-maxPanY, Math.min(maxPanY, newPanY));
+
     setViewport({ panX: newPanX, panY: newPanY });
   };
 
@@ -658,7 +682,13 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
     e.preventDefault();
     const delta = e.deltaY > 0 ? -0.1 : 0.1;
     const newZoom = Math.max(0.1, Math.min(5, viewport.zoom + delta));
-    setViewport({ zoom: newZoom });
+
+    // Reset pan to center when zooming out to fit or less
+    if (newZoom <= 1.0) {
+      setViewport({ zoom: newZoom, panX: 0, panY: 0 });
+    } else {
+      setViewport({ zoom: newZoom });
+    }
   };
 
   return (
