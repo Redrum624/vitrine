@@ -205,6 +205,18 @@ export class ImageProcessingPipeline {
                  (sh.compress === undefined || sh.compress === 0);
         }
 
+        case 'crop':
+        case 'transform':
+        case 'lenscorrections':
+        case 'localadjustments': {
+          // For new modules with enabled parameter
+          const moduleParams = params as any;
+          // If explicitly disabled or enabled property is false, treat as identity
+          if (moduleParams.enabled === false) return true;
+          // If enabled is true, module should process (not identity)
+          return false;
+        }
+
         default:
           // For unknown modules, check if all numeric params are 0
           return Object.entries(params).every(([key, val]) => {
