@@ -9,7 +9,9 @@ import { CropPipelineModule } from '../../modules/CropPipelineModule';
 import { TransformPipelineModule } from '../../modules/TransformPipelineModule';
 import { LocalAdjustmentsPipelineModule } from '../../modules/LocalAdjustmentsPipelineModule';
 import { LensCorrectionsPipelineModule } from '../../modules/LensCorrectionsPipelineModule';
+import { ExposureModule } from '../../modules/ExposureModule';
 import { BasicAdjustmentsModuleComponent } from '../Modules/BasicAdjustmentsModuleComponent';
+import { ExposureModuleComponent } from '../Modules/ExposureModuleComponent';
 import { WhiteBalanceModuleComponent } from '../Modules/WhiteBalanceModuleComponent';
 import { ToneCurveModuleComponent } from '../Modules/ToneCurveModuleComponent';
 import { ColorBalanceModuleComponent } from '../Modules/ColorBalanceModuleComponent';
@@ -74,6 +76,7 @@ export function AdjustmentPanel() {
   const cropModule = imageProcessingPipeline.getModule<CropPipelineModule>('crop');
   const transformModule = imageProcessingPipeline.getModule<TransformPipelineModule>('transform');
   const lensCorrectionsModule = imageProcessingPipeline.getModule<LensCorrectionsPipelineModule>('lenscorrections');
+  const exposureModule = imageProcessingPipeline.getModule<ExposureModule>('exposure');
   const whiteBalanceModule = imageProcessingPipeline.getModule<WhiteBalanceModule>('temperature');
   const basicAdjModule = imageProcessingPipeline.getModule<BasicAdjustmentsModule>('basicadj');
   const toneCurveModule = imageProcessingPipeline.getModule<ToneCurvePipelineModule>('tonecurve');
@@ -537,6 +540,79 @@ export function AdjustmentPanel() {
           );
         })()}
 
+        {/* Lens Corrections Module */}
+        {lensCorrectionsModule && (
+          <div className="border-b border-dark-800">
+            <button
+              onClick={() => toggleModule('lenscorrections')}
+              className="w-full p-3 flex items-center justify-between hover:bg-dark-800 transition-professional text-left"
+            >
+              <span className="text-sm font-medium text-dark-300">Lens Corrections</span>
+              {moduleStates.lenscorrections?.expanded ? (
+                <ChevronDown className="w-4 h-4 text-dark-300" />
+              ) : (
+                <ChevronRight className="w-4 h-4 text-dark-300" />
+              )}
+            </button>
+
+            {moduleStates.lenscorrections?.expanded && (
+              <div className="px-3 pb-3">
+                <LensCorrectionsModuleComponent
+                  key={`lenscorrections-${resetCounter}`}
+                  parameters={lensCorrectionsModule.getParameters().lensCorrectionsParams}
+                  onParametersChange={(params) => handleModuleParamsChange('lenscorrections', params)}
+                  onAutoDetectVignetting={() => {
+                    const img = imageService.getCurrentImage();
+                    if (img?.data) {
+                      lensCorrectionsModule.autoDetectVignetting(img.data, img.width, img.height);
+                      handleModuleParamsChange('lenscorrections', lensCorrectionsModule.getParameters().lensCorrectionsParams);
+                    }
+                  }}
+                  onResetSection={(section) => {
+                    if (section === 'vignetting') {
+                      lensCorrectionsModule.resetVignetting();
+                    } else if (section === 'distortion') {
+                      lensCorrectionsModule.resetDistortion();
+                    } else if (section === 'chromaticAberration') {
+                      lensCorrectionsModule.resetChromaticAberration();
+                    } else if (section === 'all') {
+                      lensCorrectionsModule.reset();
+                    }
+                    handleModuleParamsChange('lenscorrections', lensCorrectionsModule.getParameters().lensCorrectionsParams);
+                  }}
+                />
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Exposure Module */}
+        {exposureModule && (
+          <div className="border-b border-dark-800">
+            <button
+              onClick={() => toggleModule('exposure')}
+              className="w-full p-3 flex items-center justify-between hover:bg-dark-800 transition-professional text-left"
+            >
+              <span className="text-sm font-medium text-dark-300">Exposure</span>
+              {moduleStates.exposure?.expanded ? (
+                <ChevronDown className="w-4 h-4 text-dark-300" />
+              ) : (
+                <ChevronRight className="w-4 h-4 text-dark-300" />
+              )}
+            </button>
+
+            {moduleStates.exposure?.expanded && (
+              <div className="px-3 pb-3">
+                <ExposureModuleComponent
+                  key={`exposure-${resetCounter}`}
+                  module={exposureModule}
+                  onParamsChange={(params) => handleModuleParamsChange('exposure', params)}
+                />
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Basic Adjustments Module */}
         {basicAdjModule && (
           <div className="border-b border-dark-800">
@@ -667,52 +743,6 @@ export function AdjustmentPanel() {
                   key={`colorbalance-${resetCounter}`}
                   module={colorBalanceModule.getColorBalanceModule()}
                   onParamsChange={(params) => handleModuleParamsChange('colorbalance', params)}
-                />
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* LensCorrections Module */}
-        {lensCorrectionsModule && (
-          <div className="border-b border-dark-800">
-            <button
-              onClick={() => toggleModule('lenscorrections')}
-              className="w-full p-3 flex items-center justify-between hover:bg-dark-800 transition-professional text-left"
-            >
-              <span className="text-sm font-medium text-dark-300">Lens Corrections</span>
-              {moduleStates.lenscorrections?.expanded ? (
-                <ChevronDown className="w-4 h-4 text-dark-300" />
-              ) : (
-                <ChevronRight className="w-4 h-4 text-dark-300" />
-              )}
-            </button>
-
-            {moduleStates.lenscorrections?.expanded && (
-              <div className="px-3 pb-3">
-                <LensCorrectionsModuleComponent
-                  key={`lenscorrections-${resetCounter}`}
-                  parameters={lensCorrectionsModule.getParameters().lensCorrectionsParams}
-                  onParametersChange={(params) => handleModuleParamsChange('lenscorrections', params)}
-                  onAutoDetectVignetting={() => {
-                    const img = imageService.getCurrentImage();
-                    if (img?.data) {
-                      lensCorrectionsModule.autoDetectVignetting(img.data, img.width, img.height);
-                      handleModuleParamsChange('lenscorrections', lensCorrectionsModule.getParameters().lensCorrectionsParams);
-                    }
-                  }}
-                  onResetSection={(section) => {
-                    if (section === 'vignetting') {
-                      lensCorrectionsModule.resetVignetting();
-                    } else if (section === 'distortion') {
-                      lensCorrectionsModule.resetDistortion();
-                    } else if (section === 'chromaticAberration') {
-                      lensCorrectionsModule.resetChromaticAberration();
-                    } else if (section === 'all') {
-                      lensCorrectionsModule.reset();
-                    }
-                    handleModuleParamsChange('lenscorrections', lensCorrectionsModule.getParameters().lensCorrectionsParams);
-                  }}
                 />
               </div>
             )}
