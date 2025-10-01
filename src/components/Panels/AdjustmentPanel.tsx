@@ -516,6 +516,7 @@ export function AdjustmentPanel() {
                     key={`crop-${resetCounter}`}
                     module={cropModule.getCropModule()}
                     onParamsChange={(params) => handleModuleParamsChange('crop', params)}
+                    imageData={img.data}
                     imageWidth={img.width}
                     imageHeight={img.height}
                   />
