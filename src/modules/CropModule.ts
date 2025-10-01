@@ -13,6 +13,13 @@ export interface CropParams {
   customAspectWidth: number;  // For 'custom' ratio
   customAspectHeight: number; // For 'custom' ratio
 
+  // Transform options (merged from TransformModule)
+  angle: number;  // Rotation angle in degrees (-45.0 to +45.0)
+  flipHorizontal: boolean;
+  flipVertical: boolean;
+  expandCanvas: boolean;  // true = expand canvas to fit rotation, false = crop to original size
+  fillColor: [number, number, number, number];  // RGBA fill color for expanded areas (0-1 range)
+
   // Processing options
   resampleMethod: 'nearest' | 'bilinear' | 'bicubic';
 
@@ -57,7 +64,12 @@ export class CropModule {
     aspectRatio: 'free',
     customAspectWidth: 1,
     customAspectHeight: 1,
-    resampleMethod: 'bilinear'
+    angle: 0.0,
+    flipHorizontal: false,
+    flipVertical: false,
+    expandCanvas: true,
+    fillColor: [0, 0, 0, 1],
+    resampleMethod: 'bicubic'
   };
 
   // Original image dimensions (for 'original' aspect ratio)
@@ -98,7 +110,12 @@ export class CropModule {
       aspectRatio: 'free',
       customAspectWidth: 1,
       customAspectHeight: 1,
-      resampleMethod: 'bilinear'
+      angle: 0.0,
+      flipHorizontal: false,
+      flipVertical: false,
+      expandCanvas: true,
+      fillColor: [0, 0, 0, 1],
+      resampleMethod: 'bicubic'
     };
     logger.debug('Crop params reset to defaults');
   }
