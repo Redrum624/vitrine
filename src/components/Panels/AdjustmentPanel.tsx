@@ -6,7 +6,6 @@ import { ToneCurvePipelineModule } from '../../modules/ToneCurvePipelineModule';
 import { ColorBalancePipelineModule } from '../../modules/ColorBalancePipelineModule';
 import { ShadowsHighlightsPipelineModule } from '../../modules/ShadowsHighlightsPipelineModule';
 import { CropPipelineModule } from '../../modules/CropPipelineModule';
-import { TransformPipelineModule } from '../../modules/TransformPipelineModule';
 import { LocalAdjustmentsPipelineModule } from '../../modules/LocalAdjustmentsPipelineModule';
 import { LensCorrectionsPipelineModule } from '../../modules/LensCorrectionsPipelineModule';
 import { BasicAdjustmentsModuleComponent } from '../Modules/BasicAdjustmentsModuleComponent';
@@ -15,7 +14,6 @@ import { ToneCurveModuleComponent } from '../Modules/ToneCurveModuleComponent';
 import { ColorBalanceModuleComponent } from '../Modules/ColorBalanceModuleComponent';
 import { ShadowsHighlightsModuleComponent } from '../Modules/ShadowsHighlightsModuleComponent';
 import { CropModuleComponent } from '../Modules/CropModuleComponent';
-import { TransformModuleComponent } from '../Modules/TransformModuleComponent';
 import { LocalAdjustmentsModuleComponent } from '../Modules/LocalAdjustmentsModuleComponent';
 import { LensCorrectionsModuleComponent } from '../Modules/LensCorrectionsModuleComponent';
 import { imageProcessingPipeline } from '../../services/ImageProcessingPipeline';
@@ -37,7 +35,6 @@ export function AdjustmentPanel() {
   const [moduleStates, setModuleStates] = useState<Record<string, ModuleState>>({
     // Geometric operations (first)
     crop: { expanded: false, enabled: false },
-    transform: { expanded: false, enabled: false },
     // Core processing modules
     exposure: { expanded: true, enabled: true },
     basicadj: { expanded: false, enabled: true },
@@ -72,7 +69,6 @@ export function AdjustmentPanel() {
 
   // Get module instances from pipeline
   const cropModule = imageProcessingPipeline.getModule<CropPipelineModule>('crop');
-  const transformModule = imageProcessingPipeline.getModule<TransformPipelineModule>('transform');
   const lensCorrectionsModule = imageProcessingPipeline.getModule<LensCorrectionsPipelineModule>('lenscorrections');
   const whiteBalanceModule = imageProcessingPipeline.getModule<WhiteBalanceModule>('temperature');
   const basicAdjModule = imageProcessingPipeline.getModule<BasicAdjustmentsModule>('basicadj');
@@ -323,17 +319,11 @@ export function AdjustmentPanel() {
     // Call resetParams() on each module individually, just like individual reset buttons do
     // This ensures the exact same behavior as clicking each reset button
 
-    // Reset new modules first (Crop, Transform, Lens Corrections, Local Adjustments)
+    // Reset new modules first (Crop & Transform unified, Lens Corrections, Local Adjustments)
     if (cropModule) {
       cropModule.reset();
       const cropParams = cropModule.getParams();
       handleModuleParamsChange('crop', cropParams, 'button');
-    }
-
-    if (transformModule) {
-      transformModule.reset();
-      const transformParams = transformModule.getParams();
-      handleModuleParamsChange('transform', transformParams, 'button');
     }
 
     if (lensCorrectionsModule) {
@@ -516,44 +506,6 @@ export function AdjustmentPanel() {
                     key={`crop-${resetCounter}`}
                     module={cropModule.getCropModule()}
                     onParamsChange={(params) => handleModuleParamsChange('crop', params)}
-                    imageData={img.data}
-                    imageWidth={img.width}
-                    imageHeight={img.height}
-                  />
-                </div>
-              )}
-            </div>
-          );
-        })()}
-
-        {/* Transform Module */}
-        {transformModule && (() => {
-          const img = imageService.getCurrentImage();
-          if (!img) return null;
-          return (
-            <div className="border-b border-dark-800">
-              <button
-                onClick={() => toggleModule('transform')}
-                className="w-full p-3 flex items-center justify-between hover:bg-dark-800 transition-professional text-left"
-              >
-                <span className="text-sm font-medium text-dark-300">Transform</span>
-                {moduleStates.transform?.expanded ? (
-                  <ChevronDown className="w-4 h-4 text-dark-300" />
-                ) : (
-                  <ChevronRight className="w-4 h-4 text-dark-300" />
-                )}
-              </button>
-
-              {moduleStates.transform?.expanded && (
-                <div className="px-3 pb-3">
-                  <TransformModuleComponent
-                    key={`transform-${resetCounter}`}
-                    module={transformModule.getTransformModule()}
-                    onParamsChange={(params) => handleModuleParamsChange('transform', params)}
-                    onAutoStraighten={() => {
-                      // Re-process after auto-straighten
-                      processCurrentImageRealTime();
-                    }}
                     imageData={img.data}
                     imageWidth={img.width}
                     imageHeight={img.height}
