@@ -81,6 +81,10 @@ export class CropModule {
     resampleMethod: 'bicubic'
   };
 
+  // Preview mode state
+  private isPreviewMode: boolean = false;
+  private appliedParams: CropParams | null = null; // Last applied state
+
   // Original image dimensions (for 'original' aspect ratio)
   private originalWidth: number = 0;
   private originalHeight: number = 0;
@@ -868,5 +872,42 @@ export class CropModule {
       width: cropWidth,
       height: cropHeight
     };
+  }
+
+  // ========== PREVIEW MODE METHODS ==========
+
+  isInPreviewMode(): boolean {
+    return this.isPreviewMode;
+  }
+
+  enterPreviewMode(): void {
+    if (!this.isPreviewMode) {
+      // Save current state as the applied state
+      this.appliedParams = { ...this.params };
+      this.isPreviewMode = true;
+      logger.info('Entered preview mode');
+    }
+  }
+
+  applyChanges(): void {
+    if (this.isPreviewMode) {
+      // Commit preview params as applied state
+      this.appliedParams = { ...this.params };
+      this.isPreviewMode = false;
+      logger.info('Applied crop/transform changes');
+    }
+  }
+
+  cancelChanges(): void {
+    if (this.isPreviewMode && this.appliedParams) {
+      // Revert to applied state
+      this.params = { ...this.appliedParams };
+      this.isPreviewMode = false;
+      logger.info('Cancelled crop/transform changes');
+    }
+  }
+
+  getAppliedParams(): CropParams | null {
+    return this.appliedParams ? { ...this.appliedParams } : null;
   }
 }

@@ -157,6 +157,36 @@ export const CropModuleComponent: React.FC<CropModuleComponentProps> = ({
   const hasFlip = params.flipHorizontal || params.flipVertical;
   const hasTransform = hasRotation || hasFlip;
 
+  // Check if changes need to be applied
+  const hasCrop = params.x !== 0 || params.y !== 0 || params.width !== 1.0 || params.height !== 1.0;
+  const hasChanges = hasTransform || hasCrop;
+  const isPreviewMode = module.isInPreviewMode();
+
+  // Handle Apply button
+  const handleApply = useCallback(() => {
+    module.applyChanges();
+    // Trigger re-render
+    setParams(module.getParams());
+    onParamsChange(module.getParams());
+    logger.info('Crop/Transform applied');
+  }, [module, onParamsChange]);
+
+  // Handle Cancel button
+  const handleCancel = useCallback(() => {
+    module.cancelChanges();
+    const revertedParams = module.getParams();
+    setParams(revertedParams);
+    onParamsChange(revertedParams);
+    logger.info('Crop/Transform cancelled');
+  }, [module, onParamsChange]);
+
+  // Auto-enter preview mode when changes are made
+  useEffect(() => {
+    if (hasChanges && !isPreviewMode) {
+      module.enterPreviewMode();
+    }
+  }, [hasChanges, isPreviewMode, module]);
+
   return (
     <div className="space-y-4">
       {/* Header */}
@@ -545,6 +575,31 @@ export const CropModuleComponent: React.FC<CropModuleComponentProps> = ({
           <span className="text-blue-400">{cropPercentage}%</span>
         </div>
       </div>
+
+      {/* Apply/Cancel Buttons - Show when in preview mode */}
+      {isPreviewMode && hasChanges && (
+        <div className="flex gap-2 border-t border-gray-700 pt-3">
+          <button
+            onClick={handleApply}
+            className="flex-1 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded transition-colors"
+          >
+            Apply
+          </button>
+          <button
+            onClick={handleCancel}
+            className="flex-1 px-4 py-2 text-sm font-medium text-gray-300 bg-gray-700 hover:bg-gray-600 rounded transition-colors"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+
+      {/* Preview Mode Indicator */}
+      {isPreviewMode && (
+        <div className="text-xs text-yellow-400 flex items-center gap-1 border-t border-gray-700 pt-2">
+          <span>⚠️ Preview Mode - Click Apply to commit changes</span>
+        </div>
+      )}
     </div>
   );
 };
