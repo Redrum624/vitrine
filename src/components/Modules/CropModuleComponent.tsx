@@ -127,7 +127,26 @@ export const CropModuleComponent: React.FC<CropModuleComponentProps> = ({
   const rotateBy = useCallback((degrees: number) => {
     const newAngle = Math.max(-45, Math.min(45, params.angle + degrees));
     updateParams({ angle: newAngle, enabled: true });
-  }, [params.angle, updateParams]);
+
+    // Auto-crop to remove black borders
+    if (Math.abs(newAngle) > 0.01 && imageWidth > 0 && imageHeight > 0) {
+      const autoCrop = module.calculateAutoCropForRotation(imageWidth, imageHeight, newAngle);
+      updateParams({ ...autoCrop, angle: newAngle, enabled: true });
+    }
+  }, [params.angle, updateParams, module, imageWidth, imageHeight]);
+
+  const handleRotationChange = useCallback((newAngle: number) => {
+    updateParams({ angle: newAngle, enabled: true });
+
+    // Auto-crop to remove black borders from rotation
+    if (Math.abs(newAngle) > 0.01 && imageWidth > 0 && imageHeight > 0) {
+      const autoCrop = module.calculateAutoCropForRotation(imageWidth, imageHeight, newAngle);
+      updateParams({ ...autoCrop, angle: newAngle, enabled: true });
+    } else if (Math.abs(newAngle) < 0.01) {
+      // Reset crop when angle is 0
+      updateParams({ x: 0, y: 0, width: 1.0, height: 1.0, angle: 0, enabled: true });
+    }
+  }, [updateParams, module, imageWidth, imageHeight]);
 
   // Calculate output dimensions
   const outputDims = module.getOutputDimensions(imageWidth, imageHeight);
@@ -306,7 +325,7 @@ export const CropModuleComponent: React.FC<CropModuleComponentProps> = ({
                 max="45"
                 step="0.1"
                 value={params.angle}
-                onChange={(e) => updateParams({ angle: parseFloat(e.target.value), enabled: true })}
+                onChange={(e) => handleRotationChange(parseFloat(e.target.value))}
                 className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer"
               />
 
@@ -331,25 +350,25 @@ export const CropModuleComponent: React.FC<CropModuleComponentProps> = ({
                   )}
                 </button>
                 <button
-                  onClick={() => updateParams({ angle: -45, enabled: true })}
+                  onClick={() => handleRotationChange(-45)}
                   className="px-2 py-1.5 text-xs text-gray-300 bg-gray-700 hover:bg-gray-600 rounded transition-colors"
                 >
                   -45°
                 </button>
                 <button
-                  onClick={() => updateParams({ angle: -15, enabled: true })}
+                  onClick={() => handleRotationChange(-15)}
                   className="px-2 py-1.5 text-xs text-gray-300 bg-gray-700 hover:bg-gray-600 rounded transition-colors"
                 >
                   -15°
                 </button>
                 <button
-                  onClick={() => updateParams({ angle: 15, enabled: true })}
+                  onClick={() => handleRotationChange(15)}
                   className="px-2 py-1.5 text-xs text-gray-300 bg-gray-700 hover:bg-gray-600 rounded transition-colors"
                 >
                   +15°
                 </button>
                 <button
-                  onClick={() => updateParams({ angle: 45, enabled: true })}
+                  onClick={() => handleRotationChange(45)}
                   className="px-2 py-1.5 text-xs text-gray-300 bg-gray-700 hover:bg-gray-600 rounded transition-colors"
                 >
                   +45°
