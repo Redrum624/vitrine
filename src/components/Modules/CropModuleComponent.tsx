@@ -390,17 +390,6 @@ export const CropModuleComponent: React.FC<CropModuleComponentProps> = ({
             <div className="space-y-2">
               <label className="block text-xs text-gray-400">Options</label>
 
-              {/* Canvas Expansion */}
-              <label className="flex items-center justify-between">
-                <span className="text-xs text-gray-300">Expand Canvas</span>
-                <input
-                  type="checkbox"
-                  checked={params.expandCanvas}
-                  onChange={(e) => updateParams({ expandCanvas: e.target.checked })}
-                  className="rounded border-gray-600 text-green-400 focus:ring-green-400 focus:ring-2"
-                />
-              </label>
-
               {/* Interpolation Method */}
               <div>
                 <label className="block text-xs text-gray-400 mb-1">Interpolation</label>
@@ -414,28 +403,6 @@ export const CropModuleComponent: React.FC<CropModuleComponentProps> = ({
                   <option value="bicubic">Bicubic (Best Quality)</option>
                 </select>
               </div>
-
-              {/* Fill Color (when canvas expanded) */}
-              {params.expandCanvas && (
-                <div>
-                  <label className="block text-xs text-gray-400 mb-1">Fill Color</label>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="color"
-                      value={`#${Math.floor(params.fillColor[0] * 255).toString(16).padStart(2, '0')}${Math.floor(params.fillColor[1] * 255).toString(16).padStart(2, '0')}${Math.floor(params.fillColor[2] * 255).toString(16).padStart(2, '0')}`}
-                      onChange={(e) => {
-                        const hex = e.target.value;
-                        const r = parseInt(hex.slice(1, 3), 16) / 255;
-                        const g = parseInt(hex.slice(3, 5), 16) / 255;
-                        const b = parseInt(hex.slice(5, 7), 16) / 255;
-                        updateParams({ fillColor: [r, g, b, 1] });
-                      }}
-                      className="w-12 h-8 rounded border border-gray-600 cursor-pointer"
-                    />
-                    <span className="text-xs text-gray-400">Background fill</span>
-                  </div>
-                </div>
-              )}
             </div>
           </div>
         )}

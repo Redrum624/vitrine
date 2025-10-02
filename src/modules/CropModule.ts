@@ -76,7 +76,7 @@ export class CropModule {
     angle: 0.0,
     flipHorizontal: false,
     flipVertical: false,
-    expandCanvas: true,
+    expandCanvas: false,
     fillColor: [0, 0, 0, 1],
     resampleMethod: 'bicubic'
   };
