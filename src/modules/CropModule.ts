@@ -225,6 +225,8 @@ export class CropModule {
     // Step 1: Apply transforms first (flip/rotate)
     const hasTransforms = this.params.flipHorizontal || this.params.flipVertical || Math.abs(this.params.angle) > 0.01;
 
+    logger.debug(`CropModule.process: hasTransforms=${hasTransforms}, angle=${this.params.angle}, flipH=${this.params.flipHorizontal}, flipV=${this.params.flipVertical}`);
+
     if (hasTransforms) {
       // Apply flip/mirror first (fastest operations)
       if (this.params.flipHorizontal) {
@@ -251,6 +253,8 @@ export class CropModule {
     // Step 2: Apply crop
     const needsCrop = this.params.x !== 0.0 || this.params.y !== 0.0 ||
                       this.params.width !== 1.0 || this.params.height !== 1.0;
+
+    logger.debug(`CropModule.process: needsCrop=${needsCrop}, x=${this.params.x}, y=${this.params.y}, w=${this.params.width}, h=${this.params.height}`);
 
     if (needsCrop) {
       // Calculate pixel coordinates
