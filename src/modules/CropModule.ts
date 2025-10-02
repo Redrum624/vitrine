@@ -65,7 +65,7 @@ export interface CropProcessingContext {
 
 export class CropModule {
   private params: CropParams = {
-    enabled: false,
+    enabled: true,
     x: 0.0,
     y: 0.0,
     width: 1.0,
