@@ -492,7 +492,7 @@ export function AdjustmentPanel() {
                 onClick={() => toggleModule('crop')}
                 className="w-full p-3 flex items-center justify-between hover:bg-dark-800 transition-professional text-left"
               >
-                <span className="text-sm font-medium text-dark-300">Crop</span>
+                <span className="text-sm font-medium text-dark-300">Crop & Transform</span>
                 {moduleStates.crop?.expanded ? (
                   <ChevronDown className="w-4 h-4 text-dark-300" />
                 ) : (
