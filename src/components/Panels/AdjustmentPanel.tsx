@@ -483,38 +483,37 @@ export function AdjustmentPanel() {
       <div className="flex-1 overflow-y-auto">
 
         {/* Crop Module */}
-        {cropModule && (() => {
-          const img = imageService.getCurrentImage();
-          if (!img) return null;
-          return (
-            <div className="border-b border-dark-800">
-              <button
-                onClick={() => toggleModule('crop')}
-                className="w-full p-3 flex items-center justify-between hover:bg-dark-800 transition-professional text-left"
-              >
-                <span className="text-sm font-medium text-dark-300">Crop & Transform</span>
-                {moduleStates.crop?.expanded ? (
-                  <ChevronDown className="w-4 h-4 text-dark-300" />
-                ) : (
-                  <ChevronRight className="w-4 h-4 text-dark-300" />
-                )}
-              </button>
+        {cropModule && (
+          <div className="border-b border-dark-800">
+            <button
+              onClick={() => toggleModule('crop')}
+              className="w-full p-3 flex items-center justify-between hover:bg-dark-800 transition-professional text-left"
+            >
+              <span className="text-sm font-medium text-dark-300">Crop & Transform</span>
+              {moduleStates.crop?.expanded ? (
+                <ChevronDown className="w-4 h-4 text-dark-300" />
+              ) : (
+                <ChevronRight className="w-4 h-4 text-dark-300" />
+              )}
+            </button>
 
-              {moduleStates.crop?.expanded && (
+            {moduleStates.crop?.expanded && (() => {
+              const img = imageService.getCurrentImage();
+              return (
                 <div className="px-3 pb-3">
                   <CropModuleComponent
                     key={`crop-${resetCounter}`}
                     module={cropModule.getCropModule()}
                     onParamsChange={(params) => handleModuleParamsChange('crop', params)}
-                    imageData={img.data}
-                    imageWidth={img.width}
-                    imageHeight={img.height}
+                    imageData={img?.data}
+                    imageWidth={img?.width || 0}
+                    imageHeight={img?.height || 0}
                   />
                 </div>
-              )}
-            </div>
-          );
-        })()}
+              );
+            })()}
+          </div>
+        )}
 
         {/* Lens Corrections Module */}
         {lensCorrectionsModule && (

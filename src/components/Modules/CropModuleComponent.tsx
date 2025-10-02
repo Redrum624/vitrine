@@ -84,10 +84,6 @@ export const CropModuleComponent: React.FC<CropModuleComponentProps> = ({
     onParamsChange(updatedParams);
   }, [module, onParamsChange]);
 
-  const enableCrop = useCallback(() => {
-    updateParams({ enabled: true });
-  }, [updateParams]);
-
   // Transform handlers
   const handleAutoStraighten = useCallback(async () => {
     if (!imageData || imageWidth <= 0 || imageHeight <= 0) {
@@ -446,8 +442,7 @@ export const CropModuleComponent: React.FC<CropModuleComponentProps> = ({
       </div>
 
       {/* Crop Position Controls */}
-      {params.enabled && (
-        <div className="space-y-3 border-t border-gray-700 pt-3">
+      <div className="space-y-3 border-t border-gray-700 pt-3">
           <label className="block text-xs text-gray-400">Position & Size</label>
 
           {/* X Position */}
@@ -548,7 +543,6 @@ export const CropModuleComponent: React.FC<CropModuleComponentProps> = ({
             />
           </div>
         </div>
-      )}
 
       {/* Output Info */}
       <div className="text-xs text-gray-500 space-y-1 border-t border-gray-700 pt-3">
@@ -556,26 +550,14 @@ export const CropModuleComponent: React.FC<CropModuleComponentProps> = ({
           <span>Original Size:</span>
           <span className="text-white">{imageWidth} × {imageHeight}</span>
         </div>
-        {params.enabled && (
-          <>
-            <div className="flex items-center justify-between">
-              <span>Cropped Size:</span>
-              <span className="text-white">{outputDims.width} × {outputDims.height}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span>Crop Area:</span>
-              <span className="text-blue-400">{cropPercentage}%</span>
-            </div>
-          </>
-        )}
-        {!params.enabled && (
-          <button
-            onClick={enableCrop}
-            className="w-full mt-2 px-3 py-2 text-sm font-medium text-white bg-blue-500 hover:bg-blue-600 rounded transition-colors"
-          >
-            Enable Crop
-          </button>
-        )}
+        <div className="flex items-center justify-between">
+          <span>Output Size:</span>
+          <span className="text-white">{outputDims.width} × {outputDims.height}</span>
+        </div>
+        <div className="flex items-center justify-between">
+          <span>Crop Area:</span>
+          <span className="text-blue-400">{cropPercentage}%</span>
+        </div>
       </div>
     </div>
   );
