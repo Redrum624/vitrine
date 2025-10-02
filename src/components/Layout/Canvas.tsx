@@ -4,6 +4,9 @@ import { useAppStore } from '../../stores/appStore';
 import { fileSystemService, ImageFileInfo } from '../../services/FileSystemService';
 import { imageService } from '../../services/ImageService';
 import { logger } from '../../utils/Logger';
+import { CropTransformOverlay } from '../Canvas/CropTransformOverlay';
+import { imageProcessingPipeline } from '../../services/ImageProcessingPipeline';
+import { CropPipelineModule } from '../../modules/CropPipelineModule';
 
 
 interface CanvasProps {
@@ -23,6 +26,8 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
   const [lastPan, setLastPan] = useState({ x: 0, y: 0 });
   const [displayImage, setDisplayImage] = useState<ImageFileInfo | null>(null);
   const [imageLoading, setImageLoading] = useState(false);
+  const [cropModule, setCropModule] = useState<CropPipelineModule | null>(null);
+  const [showCropOverlay, setShowCropOverlay] = useState(false);
 
   const drawLoadedImage = useCallback((ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, imageMetadata: { width: number; height: number }, imageData: Float32Array) => {
     const { width: imageWidth, height: imageHeight } = imageMetadata;
@@ -621,6 +626,32 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewport]);
 
+  // Get crop module from pipeline
+  useEffect(() => {
+    const module = imageProcessingPipeline.getModule<CropPipelineModule>('crop');
+    if (module) {
+      setCropModule(module);
+    }
+  }, []);
+
+  // Watch for crop preview mode changes
+  useEffect(() => {
+    if (!cropModule) return;
+
+    const checkPreviewMode = () => {
+      const isInPreview = cropModule.getCropModule().isInPreviewMode();
+      setShowCropOverlay(isInPreview);
+    };
+
+    // Check immediately
+    checkPreviewMode();
+
+    // Set up interval to check for changes
+    const interval = setInterval(checkPreviewMode, 100);
+
+    return () => clearInterval(interval);
+  }, [cropModule]);
+
   // Handle window/container resize
   useEffect(() => {
     const container = containerRef.current;
@@ -704,7 +735,7 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
         onWheel={handleWheel}
       >
         {/* Aspect ratio preserving canvas container */}
-        <div className="flex items-center justify-center w-full h-full">
+        <div className="flex items-center justify-center w-full h-full relative">
           <canvas
             ref={canvasRef}
             className={isDragging ? 'cursor-grabbing' : 'cursor-grab'}
@@ -713,6 +744,19 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
               display: 'block'
             }}
           />
+
+          {/* Crop/Transform Overlay - 3x3 grid and darkened areas */}
+          {cropModule && displayImage && canvasRef.current && (
+            <CropTransformOverlay
+              imageWidth={imageService.getCurrentImage()?.width || 0}
+              imageHeight={imageService.getCurrentImage()?.height || 0}
+              cropParams={cropModule.getCropModule().getParams()}
+              viewport={viewport}
+              canvasDisplayWidth={canvasRef.current.offsetWidth}
+              canvasDisplayHeight={canvasRef.current.offsetHeight}
+              showOverlay={showCropOverlay}
+            />
+          )}
         </div>
 
         {/* Optional debug info - can be removed */}
