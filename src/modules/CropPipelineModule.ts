@@ -11,7 +11,7 @@ import { logger } from '../utils/Logger';
  */
 export class CropPipelineModule implements PipelineModule {
   private cropModule: CropModule;
-  public isEnabled = false; // Disabled by default
+  public isEnabled = true; // Enabled by default
 
   constructor() {
     this.cropModule = new CropModule();
