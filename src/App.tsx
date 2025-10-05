@@ -93,8 +93,11 @@ function App() {
         logger.info('Loading image:', filePath);
         const imageData = await imageService.loadImage(filePath);
         logger.info(`Image loaded: ${imageData.width}x${imageData.height} - ${imageData.fileName}`);
+        showSuccess('Image Loaded', `${imageData.fileName} (${imageData.width}x${imageData.height})`);
       } catch (error) {
         logger.error('Failed to load image:', error);
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+        showError('Failed to Load Image', errorMessage);
       }
     };
 
@@ -144,6 +147,7 @@ function App() {
         const currentImageData = imageService.getCurrentImage();
         if (!currentImageData) {
           logger.warn('No image loaded for export');
+          showError('No Image Loaded', 'Please load an image before exporting');
           return;
         }
 

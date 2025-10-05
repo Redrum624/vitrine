@@ -435,6 +435,11 @@ export function AdjustmentPanel() {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <h2 className="text-sm font-medium text-dark-300">Develop</h2>
+            {isProcessing && (
+              <div className="text-xs text-center text-blue-400 animate-pulse">
+                Processing...
+              </div>
+            )}
             {lastProcessingTime > 0 && !isProcessing && (
               <div className="text-xs text-center text-dark-500">
                 High quality preview ({lastProcessingTime.toFixed(1)}ms)

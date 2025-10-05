@@ -225,9 +225,6 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
       canvasWidth = dataWidth;
       canvasHeight = dataHeight;
 
-      const imageAspectRatio = dataWidth / dataHeight;
-      const containerAspectRatio = containerWidth / containerHeight;
-
       // Canvas sizing: 1:1 pixel mapping for accurate rendering
       if (process.env.NODE_ENV === 'development') {
         logger.debug(`Canvas sizing: ${canvasWidth}x${canvasHeight}, Container: ${containerWidth}x${containerHeight}, Data: ${dataWidth}x${dataHeight}`);
