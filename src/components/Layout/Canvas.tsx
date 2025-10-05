@@ -5,6 +5,7 @@ import { fileSystemService, ImageFileInfo } from '../../services/FileSystemServi
 import { imageService } from '../../services/ImageService';
 import { logger } from '../../utils/Logger';
 import { CropTransformOverlay } from '../Canvas/CropTransformOverlay';
+import { InteractiveCropHandles } from '../Canvas/InteractiveCropHandles';
 import { imageProcessingPipeline } from '../../services/ImageProcessingPipeline';
 import { CropPipelineModule } from '../../modules/CropPipelineModule';
 
@@ -747,15 +748,50 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
 
           {/* Crop/Transform Overlay - 3x3 grid and darkened areas */}
           {cropModule && displayImage && canvasRef.current && (
-            <CropTransformOverlay
-              imageWidth={imageService.getCurrentImage()?.width || 0}
-              imageHeight={imageService.getCurrentImage()?.height || 0}
-              cropParams={cropModule.getCropModule().getParams()}
-              viewport={viewport}
-              canvasDisplayWidth={canvasRef.current.offsetWidth}
-              canvasDisplayHeight={canvasRef.current.offsetHeight}
-              showOverlay={showCropOverlay}
-            />
+            <>
+              <CropTransformOverlay
+                imageWidth={imageService.getCurrentImage()?.width || 0}
+                imageHeight={imageService.getCurrentImage()?.height || 0}
+                cropParams={cropModule.getCropModule().getParams()}
+                viewport={viewport}
+                canvasDisplayWidth={canvasRef.current.offsetWidth}
+                canvasDisplayHeight={canvasRef.current.offsetHeight}
+                showOverlay={showCropOverlay}
+              />
+
+              {/* Interactive Crop Handles - drag to resize crop */}
+              <InteractiveCropHandles
+                imageWidth={imageService.getCurrentImage()?.width || 0}
+                imageHeight={imageService.getCurrentImage()?.height || 0}
+                cropParams={cropModule.getCropModule().getParams()}
+                onCropChange={(crop) => {
+                  // Update crop module params
+                  const module = cropModule.getCropModule();
+                  const currentParams = module.getParams();
+                  module.setParams({
+                    ...currentParams,
+                    x: crop.x,
+                    y: crop.y,
+                    width: crop.width,
+                    height: crop.height,
+                    enabled: true
+                  });
+
+                  // Trigger processing (debounced in the pipeline)
+                  imageProcessingPipeline.invalidateModuleCache('crop');
+
+                  // Note: Real-time processing will be triggered by the AdjustmentPanel's
+                  // effect that watches for module changes. For immediate feedback during drag,
+                  // we could add a debounced processing call here, but it's not critical
+                  // since the grid overlay updates immediately.
+                }}
+                viewport={viewport}
+                canvasDisplayWidth={canvasRef.current.offsetWidth}
+                canvasDisplayHeight={canvasRef.current.offsetHeight}
+                showHandles={showCropOverlay}
+                containerRef={containerRef}
+              />
+            </>
           )}
         </div>
 
