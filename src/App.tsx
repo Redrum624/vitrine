@@ -456,9 +456,26 @@ function App() {
           isOpen={isBatchDialogOpen}
           onClose={() => setIsBatchDialogOpen(false)}
           availableImages={availableImages}
-          onSelectImages={() => {
-            // TODO: Open file/folder selection dialog
-            logger.info('Select images for batch processing');
+          onSelectImages={async () => {
+            try {
+              const result = await (window as any).electronAPI?.showOpenDialog({
+                properties: ['openFile', 'multiSelections'],
+                filters: [
+                  { name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'tiff', 'tif', 'bmp', 'webp'] },
+                  { name: 'RAW Files', extensions: ['cr2', 'nef', 'arw', 'dng', 'orf', 'rw2', 'pef'] },
+                  { name: 'All Files', extensions: ['*'] }
+                ]
+              });
+
+              if (result && !result.canceled && result.filePaths?.length > 0) {
+                logger.info(`Selected ${result.filePaths.length} images for batch processing`);
+                showSuccess('Images Selected', `${result.filePaths.length} images selected for batch processing`);
+                // TODO: Add selected images to batch processing queue
+              }
+            } catch (error) {
+              logger.error('Failed to select images:', error);
+              showError('Selection Failed', 'Failed to open file selection dialog');
+            }
           }}
         />
       )}
