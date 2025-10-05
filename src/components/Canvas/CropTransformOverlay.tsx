@@ -28,8 +28,12 @@ interface CropTransformOverlayProps {
  * Overlay component that renders:
  * 1. 3x3 grid (rule of thirds) over the crop region
  * 2. Darkened areas outside the crop region
+ * 3. Rotation angle indicator (top-right corner)
+ * 4. Rotation center point (blue crosshair at image center)
+ * 5. Flip indicators (H-Flip, V-Flip badges)
  *
  * The grid stays straight even when the image is rotated underneath.
+ * Visual indicators help users understand active transformations.
  */
 export function CropTransformOverlay({
   imageWidth,
@@ -147,6 +151,110 @@ export function CropTransformOverlay({
     ctx.lineWidth = 2;
     ctx.setLineDash([]);
     ctx.strokeRect(cropLeft, cropTop, cropDisplayWidth, cropDisplayHeight);
+
+    // 4. Draw rotation angle indicator if there's a rotation
+    const angle = cropParams.angle || 0;
+    if (Math.abs(angle) > 0.1) {
+      // Draw rotation angle text in top-right corner of canvas
+      const angleText = `${angle > 0 ? '+' : ''}${angle.toFixed(1)}°`;
+
+      ctx.save();
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+      ctx.lineWidth = 1;
+
+      // Measure text to create background box
+      ctx.font = 'bold 14px system-ui';
+      const textMetrics = ctx.measureText(angleText);
+      const textWidth = textMetrics.width;
+      const textHeight = 20;
+      const padding = 8;
+
+      const boxX = canvasDisplayWidth - textWidth - padding * 2 - 10;
+      const boxY = 10;
+
+      // Draw background box
+      ctx.fillRect(boxX, boxY, textWidth + padding * 2, textHeight + padding);
+      ctx.strokeRect(boxX, boxY, textWidth + padding * 2, textHeight + padding);
+
+      // Draw text
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      ctx.fillText(angleText, boxX + padding, boxY + padding);
+
+      ctx.restore();
+
+      // Draw rotation center point indicator (small crosshair at image center)
+      const centerX = imageX + scaledImageWidth / 2;
+      const centerY = imageY + scaledImageHeight / 2;
+
+      ctx.save();
+      ctx.strokeStyle = 'rgba(100, 200, 255, 0.8)';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([4, 4]);
+
+      const crossSize = 12;
+
+      // Horizontal line
+      ctx.beginPath();
+      ctx.moveTo(centerX - crossSize, centerY);
+      ctx.lineTo(centerX + crossSize, centerY);
+      ctx.stroke();
+
+      // Vertical line
+      ctx.beginPath();
+      ctx.moveTo(centerX, centerY - crossSize);
+      ctx.lineTo(centerX, centerY + crossSize);
+      ctx.stroke();
+
+      // Small circle at center
+      ctx.setLineDash([]);
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, 3, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.restore();
+    }
+
+    // 5. Draw flip indicators if image is flipped
+    const indicators: string[] = [];
+    if (cropParams.flipHorizontal) indicators.push('H-Flip');
+    if (cropParams.flipVertical) indicators.push('V-Flip');
+
+    if (indicators.length > 0) {
+      ctx.save();
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+      ctx.lineWidth = 1;
+      ctx.font = 'bold 12px system-ui';
+
+      let offsetY = Math.abs(cropParams.angle || 0) > 0.1 ? 50 : 10;
+
+      indicators.forEach(text => {
+        const textMetrics = ctx.measureText(text);
+        const textWidth = textMetrics.width;
+        const textHeight = 18;
+        const padding = 6;
+
+        const boxX = canvasDisplayWidth - textWidth - padding * 2 - 10;
+        const boxY = offsetY;
+
+        // Draw background box
+        ctx.fillRect(boxX, boxY, textWidth + padding * 2, textHeight + padding);
+        ctx.strokeRect(boxX, boxY, textWidth + padding * 2, textHeight + padding);
+
+        // Draw text
+        ctx.fillStyle = 'rgba(255, 200, 100, 0.95)';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'top';
+        ctx.fillText(text, boxX + padding, boxY + padding);
+
+        offsetY += textHeight + padding + 5;
+      });
+
+      ctx.restore();
+    }
 
   }, [
     imageWidth,
