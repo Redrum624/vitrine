@@ -9,7 +9,9 @@ import {
   Layers,
   Package,
   Settings,
-  HelpCircle
+  HelpCircle,
+  Undo,
+  Redo
 } from 'lucide-react';
 import { electronService } from '../../services/ElectronService';
 
@@ -21,6 +23,10 @@ interface ToolbarProps {
   onOpenPresets?: () => void;
   onOpenPlugins?: () => void;
   onShowHelp?: () => void;
+  onUndo?: () => void;
+  onRedo?: () => void;
+  canUndo?: boolean;
+  canRedo?: boolean;
   onZoomIn?: () => void;
   onZoomOut?: () => void;
   onFitWindow?: () => void;
@@ -28,7 +34,7 @@ interface ToolbarProps {
   zoom?: number;
 }
 
-export function Toolbar({ onExport, onBatchProcess, onOpenPresets, onOpenPlugins, onShowHelp, onZoomIn, onZoomOut, onFitWindow, onActualSize, zoom = 1 }: ToolbarProps) {
+export function Toolbar({ onExport, onBatchProcess, onOpenPresets, onOpenPlugins, onShowHelp, onUndo, onRedo, canUndo = false, canRedo = false, onZoomIn, onZoomOut, onFitWindow, onActualSize, zoom = 1 }: ToolbarProps) {
   // selectedTool removed - tools now in modules
 
   return (
@@ -65,6 +71,27 @@ export function Toolbar({ onExport, onBatchProcess, onOpenPresets, onOpenPlugins
               title="Preset Manager"
             >
               <BookOpen className="w-4 h-4" />
+            </button>
+
+            {/* Separator */}
+            <div className="w-px h-6 bg-dark-700 mx-1" />
+
+            {/* Undo/Redo */}
+            <button
+              onClick={onUndo}
+              disabled={!canUndo}
+              className="p-2 rounded-md transition-professional hover:bg-dark-700 text-dark-300 disabled:opacity-30 disabled:cursor-not-allowed"
+              title="Undo (Ctrl+Z)"
+            >
+              <Undo className="w-4 h-4" />
+            </button>
+            <button
+              onClick={onRedo}
+              disabled={!canRedo}
+              className="p-2 rounded-md transition-professional hover:bg-dark-700 text-dark-300 disabled:opacity-30 disabled:cursor-not-allowed"
+              title="Redo (Ctrl+Shift+Z)"
+            >
+              <Redo className="w-4 h-4" />
             </button>
           </>
         )}

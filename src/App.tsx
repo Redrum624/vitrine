@@ -48,6 +48,8 @@ function App() {
   const [isWelcomeVisible, setIsWelcomeVisible] = useState(false);
   const [availableImages, setAvailableImages] = useState<ImageFileInfo[]>([]);
   const [showThumbnailPanel, setShowThumbnailPanel] = useState(false);
+  const [canUndo, setCanUndo] = useState(false);
+  const [canRedo, setCanRedo] = useState(false);
   const { notifications, remove: removeNotification, success: showSuccess, error: showError } = useNotifications();
 
   // Viewing control functions (available in JSX)
@@ -158,6 +160,8 @@ function App() {
         logger.info('Undo requested');
         if (historyService.undo()) {
           logger.info('Undo operation completed');
+          // Update undo/redo state
+          updateHistoryState();
         } else {
           logger.info('No previous state to undo to');
         }
@@ -171,12 +175,19 @@ function App() {
         logger.info('Redo requested');
         if (historyService.redo()) {
           logger.info('Redo operation completed');
+          // Update undo/redo state
+          updateHistoryState();
         } else {
           logger.info('No next state to redo to');
         }
       } catch (error) {
         logger.error('Failed to redo:', error);
       }
+    };
+
+    const updateHistoryState = () => {
+      setCanUndo(historyService.canUndo());
+      setCanRedo(historyService.canRedo());
     };
 
     const handleResetAll = () => {
@@ -295,6 +306,10 @@ function App() {
 
     logger.info(`Initialized ${shortcuts.length + 2} keyboard shortcuts`);
 
+    // Initialize undo/redo state
+    setCanUndo(historyService.canUndo());
+    setCanRedo(historyService.canRedo());
+
     // Setup app lifecycle service for proper closing
     appLifecycleService.registerUnsavedChangesChecker({
       hasUnsavedChanges: () => historyService.hasUnsavedChanges(),
@@ -335,6 +350,10 @@ function App() {
           onOpenPresets={() => setIsPresetDialogOpen(true)}
           onOpenPlugins={() => setIsPluginManagerOpen(true)}
           onShowHelp={() => setIsShortcutsDialogOpen(true)}
+          onUndo={() => historyService.undo() && setCanUndo(historyService.canUndo()) && setCanRedo(historyService.canRedo())}
+          onRedo={() => historyService.redo() && setCanUndo(historyService.canUndo()) && setCanRedo(historyService.canRedo())}
+          canUndo={canUndo}
+          canRedo={canRedo}
           onZoomIn={handleZoomIn}
           onZoomOut={handleZoomOut}
           onFitWindow={handleFitWindow}
