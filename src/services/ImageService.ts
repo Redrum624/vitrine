@@ -292,6 +292,23 @@ export class ImageService {
     return this.currentImage;
   }
 
+  /**
+   * Update the current image data with processed data.
+   * Used when applying crop/transform changes permanently.
+   */
+  updateCurrentImageData(data: Float32Array, width: number, height: number): void {
+    if (this.currentImage) {
+      this.currentImage = {
+        ...this.currentImage,
+        data,
+        width,
+        height
+      };
+      logger.info(`Updated current image data: ${width}x${height}`);
+      this.notifyImageLoaded();
+    }
+  }
+
   // Load image at full resolution for export (bypasses performance optimizations)
   async loadImageForExport(filePath: string): Promise<ImageData> {
     const result = await errorHandlingService.withErrorHandling(

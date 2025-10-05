@@ -898,6 +898,26 @@ export class CropModule {
     }
   }
 
+  /**
+   * After changes are committed and processed, reset to identity params.
+   * This should be called AFTER the image has been fully processed and
+   * the processed result becomes the new base image.
+   */
+  resetAfterApply(): void {
+    this.params = {
+      ...this.params,
+      x: 0.0,
+      y: 0.0,
+      width: 1.0,
+      height: 1.0,
+      angle: 0.0,
+      flipHorizontal: false,
+      flipVertical: false
+    };
+    this.appliedParams = { ...this.params };
+    logger.info('Reset crop/transform params after apply');
+  }
+
   cancelChanges(): void {
     if (this.isPreviewMode && this.appliedParams) {
       // Revert to applied state

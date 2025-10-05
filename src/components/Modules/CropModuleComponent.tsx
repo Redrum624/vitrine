@@ -2,6 +2,8 @@ import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { Crop, RotateCcw, Maximize, Grid, RotateCw, FlipHorizontal, FlipVertical, Zap, ChevronDown, ChevronUp } from 'lucide-react';
 import { CropModule, CropParams, AspectRatio } from '../../modules/CropModule';
 import { logger } from '../../utils/Logger';
+import { useAppStore } from '../../stores/appStore';
+import { imageService } from '../../services/ImageService';
 
 interface CropModuleComponentProps {
   module: CropModule;
@@ -162,14 +164,38 @@ export const CropModuleComponent: React.FC<CropModuleComponentProps> = ({
   const hasChanges = hasTransform || hasCrop;
   const isPreviewMode = module.isInPreviewMode();
 
+  const { processedImageData } = useAppStore();
+
   // Handle Apply button
   const handleApply = useCallback(() => {
+    // First, apply the changes (exits preview mode)
     module.applyChanges();
-    // Trigger re-render
-    setParams(module.getParams());
-    onParamsChange(module.getParams());
-    logger.info('Crop/Transform applied');
-  }, [module, onParamsChange]);
+
+    // Get the current processed image data (with crop/transform applied)
+    if (processedImageData && typeof processedImageData === 'object' && 'data' in processedImageData) {
+      const previewData = processedImageData as { data: Float32Array; width: number; height: number; isPreview: boolean };
+
+      // Update the source image data to be the processed result
+      imageService.updateCurrentImageData(previewData.data, previewData.width, previewData.height);
+
+      // Reset crop/transform params since the image is now the cropped/transformed version
+      module.resetAfterApply();
+
+      // Update component state with reset params
+      const resetParams = module.getParams();
+      setParams(resetParams);
+
+      // Trigger re-processing with reset params (which will be identity transform)
+      onParamsChange(resetParams);
+
+      logger.info(`Crop/Transform applied permanently - new image: ${previewData.width}x${previewData.height}`);
+    } else {
+      // Fallback if no processed data available
+      logger.warn('No processed image data available to apply');
+      setParams(module.getParams());
+      onParamsChange(module.getParams());
+    }
+  }, [module, onParamsChange, processedImageData]);
 
   // Handle Cancel button
   const handleCancel = useCallback(() => {
