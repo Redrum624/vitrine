@@ -9,6 +9,8 @@ import { InteractiveCropHandles } from '../Canvas/InteractiveCropHandles';
 import { imageProcessingPipeline } from '../../services/ImageProcessingPipeline';
 import { CropPipelineModule } from '../../modules/CropPipelineModule';
 
+// Debug mode for canvas rendering - set to false for production
+const DEBUG_CANVAS = process.env.NODE_ENV === 'development';
 
 interface CanvasProps {
   onFitWindow: () => void;
@@ -68,7 +70,7 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
     const minValue = Math.min(...imageData.slice(0, sampleSize));
     const isNormalized = maxValue <= 1.0 && minValue >= 0;
 
-    console.log('Canvas: Data analysis - min:', minValue, 'max:', maxValue, 'isNormalized:', isNormalized, 'sampleSize:', sampleSize);
+    if (DEBUG_CANVAS) console.log('Canvas: Data analysis - min:', minValue, 'max:', maxValue, 'isNormalized:', isNormalized, 'sampleSize:', sampleSize);
 
     // Validate data range
     if (maxValue > 255 || minValue < 0) {
@@ -226,13 +228,10 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
       const imageAspectRatio = dataWidth / dataHeight;
       const containerAspectRatio = containerWidth / containerHeight;
 
-      console.log(`🎨 CANVAS SIZING DEBUG:
-  Container: ${containerWidth}x${containerHeight} (aspect: ${containerAspectRatio.toFixed(3)})
-  Data: ${dataWidth}x${dataHeight} (aspect: ${imageAspectRatio.toFixed(3)})
-  Canvas will be set to EXACT data size: ${canvasWidth}x${canvasHeight} (1:1 pixel mapping)
-  Original Image: ${currentImageData.width}x${currentImageData.height}`);
-
-      console.log(`  Canvas internal resolution: ${canvasWidth}x${canvasHeight}`);
+      // Canvas sizing: 1:1 pixel mapping for accurate rendering
+      if (process.env.NODE_ENV === 'development') {
+        logger.debug(`Canvas sizing: ${canvasWidth}x${canvasHeight}, Container: ${containerWidth}x${containerHeight}, Data: ${dataWidth}x${dataHeight}`);
+      }
     } else {
       // No image loaded - use container size for placeholder
       canvasWidth = containerWidth;
@@ -267,11 +266,13 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
     canvas.style.width = `${Math.floor(displayWidth)}px`;
     canvas.style.height = `${Math.floor(displayHeight)}px`;
 
-    console.log(`  Canvas element set to:
+    if (DEBUG_CANVAS) {
+      console.log(`  Canvas element set to:
     Internal: ${canvas.width}x${canvas.height}
     CSS Display: ${canvas.style.width} x ${canvas.style.height}
     Computed: ${window.getComputedStyle(canvas).width} x ${window.getComputedStyle(canvas).height}
     Scale factor: ${(displayWidth / canvas.width).toFixed(2)}x`);
+    }
 
     // Clear canvas
     ctx.fillStyle = '#1a1a1a';
@@ -282,7 +283,7 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
       if (processedImageData && typeof processedImageData === 'object' && 'data' in processedImageData) {
         // Handle new preview data structure
         const previewData = processedImageData as { data: Float32Array; width: number; height: number; isPreview: boolean };
-        console.log('Canvas: Using processed preview data', previewData.width, 'x', previewData.height);
+        if (DEBUG_CANVAS) console.log('Canvas: Using processed preview data', previewData.width, 'x', previewData.height);
 
         // CRITICAL: Debug data integrity immediately upon receiving
         const stats = { min: Infinity, max: -Infinity, nonZero: 0 };
@@ -297,7 +298,7 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
         // Debug processed data before drawing
         const sampleData = previewData.data.slice(0, 100);
         const hasData = sampleData.some(val => val > 0);
-        console.log('Canvas: Processed data check - hasData:', hasData, 'sample:', sampleData.slice(0, 8));
+        if (DEBUG_CANVAS) console.log('Canvas: Processed data check - hasData:', hasData, 'sample:', sampleData.slice(0, 8));
 
         if (!hasData) {
           console.warn('Canvas: Processed data appears to be all zeros, falling back to original data');
@@ -308,23 +309,23 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
           const nonZeroCount = processedSample.filter(val => val > 0).length;
           const blackPixelRatio = 1 - (nonZeroCount / processedSample.length);
 
-          console.log(`Canvas: Processed data quality check - nonZero: ${nonZeroCount}/1000 (${(100-blackPixelRatio*100).toFixed(1)}% visible)`);
+          if (DEBUG_CANVAS) console.log(`Canvas: Processed data quality check - nonZero: ${nonZeroCount}/1000 (${(100-blackPixelRatio*100).toFixed(1)}% visible)`);
 
           if (blackPixelRatio > 0.95) { // If more than 95% black pixels
             console.warn('Canvas: Processed data is mostly black, using original image data instead');
             drawLoadedImageOptimized(ctx, canvas, currentImageData, currentImageData.data);
           } else {
-            console.log('Canvas: Using processed preview data for module effects');
+            if (DEBUG_CANVAS) console.log('Canvas: Using processed preview data for module effects');
             drawLoadedImageOptimized(ctx, canvas, { width: previewData.width, height: previewData.height }, previewData.data);
           }
         }
       } else if (processedImageData && processedImageData instanceof Float32Array) {
         // Handle legacy data structure
-        console.log('Canvas: Using legacy processed data', currentImageData.width, 'x', currentImageData.height);
+        if (DEBUG_CANVAS) console.log('Canvas: Using legacy processed data', currentImageData.width, 'x', currentImageData.height);
         drawLoadedImageOptimized(ctx, canvas, currentImageData, processedImageData);
       } else {
         // Use original image data
-        console.log('Canvas: Using original image data', currentImageData.width, 'x', currentImageData.height, 'channels detected');
+        if (DEBUG_CANVAS) console.log('Canvas: Using original image data', currentImageData.width, 'x', currentImageData.height, 'channels detected');
         drawLoadedImageOptimized(ctx, canvas, currentImageData, currentImageData.data);
       }
     } else {
@@ -390,15 +391,17 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
         const nonZeroSamples = sampleIndices.filter(i => data[i] > 0.0001).length; // Lower threshold
         const minSample = Math.min(...sampleIndices.map(i => data[i]));
         const maxSample = Math.max(...sampleIndices.map(i => data[i]));
-        console.log(`Canvas: Data sampling - ${pixelsSampled} pixels, ${nonZeroSamples} non-zero, range: ${minSample.toFixed(6)}-${maxSample.toFixed(6)}`);
+        if (DEBUG_CANVAS) console.log(`Canvas: Data sampling - ${pixelsSampled} pixels, ${nonZeroSamples} non-zero, range: ${minSample.toFixed(6)}-${maxSample.toFixed(6)}`);
       }
 
       // Check if we can reuse cached ImageData
       const cache = canvasCache.current;
 
       // Debug cache comparison
-      console.log(`Canvas: Cache check - current hash: ${dataHash}, cached hash: ${cache.lastDataHash || 'none'}`);
-      console.log(`Canvas: Dimensions match: ${cache.lastWidth === imageInfo.width && cache.lastHeight === imageInfo.height}`);
+      if (DEBUG_CANVAS) {
+        console.log(`Canvas: Cache check - current hash: ${dataHash}, cached hash: ${cache.lastDataHash || 'none'}`);
+        console.log(`Canvas: Dimensions match: ${cache.lastWidth === imageInfo.width && cache.lastHeight === imageInfo.height}`);
+      }
 
       if (cache.imageData &&
           cache.lastWidth === imageInfo.width &&
@@ -406,7 +409,7 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
           cache.lastDataHash === dataHash) {
 
         // Reuse cached ImageData - just redraw with current viewport
-        console.log('Canvas: ✅ Using cached render (data unchanged)');
+        if (DEBUG_CANVAS) console.log('Canvas: ✅ Using cached render (data unchanged)');
 
         // Canvas is already sized correctly - just use its dimensions
         // No need to calculate aspect ratio fitting again
@@ -418,12 +421,14 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
         const x = (canvas.width - scaledWidth) / 2 + viewport.panX;
         const y = (canvas.height - scaledHeight) / 2 + viewport.panY;
 
-        console.log(`🖼️ DRAWING (cached):
+        if (DEBUG_CANVAS) {
+          console.log(`🖼️ DRAWING (cached):
   Canvas: ${canvas.width}x${canvas.height}
   BaseSize: ${baseWidth}x${baseHeight}
   Scaled: ${scaledWidth}x${scaledHeight}
   Position: (${x}, ${y})
   Source: ${imageInfo.width}x${imageInfo.height}`);
+        }
 
         // Optimize rendering based on zoom level
         ctx.imageSmoothingEnabled = viewport.zoom < 1;
@@ -443,12 +448,12 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
         );
 
         const renderTime = performance.now() - startTime;
-        console.log(`Canvas: Cached render completed in ${renderTime.toFixed(2)}ms`);
+        if (DEBUG_CANVAS) console.log(`Canvas: Cached render completed in ${renderTime.toFixed(2)}ms`);
         return;
       }
 
       // Cache miss - need to create new render
-      console.log('Canvas: 🔄 Creating new render (data changed or no cache)');
+      if (DEBUG_CANVAS) console.log('Canvas: 🔄 Creating new render (data changed or no cache)');
 
       // Create new ImageData (this is the expensive operation)
       const imageData = ctx.createImageData(imageInfo.width, imageInfo.height);
@@ -465,7 +470,7 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
       // const normalCount = dataSample.filter(val => val >= 0.01).length;
 
       // Reduced logging - only log significant data issues
-      if (dataMax < 0.01 || nonZeroCount < sampleSize * 0.1) {
+      if (DEBUG_CANVAS && (dataMax < 0.01 || nonZeroCount < sampleSize * 0.1)) {
         console.log(`Canvas: Converting data - min: ${dataMin}, max: ${dataMax}, nonZero: ${nonZeroCount}/${sampleSize}`);
       }
 
@@ -474,7 +479,7 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
 
       // Simple data conversion without complex adjustments
       // Trust that the pipeline has provided properly processed data
-      console.log(`Canvas: Converting processed data - range: ${dataMin.toFixed(4)}-${dataMax.toFixed(4)}`);
+      if (DEBUG_CANVAS) console.log(`Canvas: Converting processed data - range: ${dataMin.toFixed(4)}-${dataMax.toFixed(4)}`);
 
       for (let i = 0; i < Math.min(data.length, imageDataArray.length); i += 4) {
         const baseIdx = i;
@@ -499,7 +504,7 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
       }
 
       // Only log if there are issues with the conversion
-      if (convertedCount < Math.floor(data.length / 4) * 0.1) {
+      if (DEBUG_CANVAS && convertedCount < Math.floor(data.length / 4) * 0.1) {
         console.log(`Canvas: Low conversion rate - ${convertedCount} non-black pixels out of ${Math.floor(data.length / 4)} total`);
       }
 
@@ -514,7 +519,7 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
       cache.lastWidth = imageInfo.width;
       cache.lastHeight = imageInfo.height;
       cache.lastDataHash = dataHash;
-      console.log(`Canvas: 💾 Cached new render with hash: ${dataHash}`);
+      if (DEBUG_CANVAS) console.log(`Canvas: 💾 Cached new render with hash: ${dataHash}`);
 
       // Calculate display dimensions with zoom and pan
       // Canvas is already sized correctly - just use its dimensions
@@ -527,12 +532,14 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
       const x = (canvas.width - scaledWidth) / 2 + viewport.panX;
       const y = (canvas.height - scaledHeight) / 2 + viewport.panY;
 
-      console.log(`🖼️ DRAWING (new):
+      if (DEBUG_CANVAS) {
+        console.log(`🖼️ DRAWING (new):
   Canvas: ${canvas.width}x${canvas.height}
   BaseSize: ${baseWidth}x${baseHeight}
   Scaled: ${scaledWidth}x${scaledHeight}
   Position: (${x}, ${y})
   Source: ${imageInfo.width}x${imageInfo.height}`);
+      }
 
       // Optimize image smoothing based on zoom level
       ctx.imageSmoothingEnabled = viewport.zoom < 1;
@@ -553,7 +560,7 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
       );
 
       const renderTime = performance.now() - startTime;
-      console.log(`Canvas: New render completed in ${renderTime.toFixed(2)}ms`);
+      if (DEBUG_CANVAS) console.log(`Canvas: New render completed in ${renderTime.toFixed(2)}ms`);
 
     } catch (error) {
       console.error('Canvas: Error drawing optimized image:', error);
