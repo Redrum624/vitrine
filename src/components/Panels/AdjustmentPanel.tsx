@@ -1,5 +1,4 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { ChevronDown, ChevronRight, RotateCcw, RefreshCw, Expand, Minimize2 } from 'lucide-react';
 import { BasicAdjustmentsModule } from '../../modules/BasicAdjustmentsModule';
 import { WhiteBalanceModule } from '../../modules/WhiteBalanceModule';
 import { ToneCurvePipelineModule } from '../../modules/ToneCurvePipelineModule';
@@ -8,6 +7,7 @@ import { ShadowsHighlightsPipelineModule } from '../../modules/ShadowsHighlights
 import { CropPipelineModule } from '../../modules/CropPipelineModule';
 import { LocalAdjustmentsPipelineModule } from '../../modules/LocalAdjustmentsPipelineModule';
 import { LensCorrectionsPipelineModule } from '../../modules/LensCorrectionsPipelineModule';
+import { NoiseReductionModule } from '../../modules/NoiseReductionModule';
 import { BasicAdjustmentsModuleComponent } from '../Modules/BasicAdjustmentsModuleComponent';
 import { WhiteBalanceModuleComponent } from '../Modules/WhiteBalanceModuleComponent';
 import { ToneCurveModuleComponent } from '../Modules/ToneCurveModuleComponent';
@@ -16,9 +16,9 @@ import { ShadowsHighlightsModuleComponent } from '../Modules/ShadowsHighlightsMo
 import { CropModuleComponent } from '../Modules/CropModuleComponent';
 import { LocalAdjustmentsModuleComponent } from '../Modules/LocalAdjustmentsModuleComponent';
 import { LensCorrectionsModuleComponent } from '../Modules/LensCorrectionsModuleComponent';
+import { NoiseReductionModuleComponent } from '../Modules/NoiseReductionModuleComponent';
 import { imageProcessingPipeline } from '../../services/ImageProcessingPipeline';
 import { imageService } from '../../services/ImageService';
-import { autoRawAdjustmentService } from '../../services/AutoRawAdjustmentService';
 import { progressivePreviewService } from '../../services/ProgressivePreviewService';
 import { adaptiveDebounceService } from '../../services/AdaptiveDebounceService';
 import { useAppStore } from '../../stores/appStore';
@@ -30,7 +30,7 @@ interface ModuleState {
 }
 
 export function AdjustmentPanel() {
-  const { setProcessedImageData, currentImage } = useAppStore();
+  const { setProcessedImageData } = useAppStore();
   const [resetCounter, setResetCounter] = useState(0);
   const [moduleStates, setModuleStates] = useState<Record<string, ModuleState>>({
     // Geometric operations (first)
@@ -57,7 +57,7 @@ export function AdjustmentPanel() {
     outputcollections: { expanded: false, enabled: false }
   });
   const [isProcessing, setIsProcessing] = useState(false);
-  const [lastProcessingTime, setLastProcessingTime] = useState(0);
+  const [_lastProcessingTime, setLastProcessingTime] = useState(0);
   const processingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastProcessingTimeRef = useRef<number>(0);
 
@@ -76,6 +76,7 @@ export function AdjustmentPanel() {
   const colorBalanceModule = imageProcessingPipeline.getModule<ColorBalancePipelineModule>('colorbalance');
   const shadowsHighlightsModule = imageProcessingPipeline.getModule<ShadowsHighlightsPipelineModule>('shadowshighlights');
   const localAdjustmentsModule = imageProcessingPipeline.getModule<LocalAdjustmentsPipelineModule>('localadjustments');
+  const noiseReductionModule = imageProcessingPipeline.getModule<NoiseReductionModule>('noise-reduction');
 
   const toggleModule = useCallback((moduleId: string) => {
     setModuleStates(prev => ({
@@ -381,30 +382,6 @@ export function AdjustmentPanel() {
     logger.info('All modules reset to defaults');
   }, [processCurrentImageRealTime, basicAdjModule, whiteBalanceModule, handleModuleParamsChange]);
 
-  // Check if all modules are expanded
-  const areAllModulesExpanded = useCallback(() => {
-    const visibleModules = ['crop', 'transform', 'lenscorrections', 'basicadj', 'whitebalance', 'shadowshighlights', 'tonecurve', 'colorbalance', 'localadjustments'];
-    return visibleModules.every(moduleId => moduleStates[moduleId]?.expanded === true);
-  }, [moduleStates]);
-
-  const toggleAllModules = useCallback(() => {
-    const allExpanded = areAllModulesExpanded();
-
-    setModuleStates(prev => {
-      const newStates = { ...prev };
-      const visibleModules = ['crop', 'transform', 'lenscorrections', 'basicadj', 'whitebalance', 'shadowshighlights', 'tonecurve', 'colorbalance', 'localadjustments'];
-
-      visibleModules.forEach(key => {
-        if (newStates[key]) {
-          newStates[key] = { ...newStates[key], expanded: !allExpanded };
-        }
-      });
-      return newStates;
-    });
-
-    logger.info(allExpanded ? 'All modules retracted' : 'All modules expanded');
-  }, [areAllModulesExpanded]);
-
   // Monitor image changes for real-time updates
   useEffect(() => {
     // Add listener for new image loads
@@ -429,59 +406,20 @@ export function AdjustmentPanel() {
   }, [processCurrentImageRealTime]);
 
   return (
-    <div className="w-80 bg-dark-900 border-dark-700 flex flex-col h-full rounded-r-lg">
+    <div className="bg-dark-900 border-l border-dark-700 flex flex-col h-full" style={{width: '360px'}}>
       {/* Header */}
-      <div className="p-3 border-b border-dark-700 rounded-tr-lg">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <h2 className="text-sm font-medium text-dark-300">Develop</h2>
-            {isProcessing && (
-              <div className="text-xs text-center text-blue-400 animate-pulse">
-                Processing...
-              </div>
-            )}
-            {lastProcessingTime > 0 && !isProcessing && (
-              <div className="text-xs text-center text-dark-500">
-                High quality preview ({lastProcessingTime.toFixed(1)}ms)
-              </div>
-            )}
-          </div>
-          <div className="flex items-center space-x-1">
-            {currentImage?.isRaw && (
-              <button
-                onClick={() => {
-                  if (currentImage && imageService.getProcessingPipeline()) {
-                    autoRawAdjustmentService.resetAutoAdjustments(imageService.getProcessingPipeline()!);
-                    processCurrentImageRealTime();
-                    logger.info('RAW auto-adjustments reset');
-                  }
-                }}
-                className="p-1 hover:bg-dark-700 rounded text-dark-300 transition-professional"
-                title="Reset RAW auto-adjustments"
-              >
-                <RefreshCw className="w-4 h-4" />
-              </button>
-            )}
-            <button
-              onClick={resetAllModules}
-              className="p-1 hover:bg-dark-700 rounded text-dark-300 transition-professional"
-              title="Reset all modules"
-            >
-              <RotateCcw className="w-4 h-4" />
-            </button>
-            <button
-              onClick={toggleAllModules}
-              className="p-1 hover:bg-dark-700 rounded text-dark-300 transition-professional"
-              title={areAllModulesExpanded() ? "Retract all modules" : "Expand all modules"}
-            >
-              {areAllModulesExpanded() ? (
-                <Minimize2 className="w-4 h-4" />
-              ) : (
-                <Expand className="w-4 h-4" />
-              )}
-            </button>
-          </div>
-        </div>
+      <div className="border-b border-dark-700 bg-dark-850 flex items-center justify-between" style={{padding: '16px 20px'}}>
+        <h2 className="text-white font-semibold" style={{fontSize: '13px', fontWeight: 600, letterSpacing: '0.3px'}}>
+          Develop
+        </h2>
+        <button
+          onClick={resetAllModules}
+          className="bg-transparent border-0 cursor-pointer text-dark-400 hover:text-dark-100 hover:bg-dark-800 transition-colors"
+          style={{fontSize: '11px', padding: '4px 8px', borderRadius: '3px'}}
+          title="Reset all"
+        >
+          Reset
+        </button>
       </div>
 
       {/* Darktable Modules */}
@@ -495,11 +433,9 @@ export function AdjustmentPanel() {
               className="w-full p-3 flex items-center justify-between hover:bg-dark-800 transition-professional text-left"
             >
               <span className="text-sm font-medium text-dark-300">Crop & Transform</span>
-              {moduleStates.crop?.expanded ? (
-                <ChevronDown className="w-4 h-4 text-dark-300" />
-              ) : (
-                <ChevronRight className="w-4 h-4 text-dark-300" />
-              )}
+              <span className="text-dark-400 text-sm">
+                {moduleStates.crop?.expanded ? '▾' : '▸'}
+              </span>
             </button>
 
             {moduleStates.crop?.expanded && (() => {
@@ -528,11 +464,9 @@ export function AdjustmentPanel() {
               className="w-full p-3 flex items-center justify-between hover:bg-dark-800 transition-professional text-left"
             >
               <span className="text-sm font-medium text-dark-300">Lens Corrections</span>
-              {moduleStates.lenscorrections?.expanded ? (
-                <ChevronDown className="w-4 h-4 text-dark-300" />
-              ) : (
-                <ChevronRight className="w-4 h-4 text-dark-300" />
-              )}
+              <span className="text-dark-400 text-sm">
+                {moduleStates.lenscorrections?.expanded ? '▾' : '▸'}
+              </span>
             </button>
 
             {moduleStates.lenscorrections?.expanded && (
@@ -574,11 +508,9 @@ export function AdjustmentPanel() {
               className="w-full p-3 flex items-center justify-between hover:bg-dark-800 transition-professional text-left"
             >
               <span className="text-sm font-medium text-dark-300">Basic Adjustments</span>
-              {moduleStates.basicadj?.expanded ? (
-                <ChevronDown className="w-4 h-4 text-dark-300" />
-              ) : (
-                <ChevronRight className="w-4 h-4 text-dark-300" />
-              )}
+              <span className="text-dark-400 text-sm">
+                {moduleStates.basicadj?.expanded ? '▾' : '▸'}
+              </span>
             </button>
 
             {moduleStates.basicadj?.expanded && (
@@ -601,11 +533,9 @@ export function AdjustmentPanel() {
               className="w-full p-3 flex items-center justify-between hover:bg-dark-800 transition-professional text-left"
             >
               <span className="text-sm font-medium text-dark-300">White Balance</span>
-              {moduleStates.whitebalance?.expanded ? (
-                <ChevronDown className="w-4 h-4 text-dark-300" />
-              ) : (
-                <ChevronRight className="w-4 h-4 text-dark-300" />
-              )}
+              <span className="text-dark-400 text-sm">
+                {moduleStates.whitebalance?.expanded ? '▾' : '▸'}
+              </span>
             </button>
 
             {moduleStates.whitebalance?.expanded && (
@@ -629,11 +559,9 @@ export function AdjustmentPanel() {
               className="w-full p-3 flex items-center justify-between hover:bg-dark-800 transition-professional text-left"
             >
               <span className="text-sm font-medium text-dark-300">Shadows & Highlights</span>
-              {moduleStates.shadowshighlights?.expanded ? (
-                <ChevronDown className="w-4 h-4 text-dark-300" />
-              ) : (
-                <ChevronRight className="w-4 h-4 text-dark-300" />
-              )}
+              <span className="text-dark-400 text-sm">
+                {moduleStates.shadowshighlights?.expanded ? '▾' : '▸'}
+              </span>
             </button>
 
             {moduleStates.shadowshighlights?.expanded && (
@@ -656,11 +584,9 @@ export function AdjustmentPanel() {
               className="w-full p-3 flex items-center justify-between hover:bg-dark-800 transition-professional text-left"
             >
               <span className="text-sm font-medium text-dark-300">Tone Curve</span>
-              {moduleStates.tonecurve?.expanded ? (
-                <ChevronDown className="w-4 h-4 text-dark-300" />
-              ) : (
-                <ChevronRight className="w-4 h-4 text-dark-300" />
-              )}
+              <span className="text-dark-400 text-sm">
+                {moduleStates.tonecurve?.expanded ? '▾' : '▸'}
+              </span>
             </button>
 
             {moduleStates.tonecurve?.expanded && (
@@ -683,11 +609,9 @@ export function AdjustmentPanel() {
               className="w-full p-3 flex items-center justify-between hover:bg-dark-800 transition-professional text-left"
             >
               <span className="text-sm font-medium text-dark-300">Color Balance</span>
-              {moduleStates.colorbalance?.expanded ? (
-                <ChevronDown className="w-4 h-4 text-dark-300" />
-              ) : (
-                <ChevronRight className="w-4 h-4 text-dark-300" />
-              )}
+              <span className="text-dark-400 text-sm">
+                {moduleStates.colorbalance?.expanded ? '▾' : '▸'}
+              </span>
             </button>
 
             {moduleStates.colorbalance?.expanded && (
@@ -710,11 +634,9 @@ export function AdjustmentPanel() {
               className="w-full p-3 flex items-center justify-between hover:bg-dark-800 transition-professional text-left"
             >
               <span className="text-sm font-medium text-dark-300">Local Adjustments</span>
-              {moduleStates.localadjustments?.expanded ? (
-                <ChevronDown className="w-4 h-4 text-dark-300" />
-              ) : (
-                <ChevronRight className="w-4 h-4 text-dark-300" />
-              )}
+              <span className="text-dark-400 text-sm">
+                {moduleStates.localadjustments?.expanded ? '▾' : '▸'}
+              </span>
             </button>
 
             {moduleStates.localadjustments?.expanded && (() => {
@@ -759,6 +681,31 @@ export function AdjustmentPanel() {
           </div>
         )}
 
+        {/* Noise Reduction Module */}
+        {noiseReductionModule && (
+          <div className="border-b border-dark-700">
+            <button
+              onClick={() => toggleModule('noisereduction')}
+              className="w-full flex items-center justify-between p-3 hover:bg-dark-750 transition-professional"
+            >
+              <div className="flex items-center space-x-2">
+                <span className="text-dark-400 text-sm">
+                  {moduleStates.noisereduction?.expanded ? '▾' : '▸'}
+                </span>
+                <span className="text-sm text-dark-100 font-medium">Noise Reduction</span>
+              </div>
+            </button>
+            {moduleStates.noisereduction?.expanded && (
+              <div className="p-3 bg-dark-800">
+                <NoiseReductionModuleComponent
+                  key={`noisereduction-${resetCounter}`}
+                  module={noiseReductionModule}
+                  onParamsChange={(params) => handleModuleParamsChange('noisereduction', params)}
+                />
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Processing Stats */}
         <div className="p-3 bg-dark-850 text-xs text-dark-400">

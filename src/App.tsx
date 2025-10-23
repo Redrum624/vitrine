@@ -1,5 +1,8 @@
 import { useEffect, useState, useCallback } from 'react';
+import { MenuBar } from './components/Layout/MenuBar';
 import { Toolbar } from './components/Layout/Toolbar';
+import { IconSidebar } from './components/Layout/IconSidebar';
+import { ToolsPanel } from './components/Layout/ToolsPanel';
 import { FileBrowser } from './components/Layout/FileBrowser';
 import { Canvas } from './components/Layout/Canvas';
 import { AdjustmentPanel } from './components/Panels/AdjustmentPanel';
@@ -50,6 +53,7 @@ function App() {
   const [showThumbnailPanel, setShowThumbnailPanel] = useState(false);
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
+  const [moduleStates, setModuleStates] = useState<Record<string, { expanded: boolean; enabled: boolean }>>({});
   const { notifications, remove: removeNotification, success: showSuccess, error: showError } = useNotifications();
 
   // Viewing control functions (available in JSX)
@@ -79,7 +83,6 @@ function App() {
     logger.info(`Folder selected with ${images.length} images`);
     setAvailableImages(images);
     setShowThumbnailPanel(images.length > 0);
-    // Optionally auto-select first image
     if (images.length > 0 && !currentImage) {
       setCurrentImage(images[0]);
     }
@@ -346,6 +349,26 @@ function App() {
   return (
     <ErrorBoundary>
       <div className="h-screen flex flex-col bg-dark-900 text-dark-300">
+      {/* Menu Bar */}
+      <MenuBar
+        onFileOpen={() => electronService.isElectron() && electronService.openFile()}
+        onFileImport={() => window.dispatchEvent(new CustomEvent('electron-file-import'))}
+        onFileExport={() => setIsExportDialogOpen(true)}
+        onEditUndo={() => historyService.undo() && setCanUndo(historyService.canUndo()) && setCanRedo(historyService.canRedo())}
+        onEditRedo={() => historyService.redo() && setCanUndo(historyService.canUndo()) && setCanRedo(historyService.canRedo())}
+        onEditReset={() => historyService.resetAll()}
+        onViewZoomIn={handleZoomIn}
+        onViewZoomOut={handleZoomOut}
+        onViewFitWindow={handleFitWindow}
+        onViewActualSize={handleActualSize}
+        onWindowPresets={() => setIsPresetDialogOpen(true)}
+        onWindowBatch={() => setIsBatchDialogOpen(true)}
+        onWindowPlugins={() => setIsPluginManagerOpen(true)}
+        onWindowHelp={() => setIsShortcutsDialogOpen(true)}
+        canUndo={canUndo}
+        canRedo={canRedo}
+      />
+
       {/* Top Toolbar */}
       <div className="toolbar">
         <Toolbar
@@ -366,41 +389,70 @@ function App() {
         />
       </div>
 
-      {/* Main Content */}
+      {/* Main Content - 4-Column Layout */}
       <div className="flex flex-1 flex-col overflow-hidden">
-        {/* Top Section - File Browser, Canvas, and Adjustment Panel */}
+        {/* Main workspace */}
         <div className="flex flex-1 overflow-hidden">
-        {/* Left Panel - File System Explorer */}
-        <div className="file-browser">
-          <FileBrowser
-            onImageSelected={handleImageSelected}
-            onFolderSelected={handleFolderSelected}
+          {/* Column 1: Icon Sidebar (64px) */}
+          <IconSidebar
+            selectedTool={selectedTool}
+            onToolSelect={(tool) => setSelectedTool(selectedTool === tool ? null : tool)}
           />
-        </div>
 
-        {/* Center - Image Viewer with Navigation */}
-        <div className="flex-1 canvas-container">
-          <Canvas
-            onFitWindow={handleFitWindow}
-            onActualSize={handleActualSize}
-            onZoomIn={handleZoomIn}
-            onZoomOut={handleZoomOut}
-            zoom={viewport.zoom}
-            currentImage={currentImage}
+          {/* Column 2: Tools Panel (280px) */}
+          <ToolsPanel
+            moduleStates={moduleStates}
+            onModuleToggle={(moduleId) => {
+              setModuleStates(prev => ({
+                ...prev,
+                [moduleId]: {
+                  ...prev[moduleId],
+                  enabled: !prev[moduleId]?.enabled
+                }
+              }));
+            }}
+            onModuleExpandCollapse={(moduleId) => {
+              setModuleStates(prev => ({
+                ...prev,
+                [moduleId]: {
+                  ...prev[moduleId],
+                  expanded: !prev[moduleId]?.expanded
+                }
+              }));
+            }}
           />
-        </div>
 
-        {/* Right Panel - Editing Tools */}
-        <div className="w-80 bg-dark-900 border-l border-dark-700 flex flex-col overflow-hidden">
-          <div className="p-3 flex-shrink-0">
-            <div className="histogram-panel">
-              <HistogramPanel />
+          {/* Column 3: File Browser (optional, collapsible) */}
+          <div className="w-64 bg-dark-900 border-r border-dark-700">
+            <FileBrowser
+              onImageSelected={handleImageSelected}
+              onFolderSelected={handleFolderSelected}
+            />
+          </div>
+
+          {/* Column 4: Canvas (flex) */}
+          <div className="flex-1 canvas-container" style={{background: '#0a0a0a'}}>
+            <Canvas
+              onFitWindow={handleFitWindow}
+              onActualSize={handleActualSize}
+              onZoomIn={handleZoomIn}
+              onZoomOut={handleZoomOut}
+              zoom={viewport.zoom}
+              currentImage={currentImage}
+            />
+          </div>
+
+          {/* Column 5: Adjustments Panel (360px) */}
+          <div className="w-90 bg-dark-900 border-l border-dark-700 flex flex-col overflow-hidden">
+            <div className="p-3 flex-shrink-0">
+              <div className="histogram-panel">
+                <HistogramPanel />
+              </div>
+            </div>
+            <div className="flex-1 border-t overflow-y-auto adjustment-panel">
+              <AdjustmentPanel />
             </div>
           </div>
-          <div className="flex-1 border-t overflow-y-auto adjustment-panel">
-            <AdjustmentPanel />
-          </div>
-        </div>
         </div>
 
         {/* Bottom Panel - Thumbnail Gallery */}
@@ -414,22 +466,20 @@ function App() {
       </div>
 
       {/* Bottom Status Bar */}
-      <div className="status-bar">
-        <StatusBar
-          currentImage={currentImage ? {
-            name: currentImage.name,
-            width: imageService.getCurrentImage()?.width,
-            height: imageService.getCurrentImage()?.height,
-            size: currentImage.size,
-            type: currentImage.type
-          } : null}
-          processingStats={{
-            processingTime: 0, // Would be updated from processing pipeline
-            modulesActive: 8,  // Would be calculated from enabled modules
-            totalModules: 8
-          }}
-        />
-      </div>
+      <StatusBar
+        currentImage={currentImage ? {
+          name: currentImage.name,
+          width: imageService.getCurrentImage()?.width,
+          height: imageService.getCurrentImage()?.height,
+          size: currentImage.size,
+          type: currentImage.type
+        } : null}
+        processingStats={{
+          processingTime: 145, // Would be updated from processing pipeline
+          modulesActive: 8,  // Would be calculated from enabled modules
+          totalModules: 8
+        }}
+      />
 
       {/* Export Dialog */}
       {isExportDialogOpen && (

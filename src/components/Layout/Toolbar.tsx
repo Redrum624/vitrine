@@ -1,21 +1,4 @@
-import {
-  Image,
-  FolderOpen,
-  Download,
-  Play,
-  BookOpen,
-  ZoomIn,
-  ZoomOut,
-  Layers,
-  Package,
-  Settings,
-  HelpCircle,
-  Undo,
-  Redo
-} from 'lucide-react';
 import { electronService } from '../../services/ElectronService';
-
-// Tools removed - functionality now in modules (Crop, Local Adjustments)
 
 interface ToolbarProps {
   onExport?: () => void;
@@ -34,145 +17,100 @@ interface ToolbarProps {
   zoom?: number;
 }
 
-export function Toolbar({ onExport, onBatchProcess, onOpenPresets, onOpenPlugins, onShowHelp, onUndo, onRedo, canUndo = false, canRedo = false, onZoomIn, onZoomOut, onFitWindow, onActualSize, zoom = 1 }: ToolbarProps) {
-  // selectedTool removed - tools now in modules
+export function Toolbar({ onExport, onBatchProcess: _onBatchProcess, onOpenPresets: _onOpenPresets, onOpenPlugins: _onOpenPlugins, onShowHelp: _onShowHelp, onUndo, onRedo, canUndo = false, canRedo = false, onZoomIn, onZoomOut, onFitWindow, onActualSize, zoom = 1 }: ToolbarProps) {
+  const btnClass = "bg-transparent border border-dark-700 text-dark-300 flex items-center justify-center cursor-pointer transition-all hover:bg-dark-800 hover:border-dark-600 hover:text-dark-100";
+  const btnStyle = {width: '32px', height: '32px', fontSize: '13px', borderRadius: '3px'};
+  const btnActiveClass = "bg-dark-700 border-dark-600 text-white";
 
   return (
-    <div className="h-12 bg-dark-850 border-b border-dark-700 flex items-center px-4 justify-between no-select rounded-t-lg">
+    <div className="flex items-center justify-between bg-dark-900 border-b border-dark-700 no-select" style={{padding: '10px 20px'}}>
       {/* Left side - File and Tools */}
-      <div className="flex items-center space-x-1">
-        {/* File operations - show only in Electron */}
+      <div className="flex items-center gap-1.5">
         {electronService.isElectron() && (
           <>
             <button
               onClick={() => electronService.openFile()}
-              className="p-2 rounded-md transition-professional hover:bg-dark-700 text-dark-300"
+              className={btnClass}
+              style={{...btnStyle, width: 'auto', padding: '0 12px'}}
               title="Open Image"
             >
-              <FolderOpen className="w-4 h-4" />
+              Open
             </button>
             <button
               onClick={onExport}
-              className="p-2 rounded-md transition-professional hover:bg-dark-700 text-dark-300"
+              className={btnClass}
+              style={{...btnStyle, width: 'auto', padding: '0 12px'}}
               title="Export Image"
             >
-              <Download className="w-4 h-4" />
-            </button>
-            <button
-              onClick={onBatchProcess}
-              className="p-2 rounded-md transition-professional hover:bg-dark-700 text-dark-300"
-              title="Batch Processing"
-            >
-              <Play className="w-4 h-4" />
-            </button>
-            <button
-              onClick={onOpenPresets}
-              className="p-2 rounded-md transition-professional hover:bg-dark-700 text-dark-300"
-              title="Preset Manager"
-            >
-              <BookOpen className="w-4 h-4" />
+              Save
             </button>
 
-            {/* Separator */}
-            <div className="w-px h-6 bg-dark-700 mx-1" />
+            <div className="bg-dark-700" style={{width: '1px', height: '24px', margin: '0 6px'}} />
 
-            {/* Undo/Redo */}
             <button
               onClick={onUndo}
               disabled={!canUndo}
-              className="p-2 rounded-md transition-professional hover:bg-dark-700 text-dark-300 disabled:opacity-30 disabled:cursor-not-allowed"
+              className={`${btnClass} disabled:opacity-30 disabled:cursor-not-allowed`}
+              style={btnStyle}
               title="Undo (Ctrl+Z)"
             >
-              <Undo className="w-4 h-4" />
+              ↶
             </button>
             <button
               onClick={onRedo}
               disabled={!canRedo}
-              className="p-2 rounded-md transition-professional hover:bg-dark-700 text-dark-300 disabled:opacity-30 disabled:cursor-not-allowed"
+              className={`${btnClass} disabled:opacity-30 disabled:cursor-not-allowed`}
+              style={btnStyle}
               title="Redo (Ctrl+Shift+Z)"
             >
-              <Redo className="w-4 h-4" />
+              ↷
             </button>
+
+            <div className="bg-dark-700" style={{width: '1px', height: '24px', margin: '0 6px'}} />
+
+            <button className={`${btnClass} ${btnActiveClass}`} style={btnStyle} title="Select">⊙</button>
+            <button className={btnClass} style={btnStyle} title="Crop">✂</button>
+            <button className={btnClass} style={btnStyle} title="Adjust">⊕</button>
           </>
         )}
       </div>
 
-      {/* Center - App title with zoom controls */}
-      <div className="flex items-center space-x-4 text-sm text-dark-300">
-        <div className="flex items-center space-x-2">
-          <Image className="w-4 h-4" />
-          <span>Photo Editor Pro</span>
-          {electronService.isElectron() && (
-            <span className="text-xs bg-dark-800 px-2 py-1 rounded text-dark-300">Desktop</span>
-          )}
-        </div>
+      {/* Center - Zoom controls */}
+      <div className="flex items-center" style={{gap: '6px'}}>
+        <button onClick={onZoomOut} className={btnClass} style={btnStyle} title="Zoom Out">−</button>
+        <span className="text-center font-mono text-dark-400" style={{fontSize: '11px', minWidth: '50px', fontVariantNumeric: 'tabular-nums'}}>
+          {Math.round(zoom * 100)}%
+        </span>
+        <button onClick={onZoomIn} className={btnClass} style={btnStyle} title="Zoom In">+</button>
 
-        {/* Zoom Controls */}
-        <div className="flex items-center space-x-2 border-l border-dark-700 pl-4">
-          <button
-            onClick={onZoomOut}
-            className="px-2 py-1 bg-dark-800 hover:bg-dark-700 rounded text-xs text-dark-300 transition-professional"
-            title="Zoom Out"
-          >
-            <ZoomOut className="w-3 h-3" />
-          </button>
-          <span className="text-xs text-dark-300 min-w-12 text-center font-mono">
-            {Math.round(zoom * 100)}%
-          </span>
-          <button
-            onClick={onZoomIn}
-            className="px-2 py-1 bg-dark-800 hover:bg-dark-700 rounded text-xs text-dark-300 transition-professional"
-            title="Zoom In"
-          >
-            <ZoomIn className="w-3 h-3" />
-          </button>
-          <button
-            onClick={onFitWindow}
-            className="px-2 py-1 bg-dark-800 hover:bg-dark-700 rounded text-xs text-dark-300 transition-professional"
-            title="Fit to Window"
-          >
-            Fit
-          </button>
-          <button
-            onClick={onActualSize}
-            className="px-2 py-1 bg-dark-800 hover:bg-dark-700 rounded text-xs text-dark-300 transition-professional"
-            title="Actual Size (100%)"
-          >
-            1:1
-          </button>
-        </div>
-      </div>
+        <div className="bg-dark-700" style={{width: '1px', height: '24px', margin: '0 6px'}} />
 
-      {/* Right side - View controls */}
-      <div className="flex items-center space-x-1">
         <button
-          className="p-2 rounded-md transition-professional hover:bg-dark-700 text-dark-300"
-          title="Layers"
+          onClick={onFitWindow}
+          className={btnClass}
+          style={{...btnStyle, width: 'auto', padding: '0 12px'}}
+          title="Fit to Window"
         >
-          <Layers className="w-4 h-4" />
+          Fit
         </button>
         <button
-          onClick={onOpenPlugins}
-          className="p-2 rounded-md transition-professional hover:bg-dark-700 text-dark-300"
-          title="Plugin Manager"
+          onClick={onActualSize}
+          className={btnClass}
+          style={{...btnStyle, width: 'auto', padding: '0 12px'}}
+          title="Actual Size (100%)"
         >
-          <Package className="w-4 h-4" />
-        </button>
-        <button
-          className="p-2 rounded-md transition-professional hover:bg-dark-700 text-dark-300"
-          title="Settings"
-        >
-          <Settings className="w-4 h-4" />
-        </button>
-        <button
-          onClick={onShowHelp}
-          className="p-2 rounded-md transition-professional hover:bg-dark-700 text-dark-300"
-          title="Keyboard Shortcuts (F1)"
-        >
-          <HelpCircle className="w-4 h-4" />
+          1:1
         </button>
       </div>
 
+      {/* Right side - Info */}
+      <div className="flex items-center text-dark-400" style={{gap: '16px', fontSize: '11px'}}>
+        <span>6000 × 4000</span>
+        <div className="bg-dark-700" style={{width: '1px', height: '16px'}} />
+        <span>24.0 MP</span>
+        <div className="bg-dark-700" style={{width: '1px', height: '16px'}} />
+        <span>sRGB</span>
+      </div>
     </div>
   );
 }
