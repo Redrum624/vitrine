@@ -1,0 +1,608 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Photo Editor Pro - Ultra Minimal</title>
+  <link rel="stylesheet" href="assets/css/shared.css">
+  <style>
+    :root {
+      --black: #000000;
+      --gray-950: #0a0a0a;
+      --gray-900: #121212;
+      --gray-850: #1a1a1a;
+      --gray-800: #1e1e1e;
+      --gray-700: #2a2a2a;
+      --gray-600: #3a3a3a;
+      --gray-500: #4a4a4a;
+      --gray-400: #6a6a6a;
+      --gray-300: #8a8a8a;
+      --gray-200: #aaaaaa;
+      --gray-100: #cccccc;
+      --white: #ffffff;
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      background: var(--black);
+      color: var(--gray-200);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+      overflow: hidden;
+      font-size: 13px;
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    .app {
+      display: grid;
+      grid-template-rows: auto 1fr;
+      height: 100vh;
+      gap: 1px;
+      background: var(--gray-900);
+    }
+
+    /* Header - Ultra Minimal */
+    .header {
+      background: var(--black);
+      padding: 16px 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .app-title {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 1.5px;
+      color: var(--gray-400);
+    }
+
+    .header-actions {
+      display: flex;
+      gap: 16px;
+      align-items: center;
+    }
+
+    .header-btn {
+      font-size: 11px;
+      color: var(--gray-400);
+      background: none;
+      border: none;
+      cursor: pointer;
+      padding: 6px 12px;
+      transition: color 0.2s ease;
+      letter-spacing: 0.3px;
+    }
+
+    .header-btn:hover {
+      color: var(--gray-100);
+    }
+
+    .info-text {
+      font-size: 10px;
+      color: var(--gray-500);
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* Main Layout - Simplified */
+    .main {
+      display: grid;
+      grid-template-columns: 300px 1fr 380px;
+      gap: 1px;
+      background: var(--gray-900);
+      overflow: hidden;
+    }
+
+    /* Left Panel - Cleaner */
+    .left-panel {
+      background: var(--black);
+      overflow-y: auto;
+      padding: 32px 0;
+    }
+
+    .module-section {
+      padding: 0 24px 32px 24px;
+    }
+
+    .section-title {
+      font-size: 9px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      color: var(--gray-600);
+      margin-bottom: 16px;
+    }
+
+    .module-list {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .module-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 0;
+      background: none;
+      border: none;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      border-bottom: 1px solid transparent;
+    }
+
+    .module-item:hover {
+      border-bottom-color: var(--gray-900);
+    }
+
+    .module-item.active {
+      border-bottom-color: var(--gray-800);
+    }
+
+    .module-name {
+      font-size: 12px;
+      color: var(--gray-300);
+      letter-spacing: 0.2px;
+    }
+
+    .module-item.active .module-name {
+      color: var(--white);
+    }
+
+    .module-toggle {
+      width: 32px;
+      height: 18px;
+      background: var(--gray-900);
+      border-radius: 9px;
+      position: relative;
+      transition: all 0.2s ease;
+    }
+
+    .module-toggle.active {
+      background: var(--gray-700);
+    }
+
+    .module-toggle::after {
+      content: '';
+      position: absolute;
+      width: 12px;
+      height: 12px;
+      background: var(--gray-600);
+      border-radius: 50%;
+      top: 3px;
+      left: 3px;
+      transition: all 0.2s ease;
+    }
+
+    .module-toggle.active::after {
+      left: 17px;
+      background: var(--gray-300);
+    }
+
+    /* Canvas Area - Maximum Focus */
+    .canvas-area {
+      background: var(--gray-950);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+    }
+
+    .canvas-image {
+      max-width: 94%;
+      max-height: 94%;
+      object-fit: contain;
+      box-shadow: 0 0 80px rgba(0, 0, 0, 1);
+    }
+
+    /* Right Panel - Clean Adjustments */
+    .right-panel {
+      background: var(--black);
+      overflow-y: auto;
+      padding: 32px 24px;
+    }
+
+    .panel-title {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      color: var(--white);
+      margin-bottom: 32px;
+    }
+
+    .control-group {
+      margin-bottom: 32px;
+    }
+
+    .control-label {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 12px;
+    }
+
+    .label-name {
+      font-size: 10px;
+      color: var(--gray-500);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      font-weight: 500;
+    }
+
+    .label-value {
+      font-size: 12px;
+      color: var(--gray-100);
+      font-weight: 400;
+      font-variant-numeric: tabular-nums;
+    }
+
+    input[type="range"] {
+      -webkit-appearance: none;
+      width: 100%;
+      height: 2px;
+      background: var(--gray-900);
+      border: none;
+      outline: none;
+      cursor: pointer;
+    }
+
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 12px;
+      height: 12px;
+      background: var(--gray-300);
+      border-radius: 50%;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    input[type="range"]::-webkit-slider-thumb:hover {
+      background: var(--gray-100);
+      transform: scale(1.15);
+    }
+
+    input[type="range"]::-moz-range-thumb {
+      width: 12px;
+      height: 12px;
+      background: var(--gray-300);
+      border-radius: 50%;
+      cursor: pointer;
+      border: none;
+      transition: all 0.2s ease;
+    }
+
+    input[type="range"]::-moz-range-thumb:hover {
+      background: var(--gray-100);
+      transform: scale(1.15);
+    }
+
+    select {
+      width: 100%;
+      padding: 10px 12px;
+      background: var(--gray-900);
+      border: none;
+      color: var(--gray-200);
+      font-size: 12px;
+      cursor: pointer;
+      outline: none;
+      transition: all 0.2s ease;
+    }
+
+    select:hover {
+      background: var(--gray-850);
+    }
+
+    .action-btn {
+      width: 100%;
+      padding: 12px;
+      background: var(--gray-900);
+      border: none;
+      color: var(--gray-300);
+      font-size: 11px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      letter-spacing: 0.5px;
+      margin-top: 16px;
+    }
+
+    .action-btn:hover {
+      background: var(--gray-850);
+      color: var(--gray-100);
+    }
+
+    .divider {
+      height: 1px;
+      background: var(--gray-900);
+      margin: 40px 0;
+    }
+
+    .section-group {
+      margin-bottom: 40px;
+    }
+
+    .group-title {
+      font-size: 9px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      color: var(--gray-600);
+      margin-bottom: 24px;
+    }
+
+    /* Histogram - Minimal */
+    .histogram-container {
+      background: var(--gray-900);
+      padding: 16px;
+      margin-top: 40px;
+    }
+
+    .histogram-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+
+    .histogram-title {
+      font-size: 9px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      color: var(--gray-600);
+    }
+
+    .histogram-channels {
+      display: flex;
+      gap: 8px;
+      font-size: 8px;
+      font-weight: 600;
+      color: var(--gray-600);
+    }
+
+    .histogram-canvas {
+      width: 100%;
+      height: 100px;
+      background: var(--black);
+    }
+
+    /* Scrollbar - Invisible */
+    ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: var(--gray-900);
+      border-radius: 4px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: var(--gray-850);
+    }
+
+    /* Zoom Indicator - Floating */
+    .zoom-indicator {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--black);
+      padding: 8px 20px;
+      font-size: 10px;
+      color: var(--gray-500);
+      letter-spacing: 0.5px;
+      font-variant-numeric: tabular-nums;
+      z-index: 100;
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+
+    <!-- Header -->
+    <header class="header">
+      <h1 class="app-title">PHOTO EDITOR PRO</h1>
+      <div class="header-actions">
+        <button class="header-btn">OPEN</button>
+        <button class="header-btn">SAVE</button>
+        <button class="header-btn">EXPORT</button>
+        <div style="width: 1px; height: 16px; background: var(--gray-900); margin: 0 8px;"></div>
+        <span class="info-text">6000 × 4000</span>
+        <span class="info-text">•</span>
+        <span class="info-text">24.0 MP</span>
+      </div>
+    </header>
+
+    <!-- Main -->
+    <main class="main">
+
+      <!-- Left Panel -->
+      <aside class="left-panel">
+
+        <div class="module-section">
+          <h3 class="section-title">Geometry</h3>
+          <div class="module-list">
+            <div class="module-item">
+              <span class="module-name">Crop</span>
+              <div class="module-toggle"></div>
+            </div>
+            <div class="module-item active">
+              <span class="module-name">Transform</span>
+              <div class="module-toggle active"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="module-section">
+          <h3 class="section-title">Exposure & Color</h3>
+          <div class="module-list">
+            <div class="module-item">
+              <span class="module-name">Exposure</span>
+              <div class="module-toggle active"></div>
+            </div>
+            <div class="module-item">
+              <span class="module-name">White Balance</span>
+              <div class="module-toggle active"></div>
+            </div>
+            <div class="module-item">
+              <span class="module-name">Basic Adjustments</span>
+              <div class="module-toggle active"></div>
+            </div>
+            <div class="module-item">
+              <span class="module-name">Tone Curve</span>
+              <div class="module-toggle"></div>
+            </div>
+            <div class="module-item">
+              <span class="module-name">Color Balance</span>
+              <div class="module-toggle"></div>
+            </div>
+            <div class="module-item">
+              <span class="module-name">Shadows / Highlights</span>
+              <div class="module-toggle"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="module-section">
+          <h3 class="section-title">Local & Effects</h3>
+          <div class="module-list">
+            <div class="module-item">
+              <span class="module-name">Local Adjustments</span>
+              <div class="module-toggle"></div>
+            </div>
+            <div class="module-item">
+              <span class="module-name">Noise Reduction</span>
+              <div class="module-toggle"></div>
+            </div>
+          </div>
+        </div>
+
+      </aside>
+
+      <!-- Canvas -->
+      <section class="canvas-area">
+        <img src="assets/images/Full_RAW_development.webp" alt="Photo" class="canvas-image">
+      </section>
+
+      <!-- Right Panel -->
+      <aside class="right-panel">
+
+        <h2 class="panel-title">Transform</h2>
+
+        <div class="section-group">
+          <div class="control-group">
+            <div class="control-label">
+              <span class="label-name">Angle</span>
+              <span class="label-value">−2.5°</span>
+            </div>
+            <input type="range" min="-45" max="45" value="-2.5" step="0.1">
+          </div>
+
+          <div class="control-group">
+            <div class="control-label">
+              <span class="label-name">Horizontal</span>
+              <span class="label-value">0</span>
+            </div>
+            <input type="range" min="-10" max="10" value="0" step="0.1">
+          </div>
+
+          <div class="control-group">
+            <div class="control-label">
+              <span class="label-name">Vertical</span>
+              <span class="label-value">0</span>
+            </div>
+            <input type="range" min="-10" max="10" value="0" step="0.1">
+          </div>
+
+          <div class="control-group">
+            <div class="control-label">
+              <span class="label-name">Interpolation</span>
+            </div>
+            <select>
+              <option>Nearest Neighbor</option>
+              <option>Bilinear</option>
+              <option selected>Bicubic</option>
+            </select>
+          </div>
+
+          <button class="action-btn">AUTO STRAIGHTEN</button>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="section-group">
+          <div class="group-title">Exposure</div>
+
+          <div class="control-group">
+            <div class="control-label">
+              <span class="label-name">Exposure</span>
+              <span class="label-value">+0.8</span>
+            </div>
+            <input type="range" min="-3" max="3" value="0.8" step="0.01">
+          </div>
+
+          <div class="control-group">
+            <div class="control-label">
+              <span class="label-name">Black Point</span>
+              <span class="label-value">−5</span>
+            </div>
+            <input type="range" min="-100" max="100" value="-5" step="1">
+          </div>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="section-group">
+          <div class="group-title">White Balance</div>
+
+          <div class="control-group">
+            <div class="control-label">
+              <span class="label-name">Temperature</span>
+              <span class="label-value">5800K</span>
+            </div>
+            <input type="range" min="2000" max="10000" value="5800" step="100">
+          </div>
+
+          <div class="control-group">
+            <div class="control-label">
+              <span class="label-name">Tint</span>
+              <span class="label-value">+5</span>
+            </div>
+            <input type="range" min="-50" max="50" value="5" step="1">
+          </div>
+        </div>
+
+        <div class="histogram-container">
+          <div class="histogram-header">
+            <span class="histogram-title">Histogram</span>
+            <div class="histogram-channels">
+              <span>R</span>
+              <span>G</span>
+              <span>B</span>
+            </div>
+          </div>
+          <canvas class="histogram-canvas" width="330" height="100"></canvas>
+        </div>
+
+      </aside>
+
+    </main>
+
+    <!-- Floating Zoom Indicator -->
+    <div class="zoom-indicator">100% • 100% LOCAL PROCESSING</div>
+
+  </div>
+</body>
+</html>
