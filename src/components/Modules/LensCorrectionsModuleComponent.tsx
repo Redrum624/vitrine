@@ -1,6 +1,5 @@
 import React, { useState, useCallback } from 'react';
 import { Camera, Zap, Palette, Eye, RotateCcw, Target } from 'lucide-react';
-import SliderControl from '../Controls/SliderControl';
 import { LensCorrectionsParams } from '../../modules/LensCorrectionsModule';
 
 interface LensCorrectionsModuleComponentProps {
@@ -113,36 +112,52 @@ export const LensCorrectionsModuleComponent: React.FC<LensCorrectionsModuleCompo
   }, [parameters.distortion, onParametersChange]);
 
   const renderVignettingTab = () => (
-    <div className="space-y-4">
-      {/* Enable Toggle */}
+    <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <label className="flex items-center space-x-2 cursor-pointer">
+        <label className="flex items-center gap-2">
           <input
             type="checkbox"
             checked={parameters.vignetting.enabled}
             onChange={(e) => handleVignettingChange('enabled', e.target.checked)}
-            className="rounded border-gray-600 bg-gray-700 text-blue-600 focus:ring-blue-500"
+            className="rounded"
+            style={{borderColor: 'var(--border)'}}
           />
-          <span className="text-sm font-medium text-gray-300">Enable Vignetting Correction</span>
+          <span className="text-sm font-medium" style={{color: 'var(--gray-300)'}}>Enable Vignetting</span>
         </label>
-        <div className="flex gap-1">
+        <div className="flex gap-1.5">
           {onAutoDetectVignetting && (
             <button
               onClick={onAutoDetectVignetting}
-              className="px-2 py-1 bg-blue-600 hover:bg-blue-500 text-white text-xs rounded transition-colors flex items-center gap-1"
+              className="px-2 py-1 text-xs rounded transition-colors flex items-center gap-1"
+              style={{
+                backgroundColor: 'var(--primary-600)',
+                color: 'var(--white)'
+              }}
               title="Auto-detect vignetting"
             >
-              <Target size={12} />
+              <Target className="w-3 h-3" />
               Auto
             </button>
           )}
           {onResetSection && (
             <button
               onClick={() => onResetSection('vignetting')}
-              className="px-2 py-1 bg-gray-600 hover:bg-gray-500 text-white text-xs rounded transition-colors"
+              className="p-1 rounded"
+              style={{
+                backgroundColor: 'transparent',
+                color: 'var(--gray-400)'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = 'var(--gray-800)';
+                e.currentTarget.style.color = 'var(--white)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = 'transparent';
+                e.currentTarget.style.color = 'var(--gray-400)';
+              }}
               title="Reset vignetting"
             >
-              <RotateCcw size={12} />
+              <RotateCcw className="w-3 h-3" />
             </button>
           )}
         </div>
@@ -150,15 +165,24 @@ export const LensCorrectionsModuleComponent: React.FC<LensCorrectionsModuleCompo
 
       {parameters.vignetting.enabled && (
         <div className="space-y-3">
-          {/* Presets */}
-          <div className="space-y-2">
-            <h5 className="text-xs font-medium text-gray-300">Presets</h5>
-            <div className="grid grid-cols-2 gap-2">
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Presets</label>
+            <div className="grid grid-cols-2 gap-1.5">
               {VIGNETTING_PRESETS.map((preset) => (
                 <button
                   key={preset.name}
                   onClick={() => applyVignettingPreset(preset)}
-                  className="px-2 py-1 bg-gray-700 hover:bg-gray-600 text-white text-xs rounded transition-colors"
+                  className="px-2 py-1 text-xs rounded transition-colors"
+                  style={{
+                    backgroundColor: 'var(--gray-700)',
+                    color: 'var(--white)'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = 'var(--gray-600)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = 'var(--gray-700)';
+                  }}
                 >
                   {preset.name}
                 </button>
@@ -166,48 +190,34 @@ export const LensCorrectionsModuleComponent: React.FC<LensCorrectionsModuleCompo
             </div>
           </div>
 
-          {/* Main Controls */}
           <div className="space-y-3">
-            <SliderControl
-              label="Amount"
-              value={parameters.vignetting.amount}
-              min={-100}
-              max={100}
-              step={1}
-              onChange={(value: number) => handleVignettingChange('amount', value)}
-              className="text-xs"
-            />
-
-            <SliderControl
-              label="Midpoint"
-              value={parameters.vignetting.midpoint}
-              min={0.1}
-              max={2.0}
-              step={0.01}
-              onChange={(value: number) => handleVignettingChange('midpoint', value)}
-              className="text-xs"
-            />
-
-            <SliderControl
-              label="Roundness"
-              value={parameters.vignetting.roundness}
-              min={-100}
-              max={100}
-              step={1}
-              onChange={(value: number) => handleVignettingChange('roundness', value)}
-              className="text-xs"
-            />
-
-            <SliderControl
-              label="Feather"
-              value={parameters.vignetting.feather}
-              min={0}
-              max={100}
-              step={1}
-              onChange={(value: number) => handleVignettingChange('feather', value)}
-              className="text-xs"
-              showPercentage
-            />
+            {[
+              { key: 'amount', label: 'Amount', min: -100, max: 100, step: 1 },
+              { key: 'midpoint', label: 'Midpoint', min: 0.1, max: 2.0, step: 0.01 },
+              { key: 'roundness', label: 'Roundness', min: -100, max: 100, step: 1 },
+              { key: 'feather', label: 'Feather', min: 0, max: 100, step: 1 }
+            ].map(({ key, label, min, max, step }) => (
+              <div key={key} className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>{label}</label>
+                  <span className="text-xs font-mono" style={{color: 'var(--gray-400)'}}>
+                    {typeof parameters.vignetting[key as keyof typeof parameters.vignetting] === 'number'
+                      ? (parameters.vignetting[key as keyof typeof parameters.vignetting] as number).toFixed(key === 'midpoint' ? 2 : 0)
+                      : '0'}
+                    {key === 'feather' ? '%' : ''}
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={min}
+                  max={max}
+                  step={step}
+                  value={parameters.vignetting[key as keyof typeof parameters.vignetting] as number}
+                  onChange={(e) => handleVignettingChange(key, parseFloat(e.target.value))}
+                  className="slider w-full"
+                />
+              </div>
+            ))}
           </div>
         </div>
       )}
@@ -215,40 +225,61 @@ export const LensCorrectionsModuleComponent: React.FC<LensCorrectionsModuleCompo
   );
 
   const renderDistortionTab = () => (
-    <div className="space-y-4">
-      {/* Enable Toggle */}
+    <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <label className="flex items-center space-x-2 cursor-pointer">
+        <label className="flex items-center gap-2">
           <input
             type="checkbox"
             checked={parameters.distortion.enabled}
             onChange={(e) => handleDistortionChange('enabled', e.target.checked)}
-            className="rounded border-gray-600 bg-gray-700 text-blue-600 focus:ring-blue-500"
+            className="rounded"
+            style={{borderColor: 'var(--border)'}}
           />
-          <span className="text-sm font-medium text-gray-300">Enable Distortion Correction</span>
+          <span className="text-sm font-medium" style={{color: 'var(--gray-300)'}}>Enable Distortion</span>
         </label>
         {onResetSection && (
           <button
             onClick={() => onResetSection('distortion')}
-            className="px-2 py-1 bg-gray-600 hover:bg-gray-500 text-white text-xs rounded transition-colors"
+            className="p-1 rounded"
+            style={{
+              backgroundColor: 'transparent',
+              color: 'var(--gray-400)'
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = 'var(--gray-800)';
+              e.currentTarget.style.color = 'var(--white)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = 'transparent';
+              e.currentTarget.style.color = 'var(--gray-400)';
+            }}
             title="Reset distortion"
           >
-            <RotateCcw size={12} />
+            <RotateCcw className="w-3 h-3" />
           </button>
         )}
       </div>
 
       {parameters.distortion.enabled && (
         <div className="space-y-3">
-          {/* Presets */}
-          <div className="space-y-2">
-            <h5 className="text-xs font-medium text-gray-300">Presets</h5>
-            <div className="grid grid-cols-2 gap-2">
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Presets</label>
+            <div className="grid grid-cols-2 gap-1.5">
               {DISTORTION_PRESETS.map((preset) => (
                 <button
                   key={preset.name}
                   onClick={() => applyDistortionPreset(preset)}
-                  className="px-2 py-1 bg-gray-700 hover:bg-gray-600 text-white text-xs rounded transition-colors"
+                  className="px-2 py-1 text-xs rounded transition-colors"
+                  style={{
+                    backgroundColor: 'var(--gray-700)',
+                    color: 'var(--white)'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = 'var(--gray-600)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = 'var(--gray-700)';
+                  }}
                 >
                   {preset.name}
                 </button>
@@ -256,61 +287,57 @@ export const LensCorrectionsModuleComponent: React.FC<LensCorrectionsModuleCompo
             </div>
           </div>
 
-          {/* Main Controls */}
           <div className="space-y-3">
-            <SliderControl
-              label="Barrel/Pincushion"
-              value={parameters.distortion.barrel}
-              min={-100}
-              max={100}
-              step={1}
-              onChange={(value: number) => handleDistortionChange('barrel', value)}
-              className="text-xs"
-              description="Negative = Barrel, Positive = Pincushion"
-            />
-
-            <SliderControl
-              label="Scale"
-              value={parameters.distortion.scale}
-              min={0.5}
-              max={2.0}
-              step={0.01}
-              onChange={(value: number) => handleDistortionChange('scale', value)}
-              className="text-xs"
-            />
+            {[
+              { key: 'barrel', label: 'Barrel/Pincushion', min: -100, max: 100, step: 1, desc: 'Negative = Barrel, Positive = Pincushion' },
+              { key: 'scale', label: 'Scale', min: 0.5, max: 2.0, step: 0.01, desc: null }
+            ].map(({ key, label, min, max, step, desc }) => (
+              <div key={key} className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>{label}</label>
+                  <span className="text-xs font-mono" style={{color: 'var(--gray-400)'}}>
+                    {(parameters.distortion[key as keyof typeof parameters.distortion] as number).toFixed(key === 'scale' ? 2 : 0)}
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={min}
+                  max={max}
+                  step={step}
+                  value={parameters.distortion[key as keyof typeof parameters.distortion] as number}
+                  onChange={(e) => handleDistortionChange(key, parseFloat(e.target.value))}
+                  className="slider w-full"
+                />
+                {desc && <div className="text-xs" style={{color: 'var(--gray-500)'}}>{desc}</div>}
+              </div>
+            ))}
           </div>
 
-          {/* Perspective Correction */}
-          <div className="space-y-2">
-            <h5 className="text-xs font-medium text-gray-300">Perspective Correction</h5>
+          <div className="space-y-1.5 pt-3" style={{borderTop: '1px solid var(--border)'}}>
+            <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Perspective Correction</label>
 
-            <SliderControl
-              label="Horizontal"
-              value={parameters.distortion.perspective.horizontal}
-              min={-45}
-              max={45}
-              step={0.1}
-              onChange={(value: number) => handleDistortionChange('perspective', {
-                ...parameters.distortion.perspective,
-                horizontal: value
-              })}
-              className="text-xs"
-              description="Degrees"
-            />
-
-            <SliderControl
-              label="Vertical"
-              value={parameters.distortion.perspective.vertical}
-              min={-45}
-              max={45}
-              step={0.1}
-              onChange={(value: number) => handleDistortionChange('perspective', {
-                ...parameters.distortion.perspective,
-                vertical: value
-              })}
-              className="text-xs"
-              description="Degrees"
-            />
+            {['horizontal', 'vertical'].map((key) => (
+              <div key={key} className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-medium capitalize" style={{color: 'var(--gray-300)'}}>{key}</span>
+                  <span className="text-xs font-mono" style={{color: 'var(--gray-400)'}}>
+                    {parameters.distortion.perspective[key as keyof typeof parameters.distortion.perspective].toFixed(1)}°
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={-45}
+                  max={45}
+                  step={0.1}
+                  value={parameters.distortion.perspective[key as keyof typeof parameters.distortion.perspective]}
+                  onChange={(e) => handleDistortionChange('perspective', {
+                    ...parameters.distortion.perspective,
+                    [key]: parseFloat(e.target.value)
+                  })}
+                  className="slider w-full"
+                />
+              </div>
+            ))}
           </div>
         </div>
       )}
@@ -318,164 +345,206 @@ export const LensCorrectionsModuleComponent: React.FC<LensCorrectionsModuleCompo
   );
 
   const renderChromaticTab = () => (
-    <div className="space-y-4">
-      {/* Enable Toggle */}
+    <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <label className="flex items-center space-x-2 cursor-pointer">
+        <label className="flex items-center gap-2">
           <input
             type="checkbox"
             checked={parameters.chromaticAberration.enabled}
             onChange={(e) => handleChromaticAberrationChange('enabled', e.target.checked)}
-            className="rounded border-gray-600 bg-gray-700 text-blue-600 focus:ring-blue-500"
+            className="rounded"
+            style={{borderColor: 'var(--border)'}}
           />
-          <span className="text-sm font-medium text-gray-300">Enable Chromatic Aberration Correction</span>
+          <span className="text-sm font-medium" style={{color: 'var(--gray-300)'}}>Enable Chromatic Aberration</span>
         </label>
         {onResetSection && (
           <button
             onClick={() => onResetSection('chromaticAberration')}
-            className="px-2 py-1 bg-gray-600 hover:bg-gray-500 text-white text-xs rounded transition-colors"
+            className="p-1 rounded"
+            style={{
+              backgroundColor: 'transparent',
+              color: 'var(--gray-400)'
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = 'var(--gray-800)';
+              e.currentTarget.style.color = 'var(--white)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = 'transparent';
+              e.currentTarget.style.color = 'var(--gray-400)';
+            }}
             title="Reset chromatic aberration"
           >
-            <RotateCcw size={12} />
+            <RotateCcw className="w-3 h-3" />
           </button>
         )}
       </div>
 
       {parameters.chromaticAberration.enabled && (
         <div className="space-y-3">
-          {/* Lateral Chromatic Aberration */}
-          <div className="space-y-2">
-            <h5 className="text-xs font-medium text-gray-300">Lateral Chromatic Aberration</h5>
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Lateral Chromatic Aberration</label>
 
-            <SliderControl
-              label="Red/Cyan"
-              value={parameters.chromaticAberration.redCyan}
-              min={-100}
-              max={100}
-              step={1}
-              onChange={(value: number) => handleChromaticAberrationChange('redCyan', value)}
-              className="text-xs"
-            />
-
-            <SliderControl
-              label="Blue/Magenta"
-              value={parameters.chromaticAberration.blueMagenta}
-              min={-100}
-              max={100}
-              step={1}
-              onChange={(value: number) => handleChromaticAberrationChange('blueMagenta', value)}
-              className="text-xs"
-            />
+            {[
+              { key: 'redCyan', label: 'Red/Cyan' },
+              { key: 'blueMagenta', label: 'Blue/Magenta' }
+            ].map(({ key, label }) => (
+              <div key={key} className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>{label}</span>
+                  <span className="text-xs font-mono" style={{color: 'var(--gray-400)'}}>
+                    {(() => {
+                      const value = parameters.chromaticAberration[key as keyof typeof parameters.chromaticAberration];
+                      return typeof value === 'number' ? value : 0;
+                    })()}
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={-100}
+                  max={100}
+                  step={1}
+                  value={typeof parameters.chromaticAberration[key as keyof typeof parameters.chromaticAberration] === 'number'
+                    ? parameters.chromaticAberration[key as keyof typeof parameters.chromaticAberration] as number
+                    : 0}
+                  onChange={(e) => handleChromaticAberrationChange(key, parseFloat(e.target.value))}
+                  className="slider w-full"
+                />
+              </div>
+            ))}
           </div>
 
-          {/* Color Fringing */}
-          <div className="space-y-2">
-            <h5 className="text-xs font-medium text-gray-300">Color Fringing</h5>
+          <div className="space-y-2 pt-3" style={{borderTop: '1px solid var(--border)'}}>
+            <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Color Fringing</label>
 
-            {/* Purple Fringing */}
-            <div className="space-y-2 pl-2 border-l border-purple-500">
-              <span className="text-xs text-purple-400 font-medium">Purple Fringing</span>
+            {[
+              { key: 'purple', label: 'Purple Fringing', color: '#a855f7' },
+              { key: 'green', label: 'Green Fringing', color: '#22c55e' }
+            ].map(({ key, label, color }) => (
+              <div key={key} className="space-y-2 pl-2" style={{borderLeft: `2px solid ${color}`}}>
+                <span className="text-xs font-medium" style={{color}}>{label}</span>
 
-              <SliderControl
-                label="Amount"
-                value={parameters.chromaticAberration.purple.amount}
-                min={0}
-                max={100}
-                step={1}
-                onChange={(value: number) => handleChromaticAberrationChange('purple', {
-                  ...parameters.chromaticAberration.purple,
-                  amount: value
-                })}
-                className="text-xs"
-                showPercentage
-              />
-
-              {showAdvanced && (
-                <>
-                  <SliderControl
-                    label="Hue"
-                    value={parameters.chromaticAberration.purple.hue}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Amount</span>
+                    <span className="text-xs font-mono" style={{color: 'var(--gray-400)'}}>
+                      {(() => {
+                        const value = parameters.chromaticAberration[key as keyof typeof parameters.chromaticAberration];
+                        return typeof value === 'object' && value !== null && 'amount' in value
+                          ? (value as {amount: number; hue: number; range: number}).amount
+                          : 0;
+                      })()}%
+                    </span>
+                  </div>
+                  <input
+                    type="range"
                     min={0}
-                    max={360}
-                    step={1}
-                    onChange={(value: number) => handleChromaticAberrationChange('purple', {
-                      ...parameters.chromaticAberration.purple,
-                      hue: value
-                    })}
-                    className="text-xs"
-                    description="Degrees"
-                  />
-
-                  <SliderControl
-                    label="Range"
-                    value={parameters.chromaticAberration.purple.range}
-                    min={1}
                     max={100}
                     step={1}
-                    onChange={(value: number) => handleChromaticAberrationChange('purple', {
-                      ...parameters.chromaticAberration.purple,
-                      range: value
-                    })}
-                    className="text-xs"
+                    value={(() => {
+                      const value = parameters.chromaticAberration[key as keyof typeof parameters.chromaticAberration];
+                      return typeof value === 'object' && value !== null && 'amount' in value
+                        ? (value as {amount: number; hue: number; range: number}).amount
+                        : 0;
+                    })()}
+                    onChange={(e) => {
+                      const current = parameters.chromaticAberration[key as keyof typeof parameters.chromaticAberration];
+                      if (typeof current === 'object' && current !== null && 'amount' in current) {
+                        handleChromaticAberrationChange(key, {
+                          amount: parseFloat(e.target.value),
+                          hue: (current as {amount: number; hue: number; range: number}).hue,
+                          range: (current as {amount: number; hue: number; range: number}).range
+                        });
+                      }
+                    }}
+                    className="slider w-full"
                   />
-                </>
-              )}
-            </div>
+                </div>
 
-            {/* Green Fringing */}
-            <div className="space-y-2 pl-2 border-l border-green-500">
-              <span className="text-xs text-green-400 font-medium">Green Fringing</span>
+                {showAdvanced && (
+                  <>
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Hue</span>
+                        <span className="text-xs font-mono" style={{color: 'var(--gray-400)'}}>
+                          {(() => {
+                            const value = parameters.chromaticAberration[key as keyof typeof parameters.chromaticAberration];
+                            return typeof value === 'object' && value !== null && 'hue' in value
+                              ? (value as {amount: number; hue: number; range: number}).hue
+                              : 0;
+                          })()}°
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min={0}
+                        max={360}
+                        step={1}
+                        value={(() => {
+                          const value = parameters.chromaticAberration[key as keyof typeof parameters.chromaticAberration];
+                          return typeof value === 'object' && value !== null && 'hue' in value
+                            ? (value as {amount: number; hue: number; range: number}).hue
+                            : 0;
+                        })()}
+                        onChange={(e) => {
+                          const current = parameters.chromaticAberration[key as keyof typeof parameters.chromaticAberration];
+                          if (typeof current === 'object' && current !== null && 'hue' in current) {
+                            handleChromaticAberrationChange(key, {
+                              amount: (current as {amount: number; hue: number; range: number}).amount,
+                              hue: parseFloat(e.target.value),
+                              range: (current as {amount: number; hue: number; range: number}).range
+                            });
+                          }
+                        }}
+                        className="slider w-full"
+                      />
+                    </div>
 
-              <SliderControl
-                label="Amount"
-                value={parameters.chromaticAberration.green.amount}
-                min={0}
-                max={100}
-                step={1}
-                onChange={(value: number) => handleChromaticAberrationChange('green', {
-                  ...parameters.chromaticAberration.green,
-                  amount: value
-                })}
-                className="text-xs"
-                showPercentage
-              />
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Range</span>
+                        <span className="text-xs font-mono" style={{color: 'var(--gray-400)'}}>
+                          {(() => {
+                            const value = parameters.chromaticAberration[key as keyof typeof parameters.chromaticAberration];
+                            return typeof value === 'object' && value !== null && 'range' in value
+                              ? (value as {amount: number; hue: number; range: number}).range
+                              : 0;
+                          })()}
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min={1}
+                        max={100}
+                        step={1}
+                        value={(() => {
+                          const value = parameters.chromaticAberration[key as keyof typeof parameters.chromaticAberration];
+                          return typeof value === 'object' && value !== null && 'range' in value
+                            ? (value as {amount: number; hue: number; range: number}).range
+                            : 0;
+                        })()}
+                        onChange={(e) => {
+                          const current = parameters.chromaticAberration[key as keyof typeof parameters.chromaticAberration];
+                          if (typeof current === 'object' && current !== null && 'range' in current) {
+                            handleChromaticAberrationChange(key, {
+                              amount: (current as {amount: number; hue: number; range: number}).amount,
+                              hue: (current as {amount: number; hue: number; range: number}).hue,
+                              range: parseFloat(e.target.value)
+                            });
+                          }
+                        }}
+                        className="slider w-full"
+                      />
+                    </div>
+                  </>
+                )}
+              </div>
+            ))}
 
-              {showAdvanced && (
-                <>
-                  <SliderControl
-                    label="Hue"
-                    value={parameters.chromaticAberration.green.hue}
-                    min={0}
-                    max={360}
-                    step={1}
-                    onChange={(value: number) => handleChromaticAberrationChange('green', {
-                      ...parameters.chromaticAberration.green,
-                      hue: value
-                    })}
-                    className="text-xs"
-                    description="Degrees"
-                  />
-
-                  <SliderControl
-                    label="Range"
-                    value={parameters.chromaticAberration.green.range}
-                    min={1}
-                    max={100}
-                    step={1}
-                    onChange={(value: number) => handleChromaticAberrationChange('green', {
-                      ...parameters.chromaticAberration.green,
-                      range: value
-                    })}
-                    className="text-xs"
-                  />
-                </>
-              )}
-            </div>
-
-            {/* Advanced Toggle */}
             <button
               onClick={() => setShowAdvanced(!showAdvanced)}
-              className="text-xs text-blue-400 hover:text-blue-300 transition-colors"
+              className="text-xs transition-colors"
+              style={{color: 'var(--primary-400)'}}
             >
               {showAdvanced ? 'Hide' : 'Show'} Advanced Settings
             </button>
@@ -486,44 +555,48 @@ export const LensCorrectionsModuleComponent: React.FC<LensCorrectionsModuleCompo
   );
 
   const renderProfileTab = () => (
-    <div className="space-y-4">
-      {/* Enable Toggle */}
-      <div className="flex items-center justify-between">
-        <label className="flex items-center space-x-2 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={parameters.profile.enabled}
-            onChange={(e) => handleProfileChange('enabled', e.target.checked)}
-            className="rounded border-gray-600 bg-gray-700 text-blue-600 focus:ring-blue-500"
-          />
-          <span className="text-sm font-medium text-gray-300">Enable Profile-based Correction</span>
-        </label>
-      </div>
+    <div className="space-y-3">
+      <label className="flex items-center gap-2">
+        <input
+          type="checkbox"
+          checked={parameters.profile.enabled}
+          onChange={(e) => handleProfileChange('enabled', e.target.checked)}
+          className="rounded"
+          style={{borderColor: 'var(--border)'}}
+        />
+        <span className="text-sm font-medium" style={{color: 'var(--gray-300)'}}>Enable Profile-based Correction</span>
+      </label>
 
       {parameters.profile.enabled && (
         <div className="space-y-3">
-          <div className="text-xs text-gray-400">
+          <div className="text-xs" style={{color: 'var(--gray-400)'}}>
             Profile-based correction uses lens manufacturer data to automatically correct distortion,
             vignetting, and chromatic aberration.
           </div>
 
-          <label className="flex items-center space-x-2 cursor-pointer">
+          <label className="flex items-center gap-2">
             <input
               type="checkbox"
               checked={parameters.profile.autoDetect}
               onChange={(e) => handleProfileChange('autoDetect', e.target.checked)}
-              className="rounded border-gray-600 bg-gray-700 text-blue-600 focus:ring-blue-500"
+              className="rounded"
+              style={{borderColor: 'var(--border)'}}
             />
-            <span className="text-xs text-gray-300">Auto-detect lens profile</span>
+            <span className="text-xs" style={{color: 'var(--gray-300)'}}>Auto-detect lens profile</span>
           </label>
 
           {!parameters.profile.autoDetect && (
-            <div className="space-y-2">
-              <label className="text-xs font-medium text-gray-300">Manual Profile Selection</label>
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Manual Profile Selection</label>
               <select
                 value={parameters.profile.profileName}
                 onChange={(e) => handleProfileChange('profileName', e.target.value)}
-                className="w-full px-3 py-1 bg-gray-700 border border-gray-600 rounded text-xs text-white"
+                className="w-full px-3 py-1 text-xs rounded border"
+                style={{
+                  backgroundColor: 'var(--gray-700)',
+                  color: 'var(--white)',
+                  borderColor: 'var(--border)'
+                }}
               >
                 <option value="">No profile selected</option>
                 <option value="canon_ef_24-70_f2.8">Canon EF 24-70mm f/2.8L</option>
@@ -534,18 +607,23 @@ export const LensCorrectionsModuleComponent: React.FC<LensCorrectionsModuleCompo
             </div>
           )}
 
-          <SliderControl
-            label="Profile Strength"
-            value={parameters.profile.strength}
-            min={0}
-            max={100}
-            step={1}
-            onChange={(value: number) => handleProfileChange('strength', value)}
-            className="text-xs"
-            showPercentage
-          />
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Profile Strength</label>
+              <span className="text-xs font-mono" style={{color: 'var(--gray-400)'}}>{parameters.profile.strength}%</span>
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              step={1}
+              value={parameters.profile.strength}
+              onChange={(e) => handleProfileChange('strength', parseFloat(e.target.value))}
+              className="slider w-full"
+            />
+          </div>
 
-          <div className="text-xs text-gray-500 mt-2">
+          <div className="text-xs mt-2" style={{color: 'var(--gray-500)'}}>
             Current profile: {parameters.profile.profileName || 'Auto-detect'}
           </div>
         </div>
@@ -554,26 +632,44 @@ export const LensCorrectionsModuleComponent: React.FC<LensCorrectionsModuleCompo
   );
 
   return (
-    <div className={`bg-gray-800 rounded-lg p-4 ${className}`}>
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-sm font-semibold text-gray-200">Lens Corrections</h3>
-        <div className="flex items-center gap-1">
-          <Camera size={16} className="text-gray-400" />
+    <div className={`space-y-3 ${className}`}>
+      {/* Header */}
+      <div className="flex items-center justify-between pb-2" style={{borderBottom: '1px solid var(--border)'}}>
+        <div className="flex items-center gap-2">
+          <div className="w-1 h-3 rounded-sm" style={{backgroundColor: 'var(--gray-600)'}} />
+          <span className="text-xs font-medium uppercase tracking-wider" style={{color: 'var(--gray-500)', letterSpacing: '0.5px'}}>Controls</span>
+        </div>
+        <div className="flex items-center gap-1.5">
           {onResetSection && (
             <button
               onClick={() => onResetSection('all')}
-              className="px-2 py-1 bg-gray-600 hover:bg-gray-500 text-white text-xs rounded transition-colors"
+              className="p-1.5 rounded border"
+              style={{
+                backgroundColor: 'transparent',
+                borderColor: 'var(--border)',
+                color: 'var(--gray-400)',
+                transition: 'var(--transition-fast)'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = 'var(--gray-800)';
+                e.currentTarget.style.borderColor = 'var(--border-light)';
+                e.currentTarget.style.color = 'var(--white)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = 'transparent';
+                e.currentTarget.style.borderColor = 'var(--border)';
+                e.currentTarget.style.color = 'var(--gray-400)';
+              }}
               title="Reset all corrections"
             >
-              <RotateCcw size={12} />
-              All
+              <RotateCcw className="w-3.5 h-3.5" />
             </button>
           )}
         </div>
       </div>
 
       {/* Tab Navigation */}
-      <div className="flex border-b border-gray-600 mb-4">
+      <div className="flex gap-1 rounded-lg p-1" style={{backgroundColor: 'var(--gray-700)'}}>
         {[
           { key: 'vignetting', label: 'Vignetting', icon: Eye },
           { key: 'distortion', label: 'Distortion', icon: Zap },
@@ -583,20 +679,22 @@ export const LensCorrectionsModuleComponent: React.FC<LensCorrectionsModuleCompo
           <button
             key={key}
             onClick={() => setActiveTab(key as TabType)}
-            className={`flex items-center gap-1 px-3 py-2 text-xs font-medium transition-colors ${
-              activeTab === key
-                ? 'text-blue-400 border-b-2 border-blue-400'
-                : 'text-gray-400 hover:text-gray-200'
+            className={`flex-1 flex items-center justify-center gap-1 px-3 py-2 text-xs font-medium rounded-md transition-all ${
+              activeTab === key ? 'shadow-sm' : 'bg-transparent'
             }`}
+            style={{
+              backgroundColor: activeTab === key ? 'var(--gray-600)' : 'transparent',
+              color: activeTab === key ? 'var(--white)' : 'var(--gray-300)'
+            }}
           >
-            <Icon size={12} />
+            <Icon className="w-3 h-3" />
             {label}
           </button>
         ))}
       </div>
 
       {/* Tab Content */}
-      <div className="space-y-4">
+      <div className="space-y-3">
         {activeTab === 'vignetting' && renderVignettingTab()}
         {activeTab === 'distortion' && renderDistortionTab()}
         {activeTab === 'chromatic' && renderChromaticTab()}
@@ -604,11 +702,11 @@ export const LensCorrectionsModuleComponent: React.FC<LensCorrectionsModuleCompo
       </div>
 
       {/* Status Summary */}
-      <div className="mt-4 pt-3 border-t border-gray-600">
-        <div className="text-xs text-gray-400">
+      <div className="pt-3" style={{borderTop: '1px solid var(--border)'}}>
+        <div className="text-xs" style={{color: 'var(--gray-400)'}}>
           <div className="flex items-center justify-between">
             <span>Active Corrections:</span>
-            <span className="text-blue-400">
+            <span style={{color: 'var(--primary-400)'}}>
               {[
                 parameters.vignetting.enabled && 'Vignetting',
                 parameters.distortion.enabled && 'Distortion',

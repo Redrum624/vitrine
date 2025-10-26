@@ -172,15 +172,17 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
     const centerX = canvas.width / 2;
     const centerY = canvas.height / 2;
 
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
     ctx.fillStyle = '#525252';
     ctx.font = 'bold 24px system-ui';
-    ctx.textAlign = 'center';
-    ctx.fillText('No Image Loaded', centerX, centerY - 20);
+    ctx.fillText('No Image Loaded', centerX, centerY - 30);
 
     ctx.fillStyle = '#404040';
     ctx.font = '16px system-ui';
-    ctx.fillText('Select an image from the file browser', centerX, centerY + 10);
-    ctx.fillText('or drag and drop a file here', centerX, centerY + 30);
+    ctx.fillText('Select an image from the file browser', centerX, centerY + 5);
+    ctx.fillText('or drag and drop a file here', centerX, centerY + 28);
   }, []);
 
   // Performance optimization: cache canvas context and ImageData
@@ -582,10 +584,19 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
 
   const loadImage = useCallback(async (image: ImageFileInfo) => {
     try {
+      // Check if image is already the current one (avoid redundant loads)
+      const currentImg = imageService.getCurrentImage();
+      if (currentImg && currentImg.filePath === image.path) {
+        logger.debug('Image already loaded, skipping reload');
+        setDisplayImage(image);
+        redrawCanvas();
+        return;
+      }
+
       setImageLoading(true);
       setDisplayImage(image);
 
-      // Load image using ImageService
+      // Load image using ImageService (will use cache if available)
       await imageService.loadImage(image.path);
 
       // Canvas will be redrawn by the useEffect that watches for processedImageData changes
@@ -598,11 +609,11 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
     } finally {
       setImageLoading(false);
     }
-  }, []);
+  }, [redrawCanvas]);
 
   // Handle image loading from file system
   useEffect(() => {
-    if (currentImage && currentImage !== displayImage) {
+    if (currentImage && currentImage.path !== displayImage?.path) {
       loadImage(currentImage);
     }
   }, [currentImage, displayImage, loadImage]);
@@ -841,8 +852,23 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
 
         {/* Loading Indicator */}
         {imageLoading && (
-          <div className="absolute inset-0 flex items-center justify-center bg-dark-900/50 backdrop-blur-sm">
-            <div className="animate-spin rounded-full h-8 w-8 border border-dark-300 border-t-transparent" />
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-dark-900/80 backdrop-blur-sm">
+            <div className="animate-spin rounded-full h-12 w-12 border-2 border-gray-600 border-t-white mb-4" />
+            <div className="text-white text-sm font-medium">
+              {currentImage?.format.toLowerCase() === 'orf' ||
+               currentImage?.format.toLowerCase() === 'cr2' ||
+               currentImage?.format.toLowerCase() === 'cr3' ||
+               currentImage?.format.toLowerCase() === 'nef' ||
+               currentImage?.format.toLowerCase() === 'arw' ||
+               currentImage?.format.toLowerCase() === 'dng' ? (
+                <>
+                  <div className="mb-1">Processing RAW file...</div>
+                  <div className="text-xs text-gray-400">This may take a few moments</div>
+                </>
+              ) : (
+                'Loading image...'
+              )}
+            </div>
           </div>
         )}
 

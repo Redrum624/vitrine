@@ -2,12 +2,12 @@ import { useEffect, useState, useCallback } from 'react';
 import { MenuBar } from './components/Layout/MenuBar';
 import { Toolbar } from './components/Layout/Toolbar';
 import { IconSidebar } from './components/Layout/IconSidebar';
-import { ToolsPanel } from './components/Layout/ToolsPanel';
 import { FileBrowser } from './components/Layout/FileBrowser';
 import { Canvas } from './components/Layout/Canvas';
 import { AdjustmentPanel } from './components/Panels/AdjustmentPanel';
 import { HistogramPanel } from './components/Panels/HistogramPanel';
 import { ThumbnailPanel } from './components/Panels/ThumbnailPanel';
+import { SettingsPanel } from './components/Panels/SettingsPanel';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ExportDialog } from './components/Dialogs/ExportDialog';
 import { BatchProcessingDialog } from './components/Dialogs/BatchProcessingDialog';
@@ -41,7 +41,8 @@ if (process.env.NODE_ENV === 'development') {
 }
 
 function App() {
-  const { setViewport, resetZoom, viewport, processedImageData, selectedTool, setSelectedTool } = useAppStore();
+  const { setViewport, resetZoom, viewport, processedImageData, selectedTool: _selectedTool, setSelectedTool: _setSelectedTool } = useAppStore();
+  const [selectedTool, setSelectedTool] = useState<string | null>('file-explorer'); // Default to file explorer
   const [currentImage, setCurrentImage] = useState<ImageFileInfo | null>(null);
   const [isExportDialogOpen, setIsExportDialogOpen] = useState(false);
   const [isBatchDialogOpen, setIsBatchDialogOpen] = useState(false);
@@ -53,7 +54,6 @@ function App() {
   const [showThumbnailPanel, setShowThumbnailPanel] = useState(false);
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
-  const [moduleStates, setModuleStates] = useState<Record<string, { expanded: boolean; enabled: boolean }>>({});
   const { notifications, remove: removeNotification, success: showSuccess, error: showError } = useNotifications();
 
   // Viewing control functions (available in JSX)
@@ -392,67 +392,85 @@ function App() {
       {/* Main Content - 4-Column Layout */}
       <div className="flex flex-1 flex-col overflow-hidden">
         {/* Main workspace */}
-        <div className="flex flex-1 overflow-hidden">
-          {/* Column 1: Icon Sidebar (64px) */}
+        <div className="flex flex-1 overflow-hidden relative">
+          {/* Column 2: Right Panel - File Explorer, Settings, Modules, or Histogram (360px) - Overlay panel */}
+          <div
+            className="absolute border-l flex-shrink-0 overflow-hidden"
+            style={{
+              right: '64px',
+              top: 0,
+              bottom: 0,
+              width: '360px',
+              transform: selectedTool && selectedTool !== null ? 'translateX(0)' : 'translateX(100%)',
+              borderLeftColor: 'var(--border)',
+              backgroundColor: 'var(--gray-900)',
+              transition: 'transform 300ms cubic-bezier(0.4, 0.0, 0.2, 1), box-shadow 300ms cubic-bezier(0.4, 0.0, 0.2, 1)',
+              boxShadow: selectedTool && selectedTool !== null ? '-2px 0 8px rgba(0,0,0,0.3)' : 'none',
+              zIndex: selectedTool && selectedTool !== null ? 10 : -1,
+              pointerEvents: selectedTool && selectedTool !== null ? 'auto' : 'none'
+            }}
+          >
+            <div style={{display: selectedTool === 'file-explorer' ? 'block' : 'none', height: '100%'}}>
+              <FileBrowser
+                onImageSelected={handleImageSelected}
+                onFolderSelected={handleFolderSelected}
+              />
+            </div>
+            <div style={{display: selectedTool === 'settings' ? 'block' : 'none', height: '100%'}}>
+              <SettingsPanel />
+            </div>
+            <div style={{display: selectedTool === 'histogram' ? 'block' : 'none', height: '100%'}}>
+              <div className="flex flex-col h-full">
+                <div className="px-5 py-4 border-b" style={{borderBottomColor: 'var(--border)'}}>
+                  <h2 className="text-sm font-semibold" style={{color: 'var(--white)'}}>Histogram</h2>
+                </div>
+                <div className="flex-1 p-4">
+                  <HistogramPanel />
+                </div>
+              </div>
+            </div>
+            {/* Module panels will be added next */}
+            <div style={{display: selectedTool && !['file-explorer', 'settings', 'histogram'].includes(selectedTool) ? 'block' : 'none', height: '100%'}}>
+              <AdjustmentPanel selectedModule={selectedTool} />
+            </div>
+          </div>
+
+          {/* Column 1: Canvas (flex) */}
+          <div
+            className="flex-1 canvas-container flex items-center justify-center transition-all"
+            style={{
+              background: '#0a0a0a',
+              marginRight: selectedTool && selectedTool !== null ? '360px' : '0px',
+              transitionDuration: '300ms',
+              transitionTimingFunction: 'cubic-bezier(0.4, 0.0, 0.2, 1)'
+            }}
+          >
+            <div
+              style={{
+                width: 'calc(100% - 40px)',
+                height: 'calc(100% - 40px)',
+                border: '1px solid var(--border)',
+                borderRadius: '4px',
+                overflow: 'hidden',
+                transition: 'all 300ms cubic-bezier(0.4, 0.0, 0.2, 1)'
+              }}
+            >
+              <Canvas
+                onFitWindow={handleFitWindow}
+                onActualSize={handleActualSize}
+                onZoomIn={handleZoomIn}
+                onZoomOut={handleZoomOut}
+                zoom={viewport.zoom}
+                currentImage={currentImage}
+              />
+            </div>
+          </div>
+
+          {/* Column 3: Icon Sidebar (64px) - Right side */}
           <IconSidebar
             selectedTool={selectedTool}
             onToolSelect={(tool) => setSelectedTool(selectedTool === tool ? null : tool)}
           />
-
-          {/* Column 2: Tools Panel (280px) */}
-          <ToolsPanel
-            moduleStates={moduleStates}
-            onModuleToggle={(moduleId) => {
-              setModuleStates(prev => ({
-                ...prev,
-                [moduleId]: {
-                  ...prev[moduleId],
-                  enabled: !prev[moduleId]?.enabled
-                }
-              }));
-            }}
-            onModuleExpandCollapse={(moduleId) => {
-              setModuleStates(prev => ({
-                ...prev,
-                [moduleId]: {
-                  ...prev[moduleId],
-                  expanded: !prev[moduleId]?.expanded
-                }
-              }));
-            }}
-          />
-
-          {/* Column 3: File Browser (optional, collapsible) */}
-          <div className="w-64 bg-dark-900 border-r border-dark-700">
-            <FileBrowser
-              onImageSelected={handleImageSelected}
-              onFolderSelected={handleFolderSelected}
-            />
-          </div>
-
-          {/* Column 4: Canvas (flex) */}
-          <div className="flex-1 canvas-container" style={{background: '#0a0a0a'}}>
-            <Canvas
-              onFitWindow={handleFitWindow}
-              onActualSize={handleActualSize}
-              onZoomIn={handleZoomIn}
-              onZoomOut={handleZoomOut}
-              zoom={viewport.zoom}
-              currentImage={currentImage}
-            />
-          </div>
-
-          {/* Column 5: Adjustments Panel (360px) */}
-          <div className="w-90 bg-dark-900 border-l border-dark-700 flex flex-col overflow-hidden">
-            <div className="p-3 flex-shrink-0">
-              <div className="histogram-panel">
-                <HistogramPanel />
-              </div>
-            </div>
-            <div className="flex-1 border-t overflow-y-auto adjustment-panel">
-              <AdjustmentPanel />
-            </div>
-          </div>
         </div>
 
         {/* Bottom Panel - Thumbnail Gallery */}

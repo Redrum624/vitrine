@@ -51,20 +51,22 @@ export function MenuBar({
   };
 
   return (
-    <div className="flex items-center h-9 border-b border-dark-700 bg-black relative z-50" style={{paddingLeft: '20px', paddingRight: '20px'}}>
+    <div className="flex items-center h-9 border-b bg-black relative z-50" style={{paddingLeft: '20px', paddingRight: '20px', borderBottomColor: 'var(--border)'}}>
       <div className="font-semibold text-white tracking-wide uppercase" style={{fontSize: '12px', fontWeight: 600, letterSpacing: '0.5px', marginRight: '32px'}}>Photo Editor Pro</div>
 
       {/* File Menu */}
       <div className="relative">
         <button
-          className="bg-transparent border-0 cursor-pointer hover:bg-dark-850 transition-colors text-dark-200 hover:text-white"
-          style={{padding: '8px 14px', fontSize: '12px'}}
+          className="bg-transparent border-0 cursor-pointer text-dark-200 hover:text-white"
+          style={{padding: '8px 14px', fontSize: '12px', transition: 'var(--transition-fast)', backgroundColor: activeMenu === 'file' ? 'var(--gray-850)' : 'transparent'}}
+          onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'var(--gray-850)'}
+          onMouseLeave={(e) => e.currentTarget.style.backgroundColor = activeMenu === 'file' ? 'var(--gray-850)' : 'transparent'}
           onClick={() => handleMenuClick('file')}
         >
           File
         </button>
         {activeMenu === 'file' && (
-          <div className="absolute top-full left-0 mt-0.5 bg-dark-800 border border-dark-700 rounded shadow-lg min-w-[180px] py-1 z-50">
+          <div className="absolute top-full left-0 mt-0.5 border min-w-[180px] py-1 z-50" style={{backgroundColor: 'var(--gray-800)', borderColor: 'var(--border)', boxShadow: 'var(--shadow-lg)', borderRadius: '0'}}>
             <button
               className="w-full text-left px-4 py-1.5 text-xs text-dark-200 hover:bg-dark-700 bg-transparent border-0 cursor-pointer"
               onClick={() => handleMenuItemClick(onFileOpen)}
@@ -91,14 +93,16 @@ export function MenuBar({
       {/* Edit Menu */}
       <div className="relative">
         <button
-          className="bg-transparent border-0 cursor-pointer hover:bg-dark-850 transition-colors text-dark-200 hover:text-white"
-          style={{padding: '8px 14px', fontSize: '12px'}}
+          className="bg-transparent border-0 cursor-pointer text-dark-200 hover:text-white"
+          style={{padding: '8px 14px', fontSize: '12px', transition: 'var(--transition-fast)', backgroundColor: activeMenu === 'edit' ? 'var(--gray-850)' : 'transparent'}}
+          onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'var(--gray-850)'}
+          onMouseLeave={(e) => e.currentTarget.style.backgroundColor = activeMenu === 'edit' ? 'var(--gray-850)' : 'transparent'}
           onClick={() => handleMenuClick('edit')}
         >
           Edit
         </button>
         {activeMenu === 'edit' && (
-          <div className="absolute top-full left-0 mt-0.5 bg-dark-800 border border-dark-700 rounded shadow-lg min-w-[180px] py-1 z-50">
+          <div className="absolute top-full left-0 mt-0.5 border min-w-[180px] py-1 z-50" style={{backgroundColor: 'var(--gray-800)', borderColor: 'var(--border)', boxShadow: 'var(--shadow-lg)', borderRadius: '0'}}>
             <button
               className={`w-full text-left px-4 py-1.5 text-xs bg-transparent border-0 cursor-pointer ${
                 canUndo ? 'text-dark-200 hover:bg-dark-700' : 'text-dark-500 cursor-not-allowed'
@@ -131,14 +135,16 @@ export function MenuBar({
       {/* Image Menu */}
       <div className="relative">
         <button
-          className="bg-transparent border-0 cursor-pointer hover:bg-dark-850 transition-colors text-dark-200 hover:text-white"
-          style={{padding: '8px 14px', fontSize: '12px'}}
+          className="bg-transparent border-0 cursor-pointer text-dark-200 hover:text-white"
+          style={{padding: '8px 14px', fontSize: '12px', transition: 'var(--transition-fast)', backgroundColor: activeMenu === 'image' ? 'var(--gray-850)' : 'transparent'}}
+          onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'var(--gray-850)'}
+          onMouseLeave={(e) => e.currentTarget.style.backgroundColor = activeMenu === 'image' ? 'var(--gray-850)' : 'transparent'}
           onClick={() => handleMenuClick('image')}
         >
           Image
         </button>
         {activeMenu === 'image' && (
-          <div className="absolute top-full left-0 mt-0.5 bg-dark-800 border border-dark-700 rounded shadow-lg min-w-[180px] py-1 z-50">
+          <div className="absolute top-full left-0 mt-0.5 border min-w-[180px] py-1 z-50" style={{backgroundColor: 'var(--gray-800)', borderColor: 'var(--border)', boxShadow: 'var(--shadow-lg)', borderRadius: '0'}}>
             <button className="w-full text-left px-4 py-1.5 text-xs text-dark-200 hover:bg-dark-700 bg-transparent border-0 cursor-pointer">
               Image Size...
             </button>
@@ -165,14 +171,16 @@ export function MenuBar({
       {/* Adjust Menu */}
       <div className="relative">
         <button
-          className="bg-transparent border-0 cursor-pointer hover:bg-dark-850 transition-colors text-dark-200 hover:text-white"
-          style={{padding: '8px 14px', fontSize: '12px'}}
+          className="bg-transparent border-0 cursor-pointer text-dark-200 hover:text-white"
+          style={{padding: '8px 14px', fontSize: '12px', transition: 'var(--transition-fast)', backgroundColor: activeMenu === 'adjust' ? 'var(--gray-850)' : 'transparent'}}
+          onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'var(--gray-850)'}
+          onMouseLeave={(e) => e.currentTarget.style.backgroundColor = activeMenu === 'adjust' ? 'var(--gray-850)' : 'transparent'}
           onClick={() => handleMenuClick('adjust')}
         >
           Adjust
         </button>
         {activeMenu === 'adjust' && (
-          <div className="absolute top-full left-0 mt-0.5 bg-dark-800 border border-dark-700 rounded shadow-lg min-w-[180px] py-1 z-50">
+          <div className="absolute top-full left-0 mt-0.5 border min-w-[180px] py-1 z-50" style={{backgroundColor: 'var(--gray-800)', borderColor: 'var(--border)', boxShadow: 'var(--shadow-lg)', borderRadius: '0'}}>
             <button className="w-full text-left px-4 py-1.5 text-xs text-dark-200 hover:bg-dark-700 bg-transparent border-0 cursor-pointer">
               Auto Levels
             </button>
@@ -199,14 +207,16 @@ export function MenuBar({
       {/* Filter Menu */}
       <div className="relative">
         <button
-          className="bg-transparent border-0 cursor-pointer hover:bg-dark-850 transition-colors text-dark-200 hover:text-white"
-          style={{padding: '8px 14px', fontSize: '12px'}}
+          className="bg-transparent border-0 cursor-pointer text-dark-200 hover:text-white"
+          style={{padding: '8px 14px', fontSize: '12px', transition: 'var(--transition-fast)', backgroundColor: activeMenu === 'filter' ? 'var(--gray-850)' : 'transparent'}}
+          onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'var(--gray-850)'}
+          onMouseLeave={(e) => e.currentTarget.style.backgroundColor = activeMenu === 'filter' ? 'var(--gray-850)' : 'transparent'}
           onClick={() => handleMenuClick('filter')}
         >
           Filter
         </button>
         {activeMenu === 'filter' && (
-          <div className="absolute top-full left-0 mt-0.5 bg-dark-800 border border-dark-700 rounded shadow-lg min-w-[180px] py-1 z-50">
+          <div className="absolute top-full left-0 mt-0.5 border min-w-[180px] py-1 z-50" style={{backgroundColor: 'var(--gray-800)', borderColor: 'var(--border)', boxShadow: 'var(--shadow-lg)', borderRadius: '0'}}>
             <button className="w-full text-left px-4 py-1.5 text-xs text-dark-200 hover:bg-dark-700 bg-transparent border-0 cursor-pointer">
               Sharpen
             </button>
@@ -230,14 +240,16 @@ export function MenuBar({
       {/* View Menu */}
       <div className="relative">
         <button
-          className="bg-transparent border-0 cursor-pointer hover:bg-dark-850 transition-colors text-dark-200 hover:text-white"
-          style={{padding: '8px 14px', fontSize: '12px'}}
+          className="bg-transparent border-0 cursor-pointer text-dark-200 hover:text-white"
+          style={{padding: '8px 14px', fontSize: '12px', transition: 'var(--transition-fast)', backgroundColor: activeMenu === 'view' ? 'var(--gray-850)' : 'transparent'}}
+          onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'var(--gray-850)'}
+          onMouseLeave={(e) => e.currentTarget.style.backgroundColor = activeMenu === 'view' ? 'var(--gray-850)' : 'transparent'}
           onClick={() => handleMenuClick('view')}
         >
           View
         </button>
         {activeMenu === 'view' && (
-          <div className="absolute top-full left-0 mt-0.5 bg-dark-800 border border-dark-700 rounded shadow-lg min-w-[180px] py-1 z-50">
+          <div className="absolute top-full left-0 mt-0.5 border min-w-[180px] py-1 z-50" style={{backgroundColor: 'var(--gray-800)', borderColor: 'var(--border)', boxShadow: 'var(--shadow-lg)', borderRadius: '0'}}>
             <button
               className="w-full text-left px-4 py-1.5 text-xs text-dark-200 hover:bg-dark-700 bg-transparent border-0 cursor-pointer"
               onClick={() => handleMenuItemClick(onViewZoomIn)}
@@ -276,14 +288,16 @@ export function MenuBar({
       {/* Window Menu */}
       <div className="relative">
         <button
-          className="bg-transparent border-0 cursor-pointer hover:bg-dark-850 transition-colors text-dark-200 hover:text-white"
-          style={{padding: '8px 14px', fontSize: '12px'}}
+          className="bg-transparent border-0 cursor-pointer text-dark-200 hover:text-white"
+          style={{padding: '8px 14px', fontSize: '12px', transition: 'var(--transition-fast)', backgroundColor: activeMenu === 'window' ? 'var(--gray-850)' : 'transparent'}}
+          onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'var(--gray-850)'}
+          onMouseLeave={(e) => e.currentTarget.style.backgroundColor = activeMenu === 'window' ? 'var(--gray-850)' : 'transparent'}
           onClick={() => handleMenuClick('window')}
         >
           Window
         </button>
         {activeMenu === 'window' && (
-          <div className="absolute top-full left-0 mt-0.5 bg-dark-800 border border-dark-700 rounded shadow-lg min-w-[180px] py-1 z-50">
+          <div className="absolute top-full left-0 mt-0.5 border min-w-[180px] py-1 z-50" style={{backgroundColor: 'var(--gray-800)', borderColor: 'var(--border)', boxShadow: 'var(--shadow-lg)', borderRadius: '0'}}>
             <button
               className="w-full text-left px-4 py-1.5 text-xs text-dark-200 hover:bg-dark-700 bg-transparent border-0 cursor-pointer"
               onClick={() => handleMenuItemClick(onWindowPresets)}

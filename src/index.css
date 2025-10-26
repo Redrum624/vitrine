@@ -1,22 +1,60 @@
 @import 'tailwindcss';
 
-/* Professional scrollbars */
+/* CSS Variables for Prestigious Studio Design */
+:root {
+  --black: #000000;
+  --gray-950: #0a0a0a;
+  --gray-900: #121212;
+  --gray-850: #1a1a1a;
+  --gray-800: #1e1e1e;
+  --gray-700: #2a2a2a;
+  --gray-600: #3a3a3a;
+  --gray-500: #4a4a4a;
+  --gray-400: #6a6a6a;
+  --gray-300: #8a8a8a;
+  --gray-200: #aaaaaa;
+  --gray-100: #cccccc;
+  --white: #ffffff;
+
+  --accent: #3a3a3a;
+  --accent-hover: #4a4a4a;
+  --accent-active: #555555;
+
+  --border: #2a2a2a;
+  --border-light: #333333;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --shadow-md: 0 4px 8px rgba(0, 0, 0, 0.6);
+  --shadow-lg: 0 8px 16px rgba(0, 0, 0, 0.7);
+
+  --transition-fast: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-normal: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-slow: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Global font smoothing for crisp text */
+body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Prestigious Studio Scrollbars - Refined */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #1a1a1a;
+  background: var(--gray-900);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #404040;
-  border-radius: 4px;
+  background: var(--gray-700);
+  border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #525252;
+  background: var(--gray-600);
 }
 
 /* Prevent text selection on UI elements */
@@ -32,30 +70,61 @@
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* Custom slider styles */
+/* Prestigious Studio Slider Styles - Refined */
 .slider {
   -webkit-appearance: none;
   appearance: none;
-  height: 6px;
-  background: #484848;
-  border-radius: 6px;
+  height: 4px;
+  background: var(--gray-800);
+  border: 1px solid var(--border);
+  border-radius: 2px;
   outline: none;
+  cursor: pointer;
+  transition: var(--transition-fast);
 }
 
 .slider::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  width: 18px;
-  height: 18px;
-  background: #b8b8b8;
+  width: 14px;
+  height: 14px;
+  background: var(--gray-200);
   border-radius: 50%;
   cursor: pointer;
-  transition: background 0.2s ease;
-  border: 2px solid #383838;
+  transition: var(--transition-normal);
+  border: 1px solid var(--border);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
 }
 
 .slider::-webkit-slider-thumb:hover {
-  background: #d8d8d8;
+  background: var(--white);
+  transform: scale(1.3);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.7);
+}
+
+.slider::-webkit-slider-thumb:active {
+  transform: scale(1.2);
+}
+
+.slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  background: var(--gray-200);
+  border-radius: 50%;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  transition: var(--transition-normal);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+}
+
+.slider::-moz-range-thumb:hover {
+  background: var(--white);
+  transform: scale(1.3);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.7);
+}
+
+.slider::-moz-range-thumb:active {
+  transform: scale(1.2);
 }
 
 /* Visible slider track styles */

@@ -1,3 +1,5 @@
+import { HardDrive, Settings, BarChart3, Sun, Droplet, Activity, Contrast, Crop, Palette, Brush, Focus, Filter } from 'lucide-react';
+
 interface IconSidebarProps {
   onToolSelect?: (tool: string) => void;
   selectedTool?: string | null;
@@ -5,21 +7,21 @@ interface IconSidebarProps {
 
 interface Tool {
   id: string;
-  icon: string;
+  icon: string | React.ReactNode;
   name: string;
 }
 
 const tools: Tool[] = [
-  { id: 'select', icon: '▨', name: 'Select' },
-  { id: 'crop', icon: '◧', name: 'Crop' },
-  { id: 'transform', icon: '⟲', name: 'Transform' },
-  { id: 'brush', icon: '◉', name: 'Brush' },
-  { id: 'gradient', icon: '◐', name: 'Gradient' },
-  { id: 'text', icon: '◈', name: 'Text' },
-  { id: 'shape', icon: '◎', name: 'Shape' },
-  { id: 'eyedropper', icon: '◪', name: 'Eyedropper' },
-  { id: 'hand', icon: '▭', name: 'Hand' },
-  { id: 'zoom', icon: '◫', name: 'Zoom' },
+  { id: 'file-explorer', icon: <HardDrive className="w-5 h-5" />, name: 'File Explorer' },
+  { id: 'crop', icon: <Crop className="w-5 h-5" />, name: 'Crop & Transform' },
+  { id: 'basicadj', icon: <Sun className="w-5 h-5" />, name: 'Basic Adjustments' },
+  { id: 'whitebalance', icon: <Droplet className="w-5 h-5" />, name: 'White Balance' },
+  { id: 'tonecurve', icon: <Activity className="w-5 h-5" />, name: 'Tone Curve' },
+  { id: 'noisereduction', icon: <Filter className="w-5 h-5" />, name: 'Noise Reduction' },
+  { id: 'shadowshighlights', icon: <Contrast className="w-5 h-5" />, name: 'Shadows & Highlights' },
+  { id: 'colorbalance', icon: <Palette className="w-5 h-5" />, name: 'Color Balance' },
+  { id: 'localadjustments', icon: <Brush className="w-5 h-5" />, name: 'Local Adjustments' },
+  { id: 'lenscorrections', icon: <Focus className="w-5 h-5" />, name: 'Lens Corrections' },
 ];
 
 export function IconSidebar({ onToolSelect, selectedTool }: IconSidebarProps) {
@@ -30,26 +32,46 @@ export function IconSidebar({ onToolSelect, selectedTool }: IconSidebarProps) {
   };
 
   return (
-    <div className="bg-black border-r border-dark-700 flex flex-col items-center" style={{width: '64px', padding: '20px 0', gap: '4px'}}>
-      {tools.slice(0, 4).map((tool) => (
+    <div className="bg-black border-r flex flex-col items-center" style={{width: '64px', padding: '20px 0', gap: '4px', borderRightColor: 'var(--border)'}}>
+      {/* Panel switchers - File Explorer and Modules */}
+      {tools.map((tool) => (
         <button
           key={tool.id}
           className={`
             relative flex items-center justify-center
-            border border-transparent cursor-pointer
-            transition-all
+            border cursor-pointer
             ${selectedTool === tool.id
-              ? 'bg-dark-850 border-dark-600 text-white'
-              : 'bg-transparent text-dark-400 hover:bg-dark-900 hover:text-dark-100'
+              ? 'text-white'
+              : 'bg-transparent hover:text-dark-100'
             }
           `}
-          style={{width: '48px', height: '48px', margin: '0 8px', fontSize: '18px', borderRadius: '4px'}}
+          style={{
+            width: '48px',
+            height: '48px',
+            margin: '0 8px',
+            fontSize: '18px',
+            borderRadius: '4px',
+            transition: 'var(--transition-fast)',
+            backgroundColor: selectedTool === tool.id ? 'var(--gray-850)' : 'transparent',
+            borderColor: selectedTool === tool.id ? 'var(--border-light)' : 'transparent',
+            color: selectedTool === tool.id ? 'var(--white)' : 'var(--gray-400)'
+          }}
+          onMouseEnter={(e) => {
+            if (selectedTool !== tool.id) {
+              e.currentTarget.style.backgroundColor = 'var(--gray-900)';
+            }
+          }}
+          onMouseLeave={(e) => {
+            if (selectedTool !== tool.id) {
+              e.currentTarget.style.backgroundColor = 'transparent';
+            }
+          }}
           onClick={() => handleToolClick(tool.id)}
           title={tool.name}
           aria-label={tool.name}
         >
           {selectedTool === tool.id && (
-            <div className="absolute bg-white" style={{left: '-8px', top: '50%', transform: 'translateY(-50%)', width: '2px', height: '24px'}} />
+            <div className="absolute" style={{left: '-8px', top: '50%', transform: 'translateY(-50%)', width: '2px', height: '24px', backgroundColor: 'var(--white)'}} />
           )}
           {tool.icon}
         </button>
@@ -57,12 +79,86 @@ export function IconSidebar({ onToolSelect, selectedTool }: IconSidebarProps) {
 
       <div className="flex-1" />
 
+      {/* Histogram button */}
       <button
-        className="flex items-center justify-center border border-transparent cursor-pointer transition-all bg-transparent text-dark-400 hover:bg-dark-900 hover:text-dark-100"
-        style={{width: '48px', height: '48px', margin: '0 8px', fontSize: '18px', borderRadius: '4px'}}
-        title="Settings"
+        className={`
+          relative flex items-center justify-center
+          border cursor-pointer
+          ${selectedTool === 'histogram'
+            ? 'text-white'
+            : 'bg-transparent hover:text-dark-100'
+          }
+        `}
+        style={{
+          width: '48px',
+          height: '48px',
+          margin: '0 8px 4px 8px',
+          fontSize: '18px',
+          borderRadius: '4px',
+          transition: 'var(--transition-fast)',
+          backgroundColor: selectedTool === 'histogram' ? 'var(--gray-850)' : 'transparent',
+          borderColor: selectedTool === 'histogram' ? 'var(--border-light)' : 'transparent',
+          color: selectedTool === 'histogram' ? 'var(--white)' : 'var(--gray-400)'
+        }}
+        onMouseEnter={(e) => {
+          if (selectedTool !== 'histogram') {
+            e.currentTarget.style.backgroundColor = 'var(--gray-900)';
+          }
+        }}
+        onMouseLeave={(e) => {
+          if (selectedTool !== 'histogram') {
+            e.currentTarget.style.backgroundColor = 'transparent';
+          }
+        }}
+        onClick={() => handleToolClick('histogram')}
+        title="Histogram"
+        aria-label="Histogram"
       >
-        ⚙
+        {selectedTool === 'histogram' && (
+          <div className="absolute" style={{left: '-8px', top: '50%', transform: 'translateY(-50%)', width: '2px', height: '24px', backgroundColor: 'var(--white)'}} />
+        )}
+        <BarChart3 className="w-5 h-5" />
+      </button>
+
+      {/* Settings button */}
+      <button
+        className={`
+          relative flex items-center justify-center
+          border cursor-pointer
+          ${selectedTool === 'settings'
+            ? 'text-white'
+            : 'bg-transparent hover:text-dark-100'
+          }
+        `}
+        style={{
+          width: '48px',
+          height: '48px',
+          margin: '0 8px',
+          fontSize: '18px',
+          borderRadius: '4px',
+          transition: 'var(--transition-fast)',
+          backgroundColor: selectedTool === 'settings' ? 'var(--gray-850)' : 'transparent',
+          borderColor: selectedTool === 'settings' ? 'var(--border-light)' : 'transparent',
+          color: selectedTool === 'settings' ? 'var(--white)' : 'var(--gray-400)'
+        }}
+        onMouseEnter={(e) => {
+          if (selectedTool !== 'settings') {
+            e.currentTarget.style.backgroundColor = 'var(--gray-900)';
+          }
+        }}
+        onMouseLeave={(e) => {
+          if (selectedTool !== 'settings') {
+            e.currentTarget.style.backgroundColor = 'transparent';
+          }
+        }}
+        onClick={() => handleToolClick('settings')}
+        title="Settings"
+        aria-label="Settings"
+      >
+        {selectedTool === 'settings' && (
+          <div className="absolute" style={{left: '-8px', top: '50%', transform: 'translateY(-50%)', width: '2px', height: '24px', backgroundColor: 'var(--white)'}} />
+        )}
+        <Settings className="w-5 h-5" />
       </button>
     </div>
   );

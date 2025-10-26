@@ -24,42 +24,18 @@ import { adaptiveDebounceService } from '../../services/AdaptiveDebounceService'
 import { useAppStore } from '../../stores/appStore';
 import { logger } from '../../utils/Logger';
 
-interface ModuleState {
-  expanded: boolean;
-  enabled: boolean;
+interface AdjustmentPanelProps {
+  selectedModule?: string | null;
 }
 
-export function AdjustmentPanel() {
+export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
   const { setProcessedImageData } = useAppStore();
   const [resetCounter, setResetCounter] = useState(0);
-  const [moduleStates, setModuleStates] = useState<Record<string, ModuleState>>({
-    // Geometric operations (first)
-    crop: { expanded: false, enabled: false },
-    // Core processing modules
-    exposure: { expanded: true, enabled: true },
-    basicadj: { expanded: false, enabled: true },
-    whitebalance: { expanded: false, enabled: true },
-    shadowshighlights: { expanded: false, enabled: true },
-    tonecurve: { expanded: false, enabled: true },
-    colorbalance: { expanded: false, enabled: true },
-    // Advanced processing
-    localadjustments: { expanded: false, enabled: false },
-    lenscorrections: { expanded: false, enabled: false },
-    noisereduction: { expanded: false, enabled: false },
-    lenscorrection: { expanded: false, enabled: false },
-    advancedraw: { expanded: false, enabled: false },
-    luminositymasks: { expanded: false, enabled: false },
-    // Output modules (bottom)
-    print: { expanded: false, enabled: false },
-    webgallery: { expanded: false, enabled: false },
-    watermark: { expanded: false, enabled: false },
-    copyright: { expanded: false, enabled: false },
-    outputcollections: { expanded: false, enabled: false }
-  });
   const [isProcessing, setIsProcessing] = useState(false);
   const [_lastProcessingTime, setLastProcessingTime] = useState(0);
   const processingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastProcessingTimeRef = useRef<number>(0);
+  const lastProcessedImagePathRef = useRef<string | null>(null);
 
   // Connect the processing pipeline to image service for auto-adjustments
   useEffect(() => {
@@ -78,21 +54,17 @@ export function AdjustmentPanel() {
   const localAdjustmentsModule = imageProcessingPipeline.getModule<LocalAdjustmentsPipelineModule>('localadjustments');
   const noiseReductionModule = imageProcessingPipeline.getModule<NoiseReductionModule>('noise-reduction');
 
-  const toggleModule = useCallback((moduleId: string) => {
-    setModuleStates(prev => ({
-      ...prev,
-      [moduleId]: {
-        ...prev[moduleId],
-        expanded: !prev[moduleId]?.expanded
-      }
-    }));
-  }, []);
-
   const processCurrentImageRealTime = useCallback(async () => {
     const currentImage = imageService.getCurrentImage();
     console.log('AdjustmentPanel: processCurrentImageRealTime called, currentImage:', currentImage ? `${currentImage.width}x${currentImage.height}` : 'null');
 
     if (!currentImage) return;
+
+    // Skip processing if it's the same image we just processed (cached navigation)
+    if (lastProcessedImagePathRef.current === currentImage.filePath) {
+      logger.debug('Skipping processing - same image already processed (cached)');
+      return;
+    }
 
     // Skip processing if already processing
     if (isProcessing) {
@@ -132,10 +104,6 @@ export function AdjustmentPanel() {
 
       // Cancel any previous progressive preview requests
       progressivePreviewService.cancelActiveRequests();
-
-      // Check if any modules are enabled (user made manual adjustments)
-      const hasManualAdjustments = Object.values(moduleStates).some(state => state.enabled);
-
 
       // Temporarily use smaller downsampling to avoid issues
       // TODO: Fix downsampling algorithm properly later
@@ -217,7 +185,7 @@ export function AdjustmentPanel() {
 
       // Always run through processing pipeline to ensure module effects are applied
       // The pipeline has its own optimizations to skip unchanged modules
-      console.log('AdjustmentPanel: Processing preview', previewWidth, 'x', previewHeight, 'hasAdjustments:', hasManualAdjustments);
+      console.log('AdjustmentPanel: Processing preview', previewWidth, 'x', previewHeight);
       const processedData = await imageProcessingPipeline.processImage(previewData, {
         width: previewWidth,
         height: previewHeight,
@@ -242,6 +210,9 @@ export function AdjustmentPanel() {
         isPreview: true
       });
 
+      // Track that we've processed this image
+      lastProcessedImagePathRef.current = currentImage.filePath;
+
       const processTime = performance.now() - startTime;
       setLastProcessingTime(processTime);
 
@@ -252,7 +223,7 @@ export function AdjustmentPanel() {
     } finally {
       setIsProcessing(false);
     }
-  }, [setProcessedImageData, isProcessing, moduleStates]);
+  }, [setProcessedImageData, isProcessing]);
 
   // Note: Removed viewport-triggered reprocessing as viewport changes (zoom, pan)
   // should not trigger image reprocessing - only display changes
@@ -405,20 +376,57 @@ export function AdjustmentPanel() {
     };
   }, [processCurrentImageRealTime]);
 
+  // Helper function to determine module title from selectedModule ID
+  const getModuleTitle = () => {
+    const titles: Record<string, string> = {
+      crop: 'Crop & Transform',
+      basicadj: 'Basic Adjustments',
+      whitebalance: 'White Balance',
+      tonecurve: 'Tone Curve',
+      noisereduction: 'Noise Reduction',
+      shadowshighlights: 'Shadows & Highlights',
+      colorbalance: 'Color Balance',
+      localadjustments: 'Local Adjustments',
+      lenscorrections: 'Lens Corrections'
+    };
+    return titles[selectedModule || ''] || 'Develop';
+  };
+
   return (
-    <div className="bg-dark-900 border-l border-dark-700 flex flex-col h-full" style={{width: '360px'}}>
-      {/* Header */}
-      <div className="border-b border-dark-700 bg-dark-850 flex items-center justify-between" style={{padding: '16px 20px'}}>
-        <h2 className="text-white font-semibold" style={{fontSize: '13px', fontWeight: 600, letterSpacing: '0.3px'}}>
-          Develop
-        </h2>
+    <div className="flex flex-col h-full" style={{width: '360px', backgroundColor: 'var(--gray-900)'}}>
+      {/* Header - Redesigned */}
+      <div className="border-b flex items-center justify-between" style={{padding: '14px 20px', borderBottomColor: 'var(--border)', backgroundColor: 'var(--black)'}}>
+        <div className="flex items-center gap-2">
+          <div className="w-1 h-4 rounded-sm" style={{backgroundColor: 'var(--white)'}} />
+          <h2 className="text-white font-semibold uppercase tracking-wider" style={{fontSize: '11px', fontWeight: 600, letterSpacing: '1.5px'}}>
+            {getModuleTitle()}
+          </h2>
+        </div>
         <button
           onClick={resetAllModules}
-          className="bg-transparent border-0 cursor-pointer text-dark-400 hover:text-dark-100 hover:bg-dark-800 transition-colors"
-          style={{fontSize: '11px', padding: '4px 8px', borderRadius: '3px'}}
-          title="Reset all"
+          className="border-0 cursor-pointer px-3 py-1.5 rounded text-xs font-medium"
+          style={{
+            backgroundColor: 'var(--gray-850)',
+            color: 'var(--gray-300)',
+            transition: 'var(--transition-fast)',
+            border: '1px solid var(--border)',
+            cursor: 'pointer'
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.color = 'var(--white)';
+            e.currentTarget.style.backgroundColor = 'var(--gray-800)';
+            e.currentTarget.style.borderColor = 'var(--border-light)';
+            e.currentTarget.style.cursor = 'pointer';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.color = 'var(--gray-300)';
+            e.currentTarget.style.backgroundColor = 'var(--gray-850)';
+            e.currentTarget.style.borderColor = 'var(--border)';
+            e.currentTarget.style.cursor = 'pointer';
+          }}
+          title="Reset all adjustments to defaults"
         >
-          Reset
+          Reset All
         </button>
       </div>
 
@@ -426,289 +434,162 @@ export function AdjustmentPanel() {
       <div className="flex-1 overflow-y-auto">
 
         {/* Crop Module */}
-        {cropModule && (
-          <div className="border-b border-dark-800">
-            <button
-              onClick={() => toggleModule('crop')}
-              className="w-full p-3 flex items-center justify-between hover:bg-dark-800 transition-professional text-left"
-            >
-              <span className="text-sm font-medium text-dark-300">Crop & Transform</span>
-              <span className="text-dark-400 text-sm">
-                {moduleStates.crop?.expanded ? '▾' : '▸'}
-              </span>
-            </button>
-
-            {moduleStates.crop?.expanded && (() => {
-              const img = imageService.getCurrentImage();
-              return (
-                <div className="px-3 pb-3">
-                  <CropModuleComponent
-                    key={`crop-${resetCounter}`}
-                    module={cropModule.getCropModule()}
-                    onParamsChange={(params) => handleModuleParamsChange('crop', params)}
-                    imageData={img?.data}
-                    imageWidth={img?.width || 0}
-                    imageHeight={img?.height || 0}
-                  />
-                </div>
-              );
-            })()}
-          </div>
-        )}
-
-        {/* Lens Corrections Module */}
-        {lensCorrectionsModule && (
-          <div className="border-b border-dark-800">
-            <button
-              onClick={() => toggleModule('lenscorrections')}
-              className="w-full p-3 flex items-center justify-between hover:bg-dark-800 transition-professional text-left"
-            >
-              <span className="text-sm font-medium text-dark-300">Lens Corrections</span>
-              <span className="text-dark-400 text-sm">
-                {moduleStates.lenscorrections?.expanded ? '▾' : '▸'}
-              </span>
-            </button>
-
-            {moduleStates.lenscorrections?.expanded && (
-              <div className="px-3 pb-3">
-                <LensCorrectionsModuleComponent
-                  key={`lenscorrections-${resetCounter}`}
-                  parameters={lensCorrectionsModule.getParameters().lensCorrectionsParams}
-                  onParametersChange={(params) => handleModuleParamsChange('lenscorrections', params)}
-                  onAutoDetectVignetting={() => {
-                    const img = imageService.getCurrentImage();
-                    if (img?.data) {
-                      lensCorrectionsModule.autoDetectVignetting(img.data, img.width, img.height);
-                      handleModuleParamsChange('lenscorrections', lensCorrectionsModule.getParameters().lensCorrectionsParams);
-                    }
-                  }}
-                  onResetSection={(section) => {
-                    if (section === 'vignetting') {
-                      lensCorrectionsModule.resetVignetting();
-                    } else if (section === 'distortion') {
-                      lensCorrectionsModule.resetDistortion();
-                    } else if (section === 'chromaticAberration') {
-                      lensCorrectionsModule.resetChromaticAberration();
-                    } else if (section === 'all') {
-                      lensCorrectionsModule.reset();
-                    }
-                    handleModuleParamsChange('lenscorrections', lensCorrectionsModule.getParameters().lensCorrectionsParams);
-                  }}
-                />
-              </div>
-            )}
-          </div>
-        )}
+        {cropModule && selectedModule === 'crop' && (() => {
+          const img = imageService.getCurrentImage();
+          return (
+            <div className="px-5 pt-4">
+              <CropModuleComponent
+                key={`crop-${resetCounter}`}
+                module={cropModule.getCropModule()}
+                onParamsChange={(params) => handleModuleParamsChange('crop', params)}
+                imageData={img?.data}
+                imageWidth={img?.width || 0}
+                imageHeight={img?.height || 0}
+              />
+            </div>
+          );
+        })()}
 
         {/* Basic Adjustments Module */}
-        {basicAdjModule && (
-          <div className="border-b border-dark-800">
-            <button
-              onClick={() => toggleModule('basicadj')}
-              className="w-full p-3 flex items-center justify-between hover:bg-dark-800 transition-professional text-left"
-            >
-              <span className="text-sm font-medium text-dark-300">Basic Adjustments</span>
-              <span className="text-dark-400 text-sm">
-                {moduleStates.basicadj?.expanded ? '▾' : '▸'}
-              </span>
-            </button>
-
-            {moduleStates.basicadj?.expanded && (
-              <div className="px-3 pb-3">
-                <BasicAdjustmentsModuleComponent
-                  key={`basicadj-${resetCounter}`}
-                  module={basicAdjModule}
-                  onParamsChange={(params) => handleModuleParamsChange('basicadj', params)}
-                />
-              </div>
-            )}
+        {basicAdjModule && selectedModule === 'basicadj' && (
+          <div className="px-5 pt-4">
+            <BasicAdjustmentsModuleComponent
+              key={`basicadj-${resetCounter}`}
+              module={basicAdjModule}
+              onParamsChange={(params) => handleModuleParamsChange('basicadj', params)}
+            />
           </div>
         )}
 
         {/* White Balance Module */}
-        {whiteBalanceModule && (
-          <div className="border-b border-dark-800">
-            <button
-              onClick={() => toggleModule('whitebalance')}
-              className="w-full p-3 flex items-center justify-between hover:bg-dark-800 transition-professional text-left"
-            >
-              <span className="text-sm font-medium text-dark-300">White Balance</span>
-              <span className="text-dark-400 text-sm">
-                {moduleStates.whitebalance?.expanded ? '▾' : '▸'}
-              </span>
-            </button>
-
-            {moduleStates.whitebalance?.expanded && (
-              <div className="px-3 pb-3">
-                <WhiteBalanceModuleComponent
-                  key={`whitebalance-${resetCounter}`}
-                  module={whiteBalanceModule}
-                  onParamsChange={(params) => handleModuleParamsChange('temperature', params)}
-                  onAutoDetect={handleAutoWhiteBalance}
-                />
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Shadows & Highlights Module */}
-        {shadowsHighlightsModule && (
-          <div className="border-b border-dark-800">
-            <button
-              onClick={() => toggleModule('shadowshighlights')}
-              className="w-full p-3 flex items-center justify-between hover:bg-dark-800 transition-professional text-left"
-            >
-              <span className="text-sm font-medium text-dark-300">Shadows & Highlights</span>
-              <span className="text-dark-400 text-sm">
-                {moduleStates.shadowshighlights?.expanded ? '▾' : '▸'}
-              </span>
-            </button>
-
-            {moduleStates.shadowshighlights?.expanded && (
-              <div className="px-3 pb-3">
-                <ShadowsHighlightsModuleComponent
-                  key={`shadowshighlights-${resetCounter}`}
-                  module={shadowsHighlightsModule.getShadowsHighlightsModule()}
-                  onParamsChange={(params) => handleModuleParamsChange('shadowshighlights', params)}
-                />
-              </div>
-            )}
+        {whiteBalanceModule && selectedModule === 'whitebalance' && (
+          <div className="px-5 pt-4">
+            <WhiteBalanceModuleComponent
+              key={`whitebalance-${resetCounter}`}
+              module={whiteBalanceModule}
+              onParamsChange={(params) => handleModuleParamsChange('temperature', params)}
+              onAutoDetect={handleAutoWhiteBalance}
+            />
           </div>
         )}
 
         {/* Tone Curve Module */}
-        {toneCurveModule && (
-          <div className="border-b border-dark-800">
-            <button
-              onClick={() => toggleModule('tonecurve')}
-              className="w-full p-3 flex items-center justify-between hover:bg-dark-800 transition-professional text-left"
-            >
-              <span className="text-sm font-medium text-dark-300">Tone Curve</span>
-              <span className="text-dark-400 text-sm">
-                {moduleStates.tonecurve?.expanded ? '▾' : '▸'}
-              </span>
-            </button>
-
-            {moduleStates.tonecurve?.expanded && (
-              <div className="px-3 pb-3">
-                <ToneCurveModuleComponent
-                  key={`tonecurve-${resetCounter}`}
-                  module={toneCurveModule.getToneCurveModule()}
-                  onParamsChange={(params) => handleModuleParamsChange('tonecurve', params)}
-                />
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Color Balance Module */}
-        {colorBalanceModule && (
-          <div className="border-b border-dark-800">
-            <button
-              onClick={() => toggleModule('colorbalance')}
-              className="w-full p-3 flex items-center justify-between hover:bg-dark-800 transition-professional text-left"
-            >
-              <span className="text-sm font-medium text-dark-300">Color Balance</span>
-              <span className="text-dark-400 text-sm">
-                {moduleStates.colorbalance?.expanded ? '▾' : '▸'}
-              </span>
-            </button>
-
-            {moduleStates.colorbalance?.expanded && (
-              <div className="px-3 pb-3">
-                <ColorBalanceModuleComponent
-                  key={`colorbalance-${resetCounter}`}
-                  module={colorBalanceModule.getColorBalanceModule()}
-                  onParamsChange={(params) => handleModuleParamsChange('colorbalance', params)}
-                />
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* LocalAdjustments Module */}
-        {localAdjustmentsModule && (
-          <div className="border-b border-dark-800">
-            <button
-              onClick={() => toggleModule('localadjustments')}
-              className="w-full p-3 flex items-center justify-between hover:bg-dark-800 transition-professional text-left"
-            >
-              <span className="text-sm font-medium text-dark-300">Local Adjustments</span>
-              <span className="text-dark-400 text-sm">
-                {moduleStates.localadjustments?.expanded ? '▾' : '▸'}
-              </span>
-            </button>
-
-            {moduleStates.localadjustments?.expanded && (() => {
-              const img = imageService.getCurrentImage();
-              if (!img) return null;
-
-              return (
-                <div className="px-3 pb-3">
-                  <LocalAdjustmentsModuleComponent
-                    key={`localadjustments-${resetCounter}`}
-                    parameters={localAdjustmentsModule.getParameters().defaultParams}
-                    brushParams={localAdjustmentsModule.getParameters().brushParams}
-                    layers={localAdjustmentsModule.getParameters().layers}
-                    activeLayerId={localAdjustmentsModule.getParameters().activeLayerId}
-                    onParametersChange={(params) => handleModuleParamsChange('localadjustments', params)}
-                    onBrushParamsChange={(params) => {
-                      localAdjustmentsModule.updateBrushParameters(params);
-                    }}
-                    onCreateLayer={(type, name) => {
-                      localAdjustmentsModule.createLayer(type, name, img.width, img.height);
-                      handleModuleParamsChange('localadjustments', localAdjustmentsModule.getParameters().defaultParams);
-                    }}
-                    onRemoveLayer={(layerId) => {
-                      localAdjustmentsModule.removeLayer(layerId);
-                      handleModuleParamsChange('localadjustments', localAdjustmentsModule.getParameters().defaultParams);
-                    }}
-                    onToggleLayer={(layerId, enabled) => {
-                      localAdjustmentsModule.toggleLayer(layerId, enabled);
-                      handleModuleParamsChange('localadjustments', localAdjustmentsModule.getParameters().defaultParams);
-                    }}
-                    onSetActiveLayer={(layerId) => {
-                      localAdjustmentsModule.setActiveLayer(layerId);
-                    }}
-                    onUpdateLayerOpacity={(layerId, opacity) => {
-                      localAdjustmentsModule.updateLayerOpacity(layerId, opacity);
-                      handleModuleParamsChange('localadjustments', localAdjustmentsModule.getParameters().defaultParams);
-                    }}
-                  />
-                </div>
-              );
-            })()}
+        {toneCurveModule && selectedModule === 'tonecurve' && (
+          <div className="px-5 pt-4">
+            <ToneCurveModuleComponent
+              key={`tonecurve-${resetCounter}`}
+              module={toneCurveModule.getToneCurveModule()}
+              onParamsChange={(params) => handleModuleParamsChange('tonecurve', params)}
+            />
           </div>
         )}
 
         {/* Noise Reduction Module */}
-        {noiseReductionModule && (
-          <div className="border-b border-dark-700">
-            <button
-              onClick={() => toggleModule('noisereduction')}
-              className="w-full flex items-center justify-between p-3 hover:bg-dark-750 transition-professional"
-            >
-              <div className="flex items-center space-x-2">
-                <span className="text-dark-400 text-sm">
-                  {moduleStates.noisereduction?.expanded ? '▾' : '▸'}
-                </span>
-                <span className="text-sm text-dark-100 font-medium">Noise Reduction</span>
-              </div>
-            </button>
-            {moduleStates.noisereduction?.expanded && (
-              <div className="p-3 bg-dark-800">
-                <NoiseReductionModuleComponent
-                  key={`noisereduction-${resetCounter}`}
-                  module={noiseReductionModule}
-                  onParamsChange={(params) => handleModuleParamsChange('noisereduction', params)}
-                />
-              </div>
-            )}
+        {noiseReductionModule && selectedModule === 'noisereduction' && (
+          <div className="px-5 pt-4">
+            <NoiseReductionModuleComponent
+              key={`noisereduction-${resetCounter}`}
+              module={noiseReductionModule}
+              onParamsChange={(params) => handleModuleParamsChange('noisereduction', params)}
+            />
+          </div>
+        )}
+
+        {/* Shadows & Highlights Module */}
+        {shadowsHighlightsModule && selectedModule === 'shadowshighlights' && (
+          <div className="px-5 pt-4">
+            <ShadowsHighlightsModuleComponent
+              key={`shadowshighlights-${resetCounter}`}
+              module={shadowsHighlightsModule.getShadowsHighlightsModule()}
+              onParamsChange={(params) => handleModuleParamsChange('shadowshighlights', params)}
+            />
+          </div>
+        )}
+
+        {/* Color Balance Module */}
+        {colorBalanceModule && selectedModule === 'colorbalance' && (
+          <div className="px-5 pt-4">
+            <ColorBalanceModuleComponent
+              key={`colorbalance-${resetCounter}`}
+              module={colorBalanceModule.getColorBalanceModule()}
+              onParamsChange={(params) => handleModuleParamsChange('colorbalance', params)}
+            />
+          </div>
+        )}
+
+        {/* LocalAdjustments Module */}
+        {localAdjustmentsModule && selectedModule === 'localadjustments' && (() => {
+          const img = imageService.getCurrentImage();
+          if (!img) return null;
+
+          return (
+            <div className="px-5 pt-4">
+              <LocalAdjustmentsModuleComponent
+                key={`localadjustments-${resetCounter}`}
+                parameters={localAdjustmentsModule.getParameters().defaultParams}
+                brushParams={localAdjustmentsModule.getParameters().brushParams}
+                layers={localAdjustmentsModule.getParameters().layers}
+                activeLayerId={localAdjustmentsModule.getParameters().activeLayerId}
+                onParametersChange={(params) => handleModuleParamsChange('localadjustments', params)}
+                onBrushParamsChange={(params) => {
+                  localAdjustmentsModule.updateBrushParameters(params);
+                }}
+                onCreateLayer={(type, name) => {
+                  localAdjustmentsModule.createLayer(type, name, img.width, img.height);
+                  handleModuleParamsChange('localadjustments', localAdjustmentsModule.getParameters().defaultParams);
+                }}
+                onRemoveLayer={(layerId) => {
+                  localAdjustmentsModule.removeLayer(layerId);
+                  handleModuleParamsChange('localadjustments', localAdjustmentsModule.getParameters().defaultParams);
+                }}
+                onToggleLayer={(layerId, enabled) => {
+                  localAdjustmentsModule.toggleLayer(layerId, enabled);
+                  handleModuleParamsChange('localadjustments', localAdjustmentsModule.getParameters().defaultParams);
+                }}
+                onSetActiveLayer={(layerId) => {
+                  localAdjustmentsModule.setActiveLayer(layerId);
+                }}
+                onUpdateLayerOpacity={(layerId, opacity) => {
+                  localAdjustmentsModule.updateLayerOpacity(layerId, opacity);
+                  handleModuleParamsChange('localadjustments', localAdjustmentsModule.getParameters().defaultParams);
+                }}
+              />
+            </div>
+          );
+        })()}
+
+        {/* Lens Corrections Module */}
+        {lensCorrectionsModule && selectedModule === 'lenscorrections' && (
+          <div className="px-5 pt-4">
+            <LensCorrectionsModuleComponent
+              key={`lenscorrections-${resetCounter}`}
+              parameters={lensCorrectionsModule.getParameters().lensCorrectionsParams}
+              onParametersChange={(params) => handleModuleParamsChange('lenscorrections', params)}
+              onAutoDetectVignetting={() => {
+                const img = imageService.getCurrentImage();
+                if (img?.data) {
+                  lensCorrectionsModule.autoDetectVignetting(img.data, img.width, img.height);
+                  handleModuleParamsChange('lenscorrections', lensCorrectionsModule.getParameters().lensCorrectionsParams);
+                }
+              }}
+              onResetSection={(section) => {
+                if (section === 'vignetting') {
+                  lensCorrectionsModule.resetVignetting();
+                } else if (section === 'distortion') {
+                  lensCorrectionsModule.resetDistortion();
+                } else if (section === 'chromaticAberration') {
+                  lensCorrectionsModule.resetChromaticAberration();
+                } else if (section === 'all') {
+                  lensCorrectionsModule.reset();
+                }
+                handleModuleParamsChange('lenscorrections', lensCorrectionsModule.getParameters().lensCorrectionsParams);
+              }}
+            />
           </div>
         )}
 
         {/* Processing Stats */}
-        <div className="p-3 bg-dark-850 text-xs text-dark-400">
+        <div className="p-3 text-xs" style={{backgroundColor: 'var(--gray-850)', color: 'var(--gray-400)'}}>
           <div className="space-y-1">
             <div>Pipeline: {imageProcessingPipeline.getStats().enabledModules} modules active</div>
             <div>Real-time: 100ms debounce, 4x downscaled preview (main thread)</div>

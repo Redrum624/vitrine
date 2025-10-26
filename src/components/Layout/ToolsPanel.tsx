@@ -90,20 +90,20 @@ export function ToolsPanel({
   };
 
   return (
-    <div className="w-70 bg-dark-900 border-r border-dark-700 flex flex-col overflow-hidden">
+    <div className="w-70 border-r flex flex-col overflow-hidden" style={{backgroundColor: 'var(--gray-900)', borderRightColor: 'var(--border)'}}>
       {/* Module List */}
       <div className="flex-1 overflow-y-auto">
         {moduleCategories.map((category) => (
-          <div key={category.id} className="border-b border-dark-700 p-4">
+          <div key={category.id} className="border-b p-4" style={{borderBottomColor: 'var(--border)'}}>
             {/* Category Header */}
             <div
               onClick={() => toggleCategory(category.id)}
               className="flex items-center justify-between mb-3 cursor-pointer select-none"
             >
-              <h3 className="text-xxs font-semibold text-dark-400 tracking-widest uppercase">
+              <h3 className="text-xxs font-semibold tracking-widest uppercase" style={{color: 'var(--gray-400)', letterSpacing: '1px'}}>
                 {category.name}
               </h3>
-              <span className="text-dark-500 text-xxs">
+              <span className="text-xxs" style={{color: 'var(--gray-500)'}}>
                 {collapsedCategories.has(category.id) ? '▸' : '▼'}
               </span>
             </div>
@@ -116,35 +116,52 @@ export function ToolsPanel({
                   return (
                     <div
                       key={module.id}
-                      className={`
-                        px-3 py-2.5 flex items-center justify-between
-                        bg-transparent border border-transparent rounded
-                        hover:bg-dark-850 hover:border-dark-600 transition-all cursor-pointer
-                        ${state.expanded ? 'bg-dark-800 border-dark-600' : ''}
-                      `}
+                      className="px-3 py-2.5 flex items-center justify-between border rounded cursor-pointer"
+                      style={{
+                        backgroundColor: state.expanded ? 'var(--gray-800)' : 'transparent',
+                        borderColor: state.expanded ? 'var(--border-light)' : 'transparent',
+                        borderRadius: '3px',
+                        transition: 'var(--transition-fast)'
+                      }}
+                      onMouseEnter={(e) => {
+                        if (!state.expanded) {
+                          e.currentTarget.style.backgroundColor = 'var(--gray-850)';
+                          e.currentTarget.style.borderColor = 'var(--border-light)';
+                        }
+                      }}
+                      onMouseLeave={(e) => {
+                        if (!state.expanded) {
+                          e.currentTarget.style.backgroundColor = 'transparent';
+                          e.currentTarget.style.borderColor = 'transparent';
+                        }
+                      }}
                       onClick={() => handleModuleClick(module.id)}
                     >
                       <div className="flex items-center gap-2.5 flex-1">
                         {module.icon && (
-                          <span className="text-dark-500 text-sm w-4 h-4 flex items-center justify-center">{module.icon}</span>
+                          <span className="text-sm w-4 h-4 flex items-center justify-center" style={{color: 'var(--gray-500)'}}>{module.icon}</span>
                         )}
-                        <span className="text-xs text-dark-200">{module.name}</span>
+                        <span className="text-xs" style={{color: 'var(--gray-200)'}}>{module.name}</span>
                       </div>
 
                       {/* Toggle Switch */}
                       <button
                         onClick={(e) => handleModuleToggle(e, module.id)}
-                        className={`
-                          relative w-9 h-5 rounded-full transition-all border
-                          ${state.enabled ? 'bg-dark-700 border-dark-600' : 'bg-dark-800 border-dark-700'}
-                        `}
+                        className="relative w-9 h-5 rounded-full border"
+                        style={{
+                          backgroundColor: state.enabled ? 'var(--gray-700)' : 'var(--gray-800)',
+                          borderColor: state.enabled ? 'var(--border-light)' : 'var(--border)',
+                          transition: 'var(--transition-normal)'
+                        }}
                         aria-label={`Toggle ${module.name}`}
                       >
                         <span
-                          className={`
-                            absolute top-0.5 left-0.5 w-3.5 h-3.5 rounded-full transition-all
-                            ${state.enabled ? 'translate-x-4 bg-dark-200' : 'translate-x-0 bg-dark-500'}
-                          `}
+                          className="absolute top-0.5 left-0.5 w-3.5 h-3.5 rounded-full"
+                          style={{
+                            backgroundColor: state.enabled ? 'var(--gray-200)' : 'var(--gray-500)',
+                            transform: state.enabled ? 'translateX(16px)' : 'translateX(0)',
+                            transition: 'var(--transition-normal)'
+                          }}
                         />
                       </button>
                     </div>

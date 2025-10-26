@@ -88,17 +88,24 @@ export class RawImageService {
 
         return rawData;
       } catch (libRawError: unknown) {
-        logger.warn('LibRaw processing failed, trying advanced processor fallback:', libRawError);
+        const errorMessage = libRawError instanceof Error ? libRawError.message : String(libRawError);
+        logger.warn(`LibRaw processing failed for ${extension.toUpperCase()} file:`, errorMessage);
+        logger.info('Attempting fallback processing...');
 
         // Fallback to old advanced processor if available
         try {
           const rawData = await advancedRawProcessor.processRawFile(filePath, options);
           const loadTime = performance.now() - startTime;
           logger.info(`RAW image loaded with fallback processor in ${loadTime.toFixed(2)}ms: ${rawData.width}x${rawData.height}`);
+          logger.warn('Note: Fallback processor was used. For best results, ensure LibRaw WebAssembly module is properly installed.');
           return rawData;
         } catch (advancedError) {
-          logger.error('All RAW processing methods failed:', advancedError);
-          throw new Error(`Failed to process RAW file: ${libRawError instanceof Error ? libRawError.message : String(libRawError)}`);
+          const advErrorMessage = advancedError instanceof Error ? advancedError.message : String(advancedError);
+          logger.error('All RAW processing methods failed:', {
+            libRawError: errorMessage,
+            advancedProcessorError: advErrorMessage
+          });
+          throw new Error(`Failed to process ${extension.toUpperCase()} RAW file. LibRaw error: ${errorMessage}. Advanced processor error: ${advErrorMessage}`);
         }
       }
 

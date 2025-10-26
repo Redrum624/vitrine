@@ -18,12 +18,11 @@ interface ToolbarProps {
 }
 
 export function Toolbar({ onExport, onBatchProcess: _onBatchProcess, onOpenPresets: _onOpenPresets, onOpenPlugins: _onOpenPlugins, onShowHelp: _onShowHelp, onUndo, onRedo, canUndo = false, canRedo = false, onZoomIn, onZoomOut, onFitWindow, onActualSize, zoom = 1 }: ToolbarProps) {
-  const btnClass = "bg-transparent border border-dark-700 text-dark-300 flex items-center justify-center cursor-pointer transition-all hover:bg-dark-800 hover:border-dark-600 hover:text-dark-100";
-  const btnStyle = {width: '32px', height: '32px', fontSize: '13px', borderRadius: '3px'};
-  const btnActiveClass = "bg-dark-700 border-dark-600 text-white";
+  const btnClass = "bg-transparent border text-dark-300 flex items-center justify-center cursor-pointer hover:text-dark-100";
+  const btnStyle = {width: '32px', height: '32px', fontSize: '13px', borderRadius: '3px', borderColor: 'var(--border)', transition: 'var(--transition-fast)'};
 
   return (
-    <div className="flex items-center justify-between bg-dark-900 border-b border-dark-700 no-select" style={{padding: '10px 20px'}}>
+    <div className="flex items-center justify-between border-b no-select" style={{padding: '10px 20px', backgroundColor: 'var(--gray-900)', borderBottomColor: 'var(--border)'}}>
       {/* Left side - File and Tools */}
       <div className="flex items-center gap-1.5">
         {electronService.isElectron() && (
@@ -45,7 +44,7 @@ export function Toolbar({ onExport, onBatchProcess: _onBatchProcess, onOpenPrese
               Save
             </button>
 
-            <div className="bg-dark-700" style={{width: '1px', height: '24px', margin: '0 6px'}} />
+            <div style={{width: '1px', height: '24px', margin: '0 6px', backgroundColor: 'var(--border)'}} />
 
             <button
               onClick={onUndo}
@@ -65,12 +64,6 @@ export function Toolbar({ onExport, onBatchProcess: _onBatchProcess, onOpenPrese
             >
               ↷
             </button>
-
-            <div className="bg-dark-700" style={{width: '1px', height: '24px', margin: '0 6px'}} />
-
-            <button className={`${btnClass} ${btnActiveClass}`} style={btnStyle} title="Select">⊙</button>
-            <button className={btnClass} style={btnStyle} title="Crop">✂</button>
-            <button className={btnClass} style={btnStyle} title="Adjust">⊕</button>
           </>
         )}
       </div>
@@ -78,7 +71,7 @@ export function Toolbar({ onExport, onBatchProcess: _onBatchProcess, onOpenPrese
       {/* Center - Zoom controls */}
       <div className="flex items-center" style={{gap: '6px'}}>
         <button onClick={onZoomOut} className={btnClass} style={btnStyle} title="Zoom Out">−</button>
-        <span className="text-center font-mono text-dark-400" style={{fontSize: '11px', minWidth: '50px', fontVariantNumeric: 'tabular-nums'}}>
+        <span className="text-center font-mono" style={{fontSize: '11px', minWidth: '50px', fontVariantNumeric: 'tabular-nums', color: 'var(--gray-400)'}}>
           {Math.round(zoom * 100)}%
         </span>
         <button onClick={onZoomIn} className={btnClass} style={btnStyle} title="Zoom In">+</button>
@@ -104,11 +97,11 @@ export function Toolbar({ onExport, onBatchProcess: _onBatchProcess, onOpenPrese
       </div>
 
       {/* Right side - Info */}
-      <div className="flex items-center text-dark-400" style={{gap: '16px', fontSize: '11px'}}>
+      <div className="flex items-center" style={{gap: '16px', fontSize: '11px', color: 'var(--gray-400)', fontVariantNumeric: 'tabular-nums'}}>
         <span>6000 × 4000</span>
-        <div className="bg-dark-700" style={{width: '1px', height: '16px'}} />
+        <div style={{width: '1px', height: '16px', backgroundColor: 'var(--border)'}} />
         <span>24.0 MP</span>
-        <div className="bg-dark-700" style={{width: '1px', height: '16px'}} />
+        <div style={{width: '1px', height: '16px', backgroundColor: 'var(--border)'}} />
         <span>sRGB</span>
       </div>
     </div>

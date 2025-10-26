@@ -1,4 +1,5 @@
 import { logger } from '../utils/Logger';
+import { LRUCache } from '../utils/LRUCache';
 import { CropPipelineModule } from '../modules/CropPipelineModule';
 import { ExposureModule } from '../modules/ExposureModule';
 import { BasicAdjustmentsModule } from '../modules/BasicAdjustmentsModule';
@@ -8,6 +9,7 @@ import { ColorBalancePipelineModule } from '../modules/ColorBalancePipelineModul
 import { ShadowsHighlightsPipelineModule } from '../modules/ShadowsHighlightsPipelineModule';
 import { LocalAdjustmentsPipelineModule } from '../modules/LocalAdjustmentsPipelineModule';
 import { LensCorrectionsPipelineModule } from '../modules/LensCorrectionsPipelineModule';
+import { NoiseReductionModule } from '../modules/NoiseReductionModule';
 import { webWorkerImageProcessor, WorkerModuleConfig } from './WebWorkerImageProcessor';
 
 export interface ProcessingContext {
@@ -28,10 +30,22 @@ export interface PipelineModule {
 export class ImageProcessingPipeline {
   private modules: Map<string, PipelineModule> = new Map();
   private processingOrder: string[] = [];
-  private moduleCache: Map<string, { params: string; result: Float32Array; context: ProcessingContext }> = new Map();
+  // LRU cache with 100 entry limit and 500MB memory limit (prevents memory leaks)
+  private moduleCache: LRUCache<{ params: string; result: Float32Array; context: ProcessingContext }>;
 
   constructor() {
+    // Initialize LRU cache with smart eviction
+    this.moduleCache = new LRUCache<{ params: string; result: Float32Array; context: ProcessingContext }>({
+      maxSize: 100, // Maximum 100 cached results
+      maxMemory: 500 * 1024 * 1024, // 500MB memory limit
+      onEvict: (key, value) => {
+        const cachedValue = value as { params: string; result: Float32Array; context: ProcessingContext };
+        logger.debug(`Pipeline cache evicted: ${key} (size: ${cachedValue.result.byteLength} bytes)`);
+      }
+    });
+
     this.initializeModules();
+    logger.info('ImageProcessingPipeline initialized with LRU cache (max: 100 entries, 500MB)');
   }
 
   private initializeModules(): void {
@@ -46,8 +60,9 @@ export class ImageProcessingPipeline {
     const colorBalanceModule = new ColorBalancePipelineModule();
     const shadowsHighlightsModule = new ShadowsHighlightsPipelineModule();
     const localAdjustmentsModule = new LocalAdjustmentsPipelineModule();
+    const noiseReductionModule = new NoiseReductionModule();
 
-    // Pipeline order: Geometric → Color/Tone → Local
+    // Pipeline order: Geometric → Color/Tone → Local → Denoise
     // Note: Transform (rotate/flip) is now integrated into CropModule
     this.addModule(cropModule, 0); // First - crop/transform (unified)
     this.addModule(lensCorrectionsModule, 1); // Second - lens corrections (geometric)
@@ -58,8 +73,9 @@ export class ImageProcessingPipeline {
     this.addModule(colorBalanceModule, 6); // Seventh - color balance
     this.addModule(shadowsHighlightsModule, 7); // Eighth - shadows/highlights recovery
     this.addModule(localAdjustmentsModule, 8); // Ninth - local adjustments
+    this.addModule(noiseReductionModule, 9); // Tenth - world-class noise reduction (BM3D, NLMeans, Wavelet, Hybrid)
 
-    logger.info('Image processing pipeline initialized with 9 modules:', this.processingOrder);
+    logger.info('Image processing pipeline initialized with 10 modules:', this.processingOrder);
   }
 
   addModule(module: PipelineModule, position?: number): void {
@@ -112,9 +128,9 @@ export class ImageProcessingPipeline {
   // Public method to invalidate cache when parameters change externally
   invalidateModuleCache(moduleId: string): void {
     logger.info(`🗑️ MANUAL CACHE INVALIDATION for module: ${moduleId}`);
-    const sizeBefore = this.moduleCache.size;
+    const sizeBefore = this.moduleCache.size();
     this.invalidateCacheFromModule(moduleId);
-    const sizeAfter = this.moduleCache.size;
+    const sizeAfter = this.moduleCache.size();
     logger.debug(`  Cache size: ${sizeBefore} → ${sizeAfter} (cleared ${sizeBefore - sizeAfter} entries)`);
   }
 
@@ -392,12 +408,17 @@ export class ImageProcessingPipeline {
           }
           logger.info(`${module.getName()} OUTPUT: range=${moduleStats.min.toFixed(4)}-${moduleStats.max.toFixed(4)}, nonZero=${moduleStats.nonZero}/${currentData.length/4}`);
 
-          // Cache the result for future use
-          this.moduleCache.set(moduleId, {
-            params: cacheKey,
-            result: new Float32Array(currentData),
-            context: { ...context }
-          });
+          // Cache the result for future use with size tracking
+          const resultSize = currentData.byteLength;
+          this.moduleCache.set(
+            moduleId,
+            {
+              params: cacheKey,
+              result: new Float32Array(currentData),
+              context: { ...context }
+            },
+            resultSize
+          );
 
           logger.info(`✅ Module ${module.getName()} processed successfully`);
 

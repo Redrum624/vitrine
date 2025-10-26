@@ -73,7 +73,7 @@ export function StatusBar({ currentImage, processingStats }: StatusBarProps) {
   }
 
   return (
-    <div className="h-6 bg-dark-850 border-t border-dark-700 flex items-center justify-between px-4 text-xs text-dark-400 no-select">
+    <div className="h-6 border-t flex items-center justify-between px-4 text-xs no-select" style={{backgroundColor: 'var(--gray-850)', borderTopColor: 'var(--border)', color: 'var(--gray-400)'}}>
       {/* Left side - Image info */}
       <div className="flex items-center space-x-4">
         <div className="flex items-center space-x-1">
@@ -85,12 +85,12 @@ export function StatusBar({ currentImage, processingStats }: StatusBarProps) {
 
         {currentImage && (
           <>
-            <div className="w-px h-3 bg-dark-600" />
+            <div className="w-px h-3" style={{backgroundColor: 'var(--border-light)'}} />
             <span>{formatDimensions(currentImage.width, currentImage.height)}</span>
 
             {currentImage.size && (
               <>
-                <div className="w-px h-3 bg-dark-600" />
+                <div className="w-px h-3" style={{backgroundColor: 'var(--border-light)'}} />
                 <div className="flex items-center space-x-1">
                   <HardDrive className="w-3 h-3" />
                   <span>{formatFileSize(currentImage.size)}</span>
@@ -100,7 +100,7 @@ export function StatusBar({ currentImage, processingStats }: StatusBarProps) {
 
             {currentImage.type && (
               <>
-                <div className="w-px h-3 bg-dark-600" />
+                <div className="w-px h-3" style={{backgroundColor: 'var(--border-light)'}} />
                 <span className="uppercase">{currentImage.type}</span>
               </>
             )}
@@ -110,7 +110,7 @@ export function StatusBar({ currentImage, processingStats }: StatusBarProps) {
         {/* Processing stats */}
         {processingStats && (
           <>
-            <div className="w-px h-3 bg-dark-600" />
+            <div className="w-px h-3" style={{backgroundColor: 'var(--border-light)'}} />
             <div className="flex items-center space-x-1">
               <Cpu className="w-3 h-3" />
               <span>{processingStats.modulesActive}/{processingStats.totalModules} modules</span>
@@ -118,7 +118,7 @@ export function StatusBar({ currentImage, processingStats }: StatusBarProps) {
 
             {processingStats.processingTime > 0 && (
               <>
-                <div className="w-px h-3 bg-dark-600" />
+                <div className="w-px h-3" style={{backgroundColor: 'var(--border-light)'}} />
                 <div className="flex items-center space-x-1">
                   <Zap className="w-3 h-3" />
                   <span>{processingStats.processingTime.toFixed(1)}ms</span>
@@ -139,7 +139,7 @@ export function StatusBar({ currentImage, processingStats }: StatusBarProps) {
               <Activity className="w-3 h-3" />
               <span>{getMemoryInfo()}</span>
             </div>
-            <div className="w-px h-3 bg-dark-600" />
+            <div className="w-px h-3" style={{backgroundColor: 'var(--border-light)'}} />
           </>
         )}
 

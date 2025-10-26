@@ -111,8 +111,9 @@ export class ImageService {
           };
 
           this.currentImage = result;
-          logger.info(`Image loaded from cache: ${result.width}x${result.height}`);
-          this.notifyImageLoaded();
+          logger.info(`Image loaded from cache: ${result.width}x${result.height} - skipping reprocessing`);
+          // Don't notify listeners for cached images to avoid reprocessing
+          // this.notifyImageLoaded();
           return result;
         }
 

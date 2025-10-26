@@ -25,11 +25,27 @@ export function ThumbnailPanel({
 
   // Load thumbnail for an image
   const loadThumbnail = useCallback(async (image: ImageFileInfo) => {
-    if (thumbnails.has(image.id) || loadingThumbnails.has(image.id)) {
-      return;
-    }
+    // Check current state using functional updates to avoid stale closures
+    setLoadingThumbnails(prev => {
+      if (prev.has(image.id)) {
+        return prev; // Already loading
+      }
+      return new Set(prev).add(image.id);
+    });
 
-    setLoadingThumbnails(prev => new Set(prev).add(image.id));
+    // Check if already loaded
+    setThumbnails(prev => {
+      if (prev.has(image.id)) {
+        // Already loaded, remove from loading set
+        setLoadingThumbnails(loading => {
+          const newSet = new Set(loading);
+          newSet.delete(image.id);
+          return newSet;
+        });
+        return prev;
+      }
+      return prev;
+    });
 
     try {
       // Try to load thumbnail via Electron API
@@ -75,7 +91,7 @@ export function ThumbnailPanel({
         return newSet;
       });
     }
-  }, [thumbnails, loadingThumbnails]);
+  }, []); // Empty dependencies - function is stable
 
   // Load visible thumbnails
   useEffect(() => {
@@ -109,10 +125,16 @@ export function ThumbnailPanel({
       const currentIndex = selectedImage ? images.findIndex(img => img.id === selectedImage.id) : -1;
 
       if (e.key === 'ArrowLeft' && currentIndex > 0) {
-        onImageSelect(images[currentIndex - 1]);
+        const prevImage = images[currentIndex - 1];
+        onImageSelect(prevImage);
+        // Trigger thumbnail load (will be a no-op if already loaded/loading)
+        loadThumbnail(prevImage);
         e.preventDefault();
       } else if (e.key === 'ArrowRight' && currentIndex < images.length - 1) {
-        onImageSelect(images[currentIndex + 1]);
+        const nextImage = images[currentIndex + 1];
+        onImageSelect(nextImage);
+        // Trigger thumbnail load (will be a no-op if already loaded/loading)
+        loadThumbnail(nextImage);
         e.preventDefault();
       } else if (e.key === 'Escape') {
         onClose();
@@ -122,13 +144,16 @@ export function ThumbnailPanel({
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [visible, images, selectedImage, onImageSelect, onClose]);
+  }, [visible, images, selectedImage, onImageSelect, onClose, loadThumbnail]);
 
   const handlePrevious = () => {
     if (!selectedImage || images.length === 0) return;
     const currentIndex = images.findIndex(img => img.id === selectedImage.id);
     if (currentIndex > 0) {
-      onImageSelect(images[currentIndex - 1]);
+      const prevImage = images[currentIndex - 1];
+      onImageSelect(prevImage);
+      // Trigger thumbnail load (will be a no-op if already loaded/loading)
+      loadThumbnail(prevImage);
     }
   };
 
@@ -136,16 +161,17 @@ export function ThumbnailPanel({
     if (!selectedImage || images.length === 0) return;
     const currentIndex = images.findIndex(img => img.id === selectedImage.id);
     if (currentIndex < images.length - 1) {
-      onImageSelect(images[currentIndex + 1]);
+      const nextImage = images[currentIndex + 1];
+      onImageSelect(nextImage);
+      // Trigger thumbnail load (will be a no-op if already loaded/loading)
+      loadThumbnail(nextImage);
     }
   };
 
   const handleThumbnailClick = (image: ImageFileInfo) => {
     onImageSelect(image);
-    // Load thumbnail if not already loaded
-    if (!thumbnails.has(image.id)) {
-      loadThumbnail(image);
-    }
+    // Trigger thumbnail load (will be a no-op if already loaded/loading)
+    loadThumbnail(image);
   };
 
   const handleScroll = () => {
@@ -163,7 +189,8 @@ export function ThumbnailPanel({
       if (rect.left < containerRect.right && rect.right > containerRect.left) {
         const imageId = element.getAttribute('data-image-id');
         const image = images.find(img => img.id === imageId);
-        if (image && !thumbnails.has(image.id) && !loadingThumbnails.has(image.id)) {
+        if (image) {
+          // Trigger thumbnail load (will be a no-op if already loaded/loading)
           loadThumbnail(image);
         }
       }
@@ -179,46 +206,100 @@ export function ThumbnailPanel({
   const canGoNext = currentIndex < images.length - 1;
 
   return (
-    <div className="bg-dark-900 border-t border-dark-700 h-32 flex flex-col">
+    <div className="border-t flex flex-col" style={{backgroundColor: 'var(--gray-900)', borderTopColor: 'var(--border)', height: '140px'}}>
       {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2 border-b border-dark-700">
-        <div className="flex items-center space-x-4">
-          <h3 className="text-sm font-medium text-dark-300">
+      <div className="flex items-center justify-between px-4 py-1 border-b" style={{borderBottomColor: 'var(--border)'}}>
+        <div className="flex items-center gap-4">
+          <h3 className="text-xs font-semibold uppercase tracking-wider" style={{color: 'var(--gray-500)'}}>
             {images.length} image{images.length !== 1 ? 's' : ''}
           </h3>
           {selectedImage && (
-            <span className="text-xs text-dark-400">
-              {currentIndex + 1} of {images.length}
+            <span className="text-xs font-mono" style={{color: 'var(--gray-400)'}}>
+              {currentIndex + 1} / {images.length}
             </span>
           )}
         </div>
 
-        <div className="flex items-center space-x-2">
+        <div className="flex items-center gap-2">
           {/* Navigation Controls */}
           <button
             onClick={handlePrevious}
             disabled={!canGoPrevious}
-            className="p-1 rounded hover:bg-dark-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="p-1.5 rounded border transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+            style={{
+              backgroundColor: 'transparent',
+              borderColor: 'var(--border)',
+              color: 'var(--gray-400)',
+              cursor: canGoPrevious ? 'pointer' : 'not-allowed'
+            }}
+            onMouseEnter={(e) => {
+              if (canGoPrevious) {
+                e.currentTarget.style.backgroundColor = 'var(--gray-800)';
+                e.currentTarget.style.color = 'var(--white)';
+                e.currentTarget.style.cursor = 'pointer';
+              }
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = 'transparent';
+              e.currentTarget.style.color = 'var(--gray-400)';
+              e.currentTarget.style.cursor = canGoPrevious ? 'pointer' : 'not-allowed';
+            }}
             title="Previous image (←)"
           >
-            <ChevronLeft className="w-4 h-4 text-dark-300" />
+            <ChevronLeft className="w-3.5 h-3.5" />
           </button>
 
           <button
             onClick={handleNext}
             disabled={!canGoNext}
-            className="p-1 rounded hover:bg-dark-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="p-1.5 rounded border transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+            style={{
+              backgroundColor: 'transparent',
+              borderColor: 'var(--border)',
+              color: 'var(--gray-400)',
+              cursor: canGoNext ? 'pointer' : 'not-allowed'
+            }}
+            onMouseEnter={(e) => {
+              if (canGoNext) {
+                e.currentTarget.style.backgroundColor = 'var(--gray-800)';
+                e.currentTarget.style.color = 'var(--white)';
+                e.currentTarget.style.cursor = 'pointer';
+              }
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = 'transparent';
+              e.currentTarget.style.color = 'var(--gray-400)';
+              e.currentTarget.style.cursor = canGoNext ? 'pointer' : 'not-allowed';
+            }}
             title="Next image (→)"
           >
-            <ChevronRight className="w-4 h-4 text-dark-300" />
+            <ChevronRight className="w-3.5 h-3.5" />
           </button>
+
+          <div style={{width: '1px', height: '20px', backgroundColor: 'var(--border)', margin: '0 4px'}} />
 
           <button
             onClick={onClose}
-            className="p-1 rounded hover:bg-dark-700 text-dark-400 hover:text-dark-300"
+            className="p-1.5 rounded border transition-all"
+            style={{
+              backgroundColor: 'transparent',
+              borderColor: 'var(--border)',
+              color: 'var(--gray-400)',
+              cursor: 'pointer'
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = 'var(--gray-800)';
+              e.currentTarget.style.color = 'var(--white)';
+              e.currentTarget.style.cursor = 'pointer';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = 'transparent';
+              e.currentTarget.style.color = 'var(--gray-400)';
+              e.currentTarget.style.cursor = 'pointer';
+            }}
             title="Close thumbnail panel (Esc)"
           >
-            <X className="w-4 h-4" />
+            <X className="w-3.5 h-3.5" />
           </button>
         </div>
       </div>
@@ -226,47 +307,69 @@ export function ThumbnailPanel({
       {/* Thumbnail Strip */}
       <div
         ref={scrollContainerRef}
-        className="flex-1 overflow-x-auto overflow-y-hidden p-2"
+        className="flex-1 overflow-x-auto overflow-y-hidden px-4 py-2"
         onScroll={handleScroll}
+        style={{
+          scrollbarWidth: 'thin',
+          scrollbarColor: 'var(--gray-700) transparent'
+        }}
       >
-        <div className="flex space-x-2 h-full">
+        <div className="flex gap-2 h-full">
           {images.map((image) => {
             const isSelected = selectedImage?.id === image.id;
             const thumbnail = thumbnails.get(image.id);
             const isLoading = loadingThumbnails.has(image.id);
+
+            // Determine aspect ratio from image metadata or default
+            // Most images will have metadata available from the ImageFileInfo
+            // For now, we'll use a default and let the actual image determine the aspect ratio
+            // when it loads, but we can optimize this later with metadata
 
             return (
               <div
                 key={image.id}
                 ref={isSelected ? selectedImageRef : undefined}
                 data-image-id={image.id}
-                className={`
-                  relative flex-shrink-0 w-24 h-16 rounded border-2 cursor-pointer transition-all
-                  ${isSelected
-                    ? 'border-primary-500 shadow-lg ring-2 ring-primary-500/30'
-                    : 'border-dark-600 hover:border-dark-500'
-                  }
-                `}
+                className="relative flex-shrink-0 rounded border cursor-pointer transition-all h-full"
+                style={{
+                  width: 'auto',
+                  borderWidth: '2px',
+                  borderColor: isSelected ? 'var(--white)' : 'var(--border)',
+                  backgroundColor: 'var(--gray-800)',
+                  boxShadow: isSelected ? '0 0 0 1px var(--white)' : 'none'
+                }}
                 onClick={() => handleThumbnailClick(image)}
+                onMouseEnter={(e) => {
+                  if (!isSelected) {
+                    e.currentTarget.style.borderColor = 'var(--border-light)';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (!isSelected) {
+                    e.currentTarget.style.borderColor = 'var(--border)';
+                  }
+                }}
                 title={`${image.name} (${image.format})`}
               >
                 {isLoading ? (
-                  <div className="w-full h-full bg-dark-800 rounded flex items-center justify-center">
-                    <div className="w-4 h-4 border-2 border-dark-400 border-t-primary-500 rounded-full animate-spin" />
+                  <div className="w-full h-full rounded flex items-center justify-center" style={{backgroundColor: 'var(--gray-800)'}}>
+                    <div className="w-4 h-4 border-2 rounded-full animate-spin" style={{borderColor: 'var(--gray-600)', borderTopColor: 'var(--white)'}} />
                   </div>
                 ) : thumbnail ? (
                   <img
                     src={thumbnail}
                     alt={image.name}
-                    className="w-full h-full object-cover rounded"
+                    className="h-full object-contain rounded"
+                    style={{ width: 'auto', maxWidth: '200px' }}
                     draggable={false}
                   />
                 ) : (
                   <div
-                    className="w-full h-full bg-dark-800 rounded flex items-center justify-center"
+                    className="w-full h-full rounded flex items-center justify-center"
+                    style={{backgroundColor: 'var(--gray-800)'}}
                     onClick={() => loadThumbnail(image)}
                   >
-                    <span className="text-xs text-dark-400 text-center px-1">
+                    <span className="text-xs text-center px-1" style={{color: 'var(--gray-500)'}}>
                       {image.format}
                     </span>
                   </div>
@@ -274,7 +377,7 @@ export function ThumbnailPanel({
 
                 {/* Selected indicator */}
                 {isSelected && (
-                  <div className="absolute -top-1 -right-1 w-3 h-3 bg-primary-500 rounded-full border-2 border-dark-900" />
+                  <div className="absolute rounded-full" style={{top: '-4px', right: '-4px', width: '10px', height: '10px', backgroundColor: 'var(--white)', border: '2px solid var(--gray-900)'}} />
                 )}
               </div>
             );

@@ -62,51 +62,92 @@ export function WhiteBalanceModuleComponent({
     }, 100);
   }, [module, onParamsChange, onAutoDetect]);
 
-  const formatTemperature = (temp: number): string => {
-    return `${Math.round(temp)}K`;
-  };
-
-  const formatTint = (tint: number): string => {
-    return tint >= 0 ? `+${tint.toFixed(1)}` : tint.toFixed(1);
-  };
-
   return (
-    <div className="space-y-4">
-      {/* Header */}
-
-      <div className="space-y-2">
-        {/* Preset Selection */}
-        <div className="flex items-center justify-between">
-          <label className="text-xs font-medium text-dark-300">Preset</label>
-          <div className="flex items-center space-x-1">
-            <button
-              onClick={handleAutoDetect}
-              className="p-1 hover:bg-dark-700 rounded text-dark-300"
-              title="Auto detect white balance"
-            >
-              <Zap className="w-4 h-4" />
-            </button>
-            <button
-              onClick={resetAll}
-              className="p-1 hover:bg-dark-700 rounded transition-professional text-dark-300 disabled:opacity-50"
-              title="Reset all parameters"
-            >
-              <RotateCcw className="w-4 h-4" />
-            </button>
-          </div>
+    <div className="space-y-3">
+      {/* Header - Redesigned */}
+      <div className="flex items-center justify-between pb-2" style={{borderBottom: '1px solid var(--border)'}}>
+        <div className="flex items-center gap-2">
+          <div className="w-1 h-3 rounded-sm" style={{backgroundColor: 'var(--gray-600)'}} />
+          <span className="text-xs font-medium uppercase tracking-wider" style={{color: 'var(--gray-500)', letterSpacing: '0.5px'}}>Controls</span>
         </div>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={handleAutoDetect}
+            className="p-1.5 rounded border"
+            style={{
+              backgroundColor: 'transparent',
+              borderColor: 'var(--border)',
+              color: 'var(--gray-400)',
+              transition: 'var(--transition-fast)'
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = 'var(--gray-800)';
+              e.currentTarget.style.borderColor = 'var(--border-light)';
+              e.currentTarget.style.color = 'var(--white)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = 'transparent';
+              e.currentTarget.style.borderColor = 'var(--border)';
+              e.currentTarget.style.color = 'var(--gray-400)';
+            }}
+            title="Auto detect"
+          >
+            <Zap className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={resetAll}
+            className="p-1.5 rounded border"
+            style={{
+              backgroundColor: 'transparent',
+              borderColor: 'var(--border)',
+              color: 'var(--gray-400)',
+              transition: 'var(--transition-fast)'
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = 'var(--gray-800)';
+              e.currentTarget.style.borderColor = 'var(--border-light)';
+              e.currentTarget.style.color = 'var(--white)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = 'transparent';
+              e.currentTarget.style.borderColor = 'var(--border)';
+              e.currentTarget.style.color = 'var(--gray-400)';
+            }}
+            title="Reset all"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      </div>
 
+      <div className="space-y-3">
+        {/* Presets */}
         <div className="space-y-2">
-          <div className="grid grid-cols-2 gap-1">
+          <label className="text-xs font-medium" style={{color: 'var(--gray-400)'}}>Preset</label>
+          <div className="grid grid-cols-2 gap-1.5">
             {Object.keys(WHITE_BALANCE_PRESETS).map((preset) => (
               <button
                 key={preset}
                 onClick={() => handlePresetChange(preset)}
-                className={`px-2 py-1 text-xs rounded border border-dark-700 transition-professional ${
-                  params.preset === preset
-                    ? 'bg-dark-600 text-dark-200'
-                    : 'bg-dark-800 text-dark-300 hover:bg-dark-700'
-                }`}
+                className="px-3 py-1.5 text-xs rounded border font-medium"
+                style={{
+                  backgroundColor: params.preset === preset ? 'var(--gray-700)' : 'var(--gray-850)',
+                  borderColor: params.preset === preset ? 'var(--border-light)' : 'var(--border)',
+                  color: params.preset === preset ? 'var(--white)' : 'var(--gray-300)',
+                  transition: 'var(--transition-fast)'
+                }}
+                onMouseEnter={(e) => {
+                  if (params.preset !== preset) {
+                    e.currentTarget.style.backgroundColor = 'var(--gray-800)';
+                    e.currentTarget.style.borderColor = 'var(--border-light)';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (params.preset !== preset) {
+                    e.currentTarget.style.backgroundColor = 'var(--gray-850)';
+                    e.currentTarget.style.borderColor = 'var(--border)';
+                  }
+                }}
               >
                 {preset.charAt(0).toUpperCase() + preset.slice(1)}
               </button>
@@ -114,19 +155,19 @@ export function WhiteBalanceModuleComponent({
           </div>
         </div>
 
-        {/* Auto White Balance Indicator */}
+        {/* Auto Indicator */}
         {params.auto && (
-          <div className="flex items-center space-x-2 px-2 py-1 bg-dark-700 rounded text-xs text-dark-300">
-            <Zap className="w-3 h-3" />
-            <span>Auto-detected white balance</span>
+          <div className="flex items-center gap-2 px-2 py-1.5 rounded border" style={{backgroundColor: 'var(--gray-850)', borderColor: 'var(--border)'}}>
+            <Zap className="w-3 h-3" style={{color: 'var(--gray-400)'}} />
+            <span className="text-xs" style={{color: 'var(--gray-300)'}}>Auto-detected white balance</span>
           </div>
         )}
 
         {/* Temperature */}
-        <div className="space-y-2">
+        <div className="space-y-1.5">
           <div className="flex items-center justify-between">
-            <label className="text-xs text-dark-300">Temperature</label>
-            <div className="flex items-center space-x-2">
+            <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Temperature</label>
+            <div className="flex items-center gap-1.5">
               <DelayedInputControl
                 value={params.temperature}
                 onChange={(value) => updateParam('temperature', value)}
@@ -135,39 +176,54 @@ export function WhiteBalanceModuleComponent({
                 step={100}
                 precision={0}
               />
-              <span className="text-xs text-dark-300">K</span>
+              <span className="text-xs font-mono" style={{color: 'var(--gray-500)', width: '12px'}}>K</span>
               <button
                 onClick={() => resetParam('temperature', 5500)}
-                className="p-1 hover:bg-dark-700 rounded text-dark-300"
-                title="Reset temperature"
+                className="p-1 rounded"
+                style={{
+                  backgroundColor: 'transparent',
+                  color: 'var(--gray-500)',
+                  transition: 'var(--transition-fast)'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = 'var(--gray-800)';
+                  e.currentTarget.style.color = 'var(--white)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = 'transparent';
+                  e.currentTarget.style.color = 'var(--gray-500)';
+                }}
+                title="Reset"
               >
                 <RotateCcw className="w-3 h-3" />
               </button>
             </div>
           </div>
-          <div className="relative">
-            <input
-              type="range"
-              min="2000"
-              max="12000"
-              step="100"
-              value={Math.min(12000, params.temperature)}
-              onChange={(e) => updateParam('temperature', parseInt(e.target.value))}
-              className="w-full h-2 bg-gradient-to-r from-blue-400 via-white to-orange-400 rounded-lg appearance-none cursor-pointer slider-thumb"
-            />
-          </div>
-          <div className="flex justify-between text-xs text-dark-400">
-            <span>Cool (2000K)</span>
-            <span>Neutral (5500K)</span>
-            <span>Warm (12000K)</span>
+          <input
+            type="range"
+            min="2000"
+            max="12000"
+            step="100"
+            value={Math.min(12000, params.temperature)}
+            onChange={(e) => updateParam('temperature', parseInt(e.target.value))}
+            className="slider w-full"
+            style={{
+              background: 'linear-gradient(to right, #60a5fa, #e5e7eb, #fb923c)',
+            }}
+            title="Double-click to reset"
+          />
+          <div className="flex justify-between text-xs" style={{color: 'var(--gray-500)'}}>
+            <span>Cool</span>
+            <span>Neutral</span>
+            <span>Warm</span>
           </div>
         </div>
 
         {/* Tint */}
-        <div className="space-y-2">
+        <div className="space-y-1.5">
           <div className="flex items-center justify-between">
-            <label className="text-xs text-dark-300">Tint</label>
-            <div className="flex items-center space-x-2">
+            <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Tint</label>
+            <div className="flex items-center gap-1.5">
               <DelayedInputControl
                 value={params.tint}
                 onChange={(value) => updateParam('tint', value)}
@@ -178,39 +234,54 @@ export function WhiteBalanceModuleComponent({
               />
               <button
                 onClick={() => resetParam('tint', 0.0)}
-                className="p-1 hover:bg-dark-700 rounded text-dark-300"
-                title="Reset tint"
+                className="p-1 rounded"
+                style={{
+                  backgroundColor: 'transparent',
+                  color: 'var(--gray-500)',
+                  transition: 'var(--transition-fast)'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = 'var(--gray-800)';
+                  e.currentTarget.style.color = 'var(--white)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = 'transparent';
+                  e.currentTarget.style.color = 'var(--gray-500)';
+                }}
+                title="Reset"
               >
                 <RotateCcw className="w-3 h-3" />
               </button>
             </div>
           </div>
-          <div className="relative">
-            <input
-              type="range"
-              min="-100"
-              max="100"
-              step="1"
-              value={params.tint}
-              onChange={(e) => updateParam('tint', parseFloat(e.target.value))}
-              className="w-full h-2 bg-gradient-to-r from-pink-400 via-gray-300 to-green-400 rounded-lg appearance-none cursor-pointer slider-thumb"
-            />
-          </div>
-          <div className="flex justify-between text-xs text-dark-400">
-            <span>Magenta (-100)</span>
-            <span>Green (+100)</span>
+          <input
+            type="range"
+            min="-100"
+            max="100"
+            step="1"
+            value={params.tint}
+            onChange={(e) => updateParam('tint', parseFloat(e.target.value))}
+            className="slider w-full"
+            style={{
+              background: 'linear-gradient(to right, #f472b6, #9ca3af, #4ade80)',
+            }}
+            title="Double-click to reset"
+          />
+          <div className="flex justify-between text-xs" style={{color: 'var(--gray-500)'}}>
+            <span>Magenta</span>
+            <span>Green</span>
           </div>
         </div>
 
-        {/* Current Values Display */}
-        <div className="flex justify-between text-xs text-dark-400 pt-2 border-t border-dark-700">
+        {/* Current Values */}
+        <div className="flex justify-between text-xs pt-2" style={{borderTop: '1px solid var(--border)', color: 'var(--gray-400)'}}>
           <div>
-            <span className="text-dark-300">Temperature: </span>
-            <span className="font-mono">{formatTemperature(params.temperature)}</span>
+            <span style={{color: 'var(--gray-500)'}}>Temp: </span>
+            <span className="font-mono" style={{color: 'var(--gray-200)'}}>{Math.round(params.temperature)}K</span>
           </div>
           <div>
-            <span className="text-dark-300">Tint: </span>
-            <span className="font-mono">{formatTint(params.tint)}</span>
+            <span style={{color: 'var(--gray-500)'}}>Tint: </span>
+            <span className="font-mono" style={{color: 'var(--gray-200)'}}>{params.tint >= 0 ? '+' : ''}{params.tint.toFixed(1)}</span>
           </div>
         </div>
       </div>

@@ -104,8 +104,13 @@ export class LibRawService {
       logger.info(`LibRaw WebAssembly service initialized in ${initTime.toFixed(2)}ms`);
 
     } catch (error) {
-      logger.error('Failed to initialize LibRaw WebAssembly service:', error);
-      throw new Error(`LibRaw initialization failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      logger.error('Failed to initialize LibRaw WebAssembly service:', errorMessage);
+      logger.warn('RAW file processing will use fallback methods. To enable LibRaw:');
+      logger.warn('1. Ensure libraw-wasm package is installed: npm install libraw-wasm');
+      logger.warn('2. Check that WebAssembly is supported in your environment');
+      logger.warn('3. Verify WASM files are accessible and not blocked by CORS');
+      throw new Error(`LibRaw initialization failed: ${errorMessage}. RAW files will use fallback processing.`);
     }
   }
 
