@@ -12,6 +12,54 @@ import { LensCorrectionsPipelineModule } from '../modules/LensCorrectionsPipelin
 import { NoiseReductionModule } from '../modules/NoiseReductionModule';
 import { webWorkerImageProcessor, WorkerModuleConfig } from './WebWorkerImageProcessor';
 
+// Module-specific param interfaces for type-safe identity checks
+interface CurveNode {
+  x: number;
+  y: number;
+}
+
+interface ToneCurveParams {
+  baseCurve?: CurveNode[];
+  autoLevels?: boolean;
+  autoContrast?: boolean;
+  exposureFusion?: number;
+  rgbCurve?: {
+    red?: CurveNode[];
+    green?: CurveNode[];
+    blue?: CurveNode[];
+  };
+}
+
+interface ColorRange {
+  cyan_red?: number;
+  magenta_green?: number;
+  yellow_blue?: number;
+}
+
+interface ColorBalanceParams {
+  shadows?: ColorRange;
+  midtones?: ColorRange;
+  highlights?: ColorRange;
+  [key: string]: unknown; // For dynamic color properties like red_saturation, etc.
+}
+
+interface WhiteBalanceParams {
+  temperature?: number;
+  tint?: number;
+}
+
+interface ShadowsHighlightsParams {
+  shadows?: number;
+  highlights?: number;
+  whitePoint?: number;
+  blackPoint?: number;
+  compress?: number;
+}
+
+interface ModuleWithEnabledParams {
+  enabled?: boolean;
+}
+
 export interface ProcessingContext {
   width: number;
   height: number;
@@ -143,12 +191,12 @@ export class ImageProcessingPipeline {
       // Module-specific identity checks with correct defaults
       switch (moduleId) {
         case 'tonecurve': {
-          const tc = params as any;
+          const tc = params as ToneCurveParams;
           // Check if curve is linear (identity transformation)
           if (!tc.baseCurve || tc.baseCurve.length < 2) return false;
 
           // For a truly linear curve, ALL points must lie on y=x line
-          const isLinear = tc.baseCurve.every((node: any) => {
+          const isLinear = tc.baseCurve.every((node: CurveNode) => {
             if (!node || typeof node.x !== 'number' || typeof node.y !== 'number') return false;
             // Check if point lies on y=x line (with small tolerance)
             return Math.abs(node.x - node.y) < 0.01;
@@ -167,9 +215,9 @@ export class ImageProcessingPipeline {
         }
 
         case 'colorbalance': {
-          const cb = params as any;
+          const cb = params as ColorBalanceParams;
           // Check all color ranges are at 0
-          const checkRange = (range: any) => {
+          const checkRange = (range: ColorRange | undefined) => {
             if (!range) return true;
             return (range.cyan_red === 0 || range.cyan_red === undefined) &&
                    (range.magenta_green === 0 || range.magenta_green === undefined) &&
@@ -194,10 +242,10 @@ export class ImageProcessingPipeline {
         }
 
         case 'temperature': {
-          const wb = params as any;
+          const wb = params as WhiteBalanceParams;
           // 5500K is neutral daylight, tint 0 is neutral
-          const tempNeutral = Math.abs((wb.temperature || 5500) - 5500) < 10;
-          const tintNeutral = Math.abs(wb.tint || 0) < 0.1;
+          const tempNeutral = Math.abs((wb.temperature ?? 5500) - 5500) < 10;
+          const tintNeutral = Math.abs(wb.tint ?? 0) < 0.1;
           return tempNeutral && tintNeutral;
         }
 
@@ -211,7 +259,7 @@ export class ImageProcessingPipeline {
 
         case 'shadowshighlights': {
           // Check main effect parameters only
-          const sh = params as any;
+          const sh = params as ShadowsHighlightsParams;
           return (sh.shadows === undefined || sh.shadows === 0) &&
                  (sh.highlights === undefined || sh.highlights === 0) &&
                  (sh.whitePoint === undefined || sh.whitePoint === 0) &&
@@ -224,7 +272,7 @@ export class ImageProcessingPipeline {
         case 'lenscorrections':
         case 'localadjustments': {
           // For new modules with enabled parameter
-          const moduleParams = params as any;
+          const moduleParams = params as ModuleWithEnabledParams;
           // If explicitly disabled or enabled property is false, treat as identity
           if (moduleParams.enabled === false) return true;
           // If enabled is true, module should process (not identity)
@@ -245,9 +293,9 @@ export class ImageProcessingPipeline {
   }
 
   // Helper method to check if a curve array represents a linear (identity) transformation
-  private isCurveLinear(curve: any[]): boolean {
+  private isCurveLinear(curve: CurveNode[] | undefined): boolean {
     if (!curve || curve.length < 2) return true;
-    return curve.every((node: any) =>
+    return curve.every((node: CurveNode) =>
       node && typeof node.x === 'number' && typeof node.y === 'number' &&
       Math.abs(node.x - node.y) < 0.01
     );

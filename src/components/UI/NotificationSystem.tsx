@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { CheckCircle, XCircle, AlertCircle, Info, X } from 'lucide-react';
 
 export interface Notification {
@@ -16,21 +16,34 @@ interface NotificationSystemProps {
 
 
 export function NotificationSystem({ notifications, onDismiss }: NotificationSystemProps) {
-  const [visibleNotifications, setVisibleNotifications] = useState<Notification[]>([]);
+  const timersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
+  // Handle auto-dismiss timers
   useEffect(() => {
-    setVisibleNotifications(notifications);
+    const currentTimers = timersRef.current;
 
-    // Handle auto-dismiss
     notifications.forEach(notification => {
-      if (notification.duration && notification.duration > 0) {
+      // Only set timer if not already set and has a duration
+      if (notification.duration && notification.duration > 0 && !currentTimers.has(notification.id)) {
         const timer = setTimeout(() => {
           onDismiss(notification.id);
+          currentTimers.delete(notification.id);
         }, notification.duration);
-
-        return () => clearTimeout(timer);
+        currentTimers.set(notification.id, timer);
       }
     });
+
+    // Clean up timers for dismissed notifications
+    currentTimers.forEach((timer, id) => {
+      if (!notifications.some(n => n.id === id)) {
+        clearTimeout(timer);
+        currentTimers.delete(id);
+      }
+    });
+
+    return () => {
+      currentTimers.forEach(timer => clearTimeout(timer));
+    };
   }, [notifications, onDismiss]);
 
   const getIcon = (type: Notification['type']) => {
@@ -65,13 +78,13 @@ export function NotificationSystem({ notifications, onDismiss }: NotificationSys
     }
   };
 
-  if (visibleNotifications.length === 0) {
+  if (notifications.length === 0) {
     return null;
   }
 
   return (
     <div className="fixed top-4 right-4 z-50 space-y-3 max-w-sm">
-      {visibleNotifications.map((notification) => (
+      {notifications.map((notification) => (
         <div
           key={notification.id}
           className={`${getStyles(notification.type)} p-4 animate-slide-in-right`}

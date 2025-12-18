@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
 
 interface DelayedInputControlProps {
   value: number;
@@ -21,24 +21,30 @@ export const DelayedInputControl: React.FC<DelayedInputControlProps> = ({
   className = '',
   disabled = false
 }) => {
-  const [displayValue, setDisplayValue] = useState<string>('');
   const [isFocused, setIsFocused] = useState(false);
+  const [localValue, setLocalValue] = useState<string | null>(null);
+  // Track previous external value using state (derived state pattern)
+  const [prevValue, setPrevValue] = useState(value);
 
   // Format value for display
   const formatValue = useCallback((val: number): string => {
     return precision > 0 ? val.toFixed(precision) : Math.round(val).toString();
   }, [precision]);
 
-  // Update display value when external value changes (but not when focused)
-  useEffect(() => {
+  // Reset local value when external value changes and not focused (derived state pattern)
+  if (value !== prevValue) {
+    setPrevValue(value);
     if (!isFocused) {
-      setDisplayValue(formatValue(value));
+      setLocalValue(null);
     }
-  }, [value, formatValue, isFocused]);
+  }
+
+  // Display value: use local value when editing, otherwise format the prop value
+  const displayValue = localValue !== null ? localValue : formatValue(value);
 
   // Handle input changes (visual only while typing)
   const handleInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    setDisplayValue(e.target.value);
+    setLocalValue(e.target.value);
   }, []);
 
   // Handle commit (Enter key or blur)
@@ -52,9 +58,9 @@ export const DelayedInputControl: React.FC<DelayedInputControlProps> = ({
 
       onChange(constrainedValue);
     }
-    // Reset display to formatted actual value
-    setDisplayValue(formatValue(value));
-  }, [displayValue, onChange, min, max, value, formatValue]);
+    // Reset local value to sync with prop
+    setLocalValue(null);
+  }, [displayValue, onChange, min, max]);
 
   // Handle key events
   const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -64,10 +70,10 @@ export const DelayedInputControl: React.FC<DelayedInputControlProps> = ({
       (e.target as HTMLInputElement).blur();
     } else if (e.key === 'Escape') {
       e.preventDefault();
-      setDisplayValue(formatValue(value));
+      setLocalValue(null);
       (e.target as HTMLInputElement).blur();
     }
-  }, [handleCommit, value, formatValue]);
+  }, [handleCommit]);
 
   // Handle focus events
   const handleFocus = useCallback(() => {

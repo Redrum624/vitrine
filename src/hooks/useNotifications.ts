@@ -2,11 +2,14 @@ import { useState, useEffect } from 'react';
 import { notificationService, Notification } from '../services/NotificationService';
 
 export function useNotifications() {
-  const [notifications, setNotifications] = useState<Notification[]>([]);
+  // Initialize with current notifications
+  const [notifications, setNotifications] = useState<Notification[]>(
+    () => notificationService.getNotifications()
+  );
 
   useEffect(() => {
+    // Subscribe to future updates
     const unsubscribe = notificationService.subscribe(setNotifications);
-    setNotifications(notificationService.getNotifications());
     return unsubscribe;
   }, []);
 

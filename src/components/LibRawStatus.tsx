@@ -18,13 +18,6 @@ export const LibRawStatus: React.FC<LibRawStatusProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [stats, setStats] = useState<{ supportedFormats: number } | null>(null);
 
-  useEffect(() => {
-    // Only initialize if not already initialized
-    if (status === 'uninit') {
-      initializeLibRaw();
-    }
-  }, [status]);
-
   const initializeLibRaw = async () => {
     setStatus('initializing');
     setError(null);
@@ -46,6 +39,14 @@ export const LibRawStatus: React.FC<LibRawStatusProps> = ({
       logger.warn('LibRaw initialization failed:', errorMessage);
     }
   };
+
+  useEffect(() => {
+    // Only initialize if not already initialized (use setTimeout to avoid synchronous setState in effect)
+    if (status === 'uninit') {
+      const timeoutId = setTimeout(() => initializeLibRaw(), 0);
+      return () => clearTimeout(timeoutId);
+    }
+  }, [status]);
 
   const getStatusIcon = () => {
     switch (status) {

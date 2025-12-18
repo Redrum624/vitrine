@@ -45,13 +45,6 @@ export function PluginManagerDialog({ isOpen, onClose }: PluginManagerDialogProp
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedTab, setSelectedTab] = useState<'installed' | 'available'>('installed');
 
-  // Load plugins on mount
-  useEffect(() => {
-    if (isOpen) {
-      loadPlugins();
-    }
-  }, [isOpen]);
-
   const loadPlugins = () => {
     const allPlugins = pluginSystem.getPlugins();
     const active = pluginSystem.getActivePlugins();
@@ -59,6 +52,14 @@ export function PluginManagerDialog({ isOpen, onClose }: PluginManagerDialogProp
     setActivePlugins(active);
     logger.info(`Loaded ${allPlugins.length} plugins, ${active.length} active`);
   };
+
+  // Load plugins on mount (use setTimeout to avoid synchronous setState in effect)
+  useEffect(() => {
+    if (isOpen) {
+      const timeoutId = setTimeout(() => loadPlugins(), 0);
+      return () => clearTimeout(timeoutId);
+    }
+  }, [isOpen]);
 
   // Initialize with example plugins if none exist
   const initializeExamplePlugins = async () => {

@@ -7,12 +7,13 @@
 
 import { logger } from '../utils/Logger';
 import { imageProcessingPipeline } from '../services/ImageProcessingPipeline';
-import { CropModule } from '../modules/CropModule';
+import { CropModule, AspectRatio } from '../modules/CropModule';
 import { ExposureModule } from '../modules/ExposureModule';
 import { WhiteBalanceModule } from '../modules/WhiteBalanceModule';
 import { BasicAdjustmentsModule } from '../modules/BasicAdjustmentsModule';
 import { ColorBalanceModule } from '../modules/ColorBalanceModule';
 import { NoiseReductionModule } from '../modules/NoiseReductionModule';
+import { PerformanceWithMemory } from '../types/global';
 
 export interface IntegrationTestResult {
   testName: string;
@@ -76,7 +77,7 @@ export class IntegrationTests {
             data[idx + 3] = 1.0;
             break;
 
-          case 'checkerboard':
+          case 'checkerboard': {
             const isWhite = (Math.floor(x / 64) + Math.floor(y / 64)) % 2 === 0;
             const value = isWhite ? 1.0 : 0.0;
             data[idx] = value;
@@ -84,6 +85,7 @@ export class IntegrationTests {
             data[idx + 2] = value;
             data[idx + 3] = 1.0;
             break;
+          }
 
           case 'noise':
             data[idx] = Math.random();
@@ -465,7 +467,7 @@ export class IntegrationTests {
         throw new Error('Crop module not found');
       }
 
-      const aspectRatios = ['1:1', '3:2', '4:3', '16:9'];
+      const aspectRatios: AspectRatio[] = ['1:1', '3:2', '4:3', '16:9'];
       const results: Record<string, boolean> = {};
 
       for (const ratio of aspectRatios) {
@@ -475,7 +477,7 @@ export class IntegrationTests {
           y: 0,
           width: width,
           height: height,
-          aspectRatio: ratio as any,
+          aspectRatio: ratio,
           straightenAngle: 0
         });
 
@@ -575,8 +577,8 @@ export class IntegrationTests {
         await imageProcessingPipeline.processImage(testImage, { width, height, channels: 4 });
 
         // Capture memory if available
-        if (performance && (performance as any).memory) {
-          const mem = (performance as any).memory;
+        if (performance && (performance as PerformanceWithMemory).memory) {
+          const mem = (performance as PerformanceWithMemory).memory!;
           memorySnapshots.push(mem.usedJSHeapSize);
         }
 

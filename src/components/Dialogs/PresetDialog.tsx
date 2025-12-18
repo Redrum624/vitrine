@@ -32,18 +32,19 @@ export function PresetDialog({ isOpen, onClose, onApplyPreset }: PresetDialogPro
     { id: 'custom' as const, name: 'Custom', count: 0 }
   ];
 
-  // Load presets on mount
-  useEffect(() => {
-    if (isOpen) {
-      loadPresets();
-    }
-  }, [isOpen]);
-
   const loadPresets = () => {
     const allPresets = presetService.getAllPresets();
     setPresets(allPresets);
     logger.info(`Loaded ${allPresets.length} presets`);
   };
+
+  // Load presets on mount (use setTimeout to avoid synchronous setState in effect)
+  useEffect(() => {
+    if (isOpen) {
+      const timeoutId = setTimeout(() => loadPresets(), 0);
+      return () => clearTimeout(timeoutId);
+    }
+  }, [isOpen]);
 
   // Filter presets based on category and search
   const filteredPresets = presets.filter(preset => {

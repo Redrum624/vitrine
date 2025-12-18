@@ -351,7 +351,7 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
     );
 
     logger.info('All modules reset to defaults');
-  }, [processCurrentImageRealTime, basicAdjModule, whiteBalanceModule, handleModuleParamsChange]);
+  }, [processCurrentImageRealTime, basicAdjModule, whiteBalanceModule, handleModuleParamsChange, cropModule, lensCorrectionsModule, localAdjustmentsModule]);
 
   // Monitor image changes for real-time updates
   useEffect(() => {

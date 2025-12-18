@@ -526,7 +526,7 @@ function App() {
           availableImages={availableImages}
           onSelectImages={async () => {
             try {
-              const result = await (window as any).electronAPI?.showOpenDialog({
+              const result = await window.electronAPI?.showOpenDialog({
                 properties: ['openFile', 'multiSelections'],
                 filters: [
                   { name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'tiff', 'tif', 'bmp', 'webp'] },

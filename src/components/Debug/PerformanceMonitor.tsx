@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Activity, Database, Cpu, HardDrive } from 'lucide-react';
 import { imageCacheService } from '../../services/ImageCacheService';
 import { canvasPoolService } from '../../services/CanvasPoolService';
@@ -32,8 +32,9 @@ interface PerformanceMetrics {
 export const PerformanceMonitor: React.FC = () => {
   const [metrics, setMetrics] = useState<PerformanceMetrics | null>(null);
   const [isVisible, setIsVisible] = useState(false);
-  const [frameCount, setFrameCount] = useState(0);
-  const [lastTime, setLastTime] = useState(Date.now());
+  const frameCountRef = useRef(0);
+  // Initialize with 0, will be set on first update
+  const lastTimeRef = useRef(0);
 
   useEffect(() => {
     let animationFrame: number;
@@ -43,11 +44,15 @@ export const PerformanceMonitor: React.FC = () => {
       try {
         // FPS calculation
         const now = Date.now();
-        const deltaTime = now - lastTime;
+        // Initialize lastTimeRef on first call
+        if (lastTimeRef.current === 0) {
+          lastTimeRef.current = now;
+        }
+        const deltaTime = now - lastTimeRef.current;
         if (deltaTime >= 1000) {
-          const fps = Math.round((frameCount * 1000) / deltaTime);
-          setFrameCount(0);
-          setLastTime(now);
+          const fps = Math.round((frameCountRef.current * 1000) / deltaTime);
+          frameCountRef.current = 0;
+          lastTimeRef.current = now;
 
           // Get memory info
           const memory = (performance as typeof performance & { memory?: { usedJSHeapSize: number; totalJSHeapSize: number; jsHeapSizeLimit: number } }).memory;
@@ -89,7 +94,7 @@ export const PerformanceMonitor: React.FC = () => {
 
           setMetrics(newMetrics);
         } else {
-          setFrameCount(prev => prev + 1);
+          frameCountRef.current += 1;
         }
       } catch (error) {
         console.warn('Performance monitoring error:', error);
@@ -114,7 +119,7 @@ export const PerformanceMonitor: React.FC = () => {
         clearInterval(intervalId);
       }
     };
-  }, [isVisible, frameCount, lastTime]);
+  }, [isVisible]);
 
   // Keyboard shortcut to toggle
   useEffect(() => {

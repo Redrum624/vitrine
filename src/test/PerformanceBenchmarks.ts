@@ -7,6 +7,7 @@
 
 import { logger } from '../utils/Logger';
 import { imageProcessingPipeline } from '../services/ImageProcessingPipeline';
+import { PerformanceWithMemory } from '../types/global';
 
 export interface BenchmarkResult {
   moduleName: string;
@@ -81,8 +82,8 @@ export class PerformanceBenchmarks {
    * Get memory snapshot
    */
   private getMemorySnapshot(): MemorySnapshot {
-    if (performance && (performance as any).memory) {
-      const mem = (performance as any).memory;
+    if (performance && (performance as PerformanceWithMemory).memory) {
+      const mem = (performance as PerformanceWithMemory).memory!;
       return {
         timestamp: Date.now(),
         heapUsed: mem.usedJSHeapSize || 0,
@@ -316,7 +317,16 @@ export class PerformanceBenchmarks {
    * Export results to JSON
    */
   exportResults(): string {
-    const resultsObj: Record<string, any> = {};
+    interface ExportedSuiteResult {
+      suiteName: string;
+      averageTime: number;
+      minTime: number;
+      maxTime: number;
+      stdDev: number;
+      totalIterations: number;
+      successRate: number;
+    }
+    const resultsObj: Record<string, ExportedSuiteResult> = {};
 
     for (const [key, suite] of this.results) {
       resultsObj[key] = {
