@@ -6,6 +6,10 @@ interface CropTransformOverlayProps {
   imageWidth: number;
   imageHeight: number;
 
+  // Original image dimensions (before rotation expansion)
+  originalWidth?: number;
+  originalHeight?: number;
+
   // Crop parameters (normalized 0-1)
   cropParams: CropParams;
 
@@ -22,6 +26,9 @@ interface CropTransformOverlayProps {
 
   // Show overlay only in preview mode
   showOverlay: boolean;
+
+  // Show just the 3x3 grid during rotation adjustment (without darkened areas)
+  showRotationGrid?: boolean;
 }
 
 /**
@@ -38,17 +45,23 @@ interface CropTransformOverlayProps {
 export function CropTransformOverlay({
   imageWidth,
   imageHeight,
+  originalWidth,
+  originalHeight,
   cropParams,
   viewport,
   canvasDisplayWidth,
   canvasDisplayHeight,
-  showOverlay
+  showOverlay,
+  showRotationGrid = false
 }: CropTransformOverlayProps) {
   const overlayRef = useRef<HTMLCanvasElement>(null);
 
+  // Show if either full overlay is enabled OR rotation grid is requested
+  const shouldShow = showOverlay || showRotationGrid;
+
   useEffect(() => {
     const canvas = overlayRef.current;
-    if (!canvas || !showOverlay || imageWidth === 0 || imageHeight === 0) {
+    if (!canvas || !shouldShow || imageWidth === 0 || imageHeight === 0) {
       // Clear overlay if not showing
       if (canvas) {
         const ctx = canvas.getContext('2d');
@@ -87,38 +100,84 @@ export function CropTransformOverlay({
     const imageY = (canvasDisplayHeight - scaledImageHeight) / 2 + viewport.panY;
 
     // Crop region in normalized coordinates (0-1)
-    const { x: cropX, y: cropY, width: cropWidth, height: cropHeight } = cropParams;
+    // When showing rotation grid only (not full crop overlay), calculate the inscribed
+    // rectangle that represents the visible content (without black borders from rotation)
+    let gridCropX = cropParams.x;
+    let gridCropY = cropParams.y;
+    let gridCropWidth = cropParams.width;
+    let gridCropHeight = cropParams.height;
+
+    if (showRotationGrid && !showOverlay) {
+      const angle = cropParams.angle || 0;
+      const origW = originalWidth || imageWidth;
+      const origH = originalHeight || imageHeight;
+
+      if (Math.abs(angle) > 0.01 && origW > 0 && origH > 0) {
+        // Calculate the inscribed rectangle that fits within the rotated image
+        // This is the visible content without black borders
+        const angleRad = Math.abs(angle * Math.PI / 180);
+        const sin = Math.sin(angleRad);
+        const cos = Math.cos(angleRad);
+
+        // Calculate scale factor for inscribed rectangle
+        const aspectRatio = origW / origH;
+        let scale: number;
+        if (aspectRatio >= 1) {
+          scale = cos + sin * (origH / origW);
+        } else {
+          scale = cos + sin * (origW / origH);
+        }
+
+        // The inscribed rectangle dimensions in original pixels
+        const inscribedW = origW / scale;
+        const inscribedH = origH / scale;
+
+        // Convert to normalized coordinates relative to the expanded canvas
+        gridCropWidth = Math.min(1.0, inscribedW / imageWidth);
+        gridCropHeight = Math.min(1.0, inscribedH / imageHeight);
+        gridCropX = (1.0 - gridCropWidth) / 2;
+        gridCropY = (1.0 - gridCropHeight) / 2;
+      } else {
+        // No rotation, use full image
+        gridCropX = 0;
+        gridCropY = 0;
+        gridCropWidth = 1.0;
+        gridCropHeight = 1.0;
+      }
+    }
 
     // Convert normalized crop coordinates to canvas pixel coordinates
-    const cropLeft = imageX + cropX * scaledImageWidth;
-    const cropTop = imageY + cropY * scaledImageHeight;
-    const cropRight = cropLeft + cropWidth * scaledImageWidth;
-    const cropBottom = cropTop + cropHeight * scaledImageHeight;
+    const cropLeft = imageX + gridCropX * scaledImageWidth;
+    const cropTop = imageY + gridCropY * scaledImageHeight;
+    const cropRight = cropLeft + gridCropWidth * scaledImageWidth;
+    const cropBottom = cropTop + gridCropHeight * scaledImageHeight;
 
     const cropDisplayWidth = cropRight - cropLeft;
     const cropDisplayHeight = cropBottom - cropTop;
 
-    // 1. Draw darkened areas outside crop region
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+    // 1. Draw darkened areas outside crop region (only in full overlay mode, not rotation grid mode)
+    if (showOverlay && !showRotationGrid) {
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
 
-    // Top area
-    if (cropTop > 0) {
-      ctx.fillRect(0, 0, canvasDisplayWidth, cropTop);
-    }
+      // Top area
+      if (cropTop > 0) {
+        ctx.fillRect(0, 0, canvasDisplayWidth, cropTop);
+      }
 
-    // Bottom area
-    if (cropBottom < canvasDisplayHeight) {
-      ctx.fillRect(0, cropBottom, canvasDisplayWidth, canvasDisplayHeight - cropBottom);
-    }
+      // Bottom area
+      if (cropBottom < canvasDisplayHeight) {
+        ctx.fillRect(0, cropBottom, canvasDisplayWidth, canvasDisplayHeight - cropBottom);
+      }
 
-    // Left area (between crop top and bottom)
-    if (cropLeft > 0) {
-      ctx.fillRect(0, cropTop, cropLeft, cropDisplayHeight);
-    }
+      // Left area (between crop top and bottom)
+      if (cropLeft > 0) {
+        ctx.fillRect(0, cropTop, cropLeft, cropDisplayHeight);
+      }
 
-    // Right area (between crop top and bottom)
-    if (cropRight < canvasDisplayWidth) {
-      ctx.fillRect(cropRight, cropTop, canvasDisplayWidth - cropRight, cropDisplayHeight);
+      // Right area (between crop top and bottom)
+      if (cropRight < canvasDisplayWidth) {
+        ctx.fillRect(cropRight, cropTop, canvasDisplayWidth - cropRight, cropDisplayHeight);
+      }
     }
 
     // 2. Draw 3x3 grid (rule of thirds) over crop region
@@ -146,11 +205,13 @@ export function CropTransformOverlay({
       ctx.stroke();
     }
 
-    // 3. Draw crop region border
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
-    ctx.lineWidth = 2;
-    ctx.setLineDash([]);
-    ctx.strokeRect(cropLeft, cropTop, cropDisplayWidth, cropDisplayHeight);
+    // 3. Draw crop region border (only in full overlay mode)
+    if (showOverlay && !showRotationGrid) {
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([]);
+      ctx.strokeRect(cropLeft, cropTop, cropDisplayWidth, cropDisplayHeight);
+    }
 
     // 4. Draw rotation angle indicator if there's a rotation
     const angle = cropParams.angle || 0;
@@ -259,14 +320,18 @@ export function CropTransformOverlay({
   }, [
     imageWidth,
     imageHeight,
+    originalWidth,
+    originalHeight,
     cropParams,
     viewport,
     canvasDisplayWidth,
     canvasDisplayHeight,
-    showOverlay
+    showOverlay,
+    showRotationGrid,
+    shouldShow
   ]);
 
-  if (!showOverlay) {
+  if (!shouldShow) {
     return null;
   }
 

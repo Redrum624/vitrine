@@ -1,4 +1,5 @@
 import { logger } from '../utils/Logger';
+import { validateInputDimensions, calculateLuminance } from './utils/ColorUtils';
 
 export interface BasicAdjParams {
   black_point: number;    // -1.0 to 1.0, default: 0.0
@@ -74,13 +75,17 @@ export class BasicAdjustmentsModule {
 
   process(input: Float32Array, context: BasicAdjProcessingContext): Float32Array {
     const { width, height, channels } = context;
+
+    // Validate input dimensions
+    validateInputDimensions(input, width, height, channels, 'BasicAdjustmentsModule');
+
     const output = new Float32Array(input.length);
 
     // Copy input to output
     output.set(input);
 
-    // Log key parameters for monitoring
-    logger.info(`BasicAdj processing with exposure: ${this.params.exposure}, contrast: ${this.params.contrast}`);
+    // Log key parameters for monitoring (debug level to reduce noise)
+    logger.debug(`BasicAdj processing with exposure: ${this.params.exposure}, contrast: ${this.params.contrast}`);
 
     logger.debug(`Processing BasicAdj: ${width}x${height}, channels: ${channels}`);
 
@@ -139,8 +144,8 @@ export class BasicAdjustmentsModule {
           const g = output[pixelIndex + 1];
           const b = output[pixelIndex + 2];
 
-          // Convert to perceived luminance
-          const luminance = 0.299 * r + 0.587 * g + 0.114 * b;
+          // Convert to perceived luminance using shared utility
+          const luminance = calculateLuminance(r, g, b);
 
           // Apply saturation
           if (this.params.saturation !== 0.0) {
@@ -176,7 +181,7 @@ export class BasicAdjustmentsModule {
       maxVal = Math.max(maxVal, r, g, b);
       if (r > 0.001 || g > 0.001 || b > 0.001) nonZeroCount++;
     }
-    logger.info(`BasicAdj OUTPUT: range=${minVal.toFixed(4)}-${maxVal.toFixed(4)}, nonZero=${nonZeroCount}/${output.length/4}`);
+    logger.debug(`BasicAdj OUTPUT: range=${minVal.toFixed(4)}-${maxVal.toFixed(4)}, nonZero=${nonZeroCount}/${output.length/4}`);
 
     logger.debug('BasicAdj processing completed');
     return output;

@@ -41,8 +41,20 @@ if (process.env.NODE_ENV === 'development') {
 }
 
 function App() {
-  const { setViewport, resetZoom, viewport, processedImageData, selectedTool: _selectedTool, setSelectedTool: _setSelectedTool } = useAppStore();
-  const [selectedTool, setSelectedTool] = useState<string | null>('file-explorer'); // Default to file explorer
+  const { setViewport, resetZoom, viewport, processedImageData, setSelectedTool: storeSetSelectedTool } = useAppStore();
+  const [selectedTool, setSelectedToolLocal] = useState<string | null>('file-explorer'); // Default to file explorer
+
+  // Wrapper to update both local state and store
+  const setSelectedTool = useCallback((tool: string | null) => {
+    setSelectedToolLocal(tool);
+    storeSetSelectedTool(tool);
+  }, [storeSetSelectedTool]);
+
+  // Initialize store with default selectedTool on mount
+  useEffect(() => {
+    storeSetSelectedTool('file-explorer');
+  }, [storeSetSelectedTool]);
+
   const [currentImage, setCurrentImage] = useState<ImageFileInfo | null>(null);
   const [isExportDialogOpen, setIsExportDialogOpen] = useState(false);
   const [isBatchDialogOpen, setIsBatchDialogOpen] = useState(false);

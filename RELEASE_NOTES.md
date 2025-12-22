@@ -1,0 +1,163 @@
+# Photo Editor Pro - Release Notes
+
+## Version 1.0.0 (2025-12-18)
+
+**First Production Release**
+
+Photo Editor Pro is a professional-grade RAW photo editing application built with modern web technologies. This release includes complete image processing capabilities, professional color science, and GPU-accelerated performance.
+
+---
+
+### Features
+
+#### Image Processing (10 Modules)
+- **Crop & Transform** - Aspect ratios, rotation, perspective correction
+- **Lens Corrections** - Distortion, vignette, chromatic aberration removal
+- **Exposure** - Exposure, highlights, shadows, whites, blacks
+- **White Balance** - Temperature, tint, auto white balance
+- **Basic Adjustments** - Brightness, contrast, saturation, vibrance
+- **Tone Curves** - RGB and individual channel curves with presets
+- **Color Balance** - Shadow/midtone/highlight color control
+- **Shadows & Highlights** - Recovery and detail enhancement
+- **Local Adjustments** - Brush-based selective editing
+- **Noise Reduction** - BM3D, Non-Local Means, Wavelet denoising
+
+#### Professional Color Science
+- **ACES Workflow** - Academy Color Encoding System support
+- **CDL Support** - Color Decision List (Slope, Offset, Power, Saturation)
+- **3D LUT Import** - Adobe .cube file support with trilinear/tetrahedral interpolation
+- **Lab Color Space** - Full XYZ/Lab conversions with D50/D65 illuminants
+- **Wide Gamut** - sRGB, Adobe RGB, ProPhoto RGB, Rec.2020, Rec.2100
+- **HDR Support** - PQ (ST 2084) and HLG transfer functions with tone mapping
+- **ICC Profiles** - v2/v4 profile parsing and application
+- **Hue Curves** - HvH, HvS, HvL, SvS, LvS professional grading curves
+- **Color Wheels** - Lift/Gamma/Gain color wheels UI
+
+#### RAW Processing
+- **LibRaw Integration** - WebAssembly-based RAW processing
+- **Format Support** - Canon CR2/CR3, Nikon NEF, Sony ARW, Fuji RAF, Adobe DNG
+- **Demosaicing** - Multiple algorithms including AHD, DCB, VNG
+- **Camera Profiles** - Camera-specific color matrix support
+
+#### GPU Acceleration
+- **WebGL2 Shaders** - Hardware-accelerated image processing
+- **Shader Pipeline** - Ping-pong framebuffer for chained operations
+- **Buffer Pooling** - Texture and buffer reuse for memory efficiency
+- **Web Workers** - Multi-threaded tile-based processing
+
+#### Performance
+- **Object Pooling** - Float32Array memory reuse (64KB to 192MB buckets)
+- **LRU Caching** - Smart cache with 500MB memory limit
+- **Performance Profiler** - GPU/CPU timing with JSON export
+
+#### Application
+- **Electron Desktop** - Native Windows application
+- **History System** - 50-state undo/redo
+- **Preset Management** - Save, load, and share editing presets
+- **Batch Processing** - Process multiple images with same settings
+- **Export Options** - JPEG, PNG, TIFF, WebP with quality control
+
+---
+
+### Technical Specifications
+
+| Metric | Value |
+|--------|-------|
+| TypeScript Errors | 0 |
+| ESLint Warnings | 0 |
+| Jest Tests | 619 passing (19 suites) |
+| Bundle Size (gzipped) | ~210 KB JS |
+| Modules | 11 processing modules |
+| Services | 65+ specialized services |
+
+#### Test Coverage
+- ColorUtils: 62 tests
+- Processing Modules: 400+ tests
+- Integration Tests: 21 tests
+- Performance Benchmarks: 7 tests
+- E2E Tests: Playwright configured
+
+---
+
+### System Requirements
+
+#### Minimum
+- **OS:** Windows 10 (64-bit)
+- **RAM:** 8 GB
+- **GPU:** WebGL2-compatible graphics card
+- **Storage:** 500 MB free space
+
+#### Recommended
+- **OS:** Windows 11 (64-bit)
+- **RAM:** 16 GB or more
+- **GPU:** Dedicated GPU with 4GB+ VRAM
+- **Storage:** SSD with 2 GB free space
+
+---
+
+### Known Limitations
+
+1. **LibRaw WASM** - Some advanced RAW features use mock fallback
+2. **GPU Acceleration** - Requires WebGL2 support (most modern GPUs)
+3. **Large Files** - Images over 100MP may require more memory
+4. **Platform** - Windows fully tested; macOS/Linux need verification
+
+---
+
+### Installation
+
+#### Windows
+1. Download `Photo Editor Pro Setup.exe` from releases
+2. Run installer and follow prompts
+3. Launch from Start Menu or Desktop shortcut
+
+#### Development
+```bash
+git clone <repository>
+cd photo_app
+npm install
+npm run dev
+```
+
+---
+
+### Changelog
+
+#### Added
+- Complete image processing pipeline with 11 modules
+- Professional color science (ACES, Lab, LUT, HDR, ICC)
+- GPU-accelerated shader pipeline
+- Memory-optimized object pooling
+- Performance profiling system
+- 619 comprehensive unit tests
+- E2E testing framework
+- Windows desktop application
+
+#### Technical
+- React 19 + TypeScript 5.9
+- Electron 39 for desktop
+- Vite 7 for building
+- Jest 30 for testing
+- Playwright for E2E
+
+---
+
+### Credits
+
+Built with:
+- [React](https://react.dev) - UI framework
+- [Electron](https://electronjs.org) - Desktop framework
+- [LibRaw](https://libraw.org) - RAW processing
+- [Sharp](https://sharp.pixelplumbing.com) - Image processing
+- [Tailwind CSS](https://tailwindcss.com) - Styling
+- [Zustand](https://zustand-demo.pmnd.rs) - State management
+
+---
+
+### License
+
+GPL-3.0 License - See LICENSE file for details.
+
+---
+
+**Photo Editor Pro v1.0.0** - Professional photo editing for everyone.

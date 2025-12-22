@@ -4,6 +4,7 @@
   "description": "Professional photo editor powered by darktable",
   "main": "electron/main.cjs",
   "scripts": {
+    "start": "npm run build && electron .",
     "dev": "node scripts/dev.cjs",
     "dev-server-only": "vite",
     "build": "tsc && vite build",
@@ -18,7 +19,10 @@
     "typecheck": "tsc --noEmit",
     "test": "jest",
     "test:watch": "jest --watch",
-    "test:coverage": "jest --coverage"
+    "test:coverage": "jest --coverage",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:headed": "playwright test --headed"
   },
   "keywords": [],
   "author": "Photo Editor Pro",
@@ -45,6 +49,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.36.0",
+    "@playwright/test": "^1.57.0",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.1",
     "@types/electron": "^1.4.38",
@@ -60,6 +65,8 @@
     "identity-obj-proxy": "^3.0.0",
     "jest": "^30.2.0",
     "jest-environment-jsdom": "^30.2.0",
+    "png-to-ico": "^3.0.1",
+    "png2icons": "^2.0.1",
     "terser": "^5.44.0",
     "ts-jest": "^29.4.6",
     "wait-on": "^9.0.1"
@@ -92,7 +99,6 @@
         }
       ],
       "icon": "assets/icon.ico",
-      "publisherName": "Photo Editor Pro",
       "verifyUpdateCodeSignature": false
     },
     "nsis": {

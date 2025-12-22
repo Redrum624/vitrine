@@ -51,7 +51,26 @@ export function ThumbnailPanel({
       // Try to load thumbnail via Electron API
       if (window.electronAPI) {
         const dataUrl = await window.electronAPI.readImageAsDataURL(image.path);
-        setThumbnails(prev => new Map(prev).set(image.id, dataUrl));
+        if (dataUrl) {
+          setThumbnails(prev => new Map(prev).set(image.id, dataUrl));
+        } else {
+          // RAW file that couldn't be processed - create placeholder with filename
+          const canvas = document.createElement('canvas');
+          canvas.width = 150;
+          canvas.height = 100;
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.fillStyle = '#1f2937';
+            ctx.fillRect(0, 0, 150, 100);
+            ctx.fillStyle = '#9CA3AF';
+            ctx.font = 'bold 10px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(image.name.substring(0, 20), 75, 45);
+            ctx.font = '9px sans-serif';
+            ctx.fillText(image.format || 'RAW', 75, 60);
+          }
+          setThumbnails(prev => new Map(prev).set(image.id, canvas.toDataURL()));
+        }
       } else {
         // Browser fallback - create placeholder
         const canvas = document.createElement('canvas');

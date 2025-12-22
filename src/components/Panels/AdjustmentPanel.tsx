@@ -29,13 +29,13 @@ interface AdjustmentPanelProps {
 }
 
 export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
-  const { setProcessedImageData } = useAppStore();
+  const { setProcessedImageData, processingVersion } = useAppStore();
   const [resetCounter, setResetCounter] = useState(0);
   const [isProcessing, setIsProcessing] = useState(false);
   const [_lastProcessingTime, setLastProcessingTime] = useState(0);
   const processingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastProcessingTimeRef = useRef<number>(0);
-  const lastProcessedImagePathRef = useRef<string | null>(null);
+  // NOTE: Removed lastProcessedImagePathRef - was blocking param change reprocessing
 
   // Connect the processing pipeline to image service for auto-adjustments
   useEffect(() => {
@@ -60,11 +60,10 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
 
     if (!currentImage) return;
 
-    // Skip processing if it's the same image we just processed (cached navigation)
-    if (lastProcessedImagePathRef.current === currentImage.filePath) {
-      logger.debug('Skipping processing - same image already processed (cached)');
-      return;
-    }
+    // NOTE: Removed early return check for "same image already processed" because
+    // it was blocking parameter change reprocessing. The check was meant for cached
+    // navigation optimization but incorrectly blocked rotation/crop adjustments.
+    // The debouncing and isProcessing checks provide sufficient protection.
 
     // Skip processing if already processing
     if (isProcessing) {
@@ -186,11 +185,33 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
       // Always run through processing pipeline to ensure module effects are applied
       // The pipeline has its own optimizations to skip unchanged modules
       console.log('AdjustmentPanel: Processing preview', previewWidth, 'x', previewHeight);
-      const processedData = await imageProcessingPipeline.processImage(previewData, {
+
+      // CRITICAL: Create context object to track dimension changes from rotation/crop
+      const processingContext = {
         width: previewWidth,
         height: previewHeight,
         channels: 4
-      }, false); // Disable web workers for preview
+      };
+
+      const processedData = await imageProcessingPipeline.processImage(previewData, processingContext, false); // Disable web workers for preview
+
+      // CRITICAL: Use the context dimensions which may have been updated by CropModule rotation
+      // When expandCanvas is true during rotation, the output dimensions change
+      const outputWidth = processingContext.width;
+      const outputHeight = processingContext.height;
+
+      console.log(`AdjustmentPanel: Processed dimensions: ${outputWidth}x${outputHeight} (input was ${previewWidth}x${previewHeight})`);
+
+      // Validate that the data length matches the output dimensions
+      const expectedLength = outputWidth * outputHeight * 4;
+      if (processedData.length !== expectedLength) {
+        console.warn(`AdjustmentPanel: Data length mismatch! Expected ${expectedLength}, got ${processedData.length}`);
+        // Try to infer correct dimensions from data length
+        const actualPixels = processedData.length / 4;
+        const inferredHeight = Math.round(Math.sqrt(actualPixels / (outputWidth / outputHeight)));
+        const inferredWidth = Math.round(inferredHeight * (outputWidth / outputHeight));
+        console.log(`AdjustmentPanel: Inferring dimensions as ${inferredWidth}x${inferredHeight}`);
+      }
 
       // Critical debugging: Track data before passing to Canvas
       const stats = { min: Infinity, max: -Infinity, nonZero: 0 };
@@ -202,16 +223,13 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
       }
       logger.info(`AdjustmentPanel: FINAL DATA before Canvas - range=${stats.min.toFixed(4)}-${stats.max.toFixed(4)}, nonZero=${stats.nonZero}/${processedData.length/4}`);
 
-      // Update UI once with final result
+      // Update UI once with final result - use OUTPUT dimensions from context
       setProcessedImageData({
         data: processedData,
-        width: previewWidth,
-        height: previewHeight,
+        width: outputWidth,
+        height: outputHeight,
         isPreview: true
       });
-
-      // Track that we've processed this image
-      lastProcessedImagePathRef.current = currentImage.filePath;
 
       const processTime = performance.now() - startTime;
       setLastProcessingTime(processTime);
@@ -375,6 +393,28 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
       progressivePreviewService.cancelActiveRequests();
     };
   }, [processCurrentImageRealTime]);
+
+  // Watch for external processing triggers (e.g., from Canvas crop handles)
+  useEffect(() => {
+    if (processingVersion > 0) {
+      logger.debug(`Processing triggered via store (version: ${processingVersion})`);
+      // Use debouncing for consistent behavior with other parameter changes
+      adaptiveDebounceService.debounce(
+        'external-trigger',
+        processCurrentImageRealTime,
+        {
+          moduleId: 'crop',
+          parameterName: 'external',
+          changeType: 'slider'
+        },
+        {
+          priority: 'normal',
+          adaptiveDelay: true,
+          maxWait: 150 // Faster response for drag operations
+        }
+      );
+    }
+  }, [processingVersion, processCurrentImageRealTime]);
 
   // Helper function to determine module title from selectedModule ID
   const getModuleTitle = () => {

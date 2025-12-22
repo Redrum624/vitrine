@@ -24,13 +24,20 @@ interface CanvasProps {
 export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize, onZoomIn: _onZoomIn, onZoomOut: _onZoomOut, zoom: _zoom, currentImage }: CanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const { viewport, setViewport, processedImageData } = useAppStore();
+  const canvasWrapperRef = useRef<HTMLDivElement>(null);
+  const { viewport, setViewport, processedImageData, isAdjustingRotation, selectedTool, triggerReprocessing } = useAppStore();
   const [isDragging, setIsDragging] = useState(false);
   const [lastPan, setLastPan] = useState({ x: 0, y: 0 });
   const [displayImage, setDisplayImage] = useState<ImageFileInfo | null>(null);
   const [imageLoading, setImageLoading] = useState(false);
   const [cropModule, setCropModule] = useState<CropPipelineModule | null>(null);
   const [showCropOverlay, setShowCropOverlay] = useState(false);
+  const [canvasDimensions, setCanvasDimensions] = useState({ width: 0, height: 0 });
+  const [isCropHandleDragging, setIsCropHandleDragging] = useState(false);
+  const [hasPendingCropChanges, setHasPendingCropChanges] = useState(false);
+  const prevShowCropOverlay = useRef(showCropOverlay);
+  // Local state for crop params during dragging (for real-time visual feedback)
+  const [liveCropParams, setLiveCropParams] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
 
   const drawLoadedImage = useCallback((ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, imageMetadata: { width: number; height: number }, imageData: Float32Array) => {
     const { width: imageWidth, height: imageHeight } = imageMetadata;
@@ -219,8 +226,29 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
       // Check if we have processed preview data - use its dimensions directly as canvas size
       if (processedImageData && typeof processedImageData === 'object' && 'data' in processedImageData) {
         const previewData = processedImageData as { data: Float32Array; width: number; height: number; isPreview: boolean };
-        dataWidth = previewData.width;
-        dataHeight = previewData.height;
+
+        // CRITICAL: Validate that previewData dimensions match actual data length
+        const expectedLength = previewData.width * previewData.height * 4;
+        if (previewData.data.length === expectedLength) {
+          dataWidth = previewData.width;
+          dataHeight = previewData.height;
+        } else {
+          // Data length doesn't match reported dimensions - infer correct dimensions
+          const actualPixels = previewData.data.length / 4;
+          const aspectRatio = currentImageData.width / currentImageData.height;
+          const inferredHeight = Math.round(Math.sqrt(actualPixels / aspectRatio));
+          const inferredWidth = Math.round(inferredHeight * aspectRatio);
+
+          console.warn(`Canvas: Preview dimension mismatch! Reported: ${previewData.width}x${previewData.height}, data suggests: ${inferredWidth}x${inferredHeight}`);
+
+          if (Math.abs(inferredWidth * inferredHeight - actualPixels) <= inferredWidth) {
+            dataWidth = inferredWidth;
+            dataHeight = inferredHeight;
+          } else {
+            // Fall back to original image dimensions
+            console.warn('Canvas: Cannot infer preview dimensions, using original image size');
+          }
+        }
       }
 
       // Set canvas to exact data dimensions (1:1 pixel mapping, no upscaling)
@@ -264,6 +292,9 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
     // Set CSS size to fit container (browser will scale smoothly)
     canvas.style.width = `${Math.floor(displayWidth)}px`;
     canvas.style.height = `${Math.floor(displayHeight)}px`;
+
+    // Update canvas dimensions state for overlay positioning
+    setCanvasDimensions({ width: Math.floor(displayWidth), height: Math.floor(displayHeight) });
 
     if (DEBUG_CANVAS) {
       console.log(`  Canvas element set to:
@@ -338,6 +369,25 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
   const drawLoadedImageOptimized = useCallback((ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, imageInfo: { width: number; height: number }, data: Float32Array) => {
     try {
       const startTime = performance.now();
+
+      // CRITICAL: Validate data length matches dimensions
+      const expectedLength = imageInfo.width * imageInfo.height * 4;
+      if (data.length !== expectedLength) {
+        // Calculate actual dimensions from data length
+        const actualPixels = data.length / 4;
+        console.warn(`Canvas: Data/dimension mismatch! Expected ${expectedLength} (${imageInfo.width}x${imageInfo.height}), got ${data.length} (${actualPixels} pixels)`);
+
+        // Try to infer correct dimensions from data length
+        // Assume same aspect ratio as reported
+        const aspectRatio = imageInfo.width / imageInfo.height;
+        const actualHeight = Math.round(Math.sqrt(actualPixels / aspectRatio));
+        const actualWidth = Math.round(actualHeight * aspectRatio);
+
+        if (Math.abs(actualWidth * actualHeight - actualPixels) <= actualWidth) {
+          console.log(`Canvas: Correcting dimensions to ${actualWidth}x${actualHeight}`);
+          imageInfo = { width: actualWidth, height: actualHeight };
+        }
+      }
 
       // Generate hash for cache comparison (includes actual data sampling for processed images)
       // For processed images, we need to sample actual pixel values to detect changes
@@ -650,23 +700,62 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
     }
   }, []);
 
-  // Watch for crop preview mode changes
+  // Hide crop overlay when leaving crop mode or clicking outside canvas
   useEffect(() => {
-    if (!cropModule) return;
+    if (selectedTool !== 'crop') {
+      setShowCropOverlay(false);
+      return;
+    }
 
-    const checkPreviewMode = () => {
-      const isInPreview = cropModule.getCropModule().isInPreviewMode();
-      setShowCropOverlay(isInPreview);
+    // Hide crop overlay when clicking outside the canvas container
+    const handleDocumentClick = (e: MouseEvent) => {
+      const container = containerRef.current;
+      if (!container) return;
+
+      // Check if click is outside the canvas container
+      if (!container.contains(e.target as Node)) {
+        setShowCropOverlay(false);
+      }
     };
 
-    // Check immediately
-    checkPreviewMode();
+    document.addEventListener('mousedown', handleDocumentClick);
+    return () => document.removeEventListener('mousedown', handleDocumentClick);
+  }, [selectedTool]);
 
-    // Set up interval to check for changes
-    const interval = setInterval(checkPreviewMode, 100);
+  // Apply crop when crop overlay is closed (only if there are pending changes)
+  useEffect(() => {
+    // Detect transition from showing to hidden
+    if (prevShowCropOverlay.current && !showCropOverlay && hasPendingCropChanges) {
+      // Crop overlay was just closed and we have pending changes - apply the crop
+      imageProcessingPipeline.invalidateModuleCache('crop');
+      triggerReprocessing();
+      setHasPendingCropChanges(false);
+      setLiveCropParams(null); // Clear live params after applying
+    }
+    prevShowCropOverlay.current = showCropOverlay;
+  }, [showCropOverlay, hasPendingCropChanges, triggerReprocessing]);
 
-    return () => clearInterval(interval);
-  }, [cropModule]);
+  // Check if a point is inside the image bounds
+  const isPointOnImage = useCallback((clientX: number, clientY: number): boolean => {
+    const canvas = canvasRef.current;
+    if (!canvas) return false;
+
+    const canvasRect = canvas.getBoundingClientRect();
+
+    // Get click position relative to canvas
+    const x = clientX - canvasRect.left;
+    const y = clientY - canvasRect.top;
+
+    // Calculate image bounds on canvas
+    const scaledImageWidth = canvas.offsetWidth * viewport.zoom;
+    const scaledImageHeight = canvas.offsetHeight * viewport.zoom;
+    const imageX = (canvas.offsetWidth - scaledImageWidth) / 2 + viewport.panX;
+    const imageY = (canvas.offsetHeight - scaledImageHeight) / 2 + viewport.panY;
+
+    // Check if click is within image bounds
+    return x >= imageX && x <= imageX + scaledImageWidth &&
+           y >= imageY && y <= imageY + scaledImageHeight;
+  }, [viewport]);
 
   // Handle window/container resize
   useEffect(() => {
@@ -685,6 +774,21 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
   }, [redrawCanvas]);
 
   const handleMouseDown = (e: React.MouseEvent) => {
+    // Handle crop overlay visibility when in crop mode
+    if (selectedTool === 'crop') {
+      const clickedOnImage = isPointOnImage(e.clientX, e.clientY);
+      if (clickedOnImage) {
+        setShowCropOverlay(true);
+      } else {
+        setShowCropOverlay(false);
+      }
+    }
+
+    // Don't start canvas dragging if crop handles are being used
+    if (isCropHandleDragging) {
+      return;
+    }
+
     setIsDragging(true);
     setLastPan({ x: e.clientX - viewport.panX, y: e.clientY - viewport.panY });
   };
@@ -727,6 +831,12 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
 
   const handleWheel = (e: React.WheelEvent) => {
     e.preventDefault();
+
+    // Don't zoom when crop handles are being used
+    if (isCropHandleDragging) {
+      return;
+    }
+
     const delta = e.deltaY > 0 ? -0.1 : 0.1;
     const newZoom = Math.max(0.1, Math.min(5, viewport.zoom + delta));
 
@@ -751,63 +861,87 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
         onWheel={handleWheel}
       >
         {/* Aspect ratio preserving canvas container */}
-        <div className="flex items-center justify-center w-full h-full relative">
-          <canvas
-            ref={canvasRef}
-            className={isDragging ? 'cursor-grabbing' : 'cursor-grab'}
+        <div className="flex items-center justify-center w-full h-full">
+          {/* Canvas wrapper - sized to match canvas for proper overlay positioning */}
+          <div
+            ref={canvasWrapperRef}
+            className="relative"
             style={{
-              // Manual aspect ratio handling - no object-fit needed
-              display: 'block'
+              width: canvasDimensions.width > 0 ? canvasDimensions.width : 'auto',
+              height: canvasDimensions.height > 0 ? canvasDimensions.height : 'auto'
             }}
-          />
+          >
+            <canvas
+              ref={canvasRef}
+              className={isDragging ? 'cursor-grabbing' : 'cursor-grab'}
+              style={{
+                // Manual aspect ratio handling - no object-fit needed
+                display: 'block'
+              }}
+            />
 
-          {/* Crop/Transform Overlay - 3x3 grid and darkened areas */}
-          {cropModule && displayImage && canvasRef.current && (
-            <>
-              <CropTransformOverlay
-                imageWidth={imageService.getCurrentImage()?.width || 0}
-                imageHeight={imageService.getCurrentImage()?.height || 0}
-                cropParams={cropModule.getCropModule().getParams()}
-                viewport={viewport}
-                canvasDisplayWidth={canvasRef.current.offsetWidth}
-                canvasDisplayHeight={canvasRef.current.offsetHeight}
-                showOverlay={showCropOverlay}
-              />
+            {/* Crop/Transform Overlay - 3x3 grid and darkened areas */}
+            {cropModule && displayImage && canvasDimensions.width > 0 && (() => {
+              // Get base params from module, override with live params during drag for real-time feedback
+              const baseParams = cropModule.getCropModule().getParams();
+              const displayParams = liveCropParams ? { ...baseParams, ...liveCropParams } : baseParams;
 
-              {/* Interactive Crop Handles - drag to resize crop */}
-              <InteractiveCropHandles
-                imageWidth={imageService.getCurrentImage()?.width || 0}
-                imageHeight={imageService.getCurrentImage()?.height || 0}
-                cropParams={cropModule.getCropModule().getParams()}
-                onCropChange={(crop) => {
-                  // Update crop module params
-                  const module = cropModule.getCropModule();
-                  const currentParams = module.getParams();
-                  module.setParams({
-                    ...currentParams,
-                    x: crop.x,
-                    y: crop.y,
-                    width: crop.width,
-                    height: crop.height,
-                    enabled: true
-                  });
+              return (
+              <>
+                <CropTransformOverlay
+                  imageWidth={(processedImageData && typeof processedImageData === 'object' && 'width' in processedImageData) ? processedImageData.width : (imageService.getCurrentImage()?.width || 0)}
+                  imageHeight={(processedImageData && typeof processedImageData === 'object' && 'height' in processedImageData) ? processedImageData.height : (imageService.getCurrentImage()?.height || 0)}
+                  originalWidth={imageService.getCurrentImage()?.width || 0}
+                  originalHeight={imageService.getCurrentImage()?.height || 0}
+                  cropParams={displayParams}
+                  viewport={viewport}
+                  canvasDisplayWidth={canvasDimensions.width}
+                  canvasDisplayHeight={canvasDimensions.height}
+                  showOverlay={showCropOverlay}
+                  showRotationGrid={isAdjustingRotation}
+                />
 
-                  // Trigger processing (debounced in the pipeline)
-                  imageProcessingPipeline.invalidateModuleCache('crop');
+                {/* Interactive Crop Handles - drag to resize crop */}
+                <InteractiveCropHandles
+                  imageWidth={imageService.getCurrentImage()?.width || 0}
+                  imageHeight={imageService.getCurrentImage()?.height || 0}
+                  cropParams={displayParams}
+                  onCropChange={(crop) => {
+                    // Update crop module params (don't trigger reprocessing yet)
+                    const module = cropModule.getCropModule();
+                    const currentParams = module.getParams();
+                    module.setParams({
+                      ...currentParams,
+                      x: crop.x,
+                      y: crop.y,
+                      width: crop.width,
+                      height: crop.height,
+                      enabled: true
+                    });
 
-                  // Note: Real-time processing will be triggered by the AdjustmentPanel's
-                  // effect that watches for module changes. For immediate feedback during drag,
-                  // we could add a debounced processing call here, but it's not critical
-                  // since the grid overlay updates immediately.
-                }}
-                viewport={viewport}
-                canvasDisplayWidth={canvasRef.current.offsetWidth}
-                canvasDisplayHeight={canvasRef.current.offsetHeight}
-                showHandles={showCropOverlay}
-                containerRef={containerRef}
-              />
-            </>
-          )}
+                    // Update live crop params for real-time visual feedback
+                    setLiveCropParams(crop);
+
+                    // Mark that we have pending crop changes to apply when overlay closes
+                    setHasPendingCropChanges(true);
+                  }}
+                  onDragStart={() => setIsCropHandleDragging(true)}
+                  onDragEnd={() => {
+                    setIsCropHandleDragging(false);
+                    // Keep liveCropParams so the grid stays at the new position
+                    // It will be cleared when overlay closes
+                  }}
+                  viewport={viewport}
+                  canvasDisplayWidth={canvasDimensions.width}
+                  canvasDisplayHeight={canvasDimensions.height}
+                  showHandles={showCropOverlay}
+                  aspectRatio={cropModule.getCropModule().getAspectRatioValue()}
+                  canvasRef={canvasRef}
+                />
+              </>
+              );
+            })()}
+          </div>
         </div>
 
         {/* Optional debug info - can be removed */}

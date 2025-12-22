@@ -19,6 +19,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getSystemDrives: () => ipcRenderer.invoke('get-system-drives'),
   getFolderContents: (folderPath) => ipcRenderer.invoke('get-folder-contents', folderPath),
 
+  // Folder watching
+  watchFolder: (folderPath) => ipcRenderer.invoke('watch-folder', folderPath),
+  unwatchFolder: (folderPath) => ipcRenderer.invoke('unwatch-folder', folderPath),
+  onFolderChanged: (callback) => ipcRenderer.on('folder-changed', (event, data) => callback(data)),
+
   // Advanced file operations
   writeImageFile: (filePath, imageData, format, options) =>
     ipcRenderer.invoke('write-image-file', filePath, imageData, format, options),
@@ -49,6 +54,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Platform info
   platform: process.platform,
+
+  // Window controls (for frameless window)
+  windowMinimize: () => ipcRenderer.invoke('window-minimize'),
+  windowMaximize: () => ipcRenderer.invoke('window-maximize'),
+  windowClose: () => ipcRenderer.invoke('window-close'),
+  windowIsMaximized: () => ipcRenderer.invoke('window-is-maximized'),
+
+  // Splash screen
+  splashProgress: (progress, message) => ipcRenderer.invoke('splash-progress', progress, message),
+  appReady: () => ipcRenderer.invoke('app-ready'),
+  getAppVersion: () => ipcRenderer.invoke('get-app-version'),
+  onSplashProgress: (callback) => ipcRenderer.on('splash-progress', (event, data) => callback(data)),
 
   // Logging
   getLogFile: () => ipcRenderer.invoke('get-log-file'),

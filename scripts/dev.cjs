@@ -91,7 +91,8 @@ function startElectron() {
   electronProcess = spawn('npm', ['run', 'electron'], {
     stdio: ['inherit', 'pipe', 'pipe'],
     shell: true,
-    windowsHide: true
+    windowsHide: true,
+    env: { ...process.env, NODE_ENV: 'development' }
   });
 
   electronProcess.stdout.on('data', (data) => {

@@ -3,11 +3,70 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 
-// Keep a global reference of the window object
+// Keep a global reference of the window objects
 let mainWindow;
+let splashWindow;
 
-// Better development detection
-const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
+// Better development detection - check if dist/index.html exists for production mode
+const distPath = path.join(__dirname, '../dist/index.html');
+const hasBuiltFiles = fs.existsSync(distPath);
+const isDev = process.env.NODE_ENV === 'development' || (!app.isPackaged && !hasBuiltFiles);
+
+// Create splash screen window
+function createSplashWindow() {
+  splashWindow = new BrowserWindow({
+    width: 500,
+    height: 400,
+    frame: false,
+    transparent: false,
+    resizable: false,
+    movable: false,
+    center: true,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, 'preload.cjs')
+    },
+    backgroundColor: '#000000',
+    icon: path.join(__dirname, '../assets/icon.ico')
+  });
+
+  splashWindow.loadFile(path.join(__dirname, 'splash.html'));
+
+  splashWindow.once('ready-to-show', () => {
+    splashWindow.show();
+  });
+
+  splashWindow.on('closed', () => {
+    splashWindow = null;
+  });
+}
+
+// Send progress update to splash screen
+function sendSplashProgress(progress, message) {
+  if (splashWindow && !splashWindow.isDestroyed()) {
+    splashWindow.webContents.send('splash-progress', { progress, message });
+  }
+}
+
+// Close splash and show main window
+function closeSplashAndShowMain() {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.maximize();
+    mainWindow.show();
+  }
+
+  if (splashWindow && !splashWindow.isDestroyed()) {
+    // Small delay for smooth transition
+    setTimeout(() => {
+      if (splashWindow && !splashWindow.isDestroyed()) {
+        splashWindow.close();
+      }
+    }, 300);
+  }
+}
 
 function createWindow() {
   // Create the browser window
@@ -24,8 +83,8 @@ function createWindow() {
       webSecurity: true,
       allowRunningInsecureContent: false
     },
-    titleBarStyle: 'default',
-    icon: path.join(__dirname, '../assets/icon.png'), // We'll add this later
+    frame: false, // Frameless window - we'll add custom controls
+    icon: path.join(__dirname, '../assets/icon.ico'),
     show: false, // Don't show until ready
     backgroundColor: '#282828' // Match our dark theme
   });
@@ -42,15 +101,11 @@ function createWindow() {
 
   mainWindow.loadURL(startUrl);
 
-  // Show window when ready to prevent visual flash
+  // Window is ready but we wait for app to signal it's fully loaded
   mainWindow.once('ready-to-show', () => {
-    mainWindow.maximize();
-    mainWindow.show();
-
-    // Focus on window (dev tools can be opened manually with F12)
-    // if (isDev) {
-    //   mainWindow.webContents.openDevTools();
-    // }
+    // Send initial progress to splash
+    sendSplashProgress(40, 'Loading application...');
+    // Don't show yet - wait for app-ready signal
   });
 
   // Handle window close request
@@ -241,6 +296,44 @@ function createMenu() {
 }
 
 // IPC handlers for file operations
+// Window control handlers (for frameless window)
+ipcMain.handle('window-minimize', () => {
+  if (mainWindow) mainWindow.minimize();
+});
+
+ipcMain.handle('window-maximize', () => {
+  if (mainWindow) {
+    if (mainWindow.isMaximized()) {
+      mainWindow.unmaximize();
+    } else {
+      mainWindow.maximize();
+    }
+  }
+});
+
+ipcMain.handle('window-close', () => {
+  if (mainWindow) mainWindow.close();
+});
+
+ipcMain.handle('window-is-maximized', () => {
+  return mainWindow ? mainWindow.isMaximized() : false;
+});
+
+// Splash screen IPC handlers
+ipcMain.handle('splash-progress', (event, progress, message) => {
+  sendSplashProgress(progress, message);
+});
+
+ipcMain.handle('app-ready', () => {
+  console.log('App ready signal received, showing main window...');
+  closeSplashAndShowMain();
+});
+
+ipcMain.handle('get-app-version', () => {
+  const packageJson = require('../package.json');
+  return packageJson.version;
+});
+
 ipcMain.handle('show-open-dialog', async (event, options) => {
   const result = await dialog.showOpenDialog(mainWindow, options);
   return result;
@@ -266,14 +359,15 @@ ipcMain.handle('read-file', async (event, filePath) => {
   }
 });
 
-// Get system drives (Windows)
+// Get system drives (Windows) - only include C: and D: for faster loading
 ipcMain.handle('get-system-drives', async () => {
   try {
     const drives = [];
 
-    // Check common Windows drives
-    for (let i = 65; i <= 90; i++) {
-      const drive = String.fromCharCode(i) + ':';
+    // Only check C: and D: drives for faster loading
+    const allowedDrives = ['C', 'D'];
+    for (const letter of allowedDrives) {
+      const drive = letter + ':';
       const drivePath = drive + '\\';
 
       try {
@@ -316,6 +410,57 @@ ipcMain.handle('get-system-drives', async () => {
   } catch (error) {
     console.error('Failed to get system drives:', error);
     return [];
+  }
+});
+
+// File watchers for detecting changes
+const folderWatchers = new Map();
+
+// Watch a folder for changes
+ipcMain.handle('watch-folder', async (event, folderPath) => {
+  try {
+    // Don't watch if already watching
+    if (folderWatchers.has(folderPath)) {
+      return { success: true, alreadyWatching: true };
+    }
+
+    const watcher = fs.watch(folderPath, { persistent: false }, (eventType, filename) => {
+      if (filename && mainWindow && !mainWindow.isDestroyed()) {
+        // Debounce rapid changes
+        const key = `${folderPath}:${filename}`;
+        if (watcher._debounce) {
+          clearTimeout(watcher._debounce);
+        }
+        watcher._debounce = setTimeout(() => {
+          mainWindow.webContents.send('folder-changed', {
+            folderPath,
+            eventType,
+            filename
+          });
+        }, 100);
+      }
+    });
+
+    folderWatchers.set(folderPath, watcher);
+    return { success: true };
+  } catch (error) {
+    console.error(`Failed to watch folder ${folderPath}:`, error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Stop watching a folder
+ipcMain.handle('unwatch-folder', async (event, folderPath) => {
+  try {
+    const watcher = folderWatchers.get(folderPath);
+    if (watcher) {
+      watcher.close();
+      folderWatchers.delete(folderPath);
+    }
+    return { success: true };
+  } catch (error) {
+    console.error(`Failed to unwatch folder ${folderPath}:`, error);
+    return { success: false, error: error.message };
   }
 });
 
@@ -369,9 +514,31 @@ ipcMain.handle('get-folder-contents', async (event, folderPath) => {
   }
 });
 
-// Read image as data URL for display in renderer
+// Read image as data URL for display in renderer (with thumbnail generation for RAW files)
 ipcMain.handle('read-image-as-data-url', async (event, filePath) => {
   try {
+    const ext = path.extname(filePath).toLowerCase();
+    const rawFormats = ['.cr2', '.cr3', '.nef', '.arw', '.orf', '.dng', '.raf', '.rw2', '.pef', '.srw'];
+
+    // For RAW files, use Sharp to generate a JPEG thumbnail
+    if (rawFormats.includes(ext)) {
+      try {
+        const sharp = require('sharp');
+        const thumbnailBuffer = await sharp(filePath, { failOnError: false })
+          .resize(300, 200, { fit: 'inside', withoutEnlargement: true })
+          .jpeg({ quality: 80 })
+          .toBuffer();
+
+        const base64 = thumbnailBuffer.toString('base64');
+        return `data:image/jpeg;base64,${base64}`;
+      } catch (sharpError) {
+        console.warn(`Sharp failed for RAW file ${filePath}:`, sharpError.message);
+        // Fall back to placeholder for unsupported RAW formats
+        return null;
+      }
+    }
+
+    // For standard image formats, read directly
     const data = await fs.promises.readFile(filePath);
     const mimeType = getMimeType(filePath);
     const base64 = data.toString('base64');
@@ -612,7 +779,18 @@ ipcMain.handle('read-file-buffer', async (event, filePath) => {
 
 // App event handlers
 app.whenReady().then(() => {
-  createWindow();
+  // Create splash screen first
+  createSplashWindow();
+
+  // Send initial progress
+  setTimeout(() => sendSplashProgress(10, 'Starting application...'), 100);
+
+  // Create main window (hidden)
+  setTimeout(() => {
+    sendSplashProgress(20, 'Loading modules...');
+    createWindow();
+  }, 300);
+
   // Remove the default menu bar
   Menu.setApplicationMenu(null);
 
@@ -620,7 +798,8 @@ app.whenReady().then(() => {
     // On macOS it's common to re-create a window in the app when the
     // dock icon is clicked and there are no other windows open
     if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
+      createSplashWindow();
+      setTimeout(() => createWindow(), 300);
     }
   });
 });

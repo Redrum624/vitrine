@@ -1,4 +1,5 @@
 import { logger } from '../utils/Logger';
+import { smoothStep, rgbToHS } from './utils/ColorUtils';
 
 export interface LocalAdjustmentLayer {
   id: string;
@@ -310,14 +311,14 @@ export class LocalAdjustmentsModule {
       const luminance = 0.299 * r + 0.587 * g + 0.114 * b;
 
       // Calculate HSV for color-based masking
-      const [h] = this.rgbToHS(r, g, b);
+      const [h] = rgbToHS(r, g, b);
 
       // Luminance mask
-      const lumMask = this.smoothStep(
+      const lumMask = smoothStep(
         luminanceMin - luminanceFeather,
         luminanceMin + luminanceFeather,
         luminance
-      ) * (1.0 - this.smoothStep(
+      ) * (1.0 - smoothStep(
         luminanceMax - luminanceFeather,
         luminanceMax + luminanceFeather,
         luminance
@@ -330,7 +331,7 @@ export class LocalAdjustmentsModule {
           Math.abs(h - hueCenter),
           360 - Math.abs(h - hueCenter)
         );
-        hueMask = 1.0 - this.smoothStep(0, hueRange, hueDistance);
+        hueMask = 1.0 - smoothStep(0, hueRange, hueDistance);
       }
 
       // Combine masks
@@ -510,7 +511,7 @@ export class LocalAdjustmentsModule {
           if (distance > hardRadius && softRadius > 0) {
             // Soft edge falloff
             const softT = (distance - hardRadius) / softRadius;
-            alpha = 1.0 - this.smoothStep(0, 1, softT);
+            alpha = 1.0 - smoothStep(0, 1, softT);
           }
 
           alpha *= opacity;
@@ -538,34 +539,6 @@ export class LocalAdjustmentsModule {
     if (position >= 1) return 1;
 
     return Math.pow(position, falloff);
-  }
-
-  private smoothStep(edge0: number, edge1: number, x: number): number {
-    const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
-    return t * t * (3 - 2 * t);
-  }
-
-  private rgbToHS(r: number, g: number, b: number): [number, number] {
-    const max = Math.max(r, g, b);
-    const min = Math.min(r, g, b);
-    const delta = max - min;
-
-    let h = 0;
-    const s = max === 0 ? 0 : delta / max;
-
-    if (delta !== 0) {
-      if (max === r) {
-        h = ((g - b) / delta) % 6;
-      } else if (max === g) {
-        h = (b - r) / delta + 2;
-      } else {
-        h = (r - g) / delta + 4;
-      }
-      h *= 60;
-      if (h < 0) h += 360;
-    }
-
-    return [h, s];
   }
 
   private applyTemperatureTint(r: number, g: number, b: number, temperature: number, tint: number): [number, number, number] {

@@ -1,9 +1,8 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { RotateCcw, Maximize, Grid, RotateCw, FlipHorizontal, FlipVertical, Zap, ChevronDown, ChevronUp } from 'lucide-react';
+import { RotateCcw, Maximize, RotateCw, FlipHorizontal, FlipVertical, Zap, ChevronDown, ChevronUp } from 'lucide-react';
 import { CropModule, CropParams, AspectRatio } from '../../modules/CropModule';
 import { logger } from '../../utils/Logger';
 import { useAppStore } from '../../stores/appStore';
-import { imageService } from '../../services/ImageService';
 
 interface CropModuleComponentProps {
   module: CropModule;
@@ -18,12 +17,13 @@ export const CropModuleComponent: React.FC<CropModuleComponentProps> = ({
   onParamsChange,
   imageWidth,
   imageHeight,
-  imageData
+  imageData: _imageData  // Now using processedImageData from appStore instead
 }) => {
   const [params, setParams] = useState<CropParams>(module.getParams());
   const paramsRef = useRef<CropParams>(params);
   const [isTransformExpanded, setIsTransformExpanded] = useState(true);
   const [isDetecting, setIsDetecting] = useState(false);
+  const { setIsAdjustingRotation } = useAppStore();
 
   // Keep ref in sync
   useEffect(() => {
@@ -63,17 +63,10 @@ export const CropModuleComponent: React.FC<CropModuleComponentProps> = ({
     }
   }, [module, updateParams]);
 
-  const handleCenterCrop = useCallback((targetRatio: number) => {
-    module.centerCrop(targetRatio, imageWidth, imageHeight);
-    const updatedParams = module.getParams();
-    setParams(updatedParams);
-    onParamsChange(updatedParams);
-    logger.info(`Center crop applied for ratio ${targetRatio}`);
-  }, [module, onParamsChange, imageWidth, imageHeight]);
-
   const handleUncrop = useCallback(() => {
     module.uncrop();
     const updatedParams = module.getParams();
+    paramsRef.current = updatedParams;
     setParams(updatedParams);
     onParamsChange(updatedParams);
   }, [module, onParamsChange]);
@@ -81,40 +74,64 @@ export const CropModuleComponent: React.FC<CropModuleComponentProps> = ({
   const handleReset = useCallback(() => {
     module.resetParams();
     const updatedParams = module.getParams();
+    paramsRef.current = updatedParams;
     setParams(updatedParams);
     onParamsChange(updatedParams);
   }, [module, onParamsChange]);
 
+  // Get processed image data from store for Auto-Straighten
+  const { processedImageData: storeProcessedData } = useAppStore();
+
+  // Check if we have valid processed image data
+  const hasProcessedData = storeProcessedData && typeof storeProcessedData === 'object' && 'data' in storeProcessedData;
+
   const handleAutoStraighten = useCallback(async () => {
-    if (!imageData || imageWidth <= 0 || imageHeight <= 0) {
-      logger.warn('Auto-straighten requires image data');
+    // Use processedImageData from appStore instead of passed props
+    const imgData = storeProcessedData && typeof storeProcessedData === 'object' && 'data' in storeProcessedData
+      ? storeProcessedData as { data: Float32Array; width: number; height: number }
+      : null;
+
+    if (!imgData || !imgData.data || imgData.width <= 0 || imgData.height <= 0) {
+      logger.warn('Auto-straighten requires processed image data');
       return;
     }
+
+    // Detect actual channel count from imageData length
+    const expectedPixels = imgData.width * imgData.height;
+    const detectedChannels = Math.round(imgData.data.length / expectedPixels);
+
+    if (detectedChannels !== 3 && detectedChannels !== 4) {
+      logger.warn(`Auto-straighten: Invalid image data format (expected 3 or 4 channels, got ${detectedChannels})`);
+      return;
+    }
+
+    logger.info(`Auto-straighten: Analyzing ${imgData.width}×${imgData.height} image with ${detectedChannels} channels`);
 
     setIsDetecting(true);
     try {
       const context = {
-        width: imageWidth,
-        height: imageHeight,
-        channels: 4
+        width: imgData.width,
+        height: imgData.height,
+        channels: detectedChannels
       };
 
-      const success = module.autoStraighten(imageData, context);
+      const success = module.autoStraighten(imgData.data, context);
 
       if (success) {
         const updatedParams = module.getParams();
+        paramsRef.current = updatedParams;  // Update ref immediately to avoid race condition
         setParams(updatedParams);
         onParamsChange(updatedParams);
         logger.info('Auto-straighten completed successfully');
       } else {
-        logger.warn('Auto-straighten: No horizon detected');
+        logger.warn('Auto-straighten: Could not detect reliable lines for straightening');
       }
     } catch (error) {
       logger.error('Auto-straighten failed:', error);
     } finally {
       setIsDetecting(false);
     }
-  }, [module, onParamsChange, imageData, imageWidth, imageHeight]);
+  }, [module, onParamsChange, storeProcessedData]);
 
   const handleFlipHorizontal = useCallback(() => {
     updateParams({ flipHorizontal: !params.flipHorizontal, enabled: true });
@@ -125,71 +142,70 @@ export const CropModuleComponent: React.FC<CropModuleComponentProps> = ({
   }, [params.flipVertical, updateParams]);
 
   const rotateBy = useCallback((degrees: number) => {
-    const newAngle = Math.max(-45, Math.min(45, params.angle + degrees));
-    updateParams({ angle: newAngle, enabled: true });
+    // Limit to -5 to +5 degrees for straightening
+    const newAngle = Math.max(-5, Math.min(5, params.angle + degrees));
 
-    if (Math.abs(newAngle) > 0.01 && imageWidth > 0 && imageHeight > 0) {
-      const autoCrop = module.calculateAutoCropForRotation(imageWidth, imageHeight, newAngle);
-      updateParams({ ...autoCrop, angle: newAngle, enabled: true });
+    // Check if user has an existing crop
+    const hasExistingCrop = params.x !== 0 || params.y !== 0 ||
+                            params.width !== 1.0 || params.height !== 1.0;
+
+    if (Math.abs(newAngle) < 0.01) {
+      // Reset to no rotation - but preserve crop if user has one
+      if (hasExistingCrop) {
+        updateParams({ angle: 0, enabled: true });
+      } else {
+        updateParams({ x: 0, y: 0, width: 1.0, height: 1.0, angle: 0, enabled: true });
+      }
+    } else {
+      if (hasExistingCrop) {
+        // Preserve user's crop, just update angle
+        updateParams({ angle: newAngle, enabled: true });
+      } else {
+        // Apply rotation with auto-crop to remove black borders
+        const autoCrop = module.calculateAutoCropForRotation(imageWidth, imageHeight, newAngle);
+        updateParams({ angle: newAngle, enabled: true, ...autoCrop });
+      }
     }
-  }, [params.angle, updateParams, module, imageWidth, imageHeight]);
+  }, [params.angle, params.x, params.y, params.width, params.height, updateParams, module, imageWidth, imageHeight]);
 
   const handleRotationChange = useCallback((newAngle: number) => {
-    updateParams({ angle: newAngle, enabled: true });
+    // Clamp to -5 to +5 range
+    const clampedAngle = Math.max(-5, Math.min(5, newAngle));
 
-    if (Math.abs(newAngle) > 0.01 && imageWidth > 0 && imageHeight > 0) {
-      const autoCrop = module.calculateAutoCropForRotation(imageWidth, imageHeight, newAngle);
-      updateParams({ ...autoCrop, angle: newAngle, enabled: true });
-    } else if (Math.abs(newAngle) < 0.01) {
-      updateParams({ x: 0, y: 0, width: 1.0, height: 1.0, angle: 0, enabled: true });
+    // Check if user has an existing crop
+    const hasExistingCrop = params.x !== 0 || params.y !== 0 ||
+                            params.width !== 1.0 || params.height !== 1.0;
+
+    if (Math.abs(clampedAngle) < 0.01) {
+      // Reset to no rotation - but preserve crop if user has one
+      if (hasExistingCrop) {
+        updateParams({ angle: 0, enabled: true });
+      } else {
+        updateParams({ x: 0, y: 0, width: 1.0, height: 1.0, angle: 0, enabled: true });
+      }
+    } else {
+      // During rotation adjustment, just update angle (preserve crop)
+      updateParams({ angle: clampedAngle, enabled: true });
     }
-  }, [updateParams, module, imageWidth, imageHeight]);
+  }, [params.x, params.y, params.width, params.height, updateParams]);
+
+  // Apply auto-crop when rotation adjustment ends (mouse up) - only if no existing crop
+  const handleRotationEnd = useCallback(() => {
+    setIsAdjustingRotation(false);
+
+    // Check if user has an existing crop
+    const hasExistingCrop = params.x !== 0 || params.y !== 0 ||
+                            params.width !== 1.0 || params.height !== 1.0;
+
+    // Only apply auto-crop if user hasn't already cropped
+    if (!hasExistingCrop && Math.abs(params.angle) > 0.01 && imageWidth > 0 && imageHeight > 0) {
+      const autoCrop = module.calculateAutoCropForRotation(imageWidth, imageHeight, params.angle);
+      updateParams({ ...autoCrop });
+    }
+  }, [setIsAdjustingRotation, params.angle, params.x, params.y, params.width, params.height, module, imageWidth, imageHeight, updateParams]);
 
   const outputDims = module.getOutputDimensions(imageWidth, imageHeight);
   const cropPercentage = ((outputDims.width * outputDims.height) / (imageWidth * imageHeight) * 100).toFixed(1);
-
-  const hasRotation = Math.abs(params.angle) > 0.01;
-  const hasFlip = params.flipHorizontal || params.flipVertical;
-  const hasTransform = hasRotation || hasFlip;
-
-  const hasCrop = params.x !== 0 || params.y !== 0 || params.width !== 1.0 || params.height !== 1.0;
-  const hasChanges = hasTransform || hasCrop;
-  const isPreviewMode = module.isInPreviewMode();
-
-  const { processedImageData } = useAppStore();
-
-  const handleApply = useCallback(() => {
-    module.applyChanges();
-
-    if (processedImageData && typeof processedImageData === 'object' && 'data' in processedImageData) {
-      const previewData = processedImageData as { data: Float32Array; width: number; height: number; isPreview: boolean };
-      imageService.updateCurrentImageData(previewData.data, previewData.width, previewData.height);
-      module.resetAfterApply();
-      const resetParams = module.getParams();
-      setParams(resetParams);
-      onParamsChange(resetParams);
-      logger.info(`Crop/Transform applied permanently - new image: ${previewData.width}x${previewData.height}`);
-    } else {
-      logger.warn('No processed image data available to apply');
-      setParams(module.getParams());
-      onParamsChange(module.getParams());
-    }
-  }, [module, onParamsChange, processedImageData]);
-
-  const handleCancel = useCallback(() => {
-    module.cancelChanges();
-    const revertedParams = module.getParams();
-    setParams(revertedParams);
-    onParamsChange(revertedParams);
-    logger.info('Crop/Transform cancelled');
-  }, [module, onParamsChange]);
-
-  // Removed auto-enter preview mode - user must click Apply to see crop overlay
-  // useEffect(() => {
-  //   if (hasChanges && !isPreviewMode) {
-  //     module.enterPreviewMode();
-  //   }
-  // }, [hasChanges, isPreviewMode, module]);
 
   return (
     <div className="space-y-3">
@@ -317,71 +333,6 @@ export const CropModuleComponent: React.FC<CropModuleComponentProps> = ({
         </div>
       )}
 
-      {/* Quick Aspect Ratio Buttons */}
-      <div className="space-y-1.5">
-        <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Quick Apply</label>
-        <div className="grid grid-cols-3 gap-1.5">
-          <button
-            onClick={() => {
-              handleAspectRatioChange('1:1');
-              handleCenterCrop(1.0);
-            }}
-            className="px-3 py-2 text-xs rounded transition-colors flex items-center justify-center gap-1.5"
-            style={{
-              backgroundColor: 'var(--gray-700)',
-              color: 'var(--gray-300)'
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = 'var(--gray-600)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = 'var(--gray-700)';
-            }}
-          >
-            <Grid className="w-3 h-3" />
-            Square
-          </button>
-          <button
-            onClick={() => {
-              handleAspectRatioChange('16:9');
-              handleCenterCrop(16/9);
-            }}
-            className="px-3 py-2 text-xs rounded transition-colors"
-            style={{
-              backgroundColor: 'var(--gray-700)',
-              color: 'var(--gray-300)'
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = 'var(--gray-600)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = 'var(--gray-700)';
-            }}
-          >
-            16:9
-          </button>
-          <button
-            onClick={() => {
-              handleAspectRatioChange('4:3');
-              handleCenterCrop(4/3);
-            }}
-            className="px-3 py-2 text-xs rounded transition-colors"
-            style={{
-              backgroundColor: 'var(--gray-700)',
-              color: 'var(--gray-300)'
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = 'var(--gray-600)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = 'var(--gray-700)';
-            }}
-          >
-            4:3
-          </button>
-        </div>
-      </div>
-
       {/* Transform Section */}
       <div className="pt-3" style={{borderTop: '1px solid var(--border)'}}>
         <button
@@ -453,11 +404,16 @@ export const CropModuleComponent: React.FC<CropModuleComponentProps> = ({
 
               <input
                 type="range"
-                min="-45"
-                max="45"
+                min="-5"
+                max="5"
                 step="0.1"
                 value={params.angle}
                 onChange={(e) => handleRotationChange(parseFloat(e.target.value))}
+                onMouseDown={() => setIsAdjustingRotation(true)}
+                onMouseUp={handleRotationEnd}
+                onMouseLeave={handleRotationEnd}
+                onTouchStart={() => setIsAdjustingRotation(true)}
+                onTouchEnd={handleRotationEnd}
                 className="slider w-full"
               />
 
@@ -465,12 +421,13 @@ export const CropModuleComponent: React.FC<CropModuleComponentProps> = ({
               <div className="grid grid-cols-4 gap-1.5 pt-1.5">
                 <button
                   onClick={handleAutoStraighten}
-                  disabled={isDetecting || !imageData}
+                  disabled={isDetecting || !hasProcessedData}
                   className="col-span-4 flex items-center justify-center gap-1.5 px-3 py-2 text-xs rounded transition-colors shadow-sm"
                   style={{
                     background: 'linear-gradient(to right, #f59e0b, #eab308)',
                     color: 'var(--white)',
-                    opacity: isDetecting || !imageData ? 0.3 : 1
+                    opacity: isDetecting || !hasProcessedData ? 0.3 : 1,
+                    cursor: isDetecting || !hasProcessedData ? 'not-allowed' : 'pointer'
                   }}
                   title="Auto-straighten based on horizon detection"
                 >
@@ -486,7 +443,7 @@ export const CropModuleComponent: React.FC<CropModuleComponentProps> = ({
                     </>
                   )}
                 </button>
-                {[-45, -15, 15, 45].map((angle) => (
+                {[-5, -2, 2, 5].map((angle) => (
                   <button
                     key={angle}
                     onClick={() => handleRotationChange(angle)}
@@ -541,74 +498,8 @@ export const CropModuleComponent: React.FC<CropModuleComponentProps> = ({
               </div>
             </div>
 
-            {/* Interpolation Method */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Interpolation</label>
-              <select
-                value={params.resampleMethod}
-                onChange={(e) => updateParams({ resampleMethod: e.target.value as 'nearest' | 'bilinear' | 'bicubic' })}
-                className="w-full text-sm rounded px-3 py-2 border"
-                style={{
-                  backgroundColor: 'var(--gray-700)',
-                  color: 'var(--white)',
-                  borderColor: 'var(--border)'
-                }}
-              >
-                <option value="nearest">Nearest Neighbor (Fast)</option>
-                <option value="bilinear">Bilinear (Good)</option>
-                <option value="bicubic">Bicubic (Best Quality)</option>
-              </select>
-            </div>
           </div>
         )}
-      </div>
-
-      {/* Crop Position Controls */}
-      <div className="space-y-3 pt-3" style={{borderTop: '1px solid var(--border)'}}>
-        <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Position & Size</label>
-
-        {['x', 'y', 'width', 'height'].map((key) => (
-          <div key={key} className="space-y-1.5">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>{key.charAt(0).toUpperCase() + key.slice(1)} {key === 'x' || key === 'y' ? 'Position' : ''}</span>
-              <span className="text-xs font-mono" style={{color: 'var(--gray-400)'}}>{(params[key as keyof CropParams] as number * 100).toFixed(1)}%</span>
-            </div>
-            <input
-              type="range"
-              min={key === 'width' || key === 'height' ? 0.05 : 0}
-              max={key === 'x' ? 1.0 - params.width : key === 'y' ? 1.0 - params.height : key === 'width' ? 1.0 - params.x : 1.0 - params.y}
-              step="0.001"
-              value={params[key as keyof CropParams] as number}
-              onChange={(e) => {
-                const value = parseFloat(e.target.value);
-                if (key === 'width' || key === 'height') {
-                  let newWidth = key === 'width' ? value : params.width;
-                  let newHeight = key === 'height' ? value : params.height;
-                  const targetRatio = module.getAspectRatioValue();
-                  if (targetRatio !== null) {
-                    if (key === 'width') {
-                      newHeight = newWidth / targetRatio;
-                      if (params.y + newHeight > 1.0) {
-                        newHeight = 1.0 - params.y;
-                        newWidth = newHeight * targetRatio;
-                      }
-                    } else {
-                      newWidth = newHeight * targetRatio;
-                      if (params.x + newWidth > 1.0) {
-                        newWidth = 1.0 - params.x;
-                        newHeight = newWidth / targetRatio;
-                      }
-                    }
-                  }
-                  updateParams({ width: newWidth, height: newHeight });
-                } else {
-                  updateParams({ [key]: value });
-                }
-              }}
-              className="slider w-full"
-            />
-          </div>
-        ))}
       </div>
 
       {/* Output Info */}
@@ -627,64 +518,6 @@ export const CropModuleComponent: React.FC<CropModuleComponentProps> = ({
         </div>
       </div>
 
-      {/* Preview/Apply/Cancel Buttons */}
-      {hasChanges && !isPreviewMode && (
-        <div className="pt-3" style={{borderTop: '1px solid var(--border)'}}>
-          <button
-            onClick={() => module.enterPreviewMode()}
-            className="w-full px-4 py-2 text-sm font-medium rounded transition-colors"
-            style={{
-              backgroundColor: 'var(--primary-600)',
-              color: 'var(--white)'
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = 'var(--primary-700)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = 'var(--primary-600)';
-            }}
-          >
-            Preview Crop
-          </button>
-        </div>
-      )}
-
-      {isPreviewMode && hasChanges && (
-        <div className="flex gap-1.5 pt-3" style={{borderTop: '1px solid var(--border)'}}>
-          <button
-            onClick={handleApply}
-            className="flex-1 px-4 py-2 text-sm font-medium rounded transition-colors"
-            style={{
-              backgroundColor: 'var(--primary-600)',
-              color: 'var(--white)'
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = 'var(--primary-700)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = 'var(--primary-600)';
-            }}
-          >
-            Apply
-          </button>
-          <button
-            onClick={handleCancel}
-            className="flex-1 px-4 py-2 text-sm font-medium rounded transition-colors"
-            style={{
-              backgroundColor: 'var(--gray-700)',
-              color: 'var(--gray-300)'
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = 'var(--gray-600)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = 'var(--gray-700)';
-            }}
-          >
-            Cancel
-          </button>
-        </div>
-      )}
     </div>
   );
 };

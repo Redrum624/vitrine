@@ -187,6 +187,61 @@ export class ColorManagementService {
       gamutVolume: 1150000
     });
 
+    // Wide gamut profiles for HDR/UHD workflows
+    this.addColorProfile({
+      name: 'Rec.2020',
+      type: 'input',
+      description: 'ITU-R BT.2020 - UHDTV wide color gamut',
+      whitePoint: [0.3127, 0.3290], // D65
+      primaries: {
+        red: [0.7080, 0.2920],
+        green: [0.1700, 0.7970],
+        blue: [0.1310, 0.0460]
+      },
+      gamma: 2.4, // BT.1886 gamma
+      matrix: [
+        [1.7167, -0.3557, -0.2534],
+        [-0.6667, 1.6165, 0.0158],
+        [0.0176, -0.0428, 0.9421]
+      ]
+    });
+
+    this.addColorProfile({
+      name: 'Rec.2100-PQ',
+      type: 'input',
+      description: 'ITU-R BT.2100 with Perceptual Quantizer (HDR)',
+      whitePoint: [0.3127, 0.3290], // D65
+      primaries: {
+        red: [0.7080, 0.2920],
+        green: [0.1700, 0.7970],
+        blue: [0.1310, 0.0460]
+      },
+      gamma: 1.0, // PQ uses EOTF instead of gamma
+      matrix: [
+        [1.7167, -0.3557, -0.2534],
+        [-0.6667, 1.6165, 0.0158],
+        [0.0176, -0.0428, 0.9421]
+      ]
+    });
+
+    this.addColorProfile({
+      name: 'Rec.2100-HLG',
+      type: 'input',
+      description: 'ITU-R BT.2100 with Hybrid Log-Gamma (HDR)',
+      whitePoint: [0.3127, 0.3290], // D65
+      primaries: {
+        red: [0.7080, 0.2920],
+        green: [0.1700, 0.7970],
+        blue: [0.1310, 0.0460]
+      },
+      gamma: 1.0, // HLG uses OETF instead of gamma
+      matrix: [
+        [1.7167, -0.3557, -0.2534],
+        [-0.6667, 1.6165, 0.0158],
+        [0.0176, -0.0428, 0.9421]
+      ]
+    });
+
     logger.info(`Initialized ${this.colorProfiles.size} color profiles and ${this.printProfiles.size} print profiles`);
   }
 
@@ -576,6 +631,240 @@ export class ColorManagementService {
       return true;
     }
     return false;
+  }
+
+  // ============================================================
+  // Lab Color Space Conversions
+  // ============================================================
+
+  /** D50 reference white XYZ values */
+  private static readonly D50_WHITE: [number, number, number] = [0.96422, 1.0, 0.82521];
+
+  /** D65 reference white XYZ values */
+  private static readonly D65_WHITE: [number, number, number] = [0.95047, 1.0, 1.08883];
+
+  /** Lab conversion constants */
+  private static readonly LAB_EPSILON = 216 / 24389; // 0.008856
+  private static readonly LAB_KAPPA = 24389 / 27; // 903.3
+
+  /**
+   * Convert XYZ to Lab color space
+   * @param xyz XYZ color values (Y normalized to 1.0)
+   * @param illuminant Reference illuminant ('D50' or 'D65')
+   * @returns Lab values [L: 0-100, a: -128 to 128, b: -128 to 128]
+   */
+  xyzToLab(xyz: [number, number, number], illuminant: 'D50' | 'D65' = 'D65'): [number, number, number] {
+    const white = illuminant === 'D50'
+      ? ColorManagementService.D50_WHITE
+      : ColorManagementService.D65_WHITE;
+
+    // Normalize by reference white
+    const xr = xyz[0] / white[0];
+    const yr = xyz[1] / white[1];
+    const zr = xyz[2] / white[2];
+
+    // Apply Lab transfer function
+    const fx = this.labF(xr);
+    const fy = this.labF(yr);
+    const fz = this.labF(zr);
+
+    // Calculate Lab values
+    const L = 116 * fy - 16;
+    const a = 500 * (fx - fy);
+    const b = 200 * (fy - fz);
+
+    return [L, a, b];
+  }
+
+  /**
+   * Convert Lab to XYZ color space
+   * @param lab Lab color values [L: 0-100, a: -128 to 128, b: -128 to 128]
+   * @param illuminant Reference illuminant ('D50' or 'D65')
+   * @returns XYZ values (Y normalized to 1.0)
+   */
+  labToXyz(lab: [number, number, number], illuminant: 'D50' | 'D65' = 'D65'): [number, number, number] {
+    const white = illuminant === 'D50'
+      ? ColorManagementService.D50_WHITE
+      : ColorManagementService.D65_WHITE;
+
+    const [L, a, b] = lab;
+
+    // Calculate intermediate values
+    const fy = (L + 16) / 116;
+    const fx = a / 500 + fy;
+    const fz = fy - b / 200;
+
+    // Apply inverse Lab transfer function
+    const xr = this.labFInverse(fx);
+    const yr = L > ColorManagementService.LAB_KAPPA * ColorManagementService.LAB_EPSILON
+      ? Math.pow(fy, 3)
+      : L / ColorManagementService.LAB_KAPPA;
+    const zr = this.labFInverse(fz);
+
+    // Denormalize by reference white
+    return [
+      xr * white[0],
+      yr * white[1],
+      zr * white[2]
+    ];
+  }
+
+  /**
+   * Convert RGB to Lab color space (convenience method)
+   * @param rgb RGB values in range [0, 1]
+   * @param profile Color profile to use (defaults to sRGB)
+   * @param illuminant Reference illuminant for Lab
+   * @returns Lab values
+   */
+  rgbToLab(
+    rgb: [number, number, number],
+    profile?: ColorProfile,
+    illuminant: 'D50' | 'D65' = 'D65'
+  ): [number, number, number] {
+    const colorProfile = profile || this.colorProfiles.get('sRGB')!;
+    const xyz = this.rgbToXYZ(rgb, colorProfile);
+    return this.xyzToLab(xyz, illuminant);
+  }
+
+  /**
+   * Convert Lab to RGB color space (convenience method)
+   * @param lab Lab values
+   * @param profile Color profile to use (defaults to sRGB)
+   * @param illuminant Reference illuminant for Lab
+   * @returns RGB values in range [0, 1]
+   */
+  labToRgb(
+    lab: [number, number, number],
+    profile?: ColorProfile,
+    illuminant: 'D50' | 'D65' = 'D65'
+  ): [number, number, number] {
+    const colorProfile = profile || this.colorProfiles.get('sRGB')!;
+    const xyz = this.labToXyz(lab, illuminant);
+    const rgb = this.xyzToRGB(xyz, colorProfile);
+
+    // Clamp to valid range
+    return [
+      Math.max(0, Math.min(1, rgb[0])),
+      Math.max(0, Math.min(1, rgb[1])),
+      Math.max(0, Math.min(1, rgb[2]))
+    ];
+  }
+
+  /**
+   * Lab transfer function f(t)
+   */
+  private labF(t: number): number {
+    if (t > ColorManagementService.LAB_EPSILON) {
+      return Math.cbrt(t);
+    }
+    return (ColorManagementService.LAB_KAPPA * t + 16) / 116;
+  }
+
+  /**
+   * Inverse Lab transfer function f^-1(t)
+   */
+  private labFInverse(t: number): number {
+    const t3 = t * t * t;
+    if (t3 > ColorManagementService.LAB_EPSILON) {
+      return t3;
+    }
+    return (116 * t - 16) / ColorManagementService.LAB_KAPPA;
+  }
+
+  /**
+   * Calculate Delta E (CIE76) between two Lab colors
+   * @param lab1 First Lab color
+   * @param lab2 Second Lab color
+   * @returns Delta E value (0 = identical, < 1 = imperceptible, < 2 = close)
+   */
+  deltaE(lab1: [number, number, number], lab2: [number, number, number]): number {
+    const dL = lab1[0] - lab2[0];
+    const da = lab1[1] - lab2[1];
+    const db = lab1[2] - lab2[2];
+    return Math.sqrt(dL * dL + da * da + db * db);
+  }
+
+  /**
+   * Calculate Delta E (CIE2000) between two Lab colors
+   * More perceptually uniform than CIE76
+   */
+  deltaE2000(lab1: [number, number, number], lab2: [number, number, number]): number {
+    const [L1, a1, b1] = lab1;
+    const [L2, a2, b2] = lab2;
+
+    // Calculate C and h values
+    const C1 = Math.sqrt(a1 * a1 + b1 * b1);
+    const C2 = Math.sqrt(a2 * a2 + b2 * b2);
+    const Cab = (C1 + C2) / 2;
+
+    const G = 0.5 * (1 - Math.sqrt(Math.pow(Cab, 7) / (Math.pow(Cab, 7) + Math.pow(25, 7))));
+
+    const a1p = a1 * (1 + G);
+    const a2p = a2 * (1 + G);
+
+    const C1p = Math.sqrt(a1p * a1p + b1 * b1);
+    const C2p = Math.sqrt(a2p * a2p + b2 * b2);
+
+    const h1p = this.labHue(a1p, b1);
+    const h2p = this.labHue(a2p, b2);
+
+    // Calculate deltas
+    const dLp = L2 - L1;
+    const dCp = C2p - C1p;
+    let dhp = h2p - h1p;
+
+    if (C1p * C2p === 0) {
+      dhp = 0;
+    } else if (Math.abs(dhp) > 180) {
+      dhp += dhp > 0 ? -360 : 360;
+    }
+
+    const dHp = 2 * Math.sqrt(C1p * C2p) * Math.sin((dhp * Math.PI) / 360);
+
+    // Calculate means
+    const Lp = (L1 + L2) / 2;
+    const Cp = (C1p + C2p) / 2;
+    let hp = (h1p + h2p) / 2;
+
+    if (C1p * C2p !== 0 && Math.abs(h1p - h2p) > 180) {
+      hp += hp < 180 ? 180 : -180;
+    }
+
+    // Calculate T
+    const T = 1
+      - 0.17 * Math.cos(((hp - 30) * Math.PI) / 180)
+      + 0.24 * Math.cos((2 * hp * Math.PI) / 180)
+      + 0.32 * Math.cos(((3 * hp + 6) * Math.PI) / 180)
+      - 0.20 * Math.cos(((4 * hp - 63) * Math.PI) / 180);
+
+    // Calculate weighting functions
+    const SL = 1 + (0.015 * Math.pow(Lp - 50, 2)) / Math.sqrt(20 + Math.pow(Lp - 50, 2));
+    const SC = 1 + 0.045 * Cp;
+    const SH = 1 + 0.015 * Cp * T;
+
+    const RC = 2 * Math.sqrt(Math.pow(Cp, 7) / (Math.pow(Cp, 7) + Math.pow(25, 7)));
+    const dTheta = 30 * Math.exp(-Math.pow((hp - 275) / 25, 2));
+    const RT = -RC * Math.sin((2 * dTheta * Math.PI) / 180);
+
+    // Calculate final Delta E
+    const dE = Math.sqrt(
+      Math.pow(dLp / SL, 2) +
+      Math.pow(dCp / SC, 2) +
+      Math.pow(dHp / SH, 2) +
+      RT * (dCp / SC) * (dHp / SH)
+    );
+
+    return dE;
+  }
+
+  /**
+   * Calculate hue angle for Lab color
+   */
+  private labHue(a: number, b: number): number {
+    if (a === 0 && b === 0) return 0;
+    let h = (Math.atan2(b, a) * 180) / Math.PI;
+    if (h < 0) h += 360;
+    return h;
   }
 }
 

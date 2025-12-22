@@ -12,6 +12,12 @@ interface AppStore extends AppState {
   toggleSidebar: () => void;
   resetZoom: () => void;
   getCurrentPipelineSettings: () => Record<string, unknown>;
+  // Rotation grid overlay state
+  isAdjustingRotation: boolean;
+  setIsAdjustingRotation: (adjusting: boolean) => void;
+  // Processing trigger - increments to signal that reprocessing is needed
+  processingVersion: number;
+  triggerReprocessing: () => void;
 }
 
 export const useAppStore = create<AppStore>((set) => ({
@@ -26,8 +32,16 @@ export const useAppStore = create<AppStore>((set) => ({
     rotation: 0,
   },
   sidebarCollapsed: false,
+  isAdjustingRotation: false,
+  processingVersion: 0,
+
+  triggerReprocessing: () => set((state) => ({
+    processingVersion: state.processingVersion + 1
+  })),
 
   setCurrentImage: (image) => set({ currentImage: image }),
+
+  setIsAdjustingRotation: (adjusting) => set({ isAdjustingRotation: adjusting }),
 
   setProcessedImageData: (data) => set({ processedImageData: data }),
 

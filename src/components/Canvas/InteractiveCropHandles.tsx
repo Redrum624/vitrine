@@ -12,6 +12,12 @@ interface InteractiveCropHandlesProps {
   // Callback when crop region changes
   onCropChange: (crop: { x: number; y: number; width: number; height: number }) => void;
 
+  // Callback when drag starts (to prevent canvas panning)
+  onDragStart?: () => void;
+
+  // Callback when drag ends
+  onDragEnd?: () => void;
+
   // Canvas viewport state
   viewport: {
     zoom: number;
@@ -26,8 +32,11 @@ interface InteractiveCropHandlesProps {
   // Show handles only in preview mode
   showHandles: boolean;
 
-  // Container ref for coordinate calculations
-  containerRef: React.RefObject<HTMLDivElement | null>;
+  // Aspect ratio constraint (null = free, number = width/height ratio)
+  aspectRatio?: number | null;
+
+  // Canvas element ref for coordinate calculations
+  canvasRef: React.RefObject<HTMLCanvasElement | null>;
 }
 
 type HandleType = 'nw' | 'ne' | 'sw' | 'se' | 'n' | 's' | 'e' | 'w' | 'center';
@@ -41,15 +50,24 @@ export function InteractiveCropHandles({
   imageHeight,
   cropParams,
   onCropChange,
+  onDragStart,
+  onDragEnd,
   viewport,
   canvasDisplayWidth,
   canvasDisplayHeight,
   showHandles,
-  containerRef
+  aspectRatio = null,
+  canvasRef
 }: InteractiveCropHandlesProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [dragHandle, setDragHandle] = useState<HandleType | null>(null);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const [initialCropRect, setInitialCropRect] = useState<{
+    left: number;
+    top: number;
+    right: number;
+    bottom: number;
+  } | null>(null);
 
   // Calculate crop region in canvas pixel coordinates
   const getCropRect = useCallback(() => {
@@ -107,83 +125,136 @@ export function InteractiveCropHandles({
     e.preventDefault();
     e.stopPropagation();
 
-    if (!containerRef.current) return;
+    if (!canvasRef.current) return;
 
-    const rect = containerRef.current.getBoundingClientRect();
+    // Use canvas element's bounding rect for accurate coordinates
+    const rect = canvasRef.current.getBoundingClientRect();
     const mouseX = e.clientX - rect.left;
     const mouseY = e.clientY - rect.top;
+
+    // Store the initial crop rect at drag start
+    const cropRect = getCropRect();
+    setInitialCropRect({
+      left: cropRect.left,
+      top: cropRect.top,
+      right: cropRect.right,
+      bottom: cropRect.bottom
+    });
 
     setIsDragging(true);
     setDragHandle(handle);
     setDragStart({ x: mouseX, y: mouseY });
-  }, [containerRef]);
+
+    // Notify parent that drag started (to prevent canvas panning)
+    onDragStart?.();
+  }, [canvasRef, getCropRect, onDragStart]);
 
   // Handle mouse move
   useEffect(() => {
-    if (!isDragging || !dragHandle || !containerRef.current) return;
+    if (!isDragging || !dragHandle || !canvasRef.current || !initialCropRect) return;
 
     const handleMouseMove = (e: MouseEvent) => {
-      const rect = containerRef.current!.getBoundingClientRect();
+      if (!canvasRef.current) return;
+      // Use canvas element's bounding rect for accurate coordinates
+      const rect = canvasRef.current.getBoundingClientRect();
       const mouseX = e.clientX - rect.left;
       const mouseY = e.clientY - rect.top;
 
       const deltaX = mouseX - dragStart.x;
       const deltaY = mouseY - dragStart.y;
 
-      const cropRect = getCropRect();
-
-      let newLeft = cropRect.left;
-      let newTop = cropRect.top;
-      let newRight = cropRect.right;
-      let newBottom = cropRect.bottom;
+      // Use the initial crop rect stored at drag start, not the current one
+      let newLeft = initialCropRect.left;
+      let newTop = initialCropRect.top;
+      let newRight = initialCropRect.right;
+      let newBottom = initialCropRect.bottom;
 
       // Calculate new bounds based on handle type
       switch (dragHandle) {
         case 'nw':
-          newLeft = cropRect.left + deltaX;
-          newTop = cropRect.top + deltaY;
+          newLeft = initialCropRect.left + deltaX;
+          newTop = initialCropRect.top + deltaY;
           break;
         case 'ne':
-          newRight = cropRect.right + deltaX;
-          newTop = cropRect.top + deltaY;
+          newRight = initialCropRect.right + deltaX;
+          newTop = initialCropRect.top + deltaY;
           break;
         case 'sw':
-          newLeft = cropRect.left + deltaX;
-          newBottom = cropRect.bottom + deltaY;
+          newLeft = initialCropRect.left + deltaX;
+          newBottom = initialCropRect.bottom + deltaY;
           break;
         case 'se':
-          newRight = cropRect.right + deltaX;
-          newBottom = cropRect.bottom + deltaY;
+          newRight = initialCropRect.right + deltaX;
+          newBottom = initialCropRect.bottom + deltaY;
           break;
         case 'n':
-          newTop = cropRect.top + deltaY;
+          newTop = initialCropRect.top + deltaY;
           break;
         case 's':
-          newBottom = cropRect.bottom + deltaY;
+          newBottom = initialCropRect.bottom + deltaY;
           break;
         case 'w':
-          newLeft = cropRect.left + deltaX;
+          newLeft = initialCropRect.left + deltaX;
           break;
         case 'e':
-          newRight = cropRect.right + deltaX;
+          newRight = initialCropRect.right + deltaX;
           break;
         case 'center':
-          newLeft = cropRect.left + deltaX;
-          newTop = cropRect.top + deltaY;
-          newRight = cropRect.right + deltaX;
-          newBottom = cropRect.bottom + deltaY;
+          newLeft = initialCropRect.left + deltaX;
+          newTop = initialCropRect.top + deltaY;
+          newRight = initialCropRect.right + deltaX;
+          newBottom = initialCropRect.bottom + deltaY;
           break;
       }
 
       // Ensure minimum size
       const minSize = 20;
-      if (newRight - newLeft < minSize) {
+      let newWidth = newRight - newLeft;
+      let newHeight = newBottom - newTop;
+
+      if (newWidth < minSize) {
         if (dragHandle.includes('w')) newLeft = newRight - minSize;
         else newRight = newLeft + minSize;
+        newWidth = newRight - newLeft;
       }
-      if (newBottom - newTop < minSize) {
+      if (newHeight < minSize) {
         if (dragHandle.includes('n')) newTop = newBottom - minSize;
         else newBottom = newTop + minSize;
+        newHeight = newBottom - newTop;
+      }
+
+      // Apply aspect ratio constraint for corner handles
+      if (aspectRatio !== null && dragHandle !== 'center' &&
+          (dragHandle === 'nw' || dragHandle === 'ne' || dragHandle === 'sw' || dragHandle === 'se')) {
+        const currentRatio = newWidth / newHeight;
+
+        if (currentRatio > aspectRatio) {
+          // Width is too wide, adjust it based on height
+          newWidth = newHeight * aspectRatio;
+        } else {
+          // Height is too tall, adjust it based on width
+          newHeight = newWidth / aspectRatio;
+        }
+
+        // Adjust bounds based on which corner is being dragged (keep opposite corner fixed)
+        switch (dragHandle) {
+          case 'nw':
+            newLeft = newRight - newWidth;
+            newTop = newBottom - newHeight;
+            break;
+          case 'ne':
+            newRight = newLeft + newWidth;
+            newTop = newBottom - newHeight;
+            break;
+          case 'sw':
+            newLeft = newRight - newWidth;
+            newBottom = newTop + newHeight;
+            break;
+          case 'se':
+            newRight = newLeft + newWidth;
+            newBottom = newTop + newHeight;
+            break;
+        }
       }
 
       // Convert to normalized coordinates
@@ -200,6 +271,9 @@ export function InteractiveCropHandles({
     const handleMouseUp = () => {
       setIsDragging(false);
       setDragHandle(null);
+      setInitialCropRect(null);
+      // Notify parent that drag ended
+      onDragEnd?.();
     };
 
     document.addEventListener('mousemove', handleMouseMove);
@@ -209,7 +283,7 @@ export function InteractiveCropHandles({
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [isDragging, dragHandle, dragStart, containerRef, getCropRect, pixelToNormalized, onCropChange]);
+  }, [isDragging, dragHandle, dragStart, initialCropRect, pixelToNormalized, onCropChange, aspectRatio, canvasRef, onDragEnd]);
 
   if (!showHandles || imageWidth === 0 || imageHeight === 0) {
     return null;
@@ -285,8 +359,8 @@ export function InteractiveCropHandles({
         />
       ))}
 
-      {/* Edge handles */}
-      {edgeHandles.map(handle => (
+      {/* Edge handles - only shown when no aspect ratio constraint */}
+      {aspectRatio === null && edgeHandles.map(handle => (
         <div
           key={handle.type}
           className="pointer-events-auto"

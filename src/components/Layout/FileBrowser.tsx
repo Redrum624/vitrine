@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { ChevronDown, ChevronRight, Folder, HardDrive, Image, FolderOpen } from 'lucide-react';
 import { fileSystemService, DriveInfo, FolderInfo, ImageFileInfo } from '../../services/FileSystemService';
 import { logger } from '../../utils/Logger';
+import { isElectron } from '../../types/electron';
 
 interface FileBrowserProps {
   onImageSelected?: (image: ImageFileInfo) => void;
@@ -14,6 +15,44 @@ export function FileBrowser({ onImageSelected, onFolderSelected }: FileBrowserPr
   const [folderContents, setFolderContents] = useState<Map<string, { folders: FolderInfo[]; images: ImageFileInfo[] }>>(new Map());
   const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
   const [loading, setLoading] = useState<string | null>(null);
+  const watchedFolders = useRef<Map<string, string>>(new Map()); // Maps folderId to folderPath
+  const folderIdToPath = useRef<Map<string, string>>(new Map()); // Maps folderId to folderPath for lookups
+
+  // Set up folder change listener
+  useEffect(() => {
+    if (!isElectron() || !window.electronAPI) return;
+
+    const handleFolderChanged = (data: { folderPath: string; eventType: string; filename: string }) => {
+      logger.debug(`Folder changed: ${data.folderPath} - ${data.eventType} - ${data.filename}`);
+
+      // Find the folderId for this path
+      let changedFolderId: string | null = null;
+      watchedFolders.current.forEach((path, id) => {
+        if (path === data.folderPath) {
+          changedFolderId = id;
+        }
+      });
+
+      if (changedFolderId && expandedFolders.has(changedFolderId)) {
+        // Reload the folder contents
+        const folderPath = watchedFolders.current.get(changedFolderId);
+        if (folderPath) {
+          logger.info(`Reloading folder due to changes: ${folderPath}`);
+          loadFolderContents(folderPath, changedFolderId, true);
+        }
+      }
+    };
+
+    window.electronAPI.onFolderChanged(handleFolderChanged);
+
+    return () => {
+      // Clean up watchers on unmount
+      watchedFolders.current.forEach((path) => {
+        window.electronAPI?.unwatchFolder(path);
+      });
+      watchedFolders.current.clear();
+    };
+  }, [expandedFolders]);
 
   // Load system drives on component mount
   useEffect(() => {
@@ -23,11 +62,38 @@ export function FileBrowser({ onImageSelected, onFolderSelected }: FileBrowserPr
   const loadSystemDrives = async () => {
     try {
       setLoading('drives');
+
+      // Report progress to splash screen
+      if (isElectron() && window.electronAPI?.splashProgress) {
+        await window.electronAPI.splashProgress(50, 'Loading file system...');
+      }
+
       const systemDrives = await fileSystemService.getSystemDrives();
       setDrives(systemDrives);
       logger.info(`Loaded ${systemDrives.length} system drives`);
+
+      // Report completion progress
+      if (isElectron() && window.electronAPI?.splashProgress) {
+        await window.electronAPI.splashProgress(90, 'Preparing workspace...');
+      }
+
+      // Small delay to ensure UI is ready, then signal app is ready
+      setTimeout(async () => {
+        if (isElectron() && window.electronAPI?.splashProgress) {
+          await window.electronAPI.splashProgress(100, 'Ready!');
+        }
+        // Signal to Electron that the app is ready to be shown
+        if (isElectron() && window.electronAPI?.appReady) {
+          await window.electronAPI.appReady();
+        }
+      }, 200);
+
     } catch (error) {
       logger.error('Failed to load system drives:', error);
+      // Even on error, signal app ready so user can see the error
+      if (isElectron() && window.electronAPI?.appReady) {
+        await window.electronAPI.appReady();
+      }
     } finally {
       setLoading(null);
     }
@@ -36,6 +102,21 @@ export function FileBrowser({ onImageSelected, onFolderSelected }: FileBrowserPr
   const loadFolderContents = useCallback(async (folderPath: string, folderId: string, shallow = false) => {
     try {
       setLoading(folderId);
+
+      // Store mapping for later lookups
+      folderIdToPath.current.set(folderId, folderPath);
+
+      // Start watching this folder for changes (if in Electron)
+      if (isElectron() && window.electronAPI && !watchedFolders.current.has(folderId)) {
+        window.electronAPI.watchFolder(folderPath).then(result => {
+          if (result.success) {
+            watchedFolders.current.set(folderId, folderPath);
+            logger.debug(`Started watching folder: ${folderPath}`);
+          }
+        }).catch(err => {
+          logger.warn(`Failed to watch folder ${folderPath}:`, err);
+        });
+      }
 
       // Add timeout to prevent hanging on slow file systems
       const timeoutPromise = new Promise<never>((_, reject) => {
@@ -87,10 +168,29 @@ export function FileBrowser({ onImageSelected, onFolderSelected }: FileBrowserPr
 
     if (isExpanded) {
       newExpanded.delete(folderId);
-      // Remove all child folders from expanded state
+
+      // Stop watching this folder and all child folders
+      if (isElectron() && window.electronAPI) {
+        const watchedPath = watchedFolders.current.get(folderId);
+        if (watchedPath) {
+          window.electronAPI.unwatchFolder(watchedPath);
+          watchedFolders.current.delete(folderId);
+          logger.debug(`Stopped watching folder: ${watchedPath}`);
+        }
+      }
+
+      // Remove all child folders from expanded state and stop watching them
       Array.from(expandedFolders).forEach(id => {
         if (id.startsWith(folderId + '/')) {
           newExpanded.delete(id);
+          // Stop watching child folders too
+          if (isElectron() && window.electronAPI) {
+            const childPath = watchedFolders.current.get(id);
+            if (childPath) {
+              window.electronAPI.unwatchFolder(childPath);
+              watchedFolders.current.delete(id);
+            }
+          }
         }
       });
     } else {

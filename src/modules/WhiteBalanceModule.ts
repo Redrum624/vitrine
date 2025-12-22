@@ -1,4 +1,5 @@
 import { logger } from '../utils/Logger';
+import { validateInputDimensions, temperatureToRgb, safeDivide } from './utils/ColorUtils';
 
 export interface WhiteBalanceParams {
   temperature: number;    // 2000K to 50000K, default: 5500K (neutral daylight)
@@ -72,54 +73,6 @@ export class WhiteBalanceModule {
     logger.debug('WhiteBalance params reset to defaults');
   }
 
-  private temperatureToRGB(temperature: number): { r: number; g: number; b: number } {
-    // Convert color temperature to RGB multipliers
-    // Based on Tanner Helland's algorithm
-    temperature = Math.max(1000, Math.min(40000, temperature)) / 100;
-
-    let r: number, g: number, b: number;
-
-    // Calculate red
-    if (temperature <= 66) {
-      r = 255;
-    } else {
-      r = temperature - 60;
-      r = 329.698727446 * Math.pow(r, -0.1332047592);
-      r = Math.max(0, Math.min(255, r));
-    }
-
-    // Calculate green
-    if (temperature <= 66) {
-      g = temperature;
-      g = 99.4708025861 * Math.log(g) - 161.1195681661;
-      g = Math.max(0, Math.min(255, g));
-    } else {
-      g = temperature - 60;
-      g = 288.1221695283 * Math.pow(g, -0.0755148492);
-      g = Math.max(0, Math.min(255, g));
-    }
-
-    // Calculate blue
-    if (temperature >= 66) {
-      b = 255;
-    } else {
-      if (temperature <= 19) {
-        b = 0;
-      } else {
-        b = temperature - 10;
-        b = 138.5177312231 * Math.log(b) - 305.0447927307;
-        b = Math.max(0, Math.min(255, b));
-      }
-    }
-
-    // Normalize to 0-1 range
-    return {
-      r: r / 255,
-      g: g / 255,
-      b: b / 255
-    };
-  }
-
   private applyTint(r: number, g: number, b: number, tint: number): { r: number; g: number; b: number } {
     // Apply green/magenta tint adjustment
     // Positive tint = more green, negative tint = more magenta
@@ -145,6 +98,10 @@ export class WhiteBalanceModule {
 
   process(input: Float32Array, context: WhiteBalanceProcessingContext): Float32Array {
     const { width, height, channels } = context;
+
+    // Validate input dimensions
+    validateInputDimensions(input, width, height, channels, 'WhiteBalanceModule');
+
     const output = new Float32Array(input.length);
 
     // Copy input to output
@@ -152,16 +109,16 @@ export class WhiteBalanceModule {
 
     logger.debug(`Processing WhiteBalance: ${width}x${height}, temp: ${this.params.temperature}K, tint: ${this.params.tint}`);
 
-    // Calculate RGB multipliers from temperature
-    const tempRGB = this.temperatureToRGB(this.params.temperature);
+    // Calculate RGB multipliers from temperature using shared utility
+    const tempRGB = temperatureToRgb(this.params.temperature);
 
     // Reference white point (6500K)
-    const referenceRGB = this.temperatureToRGB(6500);
+    const referenceRGB = temperatureToRgb(6500);
 
-    // Calculate correction factors
-    let rFactor = referenceRGB.r / tempRGB.r;
-    let gFactor = referenceRGB.g / tempRGB.g;
-    let bFactor = referenceRGB.b / tempRGB.b;
+    // Calculate correction factors with safe division
+    let rFactor = safeDivide(referenceRGB.r, tempRGB.r, 1);
+    let gFactor = safeDivide(referenceRGB.g, tempRGB.g, 1);
+    let bFactor = safeDivide(referenceRGB.b, tempRGB.b, 1);
 
     // Apply tint correction
     const tintedFactors = this.applyTint(rFactor, gFactor, bFactor, this.params.tint);
@@ -223,13 +180,13 @@ export class WhiteBalanceModule {
       const gAvg = gSum / pixelCount;
       const bAvg = bSum / pixelCount;
 
-      // Estimate temperature based on R/B ratio
-      const rbRatio = rAvg / bAvg;
-      const estimatedTemp = Math.max(2000, Math.min(50000, 6500 / rbRatio));
+      // Estimate temperature based on R/B ratio (with safe division)
+      const rbRatio = safeDivide(rAvg, bAvg, 1);
+      const estimatedTemp = Math.max(2000, Math.min(50000, safeDivide(6500, rbRatio, 6500)));
 
       // Estimate tint based on G deviation from average
       const avgColor = (rAvg + gAvg + bAvg) / 3;
-      const gDeviation = (gAvg - avgColor) / avgColor;
+      const gDeviation = safeDivide(gAvg - avgColor, avgColor, 0);
       const estimatedTint = Math.max(-100, Math.min(100, gDeviation * 100));
 
       this.setParams({

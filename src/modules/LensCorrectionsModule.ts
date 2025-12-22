@@ -1,4 +1,5 @@
 import { logger } from '../utils/Logger';
+import { smoothStep, rgbToHsl, hslToRgb } from './utils/ColorUtils';
 
 export interface LensCorrectionsParams {
   // Vignetting correction
@@ -184,7 +185,7 @@ export class LensCorrectionsModule {
             );
 
             // Apply feathering
-            const smoothFalloff = this.smoothStep(0, 1, falloffProgress);
+            const smoothFalloff = smoothStep(0, 1, falloffProgress);
             const featheredFalloff = falloffProgress * (1.0 - featherNorm) + smoothFalloff * featherNorm;
 
             vignetteMask = 1.0 - featheredFalloff;
@@ -403,7 +404,11 @@ export class LensCorrectionsModule {
       const b = imageData[i + 2];
 
       // Convert to HSL for hue-based correction
-      const [h, s, l] = this.rgbToHsl(r, g, b);
+      // Note: rgbToHsl returns h in 0-360, s and l in 0-100 range
+      const [hRaw, sRaw, lRaw] = rgbToHsl(r, g, b);
+      const h = hRaw / 360; // normalize to 0-1 for compatibility
+      const s = sRaw / 100;
+      const l = lRaw / 100;
 
       let correctionFactor = 1.0;
 
@@ -427,7 +432,8 @@ export class LensCorrectionsModule {
 
       // Apply saturation reduction to affected colors
       if (correctionFactor < 1.0) {
-        const [newR, newG, newB] = this.hslToRgb(h, s * correctionFactor, l);
+        // hslToRgb expects h in 0-360, s and l in 0-100 range
+        const [newR, newG, newB] = hslToRgb(h * 360, s * correctionFactor * 100, l * 100);
         imageData[i] = newR;
         imageData[i + 1] = newG;
         imageData[i + 2] = newB;
@@ -470,60 +476,6 @@ export class LensCorrectionsModule {
     const p1 = p10 * (1 - wx) + p11 * wx;
 
     return p0 * (1 - wy) + p1 * wy;
-  }
-
-  private smoothStep(edge0: number, edge1: number, x: number): number {
-    const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
-    return t * t * (3 - 2 * t);
-  }
-
-  private rgbToHsl(r: number, g: number, b: number): [number, number, number] {
-    const max = Math.max(r, g, b);
-    const min = Math.min(r, g, b);
-    let h: number, s: number;
-    const l = (max + min) / 2;
-
-    if (max === min) {
-      h = s = 0; // Achromatic
-    } else {
-      const d = max - min;
-      s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-
-      switch (max) {
-        case r: h = (g - b) / d + (g < b ? 6 : 0); break;
-        case g: h = (b - r) / d + 2; break;
-        case b: h = (r - g) / d + 4; break;
-        default: h = 0; break;
-      }
-      h /= 6;
-    }
-
-    return [h, s, l];
-  }
-
-  private hslToRgb(h: number, s: number, l: number): [number, number, number] {
-    let r: number, g: number, b: number;
-
-    if (s === 0) {
-      r = g = b = l; // Achromatic
-    } else {
-      const hue2rgb = (p: number, q: number, t: number): number => {
-        if (t < 0) t += 1;
-        if (t > 1) t -= 1;
-        if (t < 1/6) return p + (q - p) * 6 * t;
-        if (t < 1/2) return q;
-        if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
-        return p;
-      };
-
-      const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-      const p = 2 * l - q;
-      r = hue2rgb(p, q, h + 1/3);
-      g = hue2rgb(p, q, h);
-      b = hue2rgb(p, q, h - 1/3);
-    }
-
-    return [r, g, b];
   }
 
   private hueDistance(hue1: number, hue2: number): number {

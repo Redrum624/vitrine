@@ -332,9 +332,40 @@ export class LocalAdjustmentsPipelineModule implements PipelineModule {
   }
 
   private syncLayersToModule(): void {
-    // This would involve recreating layers in the module
-    // For now, we assume the module state is already correct
-    // In a full implementation, this would sync pipeline state to module state
+    // Sync pipeline layer state to the module
+    // Check if module layers match pipeline layers
+    const moduleLayers = localAdjustmentsModule.getLayers();
+    const pipelineLayers = this.params.layers;
+
+    // If counts don't match, we need to sync
+    if (moduleLayers.length !== pipelineLayers.length) {
+      logger.debug(`Syncing layers: module has ${moduleLayers.length}, pipeline has ${pipelineLayers.length}`);
+
+      // Check for layers in pipeline that don't exist in module
+      for (const pipelineLayer of pipelineLayers) {
+        const existsInModule = moduleLayers.some(ml => ml.id === pipelineLayer.id);
+        if (!existsInModule) {
+          logger.warn(`Layer ${pipelineLayer.id} exists in pipeline but not in module - skipping sync`);
+        }
+      }
+    }
+
+    // Sync active layer
+    if (this.params.activeLayerId) {
+      const moduleActiveId = localAdjustmentsModule.getStats().activeLayerId;
+      if (moduleActiveId !== this.params.activeLayerId) {
+        localAdjustmentsModule.setActiveLayer(this.params.activeLayerId);
+      }
+    }
+
+    // Sync layer parameters for existing layers
+    for (const pipelineLayer of pipelineLayers) {
+      const moduleLayer = localAdjustmentsModule.getLayer(pipelineLayer.id);
+      if (moduleLayer) {
+        // Update parameters if they differ
+        localAdjustmentsModule.updateLayerParameters(pipelineLayer.id, pipelineLayer.parameters);
+      }
+    }
   }
 
   // Get current parameters (required by pipeline)

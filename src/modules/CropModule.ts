@@ -70,13 +70,13 @@ export class CropModule {
     y: 0.0,
     width: 1.0,
     height: 1.0,
-    aspectRatio: 'free',
+    aspectRatio: 'original',  // Default to original aspect ratio
     customAspectWidth: 1,
     customAspectHeight: 1,
     angle: 0.0,
     flipHorizontal: false,
     flipVertical: false,
-    expandCanvas: false,
+    expandCanvas: true,  // true = expand canvas during rotation, use crop to remove black borders
     fillColor: [0, 0, 0, 1],
     resampleMethod: 'bicubic'
   };
@@ -120,13 +120,13 @@ export class CropModule {
       y: 0.0,
       width: 1.0,
       height: 1.0,
-      aspectRatio: 'free',
+      aspectRatio: 'original',  // Default to original aspect ratio
       customAspectWidth: 1,
       customAspectHeight: 1,
       angle: 0.0,
       flipHorizontal: false,
       flipVertical: false,
-      expandCanvas: true,
+      expandCanvas: true,  // true = expand canvas during rotation
       fillColor: [0, 0, 0, 1],
       resampleMethod: 'bicubic'
     };
@@ -297,14 +297,25 @@ export class CropModule {
     return output;
   }
 
-  // Get output dimensions after crop
+  // Get output dimensions after crop and rotation
   getOutputDimensions(inputWidth: number, inputHeight: number): { width: number; height: number } {
     if (!this.params.enabled) {
       return { width: inputWidth, height: inputHeight };
     }
 
-    const cropWidth = Math.max(1, Math.floor(this.params.width * inputWidth));
-    const cropHeight = Math.max(1, Math.floor(this.params.height * inputHeight));
+    let currentWidth = inputWidth;
+    let currentHeight = inputHeight;
+
+    // Step 1: Apply rotation dimensions first (rotation happens before crop in process())
+    if (Math.abs(this.params.angle) > 0.01 && this.params.expandCanvas) {
+      const rotatedDims = this.getRotatedDimensions(currentWidth, currentHeight, this.params.angle);
+      currentWidth = rotatedDims.width;
+      currentHeight = rotatedDims.height;
+    }
+
+    // Step 2: Apply crop dimensions
+    const cropWidth = Math.max(1, Math.floor(this.params.width * currentWidth));
+    const cropHeight = Math.max(1, Math.floor(this.params.height * currentHeight));
 
     return {
       width: cropWidth,
@@ -326,12 +337,12 @@ export class CropModule {
       // Image is wider than target - crop width
       const targetWidth = targetAspectRatio / currentAspectRatio;
       const offsetX = (1.0 - targetWidth) / 2;
-      this.setParams({ x: offsetX, y: 0, width: targetWidth, height: 1.0 });
+      this.setParams({ x: offsetX, y: 0, width: targetWidth, height: 1.0, enabled: true });
     } else {
       // Image is taller than target - crop height
       const targetHeight = currentAspectRatio / targetAspectRatio;
       const offsetY = (1.0 - targetHeight) / 2;
-      this.setParams({ x: 0, y: offsetY, width: 1.0, height: targetHeight });
+      this.setParams({ x: 0, y: offsetY, width: 1.0, height: targetHeight, enabled: true });
     }
 
     logger.info(`Center crop applied for aspect ratio ${targetAspectRatio.toFixed(3)}`);
@@ -681,158 +692,243 @@ export class CropModule {
     };
   }
 
-  // Auto-detect horizon/level and straighten image
-  detectHorizon(input: Float32Array, context: CropProcessingContext): HorizonLine | null {
+  // Auto-straighten image using 6-line analysis (3 vertical + 3 horizontal)
+  autoStraighten(input: Float32Array, context: CropProcessingContext): boolean {
     const { width, height, channels } = context;
 
-    logger.info('Detecting horizon for auto-straighten...');
+    logger.info('Auto-straighten: Analyzing image with 6-line method...');
 
-    // Edge detection using Sobel operator
-    const edges = this.detectEdges(input, width, height, channels);
+    const corrections: number[] = [];
 
-    // Hough transform to detect lines
-    const lines = this.houghLineDetection(edges, width, height);
+    // Define scan line positions (25%, 50%, 75% - avoiding edges)
+    const verticalPositions = [0.25, 0.5, 0.75];  // X positions for vertical line detection
+    const horizontalPositions = [0.25, 0.5, 0.75]; // Y positions for horizontal line detection
 
-    if (lines.length === 0) {
-      logger.warn('No horizon line detected');
-      return null;
+    // Analyze 3 vertical scan lines (detect deviation from true vertical)
+    for (const xRatio of verticalPositions) {
+      const angle = this.detectLineAngleAtPosition(input, width, height, channels, xRatio, 'vertical');
+      if (angle !== null) {
+        corrections.push(angle);
+        logger.debug(`Vertical line at ${(xRatio * 100).toFixed(0)}%: ${angle.toFixed(2)}°`);
+      }
     }
 
-    // Find most horizontal line (closest to 0 or 180 degrees)
-    lines.sort((a, b) => {
-      const aDeviation = Math.min(Math.abs(a.angle), Math.abs(a.angle - 180));
-      const bDeviation = Math.min(Math.abs(b.angle), Math.abs(b.angle - 180));
-      return aDeviation - bDeviation;
-    });
+    // Analyze 3 horizontal scan lines (detect deviation from true horizontal)
+    for (const yRatio of horizontalPositions) {
+      const angle = this.detectLineAngleAtPosition(input, width, height, channels, yRatio, 'horizontal');
+      if (angle !== null) {
+        corrections.push(angle);
+        logger.debug(`Horizontal line at ${(yRatio * 100).toFixed(0)}%: ${angle.toFixed(2)}°`);
+      }
+    }
 
-    const horizon = lines[0];
-    logger.info(`Horizon detected: angle=${horizon.angle.toFixed(2)}°, confidence=${horizon.confidence.toFixed(2)}`);
+    if (corrections.length === 0) {
+      logger.warn('Auto-straighten: No reliable lines detected');
+      return false;
+    }
 
-    return horizon;
+    // Calculate average correction, filtering outliers
+    const sortedCorrections = [...corrections].sort((a, b) => a - b);
+
+    // Remove extreme outliers (if we have enough samples)
+    let filteredCorrections = sortedCorrections;
+    if (sortedCorrections.length >= 4) {
+      // Remove top and bottom values
+      filteredCorrections = sortedCorrections.slice(1, -1);
+    }
+
+    const avgCorrection = filteredCorrections.reduce((sum, c) => sum + c, 0) / filteredCorrections.length;
+
+    // Clamp to -5 to +5 range (straightening range)
+    const clampedCorrection = Math.max(-5, Math.min(5, avgCorrection));
+
+    if (Math.abs(clampedCorrection) < 0.1) {
+      logger.info('Auto-straighten: Image is already straight');
+      return false;
+    }
+
+    // Check if user has an existing crop (not the full image)
+    const hasExistingCrop = this.params.x !== 0 || this.params.y !== 0 ||
+                            this.params.width !== 1.0 || this.params.height !== 1.0;
+
+    // Apply the correction - preserve existing crop if user has one
+    if (hasExistingCrop) {
+      // User has a custom crop, just update the rotation angle
+      this.setParams({
+        angle: clampedCorrection,
+        enabled: true,
+        expandCanvas: true
+        // Don't overwrite x, y, width, height - preserve user's crop
+      });
+      logger.info(`Auto-straighten applied: ${clampedCorrection.toFixed(2)}° correction (preserving existing crop)`);
+    } else {
+      // No custom crop, apply auto-crop to remove black borders
+      const autoCrop = this.calculateAutoCropForRotation(width, height, clampedCorrection);
+      this.setParams({
+        angle: clampedCorrection,
+        enabled: true,
+        expandCanvas: true,
+        ...autoCrop
+      });
+      logger.info(`Auto-straighten applied: ${clampedCorrection.toFixed(2)}° correction with auto-crop`);
+    }
+
+    return true;
   }
 
-  // Simple edge detection (Sobel)
-  private detectEdges(input: Float32Array, width: number, height: number, channels: number): Float32Array {
-    const edges = new Float32Array(width * height);
+  // Detect the dominant line angle at a specific position
+  private detectLineAngleAtPosition(
+    input: Float32Array,
+    width: number,
+    height: number,
+    channels: number,
+    position: number,
+    orientation: 'vertical' | 'horizontal'
+  ): number | null {
+    const stripWidth = Math.floor(Math.min(width, height) * 0.1); // 10% of smaller dimension
+    const halfStrip = Math.floor(stripWidth / 2);
+
+    // Accumulate gradient angles along the scan line
+    const angleVotes: Map<number, number> = new Map();
+    let totalWeight = 0;
+
+    if (orientation === 'vertical') {
+      // Scan a vertical strip at x position
+      const centerX = Math.floor(width * position);
+      const startX = Math.max(1, centerX - halfStrip);
+      const endX = Math.min(width - 2, centerX + halfStrip);
+
+      for (let y = Math.floor(height * 0.1); y < Math.floor(height * 0.9); y++) {
+        for (let x = startX; x <= endX; x++) {
+          const gradient = this.getGradientAt(input, x, y, width, height, channels);
+          if (gradient.magnitude > 0.05) { // Threshold for significant edges
+            // For vertical lines, we want edges that are roughly vertical (gradient pointing horizontally)
+            // Angle 0 = horizontal gradient = vertical edge
+            const angleFromVertical = gradient.angle; // Deviation from vertical
+            const roundedAngle = Math.round(angleFromVertical * 10) / 10; // 0.1° precision
+
+            if (Math.abs(roundedAngle) <= 15) { // Only consider near-vertical edges
+              const currentVotes = angleVotes.get(roundedAngle) || 0;
+              angleVotes.set(roundedAngle, currentVotes + gradient.magnitude);
+              totalWeight += gradient.magnitude;
+            }
+          }
+        }
+      }
+    } else {
+      // Scan a horizontal strip at y position
+      const centerY = Math.floor(height * position);
+      const startY = Math.max(1, centerY - halfStrip);
+      const endY = Math.min(height - 2, centerY + halfStrip);
+
+      for (let x = Math.floor(width * 0.1); x < Math.floor(width * 0.9); x++) {
+        for (let y = startY; y <= endY; y++) {
+          const gradient = this.getGradientAt(input, x, y, width, height, channels);
+          if (gradient.magnitude > 0.05) {
+            // For horizontal lines, we want edges that are roughly horizontal (gradient pointing vertically)
+            // Convert to deviation from horizontal
+            let angleFromHorizontal = gradient.angle - 90;
+            if (angleFromHorizontal > 90) angleFromHorizontal -= 180;
+            if (angleFromHorizontal < -90) angleFromHorizontal += 180;
+
+            const roundedAngle = Math.round(angleFromHorizontal * 10) / 10;
+
+            if (Math.abs(roundedAngle) <= 15) { // Only consider near-horizontal edges
+              const currentVotes = angleVotes.get(roundedAngle) || 0;
+              angleVotes.set(roundedAngle, currentVotes + gradient.magnitude);
+              totalWeight += gradient.magnitude;
+            }
+          }
+        }
+      }
+    }
+
+    if (totalWeight < 1) {
+      return null; // Not enough edge data
+    }
+
+    // Find the dominant angle (weighted average)
+    let weightedSum = 0;
+    for (const [angle, weight] of angleVotes) {
+      weightedSum += angle * weight;
+    }
+
+    const dominantAngle = weightedSum / totalWeight;
+
+    // Return the correction needed (negative of the detected deviation)
+    return -dominantAngle;
+  }
+
+  // Calculate gradient at a pixel using Sobel operator
+  private getGradientAt(
+    input: Float32Array,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    channels: number
+  ): { angle: number; magnitude: number } {
+    if (x < 1 || x >= width - 1 || y < 1 || y >= height - 1) {
+      return { angle: 0, magnitude: 0 };
+    }
 
     const sobelX = [[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]];
     const sobelY = [[-1, -2, -1], [0, 0, 0], [1, 2, 1]];
 
-    for (let y = 1; y < height - 1; y++) {
-      for (let x = 1; x < width - 1; x++) {
-        let gx = 0, gy = 0;
+    let gx = 0, gy = 0;
 
-        for (let ky = -1; ky <= 1; ky++) {
-          for (let kx = -1; kx <= 1; kx++) {
-            const idx = ((y + ky) * width + (x + kx)) * channels;
-            const luminance = 0.299 * input[idx] + 0.587 * input[idx + 1] + 0.114 * input[idx + 2];
+    for (let ky = -1; ky <= 1; ky++) {
+      for (let kx = -1; kx <= 1; kx++) {
+        const idx = ((y + ky) * width + (x + kx)) * channels;
+        const luminance = 0.299 * input[idx] + 0.587 * input[idx + 1] + 0.114 * input[idx + 2];
 
-            gx += luminance * sobelX[ky + 1][kx + 1];
-            gy += luminance * sobelY[ky + 1][kx + 1];
-          }
-        }
-
-        const magnitude = Math.sqrt(gx * gx + gy * gy);
-        edges[y * width + x] = magnitude;
+        gx += luminance * sobelX[ky + 1][kx + 1];
+        gy += luminance * sobelY[ky + 1][kx + 1];
       }
     }
 
-    return edges;
+    const magnitude = Math.sqrt(gx * gx + gy * gy);
+
+    // Angle in degrees: 0° = horizontal gradient (vertical edge), 90° = vertical gradient (horizontal edge)
+    const angle = Math.atan2(gy, gx) * (180 / Math.PI);
+
+    return { angle, magnitude };
   }
 
-  // Simplified Hough line detection
-  private houghLineDetection(edges: Float32Array, width: number, height: number): HorizonLine[] {
-    const threshold = 0.3; // Edge magnitude threshold
-    const angleResolution = 1; // 1 degree resolution
-    const distanceResolution = 1;
+  // Legacy method for compatibility - now just calls autoStraighten
+  detectHorizon(input: Float32Array, context: CropProcessingContext): HorizonLine | null {
+    // Run auto-straighten and return a synthetic horizon line for compatibility
+    const { width, height, channels } = context;
 
-    const maxDistance = Math.sqrt(width * width + height * height);
-    const numAngles = 180 / angleResolution;
-    const numDistances = Math.ceil(maxDistance / distanceResolution);
+    // Detect using the new method
+    const corrections: number[] = [];
+    const positions = [0.25, 0.5, 0.75];
 
-    const accumulator = new Array(numAngles * numDistances).fill(0);
-
-    // Vote for lines
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        if (edges[y * width + x] < threshold) continue;
-
-        for (let angleIdx = 0; angleIdx < numAngles; angleIdx++) {
-          const angleDeg = angleIdx * angleResolution;
-          const angleRad = (angleDeg * Math.PI) / 180;
-
-          const distance = x * Math.cos(angleRad) + y * Math.sin(angleRad);
-          const distanceIdx = Math.floor(distance / distanceResolution);
-
-          if (distanceIdx >= 0 && distanceIdx < numDistances) {
-            accumulator[angleIdx * numDistances + distanceIdx]++;
-          }
-        }
-      }
+    for (const pos of positions) {
+      const vAngle = this.detectLineAngleAtPosition(input, width, height, channels, pos, 'vertical');
+      const hAngle = this.detectLineAngleAtPosition(input, width, height, channels, pos, 'horizontal');
+      if (vAngle !== null) corrections.push(vAngle);
+      if (hAngle !== null) corrections.push(hAngle);
     }
 
-    // Find peaks in accumulator
-    const lines: HorizonLine[] = [];
-    const minVotes = width * 0.3; // At least 30% of width
+    if (corrections.length === 0) return null;
 
-    for (let angleIdx = 0; angleIdx < numAngles; angleIdx++) {
-      for (let distanceIdx = 0; distanceIdx < numDistances; distanceIdx++) {
-        const votes = accumulator[angleIdx * numDistances + distanceIdx];
+    const avgAngle = corrections.reduce((sum, c) => sum + c, 0) / corrections.length;
 
-        if (votes > minVotes) {
-          const angleDeg = angleIdx * angleResolution;
-          const distance = distanceIdx * distanceResolution;
-          const angleRad = (angleDeg * Math.PI) / 180;
-
-          // Convert to line endpoints
-          const x1 = distance * Math.cos(angleRad);
-          const y1 = distance * Math.sin(angleRad);
-          const x2 = x1 + width * Math.sin(angleRad);
-          const y2 = y1 - width * Math.cos(angleRad);
-
-          lines.push({
-            x1,
-            y1,
-            x2,
-            y2,
-            angle: angleDeg,
-            confidence: votes / (width * height)
-          });
-        }
-      }
-    }
-
-    return lines.slice(0, 5); // Return top 5 lines
-  }
-
-  // Auto-straighten image based on detected horizon
-  autoStraighten(input: Float32Array, context: CropProcessingContext): boolean {
-    const horizon = this.detectHorizon(input, context);
-
-    if (!horizon) {
-      return false;
-    }
-
-    // Calculate angle deviation from horizontal
-    let correctionAngle = horizon.angle;
-
-    // Normalize to -45 to +45 range
-    if (correctionAngle > 45) {
-      correctionAngle -= 90;
-    } else if (correctionAngle < -45) {
-      correctionAngle += 90;
-    }
-
-    // Apply negative angle to straighten
-    this.setParams({ angle: -correctionAngle, enabled: true });
-
-    logger.info(`Auto-straighten applied: ${-correctionAngle.toFixed(2)}° correction`);
-    return true;
+    return {
+      x1: 0,
+      y1: height / 2,
+      x2: width,
+      y2: height / 2 + width * Math.tan(avgAngle * Math.PI / 180),
+      angle: avgAngle,
+      confidence: corrections.length / 6
+    };
   }
 
   // Calculate the largest crop rectangle that fits inside a rotated image
   // This removes black borders created by rotation
-  calculateAutoCropForRotation(width: number, height: number, angleDeg: number): {
+  // IMPORTANT: Returns normalized coordinates (0-1) relative to the EXPANDED canvas
+  calculateAutoCropForRotation(originalWidth: number, originalHeight: number, angleDeg: number): {
     x: number;
     y: number;
     width: number;
@@ -847,24 +943,38 @@ export class CropModule {
     const sin = Math.sin(angleRad);
     const cos = Math.cos(angleRad);
 
-    // Calculate the largest inscribed rectangle after rotation
-    // Based on the formula for maximum rectangle in rotated rectangle
-    const w = width;
-    const h = height;
+    // Get the expanded canvas dimensions after rotation
+    const rotatedDims = this.getRotatedDimensions(originalWidth, originalHeight, angleDeg);
+    const rotatedW = rotatedDims.width;
+    const rotatedH = rotatedDims.height;
 
-    // Calculate new width and height that avoids black borders
-    const newW = (w * cos - h * sin * sin) / (cos * cos - sin * sin);
-    const newH = (h * cos - w * sin * sin) / (cos * cos - sin * sin);
+    // For a rectangle W×H rotated by θ, the largest inscribed axis-aligned rectangle
+    // (with same aspect ratio) that fits entirely within the original bounds has:
+    // scale = cos(θ) + sin(θ) * (shorter_side / longer_side)
+    const aspectRatio = originalWidth / originalHeight;
+    let scale: number;
 
-    // Ensure we have valid dimensions
-    const cropWidth = Math.max(0.1, Math.min(1.0, newW / w));
-    const cropHeight = Math.max(0.1, Math.min(1.0, newH / h));
+    if (aspectRatio >= 1) {
+      // Landscape or square
+      scale = cos + sin * (originalHeight / originalWidth);
+    } else {
+      // Portrait
+      scale = cos + sin * (originalWidth / originalHeight);
+    }
 
-    // Center the crop
+    // The inscribed rectangle dimensions in original image pixels
+    const inscribedW = originalWidth / scale;
+    const inscribedH = originalHeight / scale;
+
+    // Convert to normalized coordinates relative to expanded canvas
+    const cropWidth = Math.min(1.0, inscribedW / rotatedW);
+    const cropHeight = Math.min(1.0, inscribedH / rotatedH);
+
+    // Center the crop on the expanded canvas
     const cropX = (1.0 - cropWidth) / 2;
     const cropY = (1.0 - cropHeight) / 2;
 
-    logger.debug(`Auto-crop for ${angleDeg.toFixed(2)}° rotation: ${(cropWidth * 100).toFixed(1)}% × ${(cropHeight * 100).toFixed(1)}%`);
+    logger.debug(`Auto-crop for ${angleDeg.toFixed(2)}° rotation: inscribed ${inscribedW.toFixed(0)}×${inscribedH.toFixed(0)} in rotated ${rotatedW}×${rotatedH} = ${(cropWidth * 100).toFixed(1)}% × ${(cropHeight * 100).toFixed(1)}%`);
 
     return {
       x: cropX,

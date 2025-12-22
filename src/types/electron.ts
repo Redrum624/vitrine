@@ -75,6 +75,11 @@ export interface ElectronAPI {
     }>;
   }>;
 
+  // Folder watching
+  watchFolder: (folderPath: string) => Promise<{ success: boolean; alreadyWatching?: boolean; error?: string }>;
+  unwatchFolder: (folderPath: string) => Promise<{ success: boolean; error?: string }>;
+  onFolderChanged: (callback: (data: { folderPath: string; eventType: string; filename: string }) => void) => void;
+
   // Advanced file operations
   writeImageFile: (filePath: string, imageData: ArrayBuffer, format: string, options: {
     width: number;
@@ -130,6 +135,18 @@ export interface ElectronAPI {
 
   // Platform info
   platform: string;
+
+  // Window controls (for frameless window)
+  windowMinimize: () => Promise<void>;
+  windowMaximize: () => Promise<void>;
+  windowClose: () => Promise<void>;
+  windowIsMaximized: () => Promise<boolean>;
+
+  // Splash screen
+  splashProgress: (progress: number, message: string) => Promise<void>;
+  appReady: () => Promise<void>;
+  getAppVersion: () => Promise<string>;
+  onSplashProgress: (callback: (data: { progress?: number; message?: string; error?: string }) => void) => void;
 
   // Cleanup
   removeAllListeners: (channel: string) => void;

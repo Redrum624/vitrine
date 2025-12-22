@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { Minus, Square, X, Copy } from 'lucide-react';
 
 interface MenuBarProps {
   onFileOpen?: () => void;
@@ -38,6 +39,34 @@ export function MenuBar({
   canRedo = false,
 }: MenuBarProps) {
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
+  const [isMaximized, setIsMaximized] = useState(false);
+
+  // Check if window is maximized on mount and update state
+  useEffect(() => {
+    const checkMaximized = async () => {
+      if (window.electronAPI?.windowIsMaximized) {
+        const maximized = await window.electronAPI.windowIsMaximized();
+        setIsMaximized(maximized);
+      }
+    };
+    checkMaximized();
+  }, []);
+
+  const handleMinimize = () => {
+    window.electronAPI?.windowMinimize?.();
+  };
+
+  const handleMaximize = async () => {
+    await window.electronAPI?.windowMaximize?.();
+    if (window.electronAPI?.windowIsMaximized) {
+      const maximized = await window.electronAPI.windowIsMaximized();
+      setIsMaximized(maximized);
+    }
+  };
+
+  const handleClose = () => {
+    window.electronAPI?.windowClose?.();
+  };
 
   const handleMenuClick = (menu: string) => {
     setActiveMenu(activeMenu === menu ? null : menu);
@@ -51,9 +80,54 @@ export function MenuBar({
   };
 
   return (
-    <div className="flex items-center h-9 border-b bg-black relative z-50" style={{paddingLeft: '20px', paddingRight: '20px', borderBottomColor: 'var(--border)'}}>
-      <div className="font-semibold text-white tracking-wide uppercase" style={{fontSize: '12px', fontWeight: 600, letterSpacing: '0.5px', marginRight: '32px'}}>Photo Editor Pro</div>
+    <div
+      className="flex items-center h-9 border-b bg-black relative z-50"
+      style={{
+        paddingLeft: '20px',
+        borderBottomColor: 'var(--border)',
+        // @ts-expect-error - WebkitAppRegion is a non-standard CSS property for Electron
+        WebkitAppRegion: 'drag'
+      }}
+    >
+      {/* App Logo and Title */}
+      <div className="flex items-center" style={{marginRight: '32px', gap: '10px'}}>
+        <svg viewBox="0 0 256 256" width="20" height="20">
+          <defs>
+            <linearGradient id="menuBgGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" style={{stopColor: '#1a1a1a'}}/>
+              <stop offset="100%" style={{stopColor: '#0d0d0d'}}/>
+            </linearGradient>
+            <linearGradient id="menuBladeGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" style={{stopColor: '#b0b0b0'}}/>
+              <stop offset="100%" style={{stopColor: '#505050'}}/>
+            </linearGradient>
+          </defs>
+          <rect x="0" y="0" width="256" height="256" rx="40" ry="40" fill="url(#menuBgGradient)"/>
+          <circle cx="128" cy="128" r="93" fill="none" stroke="#454545" strokeWidth="5"/>
+          <circle cx="128" cy="128" r="85" fill="#0a0a0a"/>
+          <g fill="url(#menuBladeGradient)" stroke="#252525" strokeWidth="1">
+            <path d="M98,46 A85,85 0 0,1 158,46 L128,75 L98,105 Z"/>
+            <path d="M98,46 A85,85 0 0,1 158,46 L128,75 L98,105 Z" transform="rotate(45, 128, 128)"/>
+            <path d="M98,46 A85,85 0 0,1 158,46 L128,75 L98,105 Z" transform="rotate(90, 128, 128)"/>
+            <path d="M98,46 A85,85 0 0,1 158,46 L128,75 L98,105 Z" transform="rotate(135, 128, 128)"/>
+            <path d="M98,46 A85,85 0 0,1 158,46 L128,75 L98,105 Z" transform="rotate(180, 128, 128)"/>
+            <path d="M98,46 A85,85 0 0,1 158,46 L128,75 L98,105 Z" transform="rotate(225, 128, 128)"/>
+            <path d="M98,46 A85,85 0 0,1 158,46 L128,75 L98,105 Z" transform="rotate(270, 128, 128)"/>
+            <path d="M98,46 A85,85 0 0,1 158,46 L128,75 L98,105 Z" transform="rotate(315, 128, 128)"/>
+          </g>
+          <circle cx="128" cy="128" r="25" fill="#0a0a0a"/>
+        </svg>
+        <span className="font-semibold text-white tracking-wide uppercase" style={{fontSize: '12px', fontWeight: 600, letterSpacing: '0.5px'}}>Photo Editor Pro</span>
+      </div>
 
+      {/* Menu items container - not draggable */}
+      <div
+        className="flex items-center"
+        style={{
+          // @ts-expect-error - WebkitAppRegion is a non-standard CSS property for Electron
+          WebkitAppRegion: 'no-drag'
+        }}
+      >
       {/* File Menu */}
       <div className="relative">
         <button
@@ -325,6 +399,41 @@ export function MenuBar({
             </button>
           </div>
         )}
+      </div>
+      </div>
+
+      {/* Spacer to push window controls to the right */}
+      <div className="flex-1" />
+
+      {/* Window Controls */}
+      <div
+        className="flex items-center h-full"
+        style={{
+          // @ts-expect-error - WebkitAppRegion is a non-standard CSS property for Electron
+          WebkitAppRegion: 'no-drag'
+        }}
+      >
+        <button
+          className="flex items-center justify-center w-11 h-full bg-transparent border-0 cursor-pointer text-dark-300 hover:bg-dark-700 hover:text-white transition-colors"
+          onClick={handleMinimize}
+          title="Minimize"
+        >
+          <Minus size={16} />
+        </button>
+        <button
+          className="flex items-center justify-center w-11 h-full bg-transparent border-0 cursor-pointer text-dark-300 hover:bg-dark-700 hover:text-white transition-colors"
+          onClick={handleMaximize}
+          title={isMaximized ? "Restore" : "Maximize"}
+        >
+          {isMaximized ? <Copy size={14} className="rotate-180" /> : <Square size={14} />}
+        </button>
+        <button
+          className="flex items-center justify-center w-11 h-full bg-transparent border-0 cursor-pointer text-dark-300 hover:bg-red-600 hover:text-white transition-colors"
+          onClick={handleClose}
+          title="Close"
+        >
+          <X size={16} />
+        </button>
       </div>
     </div>
   );

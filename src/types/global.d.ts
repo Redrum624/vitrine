@@ -19,6 +19,11 @@ interface ElectronAPI {
     canceled: boolean;
     filePath?: string;
   }>;
+  // Window controls (for frameless window)
+  windowMinimize?: () => Promise<void>;
+  windowMaximize?: () => Promise<void>;
+  windowClose?: () => Promise<void>;
+  windowIsMaximized?: () => Promise<boolean>;
 }
 
 // Extend Window interface for Electron
