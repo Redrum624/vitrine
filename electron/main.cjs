@@ -546,17 +546,27 @@ ipcMain.handle('read-image-as-data-url', async (event, filePath) => {
           .jpeg({ quality: 80 })
           .toBuffer();
 
-        const base64 = thumbnailBuffer.toString('base64');
-        return `data:image/jpeg;base64,${base64}`;
-      } catch (_sharpError) {
+        if (thumbnailBuffer && thumbnailBuffer.length > 100) {
+          const base64 = thumbnailBuffer.toString('base64');
+          console.log(`Preview: Sharp OK for ${path.basename(filePath)}: ${thumbnailBuffer.length} bytes`);
+          return `data:image/jpeg;base64,${base64}`;
+        }
+      } catch (sharpError) {
+        console.log(`Preview: Sharp failed for ${path.basename(filePath)}: ${sharpError.message}`);
         // Sharp doesn't support this RAW format, extract embedded JPEG preview
       }
 
-      // Extract the largest embedded JPEG from the RAW file
-      // Scan the ENTIRE file (not just first 5MB) — DNG files can be 40MB+
-      // with the JPEG preview embedded deep in the file
+      // Extract the largest embedded JPEG from the first 10MB of the RAW file.
+      // For thumbnails we don't need to scan the entire 40MB+ DNG — the preview
+      // JPEG is typically in the first few MB. The full-file scan is done only
+      // by decode-raw-file when loading the actual image.
       try {
-        const fileData = await fs.promises.readFile(filePath);
+        const fd = await fs.promises.open(filePath, 'r');
+        const scanSize = Math.min((await fd.stat()).size, 10 * 1024 * 1024);
+        const fileData = Buffer.alloc(scanSize);
+        await fd.read(fileData, 0, scanSize, 0);
+        await fd.close();
+
         let largest = { offset: -1, size: 0 };
 
         for (let i = 0; i < fileData.length - 1; i++) {
