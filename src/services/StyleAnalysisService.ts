@@ -278,39 +278,38 @@ class StyleAnalysisService {
   private computeAdaptiveParams(source: StyleFingerprint, target: StyleFingerprint): Record<string, Record<string, unknown>> {
     const params: Record<string, Record<string, unknown>> = {};
 
-    // Dead-zone: ignore deltas smaller than this threshold.
-    // Similar photos naturally differ by 0.01-0.03 — those aren't style choices.
+    // Dead-zone: ignore deltas below threshold — natural photo variation, not style.
     const dz = (val: number, threshold: number) =>
       Math.abs(val) < threshold ? 0 : val;
 
-    // ── Exposure / Brightness ──────────────────────────────────────────
-    const lumDelta = dz(source.meanLuminance - target.meanLuminance, 0.03);
-    const exposureAdj = Math.max(-0.5, Math.min(0.5, lumDelta * 0.8));
-    const brightnessAdj = Math.max(-0.3, Math.min(0.3, lumDelta * 0.4));
+    // ── Exposure / Brightness (very gentle) ─────────────────────────────
+    const lumDelta = dz(source.meanLuminance - target.meanLuminance, 0.05);
+    const exposureAdj = Math.max(-0.3, Math.min(0.3, lumDelta * 0.4));
+    const brightnessAdj = Math.max(-0.15, Math.min(0.15, lumDelta * 0.2));
 
     // ── Contrast ───────────────────────────────────────────────────────
     const contrastRatio = target.stdLuminance > 0.01
       ? source.stdLuminance / target.stdLuminance : 1;
-    const contrastAdj = Math.max(-0.5, Math.min(0.5, dz(contrastRatio - 1, 0.05) * 0.8));
+    const contrastAdj = Math.max(-0.3, Math.min(0.3, dz(contrastRatio - 1, 0.08) * 0.4));
 
     // ── Saturation ─────────────────────────────────────────────────────
-    const satDelta = dz(source.meanSaturation - target.meanSaturation, 0.02);
-    const saturationAdj = Math.max(-0.5, Math.min(0.5, satDelta * 1.0));
+    const satDelta = dz(source.meanSaturation - target.meanSaturation, 0.03);
+    const saturationAdj = Math.max(-0.3, Math.min(0.3, satDelta * 0.5));
 
     params['basicadj'] = {
       exposure: exposureAdj,
       brightness: brightnessAdj,
       contrast: contrastAdj,
       saturation: saturationAdj,
-      vibrance: saturationAdj * 0.4,
+      vibrance: saturationAdj * 0.3,
       black_point: 0,
     };
 
-    // ── White Balance ──────────────────────────────────────────────────
-    const tempDelta = dz(source.estimatedTemp - target.estimatedTemp, 100);
-    const targetTemp = Math.max(2000, Math.min(12000, 5500 + tempDelta * 0.15));
-    const tintDelta = dz(source.estimatedTint - target.estimatedTint, 2);
-    const tintAdj = Math.max(-30, Math.min(30, tintDelta * 0.2));
+    // ── White Balance (conservative) ───────────────────────────────────
+    const tempDelta = dz(source.estimatedTemp - target.estimatedTemp, 200);
+    const targetTemp = Math.max(3000, Math.min(9000, 5500 + tempDelta * 0.06));
+    const tintDelta = dz(source.estimatedTint - target.estimatedTint, 5);
+    const tintAdj = Math.max(-15, Math.min(15, tintDelta * 0.1));
 
     params['temperature'] = {
       temperature: Math.round(targetTemp),
@@ -318,31 +317,30 @@ class StyleAnalysisService {
     };
 
     // ── Shadows / Highlights ───────────────────────────────────────────
-    const shadowLumDelta = dz(source.shadows.meanLuminance - target.shadows.meanLuminance, 0.02);
-    const highlightLumDelta = dz(source.highlights.meanLuminance - target.highlights.meanLuminance, 0.02);
+    const shadowLumDelta = dz(source.shadows.meanLuminance - target.shadows.meanLuminance, 0.03);
+    const highlightLumDelta = dz(source.highlights.meanLuminance - target.highlights.meanLuminance, 0.03);
 
-    const shadowRecovery = Math.max(0, Math.min(50, shadowLumDelta * 60));
-    const highlightRecovery = Math.max(0, Math.min(50, -highlightLumDelta * 60));
+    const shadowRecovery = Math.max(0, Math.min(25, shadowLumDelta * 20));
+    const highlightRecovery = Math.max(0, Math.min(25, -highlightLumDelta * 20));
 
-    const blackPointAdj = Math.max(-1, Math.min(1, dz(source.p5 - target.p5, 0.02) * 2));
-    const whitePointAdj = Math.max(-1, Math.min(1, dz(source.p95 - target.p95, 0.02) * 2));
+    const blackPointAdj = Math.max(-0.5, Math.min(0.5, dz(source.p5 - target.p5, 0.03) * 0.8));
+    const whitePointAdj = Math.max(-0.5, Math.min(0.5, dz(source.p95 - target.p95, 0.03) * 0.8));
 
     params['shadowshighlights'] = {
       shadows: shadowRecovery,
       highlights: highlightRecovery,
       whitePoint: whitePointAdj,
       blackPoint: blackPointAdj,
-      enabled: shadowRecovery > 1 || highlightRecovery > 1 || Math.abs(blackPointAdj) > 0.05 || Math.abs(whitePointAdj) > 0.05,
+      enabled: shadowRecovery > 2 || highlightRecovery > 2,
     };
 
-    // ── Tone Curve ─────────────────────────────────────────────────────
-    // Blend between identity curve and source-mapped curve.
-    // For similar photos the blend factor is low → near-identity curve.
+    // ── Tone Curve (gentle blend) ──────────────────────────────────────
+    // Only apply curve if histograms are meaningfully different
     const curveDivergence = Math.abs(source.p50 - target.p50) + Math.abs(source.p25 - target.p25) + Math.abs(source.p75 - target.p75);
-    const curveBlend = Math.min(1, curveDivergence * 3); // 0=identity, 1=full match
+    const curveBlend = Math.min(1, Math.max(0, (curveDivergence - 0.05) * 2)); // dead zone at 0.05
 
     const blendPt = (srcVal: number, tgtVal: number) =>
-      tgtVal + (srcVal - tgtVal) * curveBlend;
+      tgtVal + (srcVal - tgtVal) * curveBlend * 0.5; // extra 50% dampening
 
     const curve = [
       { x: 0, y: 0 },
@@ -352,23 +350,26 @@ class StyleAnalysisService {
       { x: 1, y: 1 },
     ];
 
-    params['tonecurve'] = {
-      baseCurve: curve,
-      baseCurveType: 1,
-    };
+    // Only set curve if it actually deviates from identity
+    if (curveBlend > 0.01) {
+      params['tonecurve'] = {
+        baseCurve: curve,
+        baseCurveType: 1,
+      };
+    }
 
-    // ── Color Balance ──────────────────────────────────────────────────
+    // ── Color Balance (very subtle) ────────────────────────────────────
     const computeZoneCast = (srcZone: ZoneStats, tgtZone: ZoneStats) => {
       if (srcZone.pixelCount < 100 || tgtZone.pixelCount < 100) {
         return { cyan_red: 0, magenta_green: 0, yellow_blue: 0 };
       }
       return {
-        cyan_red: Math.max(-0.2, Math.min(0.2, dz(srcZone.meanR - tgtZone.meanR, 0.01) * 0.6)),
-        magenta_green: Math.max(-0.2, Math.min(0.2, dz(
+        cyan_red: Math.max(-0.1, Math.min(0.1, dz(srcZone.meanR - tgtZone.meanR, 0.015) * 0.3)),
+        magenta_green: Math.max(-0.1, Math.min(0.1, dz(
           ((srcZone.meanR + srcZone.meanB) / 2 - srcZone.meanG) -
-          ((tgtZone.meanR + tgtZone.meanB) / 2 - tgtZone.meanG), 0.01
-        ) * 0.6)),
-        yellow_blue: Math.max(-0.2, Math.min(0.2, dz(srcZone.meanB - tgtZone.meanB, 0.01) * 0.6)),
+          ((tgtZone.meanR + tgtZone.meanB) / 2 - tgtZone.meanG), 0.015
+        ) * 0.3)),
+        yellow_blue: Math.max(-0.1, Math.min(0.1, dz(srcZone.meanB - tgtZone.meanB, 0.015) * 0.3)),
       };
     };
 
