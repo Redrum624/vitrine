@@ -193,17 +193,17 @@ export const WebGalleryModule: React.FC<WebGalleryModuleProps> = ({
       {/* Module Header */}
       <div className="flex items-center justify-between p-4 border-b border-gray-700">
         <div className="flex items-center gap-3">
-          <Globe className="w-5 h-5 text-green-400" />
+          <Globe className="w-5 h-5 text-gray-300" />
           <span className="text-white font-medium">Web Gallery</span>
           {isGenerating && (
-            <RefreshCw className="w-4 h-4 text-green-400 animate-spin" />
+            <RefreshCw className="w-4 h-4 text-gray-300 animate-spin" />
           )}
         </div>
         <div className="flex items-center gap-2">
           <button
             onClick={previewGallery}
             disabled={!generatedGallery || isGenerating}
-            className="px-2 py-1 text-xs bg-green-600 hover:bg-green-700 disabled:bg-gray-700 text-white rounded transition-colors"
+            className="px-2 py-1 text-xs bg-gray-800 hover:bg-gray-800 disabled:bg-gray-700 text-white rounded transition-colors"
             title="Preview gallery in new tab"
           >
             Preview
@@ -215,7 +215,7 @@ export const WebGalleryModule: React.FC<WebGalleryModuleProps> = ({
               onChange={(e) => onToggle(e.target.checked)}
               className="sr-only peer"
             />
-            <div className="w-11 h-6 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-500"></div>
+            <div className="w-11 h-6 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-gray-400"></div>
           </label>
         </div>
       </div>
@@ -236,7 +236,7 @@ export const WebGalleryModule: React.FC<WebGalleryModuleProps> = ({
               <select
                 value={selectedCollection}
                 onChange={(e) => setSelectedCollection(e.target.value)}
-                className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-green-400 focus:outline-none"
+                className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-gray-600 focus:outline-none"
                 disabled={isGenerating}
               >
                 {collections.map(collection => (
@@ -248,10 +248,10 @@ export const WebGalleryModule: React.FC<WebGalleryModuleProps> = ({
             </div>
 
             {selectedCollectionData && (
-              <div className="bg-green-900/20 border border-green-500/20 rounded-lg p-3">
-                <div className="text-sm text-green-200">
+              <div className="bg-gray-800 border border-gray-600 rounded-lg p-3">
+                <div className="text-sm text-gray-300">
                   <div className="font-medium">{selectedCollectionData.name}</div>
-                  <div className="text-green-300 text-xs">
+                  <div className="text-gray-300 text-xs">
                     {selectedCollectionData.images.length} images • Created {selectedCollectionData.createdAt.toLocaleDateString()}
                   </div>
                 </div>
@@ -273,7 +273,7 @@ export const WebGalleryModule: React.FC<WebGalleryModuleProps> = ({
                   type="text"
                   value={gallerySettings.title}
                   onChange={(e) => updateGallerySetting('title', e.target.value)}
-                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-green-400 focus:outline-none"
+                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-gray-600 focus:outline-none"
                   placeholder="My Photo Gallery"
                   disabled={isGenerating}
                 />
@@ -284,7 +284,7 @@ export const WebGalleryModule: React.FC<WebGalleryModuleProps> = ({
                 <textarea
                   value={gallerySettings.description}
                   onChange={(e) => updateGallerySetting('description', e.target.value)}
-                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-green-400 focus:outline-none resize-none"
+                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-gray-600 focus:outline-none resize-none"
                   rows={2}
                   placeholder="A beautiful collection of photographs"
                   disabled={isGenerating}
@@ -309,7 +309,7 @@ export const WebGalleryModule: React.FC<WebGalleryModuleProps> = ({
                     const theme = themes.find(t => t.name === e.target.value);
                     if (theme) updateGallerySetting('theme', theme);
                   }}
-                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-green-400 focus:outline-none"
+                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-gray-600 focus:outline-none"
                   disabled={isGenerating}
                 >
                   {themes.map(theme => (
@@ -325,7 +325,7 @@ export const WebGalleryModule: React.FC<WebGalleryModuleProps> = ({
                 <select
                   value={gallerySettings.layout}
                   onChange={(e) => updateGallerySetting('layout', e.target.value as 'grid' | 'masonry' | 'justified' | 'slideshow')}
-                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-green-400 focus:outline-none"
+                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-gray-600 focus:outline-none"
                   disabled={isGenerating}
                 >
                   <option value="grid">Grid</option>
@@ -367,7 +367,7 @@ export const WebGalleryModule: React.FC<WebGalleryModuleProps> = ({
                 <select
                   value={gallerySettings.thumbnailQuality}
                   onChange={(e) => updateGallerySetting('thumbnailQuality', e.target.value as 'low' | 'medium' | 'high')}
-                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-green-400 focus:outline-none"
+                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-gray-600 focus:outline-none"
                   disabled={isGenerating}
                 >
                   <option value="low">Low (Fast)</option>
@@ -381,7 +381,7 @@ export const WebGalleryModule: React.FC<WebGalleryModuleProps> = ({
                 <select
                   value={gallerySettings.previewQuality}
                   onChange={(e) => updateGallerySetting('previewQuality', e.target.value as 'medium' | 'high' | 'maximum')}
-                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-green-400 focus:outline-none"
+                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-gray-600 focus:outline-none"
                   disabled={isGenerating}
                 >
                   <option value="medium">Medium</option>
@@ -451,7 +451,7 @@ export const WebGalleryModule: React.FC<WebGalleryModuleProps> = ({
                     type="text"
                     value={gallerySettings.watermark.text || ''}
                     onChange={(e) => updateWatermarkSetting('text', e.target.value)}
-                    className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1 border border-gray-600 focus:border-green-400 focus:outline-none"
+                    className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1 border border-gray-600 focus:border-gray-600 focus:outline-none"
                     placeholder="© Your Name"
                     disabled={isGenerating}
                   />
@@ -463,7 +463,7 @@ export const WebGalleryModule: React.FC<WebGalleryModuleProps> = ({
                     <select
                       value={gallerySettings.watermark.position}
                       onChange={(e) => updateWatermarkSetting('position', e.target.value)}
-                      className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1 border border-gray-600 focus:border-green-400 focus:outline-none"
+                      className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1 border border-gray-600 focus:border-gray-600 focus:outline-none"
                       disabled={isGenerating}
                     >
                       <option value="bottom-right">Bottom Right</option>
@@ -485,7 +485,7 @@ export const WebGalleryModule: React.FC<WebGalleryModuleProps> = ({
                       step="0.1"
                       value={gallerySettings.watermark.opacity || 0.5}
                       onChange={(e) => updateWatermarkSetting('opacity', parseFloat(e.target.value))}
-                      className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-green-400"
+                      className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-gray-200"
                       disabled={isGenerating}
                     />
                   </div>
@@ -499,7 +499,7 @@ export const WebGalleryModule: React.FC<WebGalleryModuleProps> = ({
             <button
               onClick={generateGallery}
               disabled={isGenerating || !selectedCollectionData || selectedCollectionData.images.length === 0}
-              className="flex-1 bg-green-600 hover:bg-green-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white text-sm font-medium py-2 px-4 rounded transition-colors flex items-center justify-center gap-2"
+              className="flex-1 bg-gray-800 hover:bg-gray-800 disabled:bg-gray-600 disabled:cursor-not-allowed text-white text-sm font-medium py-2 px-4 rounded transition-colors flex items-center justify-center gap-2"
             >
               <Globe className="w-4 h-4" />
               {isGenerating ? 'Generating...' : 'Generate Gallery'}
@@ -517,7 +517,7 @@ export const WebGalleryModule: React.FC<WebGalleryModuleProps> = ({
 
                 <button
                   onClick={downloadGallery}
-                  className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium py-2 px-4 rounded transition-colors flex items-center gap-2"
+                  className="bg-gray-800 hover:bg-gray-800 text-white text-sm font-medium py-2 px-4 rounded transition-colors flex items-center gap-2"
                 >
                   <Download className="w-4 h-4" />
                   Download
@@ -528,12 +528,12 @@ export const WebGalleryModule: React.FC<WebGalleryModuleProps> = ({
 
           {/* Gallery Info */}
           {generatedGallery && (
-            <div className="bg-green-900/20 border border-green-500/20 rounded-lg p-3">
+            <div className="bg-gray-800 border border-gray-600 rounded-lg p-3">
               <div className="flex items-center gap-2 mb-2">
-                <Share2 className="w-4 h-4 text-green-400" />
+                <Share2 className="w-4 h-4 text-gray-300" />
                 <span className="text-sm font-medium text-white">Gallery Ready</span>
               </div>
-              <div className="text-xs text-green-200">
+              <div className="text-xs text-gray-300">
                 <div>Theme: {gallerySettings.theme.displayName}</div>
                 <div>Layout: {gallerySettings.layout.charAt(0).toUpperCase() + gallerySettings.layout.slice(1)}</div>
                 <div>Size: {(generatedGallery.totalSize / 1024 / 1024).toFixed(2)} MB</div>
@@ -544,11 +544,11 @@ export const WebGalleryModule: React.FC<WebGalleryModuleProps> = ({
 
           {/* No Images Warning */}
           {selectedCollectionData && selectedCollectionData.images.length === 0 && (
-            <div className="bg-yellow-900/20 border border-yellow-500/20 rounded-lg p-3 text-center">
-              <div className="text-yellow-200 text-sm">
+            <div className="bg-gray-800 border border-gray-600 rounded-lg p-3 text-center">
+              <div className="text-gray-300 text-sm">
                 No images in selected collection
               </div>
-              <div className="text-yellow-300 text-xs mt-1">
+              <div className="text-gray-300 text-xs mt-1">
                 Process an image to add it to the current session
               </div>
             </div>

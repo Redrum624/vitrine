@@ -165,11 +165,11 @@ export const PerformanceMonitor: React.FC = () => {
       <div className="space-y-3">
         {/* FPS and Render Time */}
         <div className="flex items-center space-x-2">
-          <Cpu className="w-4 h-4 text-green-400" />
+          <Cpu className="w-4 h-4 text-gray-300" />
           <div className="flex-1">
             <div className="flex justify-between">
               <span className="text-dark-300">FPS</span>
-              <span className={`${metrics.fps < 30 ? 'text-red-400' : metrics.fps < 45 ? 'text-yellow-400' : 'text-green-400'}`}>
+              <span className={`${metrics.fps < 30 ? 'text-gray-300' : metrics.fps < 45 ? 'text-gray-300' : 'text-gray-300'}`}>
                 {metrics.fps}
               </span>
             </div>
@@ -182,7 +182,7 @@ export const PerformanceMonitor: React.FC = () => {
 
         {/* Memory Usage */}
         <div className="flex items-center space-x-2">
-          <HardDrive className="w-4 h-4 text-blue-400" />
+          <HardDrive className="w-4 h-4 text-gray-300" />
           <div className="flex-1">
             <div className="flex justify-between">
               <span className="text-dark-300">Memory</span>
@@ -193,8 +193,8 @@ export const PerformanceMonitor: React.FC = () => {
             <div className="w-full bg-dark-700 rounded-full h-2 mt-1">
               <div
                 className={`h-2 rounded-full transition-all duration-300 ${
-                  metrics.memory.used / metrics.memory.total > 0.8 ? 'bg-red-400' :
-                  metrics.memory.used / metrics.memory.total > 0.6 ? 'bg-yellow-400' : 'bg-blue-400'
+                  metrics.memory.used / metrics.memory.total > 0.8 ? 'bg-gray-800' :
+                  metrics.memory.used / metrics.memory.total > 0.6 ? 'bg-gray-800' : 'bg-gray-800'
                 }`}
                 style={{
                   width: `${Math.min(100, (metrics.memory.used / metrics.memory.total) * 100)}%`
@@ -206,13 +206,13 @@ export const PerformanceMonitor: React.FC = () => {
 
         {/* Cache Performance */}
         <div className="flex items-center space-x-2">
-          <Database className="w-4 h-4 text-purple-400" />
+          <Database className="w-4 h-4 text-gray-300" />
           <div className="flex-1">
             <div className="flex justify-between">
               <span className="text-dark-300">Cache Hit Rate</span>
               <span className={`${
-                metrics.cache.hitRate > 80 ? 'text-green-400' :
-                metrics.cache.hitRate > 50 ? 'text-yellow-400' : 'text-red-400'
+                metrics.cache.hitRate > 80 ? 'text-gray-300' :
+                metrics.cache.hitRate > 50 ? 'text-gray-300' : 'text-gray-300'
               }`}>
                 {metrics.cache.hitRate.toFixed(1)}%
               </span>
@@ -248,7 +248,7 @@ export const PerformanceMonitor: React.FC = () => {
             <div className="flex justify-between">
               <span className="text-dark-300">Errors</span>
               <span className={`${
-                metrics.errors.recent > 0 ? 'text-red-400' : 'text-dark-400'
+                metrics.errors.recent > 0 ? 'text-gray-300' : 'text-dark-400'
               }`}>
                 {metrics.errors.total}
               </span>

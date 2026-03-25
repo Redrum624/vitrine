@@ -130,25 +130,10 @@ export class RawImageService {
         throw new Error('Browser RAW processing requires file buffer, not file path');
       }
 
-      // Process with LibRaw WebAssembly
-      // Configure ultra-neutral settings to eliminate color cast
-      const libRawOptions = {
-        // Ultra-neutral LibRaw settings to eliminate color cast
-        outputBps: 8,
-        outputColor: 0, // RAW colorspace (no color conversion)
-        useCameraWb: false, // Disable camera white balance
-        useAutoWb: false,   // Disable auto white balance
-        gamm: [1.0, 1.0],   // Linear gamma (no tone curve)
-        bright: 1.0,        // No brightness adjustment
-        highlight: 0,       // No highlight recovery
-        expCorrec: false,   // No exposure correction
-        noAutoScale: true   // Disable auto scaling
-      };
-
+      // Process with LibRaw WebAssembly using quality preset
       const result = await libRawService.processRawFileWithPreset(
         buffer,
-        'quality', // Use quality preset for best results
-        libRawOptions
+        'quality'
       );
 
       // RESEARCH: Extract real pixel data from LibRaw result

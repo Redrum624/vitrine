@@ -3,6 +3,8 @@ import { RotateCcw, Info, Zap } from 'lucide-react';
 import type { ExposureParams } from '../../types/darktable';
 import { ExposureModule } from '../../modules/ExposureModule';
 import { DelayedInputControl } from '../Controls/DelayedInputControl';
+import { autoAdjustService } from '../../services/AutoAdjustService';
+import { imageService } from '../../services/ImageService';
 
 interface ExposureModuleComponentProps {
   module: ExposureModule;
@@ -60,10 +62,14 @@ export function ExposureModuleComponent({
         <div className="flex items-center space-x-1">
           <button
             onClick={() => {
-              // Auto adjust exposure based on histogram
-              const autoParams = module.autoExposure();
-              setParams(autoParams);
-              onParamsChange?.(autoParams);
+              const img = imageService.getCurrentImage();
+              if (!img) return;
+              const stats = autoAdjustService.analyse(img.data, img.width, img.height);
+              const computed = autoAdjustService.autoExposure(stats);
+              module.setCurrentParams(computed);
+              const newParams = module.getCurrentParams();
+              setParams(newParams);
+              onParamsChange?.(newParams);
             }}
             disabled={disabled}
             className="p-1 hover:bg-dark-700 rounded text-dark-300 disabled:opacity-50"

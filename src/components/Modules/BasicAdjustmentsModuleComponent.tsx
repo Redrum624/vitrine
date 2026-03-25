@@ -3,6 +3,8 @@ import { RotateCcw, Zap } from 'lucide-react';
 import { BasicAdjustmentsModule, BasicAdjParams } from '../../modules/BasicAdjustmentsModule';
 import { logger } from '../../utils/Logger';
 import { DelayedInputControl } from '../Controls/DelayedInputControl';
+import { autoAdjustService } from '../../services/AutoAdjustService';
+import { imageService } from '../../services/ImageService';
 
 interface BasicAdjustmentsModuleComponentProps {
   module: BasicAdjustmentsModule;
@@ -88,13 +90,18 @@ export function BasicAdjustmentsModuleComponent({
           <div className="w-1 h-3 rounded-sm" style={{backgroundColor: 'var(--gray-600)'}} />
           <span className="text-xs font-medium uppercase tracking-wider" style={{color: 'var(--gray-500)', letterSpacing: '0.5px'}}>Controls</span>
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1.5">
           <button
             onClick={() => {
-              const autoParams = module.autoAdjust();
-              setParams(autoParams);
-              onParamsChange?.(autoParams);
-              logger.info('Auto adjustments applied');
+              const img = imageService.getCurrentImage();
+              if (!img) { logger.warn('No image for auto adjust'); return; }
+              const stats = autoAdjustService.analyse(img.data, img.width, img.height);
+              const computed = autoAdjustService.autoBasicAdj(stats);
+              module.setParams(computed);
+              const newParams = module.getParams() as BasicAdjParams;
+              setParams(newParams);
+              onParamsChange?.(newParams);
+              logger.info('Auto adjustments applied (image-aware)');
             }}
             className="p-1.5 rounded border"
             style={{

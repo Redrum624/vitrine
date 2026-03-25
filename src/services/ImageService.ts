@@ -24,6 +24,7 @@ export interface ImageData {
 export class ImageService {
   private static instance: ImageService;
   private currentImage: ImageData | null = null;
+  private originalImageData: { data: Float32Array; width: number; height: number } | null = null;
   private imageLoadListeners: (() => void)[] = [];
   private processingPipeline: ImageProcessingPipeline | null = null;
 
@@ -111,6 +112,8 @@ export class ImageService {
           };
 
           this.currentImage = result;
+          // Snapshot the original for instant before/after comparison
+          this.snapshotOriginal(result);
           logger.info(`Image loaded from cache: ${result.width}x${result.height} - skipping reprocessing`);
           // Don't notify listeners for cached images to avoid reprocessing
           // this.notifyImageLoaded();
@@ -203,6 +206,8 @@ export class ImageService {
         }
 
         this.currentImage = result;
+        // Snapshot the original for instant before/after comparison
+        this.snapshotOriginal(result);
         this.notifyImageLoaded();
         return result;
       },
@@ -291,6 +296,30 @@ export class ImageService {
 
   getCurrentImage(): ImageData | null {
     return this.currentImage;
+  }
+
+  /**
+   * Returns the pristine original image data as it was at load time.
+   * Used for instant before/after comparison without re-reading from disk.
+   */
+  getOriginalImage(): { data: Float32Array; width: number; height: number } | null {
+    return this.originalImageData;
+  }
+
+  /**
+   * Take a deep copy of the image data at load time so comparisons are instant.
+   * Runs asynchronously in a microtask to avoid blocking the initial render.
+   */
+  private snapshotOriginal(image: ImageData): void {
+    // Use queueMicrotask so the copy doesn't block the first paint
+    queueMicrotask(() => {
+      this.originalImageData = {
+        data: new Float32Array(image.data),
+        width: image.width,
+        height: image.height,
+      };
+      logger.info(`Original image snapshot cached: ${image.width}x${image.height} (${(image.data.byteLength / 1024 / 1024).toFixed(1)} MB)`);
+    });
   }
 
   /**

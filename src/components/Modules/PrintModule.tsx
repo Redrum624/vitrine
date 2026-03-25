@@ -223,9 +223,9 @@ export const PrintModule: React.FC<PrintModuleProps> = ({
 
   const getJobStatusColor = (status: string) => {
     switch (status) {
-      case 'ready': return 'text-green-400';
-      case 'processing': return 'text-yellow-400';
-      case 'error': return 'text-red-400';
+      case 'ready': return 'text-gray-300';
+      case 'processing': return 'text-gray-300';
+      case 'error': return 'text-gray-300';
       default: return 'text-gray-400';
     }
   };
@@ -235,17 +235,17 @@ export const PrintModule: React.FC<PrintModuleProps> = ({
       {/* Module Header */}
       <div className="flex items-center justify-between p-4 border-b border-gray-700">
         <div className="flex items-center gap-3">
-          <Printer className="w-5 h-5 text-indigo-400" />
+          <Printer className="w-5 h-5 text-gray-300" />
           <span className="text-white font-medium">Print Module</span>
           {isProcessing && (
-            <RefreshCw className="w-4 h-4 text-indigo-400 animate-spin" />
+            <RefreshCw className="w-4 h-4 text-gray-300 animate-spin" />
           )}
         </div>
         <div className="flex items-center gap-2">
           <button
             onClick={() => setShowSoftProof(!showSoftProof)}
             className={`px-2 py-1 text-xs rounded transition-colors ${
-              showSoftProof ? 'bg-indigo-500 text-white' : 'bg-gray-700 text-gray-300'
+              showSoftProof ? 'bg-gray-800 text-white' : 'bg-gray-700 text-gray-300'
             }`}
             title="Toggle soft proof preview"
           >
@@ -258,7 +258,7 @@ export const PrintModule: React.FC<PrintModuleProps> = ({
               onChange={(e) => onToggle(e.target.checked)}
               className="sr-only peer"
             />
-            <div className="w-11 h-6 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-500"></div>
+            <div className="w-11 h-6 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-gray-400"></div>
           </label>
         </div>
       </div>
@@ -280,7 +280,7 @@ export const PrintModule: React.FC<PrintModuleProps> = ({
                 <select
                   value={selectedPaperSize}
                   onChange={(e) => setSelectedPaperSize(e.target.value)}
-                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-indigo-400 focus:outline-none"
+                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-gray-600 focus:outline-none"
                   disabled={isProcessing}
                 >
                   {paperSizes.map(size => (
@@ -296,7 +296,7 @@ export const PrintModule: React.FC<PrintModuleProps> = ({
                 <select
                   value={selectedLayout}
                   onChange={(e) => setSelectedLayout(e.target.value)}
-                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-indigo-400 focus:outline-none"
+                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-gray-600 focus:outline-none"
                   disabled={isProcessing || printLayouts.length === 0}
                 >
                   {printLayouts.map(layout => (
@@ -322,7 +322,7 @@ export const PrintModule: React.FC<PrintModuleProps> = ({
                 <select
                   value={selectedProfile}
                   onChange={(e) => setSelectedProfile(e.target.value)}
-                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-indigo-400 focus:outline-none"
+                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-gray-600 focus:outline-none"
                   disabled={isProcessing}
                 >
                   {printProfiles.map(profile => (
@@ -338,7 +338,7 @@ export const PrintModule: React.FC<PrintModuleProps> = ({
                 <select
                   value={printSettings.renderingIntent}
                   onChange={(e) => updatePrintSetting('renderingIntent', e.target.value as 'perceptual' | 'relative' | 'saturation' | 'absolute')}
-                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-indigo-400 focus:outline-none"
+                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-gray-600 focus:outline-none"
                   disabled={isProcessing}
                 >
                   <option value="perceptual">Perceptual</option>
@@ -377,7 +377,7 @@ export const PrintModule: React.FC<PrintModuleProps> = ({
                   step="150"
                   value={printSettings.resolution}
                   onChange={(e) => updatePrintSetting('resolution', parseInt(e.target.value))}
-                  className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-indigo-400"
+                  className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-gray-200"
                   disabled={isProcessing}
                 />
               </div>
@@ -387,7 +387,7 @@ export const PrintModule: React.FC<PrintModuleProps> = ({
                 <select
                   value={printSettings.qualityLevel}
                   onChange={(e) => updatePrintSetting('qualityLevel', e.target.value as 'draft' | 'normal' | 'high' | 'maximum')}
-                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-indigo-400 focus:outline-none"
+                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-gray-600 focus:outline-none"
                   disabled={isProcessing}
                 >
                   <option value="draft">Draft</option>
@@ -414,7 +414,7 @@ export const PrintModule: React.FC<PrintModuleProps> = ({
                   max="50"
                   value={printSettings.colorAdjustments?.brightness || 0}
                   onChange={(e) => updateColorAdjustment('brightness', parseInt(e.target.value))}
-                  className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-indigo-400"
+                  className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-gray-200"
                   disabled={isProcessing}
                 />
               </div>
@@ -429,7 +429,7 @@ export const PrintModule: React.FC<PrintModuleProps> = ({
                   max="50"
                   value={printSettings.colorAdjustments?.contrast || 0}
                   onChange={(e) => updateColorAdjustment('contrast', parseInt(e.target.value))}
-                  className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-indigo-400"
+                  className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-gray-200"
                   disabled={isProcessing}
                 />
               </div>
@@ -444,7 +444,7 @@ export const PrintModule: React.FC<PrintModuleProps> = ({
                   max="50"
                   value={printSettings.colorAdjustments?.saturation || 0}
                   onChange={(e) => updateColorAdjustment('saturation', parseInt(e.target.value))}
-                  className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-indigo-400"
+                  className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-gray-200"
                   disabled={isProcessing}
                 />
               </div>
@@ -459,7 +459,7 @@ export const PrintModule: React.FC<PrintModuleProps> = ({
                   max="50"
                   value={printSettings.colorAdjustments?.shadows || 0}
                   onChange={(e) => updateColorAdjustment('shadows', parseInt(e.target.value))}
-                  className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-indigo-400"
+                  className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-gray-200"
                   disabled={isProcessing}
                 />
               </div>
@@ -480,7 +480,7 @@ export const PrintModule: React.FC<PrintModuleProps> = ({
             <button
               onClick={createPrintJob}
               disabled={isProcessing || !processedImageData || !selectedLayout || !selectedProfile}
-              className="flex-1 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white text-sm font-medium py-2 px-4 rounded transition-colors flex items-center justify-center gap-2"
+              className="flex-1 bg-gray-800 hover:bg-gray-800 disabled:bg-gray-600 disabled:cursor-not-allowed text-white text-sm font-medium py-2 px-4 rounded transition-colors flex items-center justify-center gap-2"
             >
               <Download className="w-4 h-4" />
               {isProcessing ? 'Creating...' : 'Create Print Job'}

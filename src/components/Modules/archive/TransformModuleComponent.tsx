@@ -105,10 +105,10 @@ export const TransformModuleComponent: React.FC<TransformModuleComponentProps> =
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <RotateCw className="w-4 h-4 text-green-400" />
+          <RotateCw className="w-4 h-4 text-gray-300" />
           <span className="text-sm font-medium text-white">Transform</span>
           {params.enabled && (
-            <span className="text-xs px-2 py-0.5 bg-green-500/20 text-green-300 rounded">
+            <span className="text-xs px-2 py-0.5 bg-gray-800 text-gray-300 rounded">
               Active
             </span>
           )}
@@ -121,7 +121,7 @@ export const TransformModuleComponent: React.FC<TransformModuleComponentProps> =
             title="Auto-straighten based on horizon detection"
           >
             {isDetecting ? (
-              <div className="w-3 h-3 border-2 border-yellow-400 border-t-transparent rounded-full animate-spin" />
+              <div className="w-3 h-3 border-2 border-gray-600 border-t-transparent rounded-full animate-spin" />
             ) : (
               <Zap className="w-3 h-3" />
             )}
@@ -209,7 +209,7 @@ export const TransformModuleComponent: React.FC<TransformModuleComponentProps> =
             onClick={handleFlipHorizontal}
             className={`flex items-center justify-center gap-2 px-3 py-2 text-xs rounded transition-colors ${
               params.flipHorizontal
-                ? 'bg-green-500 text-white'
+                ? 'bg-gray-800 text-white'
                 : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
             }`}
           >
@@ -220,7 +220,7 @@ export const TransformModuleComponent: React.FC<TransformModuleComponentProps> =
             onClick={handleFlipVertical}
             className={`flex items-center justify-center gap-2 px-3 py-2 text-xs rounded transition-colors ${
               params.flipVertical
-                ? 'bg-green-500 text-white'
+                ? 'bg-gray-800 text-white'
                 : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
             }`}
           >
@@ -241,7 +241,7 @@ export const TransformModuleComponent: React.FC<TransformModuleComponentProps> =
             type="checkbox"
             checked={params.expandCanvas}
             onChange={(e) => updateParams({ expandCanvas: e.target.checked })}
-            className="rounded border-gray-600 text-green-400 focus:ring-green-400 focus:ring-2"
+            className="rounded border-gray-600 text-gray-300 focus:ring-gray-400 focus:ring-2"
           />
         </label>
 
@@ -251,7 +251,7 @@ export const TransformModuleComponent: React.FC<TransformModuleComponentProps> =
           <select
             value={params.interpolation}
             onChange={(e) => updateParams({ interpolation: e.target.value as TransformParams['interpolation'] })}
-            className="w-full bg-gray-700 text-white text-sm rounded px-3 py-2 border border-gray-600 focus:border-green-400 focus:outline-none"
+            className="w-full bg-gray-700 text-white text-sm rounded px-3 py-2 border border-gray-600 focus:border-gray-600 focus:outline-none"
           >
             <option value="nearest">Nearest Neighbor (Fast)</option>
             <option value="bilinear">Bilinear (Good)</option>
@@ -292,20 +292,20 @@ export const TransformModuleComponent: React.FC<TransformModuleComponentProps> =
             </div>
             <div className="flex items-center justify-between">
               <span>Output Size:</span>
-              <span className="text-green-400">{outputDims.width} × {outputDims.height}</span>
+              <span className="text-gray-300">{outputDims.width} × {outputDims.height}</span>
             </div>
           </>
         )}
         {!params.enabled && (
           <button
             onClick={enableTransform}
-            className="w-full mt-2 px-3 py-2 text-sm font-medium text-white bg-green-500 hover:bg-green-600 rounded transition-colors"
+            className="w-full mt-2 px-3 py-2 text-sm font-medium text-white bg-gray-800 hover:bg-gray-800 rounded transition-colors"
           >
             Enable Transform
           </button>
         )}
         {params.enabled && (
-          <div className="flex items-center gap-1 text-yellow-400">
+          <div className="flex items-center gap-1 text-gray-300">
             <Zap className="w-3 h-3" />
             <span>Use auto-straighten to detect horizon</span>
           </div>

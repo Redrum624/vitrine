@@ -18,6 +18,20 @@ interface AppStore extends AppState {
   // Processing trigger - increments to signal that reprocessing is needed
   processingVersion: number;
   triggerReprocessing: () => void;
+  // View overlays
+  showGrid: boolean;
+  showRulers: boolean;
+  toggleGrid: () => void;
+  toggleRulers: () => void;
+  // Before/after comparison
+  showOriginal: boolean;
+  toggleOriginal: () => void;
+  // Reference comparison
+  referenceMode: boolean;
+  referenceImageUrl: string | null;  // data-URL of the reference photo
+  referenceImageName: string | null;
+  toggleReferenceMode: () => void;
+  setReferenceImage: (url: string | null, name: string | null) => void;
 }
 
 export const useAppStore = create<AppStore>((set) => ({
@@ -34,6 +48,12 @@ export const useAppStore = create<AppStore>((set) => ({
   sidebarCollapsed: false,
   isAdjustingRotation: false,
   processingVersion: 0,
+  showGrid: false,
+  showRulers: false,
+  showOriginal: false,
+  referenceMode: false,
+  referenceImageUrl: null,
+  referenceImageName: null,
 
   triggerReprocessing: () => set((state) => ({
     processingVersion: state.processingVersion + 1
@@ -72,6 +92,12 @@ export const useAppStore = create<AppStore>((set) => ({
   resetZoom: () => set((state) => ({
     viewport: { ...state.viewport, zoom: 1, panX: 0, panY: 0 }
   })),
+
+  toggleGrid: () => set((state) => ({ showGrid: !state.showGrid })),
+  toggleRulers: () => set((state) => ({ showRulers: !state.showRulers })),
+  toggleOriginal: () => set((state) => ({ showOriginal: !state.showOriginal, referenceMode: false })),
+  toggleReferenceMode: () => set((state) => ({ referenceMode: !state.referenceMode, showOriginal: false })),
+  setReferenceImage: (url, name) => set({ referenceImageUrl: url, referenceImageName: name }),
 
   getCurrentPipelineSettings: () => {
     // This would need to be implemented to collect current settings from all modules

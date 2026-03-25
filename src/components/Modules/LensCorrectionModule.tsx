@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Camera, Settings, Zap, RefreshCw, Eye, EyeOff } from 'lucide-react';
+import { Camera, Settings, Zap, RefreshCw } from 'lucide-react';
 import { logger } from '../../utils/Logger';
 import { useAppStore } from '../../stores/appStore';
 import {
@@ -129,10 +129,10 @@ export const LensCorrectionModule: React.FC<LensCorrectionModuleProps> = ({
   };
 
   const getConfidenceColor = (confidence: number): string => {
-    if (confidence >= 0.8) return 'text-green-400';
-    if (confidence >= 0.6) return 'text-yellow-400';
-    if (confidence >= 0.4) return 'text-orange-400';
-    return 'text-red-400';
+    if (confidence >= 0.8) return 'text-gray-300';
+    if (confidence >= 0.6) return 'text-gray-300';
+    if (confidence >= 0.4) return 'text-gray-300';
+    return 'text-gray-300';
   };
 
   const getConfidenceText = (confidence: number): string => {
@@ -147,17 +147,19 @@ export const LensCorrectionModule: React.FC<LensCorrectionModuleProps> = ({
       {/* Module Header */}
       <div className="flex items-center justify-between p-4 border-b border-gray-700">
         <div className="flex items-center gap-3">
-          <Camera className="w-5 h-5 text-blue-400" />
+          <Camera className="w-5 h-5 text-gray-300" />
           <span className="text-white font-medium">Lens Correction</span>
           {isProcessing && (
-            <RefreshCw className="w-4 h-4 text-blue-400 animate-spin" />
+            <RefreshCw className="w-4 h-4 text-gray-300 animate-spin" />
           )}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
           <button
             onClick={() => setAutoDetect(!autoDetect)}
-            className={`px-2 py-1 text-xs rounded transition-colors ${
-              autoDetect ? 'bg-blue-500 text-white' : 'bg-gray-700 text-gray-300'
+            className={`px-2.5 py-1 text-xs rounded border transition-colors ${
+              autoDetect
+                ? 'bg-gray-700 text-white border-gray-500'
+                : 'bg-transparent text-gray-400 border-gray-600 hover:text-gray-300'
             }`}
             title="Auto-detect lens from EXIF data"
           >
@@ -170,7 +172,7 @@ export const LensCorrectionModule: React.FC<LensCorrectionModuleProps> = ({
               onChange={(e) => onToggle(e.target.checked)}
               className="sr-only peer"
             />
-            <div className="w-11 h-6 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-500"></div>
+            <div className="w-9 h-5 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-gray-400"></div>
           </label>
         </div>
       </div>
@@ -181,9 +183,9 @@ export const LensCorrectionModule: React.FC<LensCorrectionModuleProps> = ({
 
           {/* Lens Detection Results */}
           {detectedLens && (
-            <div className="bg-blue-900/20 border border-blue-500/20 rounded-lg p-3">
+            <div className="bg-gray-800 border border-gray-600 rounded-lg p-3">
               <div className="flex items-center gap-2 mb-2">
-                <Zap className="w-4 h-4 text-blue-400" />
+                <Zap className="w-4 h-4 text-gray-300" />
                 <span className="text-sm font-medium text-white">Auto-Detection</span>
                 <span className={`text-xs font-mono ${getConfidenceColor(detectedLens.confidence)}`}>
                   {getConfidenceText(detectedLens.confidence)} ({(detectedLens.confidence * 100).toFixed(0)}%)
@@ -219,16 +221,16 @@ export const LensCorrectionModule: React.FC<LensCorrectionModuleProps> = ({
 
           {/* Selected Lens Profile */}
           {selectedProfile && (
-            <div className="bg-green-900/20 border border-green-500/20 rounded-lg p-3">
+            <div className="bg-gray-800 border border-gray-600 rounded-lg p-3">
               <div className="flex items-center gap-2 mb-2">
-                <Camera className="w-4 h-4 text-green-400" />
+                <Camera className="w-4 h-4 text-gray-300" />
                 <span className="text-sm font-medium text-white">Active Profile</span>
               </div>
-              <div className="text-xs text-green-200">
+              <div className="text-xs text-gray-300">
                 <div className="font-medium">
                   {selectedProfile.camera} {selectedProfile.lens}
                 </div>
-                <div className="text-green-300">
+                <div className="text-gray-300">
                   {selectedProfile.focalLength}mm f/{selectedProfile.aperture}
                 </div>
               </div>
@@ -246,7 +248,7 @@ export const LensCorrectionModule: React.FC<LensCorrectionModuleProps> = ({
               <div>
                 <label className="block text-xs text-gray-400 mb-1">Camera</label>
                 <select
-                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-blue-400 focus:outline-none"
+                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-gray-600 focus:outline-none"
                   onChange={(e) => {
                     const camera = e.target.value;
                     if (camera) {
@@ -268,7 +270,7 @@ export const LensCorrectionModule: React.FC<LensCorrectionModuleProps> = ({
                 <div>
                   <label className="block text-xs text-gray-400 mb-1">Lens</label>
                   <select
-                    className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-blue-400 focus:outline-none"
+                    className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-gray-600 focus:outline-none"
                     onChange={(e) => {
                       const [camera, lens, focalLength, aperture] = e.target.value.split('|');
                       if (camera && lens) {
@@ -307,51 +309,37 @@ export const LensCorrectionModule: React.FC<LensCorrectionModuleProps> = ({
                 <span className="text-sm font-medium text-white">Corrections</span>
               </div>
 
-              <div className="space-y-2">
-                <label className="flex items-center justify-between">
-                  <span className="text-sm text-gray-300">Barrel/Pincushion Distortion</span>
+              <div className="space-y-1">
+                {([
+                  { key: 'distortion' as const, label: 'Distortion', desc: 'Barrel / Pincushion' },
+                  { key: 'vignetting' as const, label: 'Vignetting', desc: 'Edge darkening' },
+                  { key: 'chromaticAberration' as const, label: 'Chromatic Aberration', desc: 'Color fringing' },
+                ] as const).map(({ key, label, desc }) => (
                   <button
-                    onClick={() => updateCorrection('distortion', !corrections.distortion)}
-                    className="p-1"
+                    key={key}
+                    onClick={() => updateCorrection(key, !corrections[key])}
                     disabled={isProcessing}
+                    className="flex items-center gap-3 w-full px-3 py-2 rounded text-left transition-colors hover:bg-gray-700/50 disabled:opacity-50"
                   >
-                    {corrections.distortion ? (
-                      <Eye className="w-4 h-4 text-blue-400" />
-                    ) : (
-                      <EyeOff className="w-4 h-4 text-gray-500" />
-                    )}
+                    <div
+                      className="w-4 h-4 rounded border flex-shrink-0 flex items-center justify-center transition-colors"
+                      style={{
+                        borderColor: corrections[key] ? 'var(--gray-400)' : 'var(--gray-600)',
+                        backgroundColor: corrections[key] ? 'var(--gray-500)' : 'transparent',
+                      }}
+                    >
+                      {corrections[key] && (
+                        <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+                          <path d="M2 5L4.5 7.5L8 3" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      )}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-sm text-gray-200 leading-tight">{label}</div>
+                      <div className="text-xs text-gray-500 leading-tight">{desc}</div>
+                    </div>
                   </button>
-                </label>
-
-                <label className="flex items-center justify-between">
-                  <span className="text-sm text-gray-300">Vignetting (Edge Darkening)</span>
-                  <button
-                    onClick={() => updateCorrection('vignetting', !corrections.vignetting)}
-                    className="p-1"
-                    disabled={isProcessing}
-                  >
-                    {corrections.vignetting ? (
-                      <Eye className="w-4 h-4 text-blue-400" />
-                    ) : (
-                      <EyeOff className="w-4 h-4 text-gray-500" />
-                    )}
-                  </button>
-                </label>
-
-                <label className="flex items-center justify-between">
-                  <span className="text-sm text-gray-300">Chromatic Aberration (Color Fringing)</span>
-                  <button
-                    onClick={() => updateCorrection('chromaticAberration', !corrections.chromaticAberration)}
-                    className="p-1"
-                    disabled={isProcessing}
-                  >
-                    {corrections.chromaticAberration ? (
-                      <Eye className="w-4 h-4 text-blue-400" />
-                    ) : (
-                      <EyeOff className="w-4 h-4 text-gray-500" />
-                    )}
-                  </button>
-                </label>
+                ))}
               </div>
             </div>
           )}
@@ -378,24 +366,32 @@ export const LensCorrectionModule: React.FC<LensCorrectionModuleProps> = ({
           )}
 
           {/* Manual Apply Button */}
-          <div className="pt-2 border-t border-gray-700">
+          <div className="pt-3 border-t border-gray-700">
             <button
               onClick={applyLensCorrections}
               disabled={isProcessing || !processedImageData || !currentImage || !selectedProfile}
-              className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white text-sm font-medium py-2 px-4 rounded transition-colors"
+              className="w-full bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:text-gray-500 disabled:cursor-not-allowed text-white text-sm font-medium py-2.5 px-4 rounded transition-colors"
             >
-              {isProcessing ? 'Processing...' : 'Apply Lens Corrections'}
+              {isProcessing ? (
+                <span className="flex items-center justify-center gap-2">
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  Processing...
+                </span>
+              ) : (
+                'Apply Lens Corrections'
+              )}
             </button>
           </div>
 
           {/* No Profile Warning */}
           {isEnabled && !selectedProfile && (
-            <div className="bg-yellow-900/20 border border-yellow-500/20 rounded-lg p-3 text-center">
-              <div className="text-yellow-200 text-sm">
-                No lens profile available for this image
+            <div className="bg-gray-800/50 border border-gray-600 rounded-lg p-4 text-center">
+              <Camera className="w-6 h-6 text-gray-500 mx-auto mb-2" />
+              <div className="text-gray-300 text-sm">
+                No lens profile available
               </div>
-              <div className="text-yellow-300 text-xs mt-1">
-                Try manual lens selection or check EXIF data
+              <div className="text-gray-500 text-xs mt-1">
+                Try manual selection or check EXIF data
               </div>
             </div>
           )}

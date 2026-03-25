@@ -93,7 +93,7 @@ export class ErrorBoundary extends Component<Props, State> {
         <div className="h-screen flex items-center justify-center bg-dark-900 text-dark-300">
           <div className="text-center max-w-lg p-6">
             <div className="mb-6">
-              <svg className="w-20 h-20 mx-auto text-red-500" fill="currentColor" viewBox="0 0 20 20">
+              <svg className="w-20 h-20 mx-auto text-gray-300" fill="currentColor" viewBox="0 0 20 20">
                 <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
               </svg>
             </div>
@@ -116,7 +116,7 @@ export class ErrorBoundary extends Component<Props, State> {
             <div className="space-y-3 mb-6">
               {canRetry && (
                 <button
-                  className="w-full px-4 py-3 bg-blue-600 hover:bg-blue-700 rounded-lg text-white font-medium transition-professional"
+                  className="w-full px-4 py-3 bg-gray-800 hover:bg-gray-800 rounded-lg text-white font-medium transition-professional"
                   onClick={this.handleRetry}
                 >
                   Try Again {this.state.retryCount > 0 && `(${3 - this.state.retryCount} attempts left)`}
@@ -125,7 +125,7 @@ export class ErrorBoundary extends Component<Props, State> {
 
               {isMemoryError && (
                 <button
-                  className="w-full px-4 py-3 bg-yellow-600 hover:bg-yellow-700 rounded-lg text-white font-medium transition-professional"
+                  className="w-full px-4 py-3 bg-gray-800 hover:bg-gray-800 rounded-lg text-white font-medium transition-professional"
                   onClick={this.handleClearCache}
                 >
                   Clear Cache & Retry

@@ -202,17 +202,17 @@ export const WatermarkModule: React.FC<WatermarkModuleProps> = ({
       {/* Module Header */}
       <div className="flex items-center justify-between p-4 border-b border-gray-700">
         <div className="flex items-center gap-3">
-          <Type className="w-5 h-5 text-purple-400" />
+          <Type className="w-5 h-5 text-gray-300" />
           <span className="text-white font-medium">Watermark</span>
           {isGeneratingPreview && (
-            <RotateCw className="w-4 h-4 text-purple-400 animate-spin" />
+            <RotateCw className="w-4 h-4 text-gray-300 animate-spin" />
           )}
         </div>
         <div className="flex items-center gap-2">
           <button
             onClick={exportSettings}
             disabled={!watermarkSettings.enabled}
-            className="px-2 py-1 text-xs bg-purple-600 hover:bg-purple-700 disabled:bg-gray-700 text-white rounded transition-colors"
+            className="px-2 py-1 text-xs bg-gray-800 hover:bg-gray-800 disabled:bg-gray-700 text-white rounded transition-colors"
             title="Export settings"
           >
             Export
@@ -224,7 +224,7 @@ export const WatermarkModule: React.FC<WatermarkModuleProps> = ({
               onChange={(e) => onToggle(e.target.checked)}
               className="sr-only peer"
             />
-            <div className="w-11 h-6 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-500"></div>
+            <div className="w-11 h-6 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-gray-400"></div>
           </label>
         </div>
       </div>
@@ -247,7 +247,7 @@ export const WatermarkModule: React.FC<WatermarkModuleProps> = ({
                   onClick={() => applyPreset(preset.id)}
                   className={`text-left p-2 rounded text-sm transition-colors ${
                     selectedPreset === preset.id
-                      ? 'bg-purple-600 text-white'
+                      ? 'bg-gray-800 text-white'
                       : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
                   }`}
                 >
@@ -270,7 +270,7 @@ export const WatermarkModule: React.FC<WatermarkModuleProps> = ({
                 onClick={() => updateWatermarkSetting('type', 'text')}
                 className={`flex-1 py-2 px-3 rounded text-sm transition-colors flex items-center justify-center gap-2 ${
                   watermarkSettings.type === 'text'
-                    ? 'bg-purple-600 text-white'
+                    ? 'bg-gray-800 text-white'
                     : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
                 }`}
               >
@@ -281,7 +281,7 @@ export const WatermarkModule: React.FC<WatermarkModuleProps> = ({
                 onClick={() => updateWatermarkSetting('type', 'image')}
                 className={`flex-1 py-2 px-3 rounded text-sm transition-colors flex items-center justify-center gap-2 ${
                   watermarkSettings.type === 'image'
-                    ? 'bg-purple-600 text-white'
+                    ? 'bg-gray-800 text-white'
                     : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
                 }`}
               >
@@ -299,7 +299,7 @@ export const WatermarkModule: React.FC<WatermarkModuleProps> = ({
                     type="text"
                     value={watermarkSettings.text || ''}
                     onChange={(e) => updateWatermarkSetting('text', e.target.value)}
-                    className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-purple-400 focus:outline-none"
+                    className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-gray-600 focus:outline-none"
                     placeholder="© Your Name"
                   />
                 </div>
@@ -310,7 +310,7 @@ export const WatermarkModule: React.FC<WatermarkModuleProps> = ({
                     <select
                       value={watermarkSettings.font || 'Arial'}
                       onChange={(e) => updateWatermarkSetting('font', e.target.value)}
-                      className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-purple-400 focus:outline-none"
+                      className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-gray-600 focus:outline-none"
                     >
                       <option value="Arial">Arial</option>
                       <option value="Georgia">Georgia</option>
@@ -332,7 +332,7 @@ export const WatermarkModule: React.FC<WatermarkModuleProps> = ({
                       max="120"
                       value={watermarkSettings.fontSize || 24}
                       onChange={(e) => updateWatermarkSetting('fontSize', parseInt(e.target.value))}
-                      className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-purple-400"
+                      className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-gray-200"
                     />
                   </div>
                 </div>
@@ -343,7 +343,7 @@ export const WatermarkModule: React.FC<WatermarkModuleProps> = ({
                     <select
                       value={watermarkSettings.fontWeight || 'normal'}
                       onChange={(e) => updateWatermarkSetting('fontWeight', e.target.value as 'normal' | 'bold' | '100' | '200' | '300' | '400' | '500' | '600' | '700' | '800' | '900')}
-                      className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-purple-400 focus:outline-none"
+                      className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-gray-600 focus:outline-none"
                     >
                       <option value="normal">Normal</option>
                       <option value="bold">Bold</option>
@@ -411,7 +411,7 @@ export const WatermarkModule: React.FC<WatermarkModuleProps> = ({
                 <select
                   value={watermarkSettings.position}
                   onChange={(e) => updateWatermarkSetting('position', e.target.value as 'top-left' | 'top-center' | 'top-right' | 'center-left' | 'center' | 'center-right' | 'bottom-left' | 'bottom-center' | 'bottom-right')}
-                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-purple-400 focus:outline-none"
+                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-gray-600 focus:outline-none"
                 >
                   {positions.map(pos => (
                     <option key={pos.value} value={pos.value}>
@@ -426,7 +426,7 @@ export const WatermarkModule: React.FC<WatermarkModuleProps> = ({
                 <select
                   value={watermarkSettings.blendMode || 'normal'}
                   onChange={(e) => updateWatermarkSetting('blendMode', e.target.value as 'source-over' | 'multiply' | 'screen' | 'overlay' | 'soft-light' | 'hard-light' | 'difference' | 'exclusion')}
-                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-purple-400 focus:outline-none"
+                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-gray-600 focus:outline-none"
                 >
                   {blendModes.map(mode => (
                     <option key={mode.value} value={mode.value}>
@@ -449,7 +449,7 @@ export const WatermarkModule: React.FC<WatermarkModuleProps> = ({
                   step="0.05"
                   value={watermarkSettings.opacity}
                   onChange={(e) => updateWatermarkSetting('opacity', parseFloat(e.target.value))}
-                  className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-purple-400"
+                  className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-gray-200"
                 />
               </div>
 
@@ -464,7 +464,7 @@ export const WatermarkModule: React.FC<WatermarkModuleProps> = ({
                   step="0.05"
                   value={watermarkSettings.scale}
                   onChange={(e) => updateWatermarkSetting('scale', parseFloat(e.target.value))}
-                  className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-purple-400"
+                  className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-gray-200"
                 />
               </div>
             </div>
@@ -481,7 +481,7 @@ export const WatermarkModule: React.FC<WatermarkModuleProps> = ({
                   step="5"
                   value={watermarkSettings.rotation}
                   onChange={(e) => updateWatermarkSetting('rotation', parseInt(e.target.value))}
-                  className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-purple-400"
+                  className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-gray-200"
                 />
               </div>
 
@@ -496,7 +496,7 @@ export const WatermarkModule: React.FC<WatermarkModuleProps> = ({
                   step="5"
                   value={watermarkSettings.padding}
                   onChange={(e) => updateWatermarkSetting('padding', parseInt(e.target.value))}
-                  className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-purple-400"
+                  className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-gray-200"
                 />
               </div>
             </div>
@@ -511,7 +511,7 @@ export const WatermarkModule: React.FC<WatermarkModuleProps> = ({
                   step="5"
                   value={watermarkSettings.offsetX}
                   onChange={(e) => updateWatermarkSetting('offsetX', parseInt(e.target.value))}
-                  className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-purple-400"
+                  className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-gray-200"
                 />
               </div>
 
@@ -524,7 +524,7 @@ export const WatermarkModule: React.FC<WatermarkModuleProps> = ({
                   step="5"
                   value={watermarkSettings.offsetY}
                   onChange={(e) => updateWatermarkSetting('offsetY', parseInt(e.target.value))}
-                  className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-purple-400"
+                  className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-gray-200"
                 />
               </div>
             </div>
@@ -546,7 +546,7 @@ export const WatermarkModule: React.FC<WatermarkModuleProps> = ({
                       step="25"
                       value={watermarkSettings.spacing || 200}
                       onChange={(e) => updateWatermarkSetting('spacing', parseInt(e.target.value))}
-                      className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-purple-400"
+                      className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-gray-200"
                     />
                   </div>
 
@@ -561,7 +561,7 @@ export const WatermarkModule: React.FC<WatermarkModuleProps> = ({
                       step="0.05"
                       value={watermarkSettings.tiledOpacity || watermarkSettings.opacity}
                       onChange={(e) => updateWatermarkSetting('tiledOpacity', parseFloat(e.target.value))}
-                      className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-purple-400"
+                      className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-gray-200"
                     />
                   </div>
                 </div>
@@ -570,7 +570,7 @@ export const WatermarkModule: React.FC<WatermarkModuleProps> = ({
           </div>
 
           {/* Enable Watermark */}
-          <div className="flex items-center gap-3 p-3 bg-purple-900/20 border border-purple-500/20 rounded-lg">
+          <div className="flex items-center gap-3 p-3 bg-gray-800 border border-gray-600 rounded-lg">
             <label className="flex items-center cursor-pointer flex-1">
               <input
                 type="checkbox"
@@ -590,7 +590,7 @@ export const WatermarkModule: React.FC<WatermarkModuleProps> = ({
                 <button
                   onClick={generatePreview}
                   disabled={isGeneratingPreview || !processedImageData}
-                  className="px-3 py-1 text-xs bg-purple-600 hover:bg-purple-700 disabled:bg-gray-700 text-white rounded transition-colors flex items-center gap-2"
+                  className="px-3 py-1 text-xs bg-gray-800 hover:bg-gray-800 disabled:bg-gray-700 text-white rounded transition-colors flex items-center gap-2"
                 >
                   <Eye className="w-3 h-3" />
                   {isGeneratingPreview ? 'Generating...' : 'Refresh Preview'}

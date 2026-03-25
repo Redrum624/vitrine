@@ -12,12 +12,41 @@ interface MenuBarProps {
   onViewZoomOut?: () => void;
   onViewFitWindow?: () => void;
   onViewActualSize?: () => void;
+  onViewToggleGrid?: () => void;
+  onViewToggleRulers?: () => void;
+  onViewToggleOriginal?: () => void;
   onWindowPresets?: () => void;
   onWindowBatch?: () => void;
   onWindowPlugins?: () => void;
   onWindowHelp?: () => void;
+  onWindowWelcome?: () => void;
+  // Image menu
+  onImageSize?: () => void;
+  onCanvasSize?: () => void;
+  onRotateCW?: () => void;
+  onRotateCCW?: () => void;
+  onFlipHorizontal?: () => void;
+  onFlipVertical?: () => void;
+  // Adjust menu
+  onAutoLevels?: () => void;
+  onAutoContrast?: () => void;
+  onAutoColor?: () => void;
+  onBrightnessContrast?: () => void;
+  onLevels?: () => void;
+  onCurves?: () => void;
+  // Filter menu
+  onSharpen?: () => void;
+  onBlur?: () => void;
+  onNoiseReduction?: () => void;
+  onVignette?: () => void;
+  onFilmGrain?: () => void;
+  // State
   canUndo?: boolean;
   canRedo?: boolean;
+  showGrid?: boolean;
+  showRulers?: boolean;
+  showOriginal?: boolean;
+  hasImage?: boolean;
 }
 
 export function MenuBar({
@@ -31,12 +60,37 @@ export function MenuBar({
   onViewZoomOut,
   onViewFitWindow,
   onViewActualSize,
+  onViewToggleGrid,
+  onViewToggleRulers,
+  onViewToggleOriginal,
   onWindowPresets,
   onWindowBatch,
   onWindowPlugins,
   onWindowHelp,
+  onWindowWelcome,
+  onImageSize,
+  onCanvasSize,
+  onRotateCW,
+  onRotateCCW,
+  onFlipHorizontal,
+  onFlipVertical,
+  onAutoLevels,
+  onAutoContrast,
+  onAutoColor,
+  onBrightnessContrast,
+  onLevels,
+  onCurves,
+  onSharpen,
+  onBlur,
+  onNoiseReduction,
+  onVignette,
+  onFilmGrain,
   canUndo = false,
   canRedo = false,
+  showGrid = false,
+  showRulers = false,
+  showOriginal = false,
+  hasImage = false,
 }: MenuBarProps) {
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
   const [isMaximized, setIsMaximized] = useState(false);
@@ -219,23 +273,41 @@ export function MenuBar({
         </button>
         {activeMenu === 'image' && (
           <div className="absolute top-full left-0 mt-0.5 border min-w-[180px] py-1 z-50" style={{backgroundColor: 'var(--gray-800)', borderColor: 'var(--border)', boxShadow: 'var(--shadow-lg)', borderRadius: '0'}}>
-            <button className="w-full text-left px-4 py-1.5 text-xs text-dark-200 hover:bg-dark-700 bg-transparent border-0 cursor-pointer">
+            <button
+              className={`w-full text-left px-4 py-1.5 text-xs bg-transparent border-0 cursor-pointer ${hasImage ? 'text-dark-200 hover:bg-dark-700' : 'text-dark-500 cursor-not-allowed'}`}
+              onClick={() => hasImage && handleMenuItemClick(onImageSize)}
+            >
               Image Size...
             </button>
-            <button className="w-full text-left px-4 py-1.5 text-xs text-dark-200 hover:bg-dark-700 bg-transparent border-0 cursor-pointer">
+            <button
+              className={`w-full text-left px-4 py-1.5 text-xs bg-transparent border-0 cursor-pointer ${hasImage ? 'text-dark-200 hover:bg-dark-700' : 'text-dark-500 cursor-not-allowed'}`}
+              onClick={() => hasImage && handleMenuItemClick(onCanvasSize)}
+            >
               Canvas Size...
             </button>
             <div className="h-px bg-dark-700 my-1"></div>
-            <button className="w-full text-left px-4 py-1.5 text-xs text-dark-200 hover:bg-dark-700 bg-transparent border-0 cursor-pointer">
+            <button
+              className={`w-full text-left px-4 py-1.5 text-xs bg-transparent border-0 cursor-pointer ${hasImage ? 'text-dark-200 hover:bg-dark-700' : 'text-dark-500 cursor-not-allowed'}`}
+              onClick={() => hasImage && handleMenuItemClick(onRotateCW)}
+            >
               Rotate 90° CW
             </button>
-            <button className="w-full text-left px-4 py-1.5 text-xs text-dark-200 hover:bg-dark-700 bg-transparent border-0 cursor-pointer">
+            <button
+              className={`w-full text-left px-4 py-1.5 text-xs bg-transparent border-0 cursor-pointer ${hasImage ? 'text-dark-200 hover:bg-dark-700' : 'text-dark-500 cursor-not-allowed'}`}
+              onClick={() => hasImage && handleMenuItemClick(onRotateCCW)}
+            >
               Rotate 90° CCW
             </button>
-            <button className="w-full text-left px-4 py-1.5 text-xs text-dark-200 hover:bg-dark-700 bg-transparent border-0 cursor-pointer">
+            <button
+              className={`w-full text-left px-4 py-1.5 text-xs bg-transparent border-0 cursor-pointer ${hasImage ? 'text-dark-200 hover:bg-dark-700' : 'text-dark-500 cursor-not-allowed'}`}
+              onClick={() => hasImage && handleMenuItemClick(onFlipHorizontal)}
+            >
               Flip Horizontal
             </button>
-            <button className="w-full text-left px-4 py-1.5 text-xs text-dark-200 hover:bg-dark-700 bg-transparent border-0 cursor-pointer">
+            <button
+              className={`w-full text-left px-4 py-1.5 text-xs bg-transparent border-0 cursor-pointer ${hasImage ? 'text-dark-200 hover:bg-dark-700' : 'text-dark-500 cursor-not-allowed'}`}
+              onClick={() => hasImage && handleMenuItemClick(onFlipVertical)}
+            >
               Flip Vertical
             </button>
           </div>
@@ -255,23 +327,41 @@ export function MenuBar({
         </button>
         {activeMenu === 'adjust' && (
           <div className="absolute top-full left-0 mt-0.5 border min-w-[180px] py-1 z-50" style={{backgroundColor: 'var(--gray-800)', borderColor: 'var(--border)', boxShadow: 'var(--shadow-lg)', borderRadius: '0'}}>
-            <button className="w-full text-left px-4 py-1.5 text-xs text-dark-200 hover:bg-dark-700 bg-transparent border-0 cursor-pointer">
+            <button
+              className={`w-full text-left px-4 py-1.5 text-xs bg-transparent border-0 cursor-pointer ${hasImage ? 'text-dark-200 hover:bg-dark-700' : 'text-dark-500 cursor-not-allowed'}`}
+              onClick={() => hasImage && handleMenuItemClick(onAutoLevels)}
+            >
               Auto Levels
             </button>
-            <button className="w-full text-left px-4 py-1.5 text-xs text-dark-200 hover:bg-dark-700 bg-transparent border-0 cursor-pointer">
+            <button
+              className={`w-full text-left px-4 py-1.5 text-xs bg-transparent border-0 cursor-pointer ${hasImage ? 'text-dark-200 hover:bg-dark-700' : 'text-dark-500 cursor-not-allowed'}`}
+              onClick={() => hasImage && handleMenuItemClick(onAutoContrast)}
+            >
               Auto Contrast
             </button>
-            <button className="w-full text-left px-4 py-1.5 text-xs text-dark-200 hover:bg-dark-700 bg-transparent border-0 cursor-pointer">
+            <button
+              className={`w-full text-left px-4 py-1.5 text-xs bg-transparent border-0 cursor-pointer ${hasImage ? 'text-dark-200 hover:bg-dark-700' : 'text-dark-500 cursor-not-allowed'}`}
+              onClick={() => hasImage && handleMenuItemClick(onAutoColor)}
+            >
               Auto Color
             </button>
             <div className="h-px bg-dark-700 my-1"></div>
-            <button className="w-full text-left px-4 py-1.5 text-xs text-dark-200 hover:bg-dark-700 bg-transparent border-0 cursor-pointer">
+            <button
+              className="w-full text-left px-4 py-1.5 text-xs text-dark-200 hover:bg-dark-700 bg-transparent border-0 cursor-pointer"
+              onClick={() => handleMenuItemClick(onBrightnessContrast)}
+            >
               Brightness/Contrast...
             </button>
-            <button className="w-full text-left px-4 py-1.5 text-xs text-dark-200 hover:bg-dark-700 bg-transparent border-0 cursor-pointer">
+            <button
+              className="w-full text-left px-4 py-1.5 text-xs text-dark-200 hover:bg-dark-700 bg-transparent border-0 cursor-pointer"
+              onClick={() => handleMenuItemClick(onLevels)}
+            >
               Levels...
             </button>
-            <button className="w-full text-left px-4 py-1.5 text-xs text-dark-200 hover:bg-dark-700 bg-transparent border-0 cursor-pointer">
+            <button
+              className="w-full text-left px-4 py-1.5 text-xs text-dark-200 hover:bg-dark-700 bg-transparent border-0 cursor-pointer"
+              onClick={() => handleMenuItemClick(onCurves)}
+            >
               Curves...
             </button>
           </div>
@@ -291,21 +381,36 @@ export function MenuBar({
         </button>
         {activeMenu === 'filter' && (
           <div className="absolute top-full left-0 mt-0.5 border min-w-[180px] py-1 z-50" style={{backgroundColor: 'var(--gray-800)', borderColor: 'var(--border)', boxShadow: 'var(--shadow-lg)', borderRadius: '0'}}>
-            <button className="w-full text-left px-4 py-1.5 text-xs text-dark-200 hover:bg-dark-700 bg-transparent border-0 cursor-pointer">
-              Sharpen
+            <button
+              className={`w-full text-left px-4 py-1.5 text-xs bg-transparent border-0 cursor-pointer ${hasImage ? 'text-dark-200 hover:bg-dark-700' : 'text-dark-500 cursor-not-allowed'}`}
+              onClick={() => hasImage && handleMenuItemClick(onSharpen)}
+            >
+              Sharpen...
             </button>
-            <button className="w-full text-left px-4 py-1.5 text-xs text-dark-200 hover:bg-dark-700 bg-transparent border-0 cursor-pointer">
-              Blur
+            <button
+              className={`w-full text-left px-4 py-1.5 text-xs bg-transparent border-0 cursor-pointer ${hasImage ? 'text-dark-200 hover:bg-dark-700' : 'text-dark-500 cursor-not-allowed'}`}
+              onClick={() => hasImage && handleMenuItemClick(onBlur)}
+            >
+              Blur...
             </button>
-            <button className="w-full text-left px-4 py-1.5 text-xs text-dark-200 hover:bg-dark-700 bg-transparent border-0 cursor-pointer">
-              Noise Reduction
+            <button
+              className="w-full text-left px-4 py-1.5 text-xs text-dark-200 hover:bg-dark-700 bg-transparent border-0 cursor-pointer"
+              onClick={() => handleMenuItemClick(onNoiseReduction)}
+            >
+              Noise Reduction...
             </button>
             <div className="h-px bg-dark-700 my-1"></div>
-            <button className="w-full text-left px-4 py-1.5 text-xs text-dark-200 hover:bg-dark-700 bg-transparent border-0 cursor-pointer">
-              Vignette
+            <button
+              className={`w-full text-left px-4 py-1.5 text-xs bg-transparent border-0 cursor-pointer ${hasImage ? 'text-dark-200 hover:bg-dark-700' : 'text-dark-500 cursor-not-allowed'}`}
+              onClick={() => hasImage && handleMenuItemClick(onVignette)}
+            >
+              Vignette...
             </button>
-            <button className="w-full text-left px-4 py-1.5 text-xs text-dark-200 hover:bg-dark-700 bg-transparent border-0 cursor-pointer">
-              Film Grain
+            <button
+              className={`w-full text-left px-4 py-1.5 text-xs bg-transparent border-0 cursor-pointer ${hasImage ? 'text-dark-200 hover:bg-dark-700' : 'text-dark-500 cursor-not-allowed'}`}
+              onClick={() => hasImage && handleMenuItemClick(onFilmGrain)}
+            >
+              Film Grain...
             </button>
           </div>
         )}
@@ -349,11 +454,24 @@ export function MenuBar({
               Actual Size <span className="float-right text-dark-400">Ctrl+1</span>
             </button>
             <div className="h-px bg-dark-700 my-1"></div>
-            <button className="w-full text-left px-4 py-1.5 text-xs text-dark-200 hover:bg-dark-700 bg-transparent border-0 cursor-pointer">
-              Show Grid
+            <button
+              className="w-full text-left px-4 py-1.5 text-xs text-dark-200 hover:bg-dark-700 bg-transparent border-0 cursor-pointer"
+              onClick={() => handleMenuItemClick(onViewToggleOriginal)}
+            >
+              {showOriginal ? '\u2713 ' : ''}Before / After <span className="float-right text-dark-400">B</span>
             </button>
-            <button className="w-full text-left px-4 py-1.5 text-xs text-dark-200 hover:bg-dark-700 bg-transparent border-0 cursor-pointer">
-              Show Rulers
+            <div className="h-px bg-dark-700 my-1"></div>
+            <button
+              className="w-full text-left px-4 py-1.5 text-xs text-dark-200 hover:bg-dark-700 bg-transparent border-0 cursor-pointer"
+              onClick={() => handleMenuItemClick(onViewToggleGrid)}
+            >
+              {showGrid ? '\u2713 ' : ''}Show Grid
+            </button>
+            <button
+              className="w-full text-left px-4 py-1.5 text-xs text-dark-200 hover:bg-dark-700 bg-transparent border-0 cursor-pointer"
+              onClick={() => handleMenuItemClick(onViewToggleRulers)}
+            >
+              {showRulers ? '\u2713 ' : ''}Show Rulers
             </button>
           </div>
         )}
@@ -397,6 +515,13 @@ export function MenuBar({
             >
               Keyboard Shortcuts <span className="float-right text-dark-400">F1</span>
             </button>
+            <div className="h-px bg-dark-700 my-1"></div>
+            <button
+              className="w-full text-left px-4 py-1.5 text-xs text-dark-200 hover:bg-dark-700 bg-transparent border-0 cursor-pointer"
+              onClick={() => handleMenuItemClick(onWindowWelcome)}
+            >
+              Welcome Screen...
+            </button>
           </div>
         )}
       </div>
@@ -428,7 +553,7 @@ export function MenuBar({
           {isMaximized ? <Copy size={14} className="rotate-180" /> : <Square size={14} />}
         </button>
         <button
-          className="flex items-center justify-center w-11 h-full bg-transparent border-0 cursor-pointer text-dark-300 hover:bg-red-600 hover:text-white transition-colors"
+          className="flex items-center justify-center w-11 h-full bg-transparent border-0 cursor-pointer text-dark-300 hover:bg-gray-800 hover:text-white transition-colors"
           onClick={handleClose}
           title="Close"
         >

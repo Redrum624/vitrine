@@ -11,57 +11,64 @@ export default {
         '90': '360px',  // Adjustments panel width
       },
       colors: {
-        // Prestigious Studio Color Palette (Pure Grayscale)
+        // High Contrast Grayscale Palette
         dark: {
           'black': '#000000',
-          950: '#0a0a0a',
-          900: '#121212',
-          850: '#1a1a1a',
-          800: '#1e1e1e',
-          700: '#2a2a2a',
-          600: '#3a3a3a',
-          500: '#4a4a4a',
-          400: '#6a6a6a',
-          300: '#8a8a8a',
-          200: '#aaaaaa',
-          100: '#cccccc',
+          950: '#070707',
+          900: '#0d0d0d',
+          850: '#141414',
+          800: '#1a1a1a',
+          700: '#222222',
+          600: '#2d2d2d',
+          500: '#3a3a3a',
+          400: '#555555',
+          300: '#888888',
+          200: '#bbbbbb',
+          100: '#e0e0e0',
           'white': '#ffffff',
+        },
+        // Accent purely for sliders/highlights
+        cyan: {
+          300: '#67e8f9',
+          400: '#22d3ee',
+          500: '#06b6d4',
+          600: '#0891b2',
+        },
+        accent: {
+          DEFAULT: '#ffffff',
+          hover: '#e0e0e0',
+          active: '#bbbbbb',
         },
         // Border colors
         border: {
-          primary: '#2a2a2a',
-          secondary: '#333333',
+          primary: '#222222',
+          secondary: '#2d2d2d',
           light: '#3a3a3a',
-        },
-        // Accent (grayscale only)
-        accent: {
-          DEFAULT: '#3a3a3a',
-          hover: '#4a4a4a',
-          active: '#555555',
         }
       },
       fontFamily: {
-        'sans': ['-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Helvetica Neue', 'Arial', 'sans-serif']
+        'sans': ['Inter', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'Helvetica Neue', 'Arial', 'sans-serif']
       },
       fontSize: {
-        'xxs': ['10px', { lineHeight: '1.4', letterSpacing: '0.5px' }],
-        'xs': ['11px', { lineHeight: '1.5', letterSpacing: '0.5px' }],
-        'sm': ['12px', { lineHeight: '1.5', letterSpacing: '0.3px' }],
-        'base': ['13px', { lineHeight: '1.5' }],
-        'lg': ['14px', { lineHeight: '1.6' }],
+        'xxs': ['11px', { lineHeight: '1.4', letterSpacing: '0.5px' }],
+        'xs': ['13px', { lineHeight: '1.5', letterSpacing: '0.3px' }],
+        'sm': ['14px', { lineHeight: '1.5', letterSpacing: '0.2px' }],
+        'base': ['15px', { lineHeight: '1.5' }],
+        'lg': ['16px', { lineHeight: '1.6' }],
+        'xl': ['18px', { lineHeight: '1.6' }],
       },
       borderRadius: {
         'none': '0',
-        'sm': '3px',
-        DEFAULT: '4px',
-        'md': '6px',
-        'lg': '8px',
+        'sm': '4px',
+        DEFAULT: '6px',
+        'md': '8px',
+        'lg': '12px',
       },
       boxShadow: {
-        'sm': '0 1px 2px rgba(0, 0, 0, 0.5)',
-        'md': '0 4px 8px rgba(0, 0, 0, 0.6)',
-        'lg': '0 8px 16px rgba(0, 0, 0, 0.7)',
-        'xl': '0 12px 24px rgba(0, 0, 0, 0.8)',
+        'sm': '0 1px 3px rgba(0, 0, 0, 0.8)',
+        'md': '0 4px 8px rgba(0, 0, 0, 0.9)',
+        'lg': '0 10px 20px rgba(0, 0, 0, 1)',
+        'xl': '0 20px 40px rgba(0, 0, 0, 1)',
       },
       transitionTimingFunction: {
         'professional': 'cubic-bezier(0.4, 0, 0.2, 1)',

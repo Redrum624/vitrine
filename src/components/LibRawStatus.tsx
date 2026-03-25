@@ -51,11 +51,11 @@ export const LibRawStatus: React.FC<LibRawStatusProps> = ({
   const getStatusIcon = () => {
     switch (status) {
       case 'ready':
-        return <CheckCircle className="w-4 h-4 text-green-500" />;
+        return <CheckCircle className="w-4 h-4 text-gray-300" />;
       case 'error':
-        return <XCircle className="w-4 h-4 text-red-500" />;
+        return <XCircle className="w-4 h-4 text-gray-300" />;
       case 'initializing':
-        return <AlertCircle className="w-4 h-4 text-yellow-500 animate-pulse" />;
+        return <AlertCircle className="w-4 h-4 text-gray-300 animate-pulse" />;
       default:
         return <Camera className="w-4 h-4 text-gray-400" />;
     }
@@ -77,11 +77,11 @@ export const LibRawStatus: React.FC<LibRawStatusProps> = ({
   const getStatusColor = () => {
     switch (status) {
       case 'ready':
-        return 'text-green-500';
+        return 'text-gray-300';
       case 'error':
-        return 'text-red-500';
+        return 'text-gray-300';
       case 'initializing':
-        return 'text-yellow-500';
+        return 'text-gray-300';
       default:
         return 'text-gray-400';
     }
@@ -103,7 +103,7 @@ export const LibRawStatus: React.FC<LibRawStatusProps> = ({
         )}
 
         {error && showDetails && (
-          <span className="text-xs text-red-400 max-w-48 truncate" title={error}>
+          <span className="text-xs text-gray-300 max-w-48 truncate" title={error}>
             {error}
           </span>
         )}

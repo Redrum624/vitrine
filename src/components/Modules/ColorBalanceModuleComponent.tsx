@@ -4,6 +4,8 @@ import { ColorBalanceModule, ColorBalanceParams } from '../../modules/ColorBalan
 import ColorWheel from '../Controls/ColorWheel';
 import ColoredSliderControl from '../Controls/ColoredSliderControl';
 import { logger } from '../../utils/Logger';
+import { autoAdjustService } from '../../services/AutoAdjustService';
+import { imageService } from '../../services/ImageService';
 
 interface ColorBalanceModuleComponentProps {
   module: ColorBalanceModule;
@@ -269,13 +271,15 @@ export const ColorBalanceModuleComponent: React.FC<ColorBalanceModuleComponentPr
         <div className="flex items-center gap-1.5">
           <button
             onClick={() => {
-              // Auto balance colors - feature to be implemented
-              // const autoParams = module.autoBalance();
-              // if (autoParams) {
-              //   setParams(autoParams);
-              //   onParamsChange(autoParams);
-              // }
-              logger.info('Auto balance feature coming soon');
+              const img = imageService.getCurrentImage();
+              if (!img) { logger.warn('No image for auto color balance'); return; }
+              const stats = autoAdjustService.analyse(img.data, img.width, img.height);
+              const computed = autoAdjustService.autoColorBalance(stats);
+              module.setParams(computed as Partial<ColorBalanceParams>);
+              const newParams = module.getParams();
+              setParams(newParams);
+              onParamsChange(newParams);
+              logger.info('Auto color balance applied (image-aware)');
             }}
             className="p-1.5 rounded border"
             style={{

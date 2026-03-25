@@ -140,10 +140,10 @@ export const AdvancedRawModule: React.FC<AdvancedRawModuleProps> = ({
       {/* Module Header */}
       <div className="flex items-center justify-between p-4 border-b border-gray-700">
         <div className="flex items-center gap-3">
-          <Cpu className="w-5 h-5 text-blue-400" />
+          <Cpu className="w-5 h-5 text-gray-300" />
           <span className="text-white font-medium">Advanced RAW Processing</span>
           {isProcessing && (
-            <div className="w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+            <div className="w-4 h-4 border-2 border-gray-600 border-t-transparent rounded-full animate-spin" />
           )}
         </div>
         <div className="flex items-center gap-2">
@@ -161,7 +161,7 @@ export const AdvancedRawModule: React.FC<AdvancedRawModuleProps> = ({
               onChange={(e) => onToggle(e.target.checked)}
               className="sr-only peer"
             />
-            <div className="w-11 h-6 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-500"></div>
+            <div className="w-11 h-6 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-gray-400"></div>
           </label>
         </div>
       </div>
@@ -174,7 +174,7 @@ export const AdvancedRawModule: React.FC<AdvancedRawModuleProps> = ({
           {cameraProfile && (
             <div className="bg-gray-700 rounded-lg p-3">
               <div className="flex items-center gap-2 mb-2">
-                <Settings className="w-4 h-4 text-green-400" />
+                <Settings className="w-4 h-4 text-gray-300" />
                 <span className="text-sm font-medium text-white">Camera Profile</span>
               </div>
               <div className="text-xs text-gray-300">
@@ -187,9 +187,9 @@ export const AdvancedRawModule: React.FC<AdvancedRawModuleProps> = ({
 
           {/* Professional Camera Profiles */}
           {professionalMode && availableProfiles.length > 0 && (
-            <div className="bg-purple-900/20 rounded-lg p-3 border border-purple-500/20">
+            <div className="bg-gray-800 rounded-lg p-3 border border-gray-600">
               <div className="flex items-center gap-2 mb-2">
-                <Camera className="w-4 h-4 text-purple-400" />
+                <Camera className="w-4 h-4 text-gray-300" />
                 <span className="text-sm font-medium text-white">Available Camera Profiles</span>
               </div>
               <div className="grid grid-cols-2 gap-2 text-xs">
@@ -209,10 +209,10 @@ export const AdvancedRawModule: React.FC<AdvancedRawModuleProps> = ({
           )}
 
           {/* Professional Mode Toggle */}
-          <div className="bg-gray-700 rounded-lg p-3 border border-purple-500/20">
+          <div className="bg-gray-700 rounded-lg p-3 border border-gray-600">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Camera className="w-4 h-4 text-purple-400" />
+                <Camera className="w-4 h-4 text-gray-300" />
                 <span className="text-sm font-medium text-white">Professional Mode</span>
               </div>
               <label className="relative inline-flex items-center cursor-pointer">
@@ -222,7 +222,7 @@ export const AdvancedRawModule: React.FC<AdvancedRawModuleProps> = ({
                   onChange={(e) => setProfessionalMode(e.target.checked)}
                   className="sr-only peer"
                 />
-                <div className="w-11 h-6 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-500"></div>
+                <div className="w-11 h-6 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-gray-400"></div>
               </label>
             </div>
             <p className="text-xs text-gray-400 mt-1">
@@ -233,7 +233,7 @@ export const AdvancedRawModule: React.FC<AdvancedRawModuleProps> = ({
           {/* Demosaicing Section */}
           <div className="space-y-3">
             <div className="flex items-center gap-2">
-              <Image className="w-4 h-4 text-purple-400" />
+              <Image className="w-4 h-4 text-gray-300" />
               <span className="text-sm font-medium text-white">Demosaicing</span>
             </div>
 
@@ -245,7 +245,7 @@ export const AdvancedRawModule: React.FC<AdvancedRawModuleProps> = ({
                     <select
                       value={demosaicAlgorithm}
                       onChange={(e) => setDemosaicAlgorithm(e.target.value as 'VNG' | 'AHD' | 'LMMSE')}
-                      className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-purple-400 focus:outline-none"
+                      className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-gray-600 focus:outline-none"
                       disabled={isProcessing}
                     >
                       <option value="VNG">VNG (Variable Number of Gradients)</option>
@@ -259,7 +259,7 @@ export const AdvancedRawModule: React.FC<AdvancedRawModuleProps> = ({
                     <select
                       value={bayerPattern}
                       onChange={(e) => setBayerPattern(e.target.value as 'RGGB' | 'BGGR' | 'GRBG' | 'GBRG')}
-                      className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-purple-400 focus:outline-none"
+                      className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-gray-600 focus:outline-none"
                       disabled={isProcessing}
                     >
                       <option value="RGGB">RGGB</option>
@@ -275,7 +275,7 @@ export const AdvancedRawModule: React.FC<AdvancedRawModuleProps> = ({
                   <select
                     value={options.demosaicQuality}
                     onChange={(e) => updateOption('demosaicQuality', e.target.value as 'draft' | 'good' | 'best')}
-                    className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-purple-400 focus:outline-none"
+                    className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-gray-600 focus:outline-none"
                     disabled={isProcessing}
                   >
                     <option value="draft">Draft (Linear)</option>
@@ -290,7 +290,7 @@ export const AdvancedRawModule: React.FC<AdvancedRawModuleProps> = ({
                 <select
                   value={options.outputSize}
                   onChange={(e) => updateOption('outputSize', e.target.value as 'full' | 'half' | 'quarter')}
-                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-purple-400 focus:outline-none"
+                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-gray-600 focus:outline-none"
                   disabled={isProcessing}
                 >
                   <option value="full">Full Size</option>
@@ -304,7 +304,7 @@ export const AdvancedRawModule: React.FC<AdvancedRawModuleProps> = ({
                 <select
                   value={options.outputBitDepth}
                   onChange={(e) => updateOption('outputBitDepth', parseInt(e.target.value) as 8 | 16)}
-                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-purple-400 focus:outline-none"
+                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-gray-600 focus:outline-none"
                   disabled={isProcessing}
                 >
                   <option value={8}>8-bit</option>
@@ -317,7 +317,7 @@ export const AdvancedRawModule: React.FC<AdvancedRawModuleProps> = ({
           {/* White Balance Section */}
           <div className="space-y-3">
             <div className="flex items-center gap-2">
-              <Palette className="w-4 h-4 text-orange-400" />
+              <Palette className="w-4 h-4 text-gray-300" />
               <span className="text-sm font-medium text-white">White Balance</span>
             </div>
 
@@ -327,7 +327,7 @@ export const AdvancedRawModule: React.FC<AdvancedRawModuleProps> = ({
                 <select
                   value={options.whiteBalanceMode}
                   onChange={(e) => updateOption('whiteBalanceMode', e.target.value as 'camera' | 'auto' | 'custom')}
-                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-orange-400 focus:outline-none"
+                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-gray-600 focus:outline-none"
                   disabled={isProcessing}
                 >
                   <option value="camera">Use Camera WB</option>
@@ -349,7 +349,7 @@ export const AdvancedRawModule: React.FC<AdvancedRawModuleProps> = ({
                       step="100"
                       value={options.temperature || 6500}
                       onChange={(e) => updateOption('temperature', parseInt(e.target.value))}
-                      className="w-full h-2 bg-gradient-to-r from-blue-400 via-white to-yellow-400 rounded-lg appearance-none cursor-pointer"
+                      className="w-full h-2 bg-gradient-to-r from-gray-900 via-white to-black rounded-lg appearance-none cursor-pointer"
                       disabled={isProcessing}
                     />
                   </div>
@@ -365,7 +365,7 @@ export const AdvancedRawModule: React.FC<AdvancedRawModuleProps> = ({
                       step="0.01"
                       value={options.tint || 1.0}
                       onChange={(e) => updateOption('tint', parseFloat(e.target.value))}
-                      className="w-full h-2 bg-gradient-to-r from-green-400 via-gray-300 to-magenta-400 rounded-lg appearance-none cursor-pointer"
+                      className="w-full h-2 bg-gradient-to-r from-gray-900 via-gray-300 to-magenta-400 rounded-lg appearance-none cursor-pointer"
                       disabled={isProcessing}
                     />
                   </div>
@@ -377,7 +377,7 @@ export const AdvancedRawModule: React.FC<AdvancedRawModuleProps> = ({
           {/* Exposure & Tone Section */}
           <div className="space-y-3">
             <div className="flex items-center gap-2">
-              <Zap className="w-4 h-4 text-yellow-400" />
+              <Zap className="w-4 h-4 text-gray-300" />
               <span className="text-sm font-medium text-white">Exposure & Tone</span>
             </div>
 
@@ -393,7 +393,7 @@ export const AdvancedRawModule: React.FC<AdvancedRawModuleProps> = ({
                   step="0.1"
                   value={options.exposureCompensation}
                   onChange={(e) => updateOption('exposureCompensation', parseFloat(e.target.value))}
-                  className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-yellow-400"
+                  className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-gray-200"
                   disabled={isProcessing}
                 />
               </div>
@@ -404,7 +404,7 @@ export const AdvancedRawModule: React.FC<AdvancedRawModuleProps> = ({
                     type="checkbox"
                     checked={options.highlightRecovery}
                     onChange={(e) => updateOption('highlightRecovery', e.target.checked)}
-                    className="rounded border-gray-600 text-yellow-400 focus:ring-yellow-400 focus:ring-2"
+                    className="rounded border-gray-600 text-gray-300 focus:ring-gray-400 focus:ring-2"
                     disabled={isProcessing}
                   />
                   <span className="ml-2 text-xs text-gray-300">Highlight Recovery</span>
@@ -415,7 +415,7 @@ export const AdvancedRawModule: React.FC<AdvancedRawModuleProps> = ({
                     type="checkbox"
                     checked={options.shadowBoost}
                     onChange={(e) => updateOption('shadowBoost', e.target.checked)}
-                    className="rounded border-gray-600 text-yellow-400 focus:ring-yellow-400 focus:ring-2"
+                    className="rounded border-gray-600 text-gray-300 focus:ring-gray-400 focus:ring-2"
                     disabled={isProcessing}
                   />
                   <span className="ml-2 text-xs text-gray-300">Shadow Boost</span>
@@ -427,7 +427,7 @@ export const AdvancedRawModule: React.FC<AdvancedRawModuleProps> = ({
           {/* Color Section */}
           <div className="space-y-3">
             <div className="flex items-center gap-2">
-              <Palette className="w-4 h-4 text-blue-400" />
+              <Palette className="w-4 h-4 text-gray-300" />
               <span className="text-sm font-medium text-white">Color</span>
             </div>
 
@@ -437,7 +437,7 @@ export const AdvancedRawModule: React.FC<AdvancedRawModuleProps> = ({
                 <select
                   value={options.colorSpace}
                   onChange={(e) => updateOption('colorSpace', e.target.value as 'sRGB' | 'AdobeRGB' | 'ProPhotoRGB')}
-                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-blue-400 focus:outline-none"
+                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-gray-600 focus:outline-none"
                   disabled={isProcessing}
                 >
                   <option value="sRGB">sRGB</option>
@@ -452,7 +452,7 @@ export const AdvancedRawModule: React.FC<AdvancedRawModuleProps> = ({
                     type="checkbox"
                     checked={options.useManufacturerProfile}
                     onChange={(e) => updateOption('useManufacturerProfile', e.target.checked)}
-                    className="rounded border-gray-600 text-blue-400 focus:ring-blue-400 focus:ring-2"
+                    className="rounded border-gray-600 text-gray-300 focus:ring-gray-400 focus:ring-2"
                     disabled={isProcessing}
                   />
                   <span className="ml-2 text-xs text-gray-300">Use Camera Profile</span>
@@ -463,7 +463,7 @@ export const AdvancedRawModule: React.FC<AdvancedRawModuleProps> = ({
                     type="checkbox"
                     checked={options.applyLensCorrections}
                     onChange={(e) => updateOption('applyLensCorrections', e.target.checked)}
-                    className="rounded border-gray-600 text-blue-400 focus:ring-blue-400 focus:ring-2"
+                    className="rounded border-gray-600 text-gray-300 focus:ring-gray-400 focus:ring-2"
                     disabled={isProcessing}
                   />
                   <span className="ml-2 text-xs text-gray-300">Lens Corrections</span>
@@ -475,7 +475,7 @@ export const AdvancedRawModule: React.FC<AdvancedRawModuleProps> = ({
           {/* Quality Enhancement Section */}
           <div className="space-y-3">
             <div className="flex items-center gap-2">
-              <Settings className="w-4 h-4 text-green-400" />
+              <Settings className="w-4 h-4 text-gray-300" />
               <span className="text-sm font-medium text-white">Quality Enhancement</span>
             </div>
 
@@ -491,7 +491,7 @@ export const AdvancedRawModule: React.FC<AdvancedRawModuleProps> = ({
                   step="0.01"
                   value={options.denoiseThreshold}
                   onChange={(e) => updateOption('denoiseThreshold', parseFloat(e.target.value))}
-                  className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-green-400"
+                  className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-gray-200"
                   disabled={isProcessing}
                 />
               </div>
@@ -507,7 +507,7 @@ export const AdvancedRawModule: React.FC<AdvancedRawModuleProps> = ({
                   step="0.01"
                   value={options.sharpening}
                   onChange={(e) => updateOption('sharpening', parseFloat(e.target.value))}
-                  className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-green-400"
+                  className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-gray-200"
                   disabled={isProcessing}
                 />
               </div>

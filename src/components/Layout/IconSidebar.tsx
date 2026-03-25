@@ -3,6 +3,7 @@ import { HardDrive, Settings, BarChart3, Sun, Droplet, Activity, Contrast, Crop,
 interface IconSidebarProps {
   onToolSelect?: (tool: string) => void;
   selectedTool?: string | null;
+  histogramVisible?: boolean;
 }
 
 interface Tool {
@@ -24,7 +25,7 @@ const tools: Tool[] = [
   { id: 'lenscorrections', icon: <Focus className="w-5 h-5" />, name: 'Lens Corrections' },
 ];
 
-export function IconSidebar({ onToolSelect, selectedTool }: IconSidebarProps) {
+export function IconSidebar({ onToolSelect, selectedTool, histogramVisible }: IconSidebarProps) {
   const handleToolClick = (toolId: string) => {
     if (onToolSelect) {
       onToolSelect(toolId);
@@ -84,7 +85,7 @@ export function IconSidebar({ onToolSelect, selectedTool }: IconSidebarProps) {
         className={`
           relative flex items-center justify-center
           border cursor-pointer
-          ${selectedTool === 'histogram'
+          ${histogramVisible
             ? 'text-white'
             : 'bg-transparent hover:text-dark-100'
           }
@@ -96,17 +97,17 @@ export function IconSidebar({ onToolSelect, selectedTool }: IconSidebarProps) {
           fontSize: '18px',
           borderRadius: '4px',
           transition: 'var(--transition-fast)',
-          backgroundColor: selectedTool === 'histogram' ? 'var(--gray-850)' : 'transparent',
-          borderColor: selectedTool === 'histogram' ? 'var(--border-light)' : 'transparent',
-          color: selectedTool === 'histogram' ? 'var(--white)' : 'var(--gray-400)'
+          backgroundColor: histogramVisible ? 'var(--gray-850)' : 'transparent',
+          borderColor: histogramVisible ? 'var(--border-light)' : 'transparent',
+          color: histogramVisible ? 'var(--white)' : 'var(--gray-400)'
         }}
         onMouseEnter={(e) => {
-          if (selectedTool !== 'histogram') {
+          if (!histogramVisible) {
             e.currentTarget.style.backgroundColor = 'var(--gray-900)';
           }
         }}
         onMouseLeave={(e) => {
-          if (selectedTool !== 'histogram') {
+          if (!histogramVisible) {
             e.currentTarget.style.backgroundColor = 'transparent';
           }
         }}
@@ -114,7 +115,7 @@ export function IconSidebar({ onToolSelect, selectedTool }: IconSidebarProps) {
         title="Histogram"
         aria-label="Histogram"
       >
-        {selectedTool === 'histogram' && (
+        {histogramVisible && (
           <div className="absolute" style={{left: '-8px', top: '50%', transform: 'translateY(-50%)', width: '2px', height: '24px', backgroundColor: 'var(--white)'}} />
         )}
         <BarChart3 className="w-5 h-5" />

@@ -138,31 +138,14 @@ export class LibRawService {
       // Convert buffer to Uint8Array if needed
       const uint8Buffer = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
 
-      // Configure processing options with professional defaults
+      // Configure processing options
+      // libraw-wasm defaults are good: outputColor=1 (sRGB), useCameraMatrix=1, gamm=sRGB
+      // Only override what we need — don't fight the defaults
       const defaultOptions: LibRawOptions = {
-        // Quality settings - use high-quality demosaicing
-        userQual: 3, // AHD (Adaptive Homogeneity-Directed)
-        halfSize: false, // Full resolution
-        fourColorRgb: false, // Standard RGB
-
-        // Color settings - most neutral processing
-        outputColor: 0, // RAW colorspace (no color conversion)
+        userQual: 3, // AHD demosaicing
+        useCameraWb: true, // Use camera's recorded white balance
         outputBps: 8, // 8-bit output for web
-
-        // White balance - disable all white balance to preserve original colors
-        useCameraWb: false,
-        useAutoWb: false,
-
-        // Exposure and gamma correction - completely linear processing
-        expCorrec: false, // Disable exposure correction
-        bright: 1.0, // Default brightness
-        gamm: [1.0, 1.0], // Linear gamma (no tone curve applied)
-
-        // Noise and enhancement
         threshold: 100, // Wavelet denoising threshold
-        userBlack: 0, // Auto black level
-        userSat: 32767, // Auto saturation
-
         ...options // Override with user-provided options
       };
 
@@ -240,13 +223,9 @@ export class LibRawService {
       case 'quality':
         options = {
           userQual: 3, // AHD interpolation (highest quality)
-          halfSize: false,
-          fourColorRgb: false,
           useCameraWb: true,
-          outputBps: 8, // Keep 8-bit for web compatibility
-          bright: 1.0,
-          threshold: 50, // Lower threshold for better noise reduction
-          gamm: [1.0, 4.5]
+          outputBps: 8,
+          threshold: 50,
         };
         break;
 

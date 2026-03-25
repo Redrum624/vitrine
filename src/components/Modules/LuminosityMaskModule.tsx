@@ -289,10 +289,10 @@ export const LuminosityMaskModule: React.FC<LuminosityMaskModuleProps> = ({
   }, {} as Record<string, LuminosityMask[]>);
 
   const maskTypes = [
-    { value: 'lights', label: 'Lights', icon: Sun, color: 'text-yellow-400' },
-    { value: 'darks', label: 'Darks', icon: Moon, color: 'text-blue-400' },
+    { value: 'lights', label: 'Lights', icon: Sun, color: 'text-gray-300' },
+    { value: 'darks', label: 'Darks', icon: Moon, color: 'text-gray-300' },
     { value: 'midtones', label: 'Midtones', icon: Circle, color: 'text-gray-400' },
-    { value: 'custom', label: 'Custom', icon: Layers, color: 'text-purple-400' }
+    { value: 'custom', label: 'Custom', icon: Layers, color: 'text-gray-300' }
   ];
 
   return (
@@ -300,17 +300,17 @@ export const LuminosityMaskModule: React.FC<LuminosityMaskModuleProps> = ({
       {/* Module Header */}
       <div className="flex items-center justify-between p-4 border-b border-gray-700">
         <div className="flex items-center gap-3">
-          <Layers className="w-5 h-5 text-purple-400" />
+          <Layers className="w-5 h-5 text-gray-300" />
           <span className="text-white font-medium">Luminosity Masks</span>
           {isGenerating && (
-            <div className="w-4 h-4 border-2 border-purple-400 border-t-transparent rounded-full animate-spin" />
+            <div className="w-4 h-4 border-2 border-gray-600 border-t-transparent rounded-full animate-spin" />
           )}
         </div>
         <div className="flex items-center gap-2">
           <button
             onClick={generateCompleteMaskSet}
             disabled={isGenerating || !processedImageData}
-            className="px-2 py-1 text-xs bg-purple-600 hover:bg-purple-700 disabled:bg-gray-700 text-white rounded transition-colors"
+            className="px-2 py-1 text-xs bg-gray-800 hover:bg-gray-800 disabled:bg-gray-700 text-white rounded transition-colors"
             title="Generate complete set"
           >
             Full Set
@@ -322,7 +322,7 @@ export const LuminosityMaskModule: React.FC<LuminosityMaskModuleProps> = ({
               onChange={(e) => onToggle(e.target.checked)}
               className="sr-only peer"
             />
-            <div className="w-11 h-6 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-500"></div>
+            <div className="w-11 h-6 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-gray-400"></div>
           </label>
         </div>
       </div>
@@ -344,7 +344,7 @@ export const LuminosityMaskModule: React.FC<LuminosityMaskModuleProps> = ({
                 <select
                   value={maskSettings.type}
                   onChange={(e) => setMaskSettings(prev => ({ ...prev, type: e.target.value as 'lights' | 'darks' | 'midtones' }))}
-                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-purple-400 focus:outline-none"
+                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-gray-600 focus:outline-none"
                   disabled={isGenerating}
                 >
                   {maskTypes.map(type => (
@@ -365,7 +365,7 @@ export const LuminosityMaskModule: React.FC<LuminosityMaskModuleProps> = ({
                   max={maskSettings.type === 'midtones' ? '3' : '6'}
                   value={maskSettings.level}
                   onChange={(e) => setMaskSettings(prev => ({ ...prev, level: parseInt(e.target.value) }))}
-                  className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-purple-400"
+                  className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-gray-200"
                   disabled={isGenerating || maskSettings.type === 'custom'}
                 />
               </div>
@@ -390,7 +390,7 @@ export const LuminosityMaskModule: React.FC<LuminosityMaskModuleProps> = ({
                         ...prev,
                         customRange: { ...prev.customRange, min: parseFloat(e.target.value) }
                       }))}
-                      className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-purple-400"
+                      className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-gray-200"
                     />
                   </div>
                   <div>
@@ -407,7 +407,7 @@ export const LuminosityMaskModule: React.FC<LuminosityMaskModuleProps> = ({
                         ...prev,
                         customRange: { ...prev.customRange, max: parseFloat(e.target.value) }
                       }))}
-                      className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-purple-400"
+                      className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-gray-200"
                     />
                   </div>
                   <div>
@@ -424,7 +424,7 @@ export const LuminosityMaskModule: React.FC<LuminosityMaskModuleProps> = ({
                         ...prev,
                         customRange: { ...prev.customRange, feather: parseFloat(e.target.value) }
                       }))}
-                      className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-purple-400"
+                      className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-gray-200"
                     />
                   </div>
                 </div>
@@ -434,7 +434,7 @@ export const LuminosityMaskModule: React.FC<LuminosityMaskModuleProps> = ({
             <button
               onClick={generateMask}
               disabled={isGenerating || !processedImageData}
-              className="w-full bg-purple-600 hover:bg-purple-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white text-sm font-medium py-2 px-4 rounded transition-colors flex items-center justify-center gap-2"
+              className="w-full bg-gray-800 hover:bg-gray-800 disabled:bg-gray-600 disabled:cursor-not-allowed text-white text-sm font-medium py-2 px-4 rounded transition-colors flex items-center justify-center gap-2"
             >
               <Plus className="w-4 h-4" />
               {isGenerating ? 'Generating...' : 'Generate Mask'}
@@ -455,14 +455,14 @@ export const LuminosityMaskModule: React.FC<LuminosityMaskModuleProps> = ({
                     <>
                       <button
                         onClick={() => combineSelectedMasks('intersect')}
-                        className="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors"
+                        className="px-2 py-1 text-xs bg-gray-800 hover:bg-gray-800 text-white rounded transition-colors"
                         title="Intersect selected"
                       >
                         ∩
                       </button>
                       <button
                         onClick={() => combineSelectedMasks('union')}
-                        className="px-2 py-1 text-xs bg-green-600 hover:bg-green-700 text-white rounded transition-colors"
+                        className="px-2 py-1 text-xs bg-gray-800 hover:bg-gray-800 text-white rounded transition-colors"
                         title="Union selected"
                       >
                         ∪
@@ -472,7 +472,7 @@ export const LuminosityMaskModule: React.FC<LuminosityMaskModuleProps> = ({
                   {selectedMasks.length > 0 && (
                     <button
                       onClick={deleteSelectedMasks}
-                      className="px-2 py-1 text-xs bg-red-600 hover:bg-red-700 text-white rounded transition-colors"
+                      className="px-2 py-1 text-xs bg-gray-800 hover:bg-gray-800 text-white rounded transition-colors"
                       title="Delete selected"
                     >
                       <Trash2 className="w-3 h-3" />
@@ -500,9 +500,9 @@ export const LuminosityMaskModule: React.FC<LuminosityMaskModuleProps> = ({
                             key={mask.id}
                             className={`flex items-center justify-between p-2 rounded cursor-pointer transition-colors ${
                               previewMask === mask.id
-                                ? 'bg-purple-900/30 border border-purple-500/50'
+                                ? 'bg-gray-800 border border-gray-600'
                                 : selectedMasks.includes(mask.id)
-                                ? 'bg-blue-900/30 border border-blue-500/50'
+                                ? 'bg-gray-800 border border-gray-600'
                                 : 'bg-gray-700/50 hover:bg-gray-700'
                             }`}
                             onClick={() => setPreviewMask(mask.id)}
@@ -600,7 +600,7 @@ export const LuminosityMaskModule: React.FC<LuminosityMaskModuleProps> = ({
                     step="0.1"
                     value={maskSettings.previewOpacity}
                     onChange={(e) => setMaskSettings(prev => ({ ...prev, previewOpacity: parseFloat(e.target.value) }))}
-                    className="w-16 h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-purple-400"
+                    className="w-16 h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-gray-200"
                     title="Preview opacity"
                   />
                 </div>
@@ -621,7 +621,7 @@ export const LuminosityMaskModule: React.FC<LuminosityMaskModuleProps> = ({
               </div>
 
               {maskStats && (
-                <div className="bg-purple-900/20 border border-purple-500/20 rounded p-3">
+                <div className="bg-gray-800 border border-gray-600 rounded p-3">
                   <div className="grid grid-cols-2 gap-2 text-xs">
                     <div>
                       <span className="text-gray-400">Coverage:</span>{' '}
@@ -639,8 +639,8 @@ export const LuminosityMaskModule: React.FC<LuminosityMaskModuleProps> = ({
 
           {/* No Image Warning */}
           {!processedImageData && (
-            <div className="bg-yellow-900/20 border border-yellow-500/20 rounded-lg p-3 text-center">
-              <div className="text-yellow-200 text-sm">
+            <div className="bg-gray-800 border border-gray-600 rounded-lg p-3 text-center">
+              <div className="text-gray-300 text-sm">
                 Load an image to generate luminosity masks
               </div>
             </div>

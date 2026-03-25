@@ -2,6 +2,8 @@ import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { TrendingUp, RotateCcw, Settings, Zap } from 'lucide-react';
 import { ToneCurveModule, ToneCurveParams } from '../../modules/ToneCurveModule';
 import { logger } from '../../utils/Logger';
+import { autoAdjustService } from '../../services/AutoAdjustService';
+import { imageService } from '../../services/ImageService';
 
 interface ToneCurveModuleComponentProps {
   module: ToneCurveModule;
@@ -287,9 +289,14 @@ export const ToneCurveModuleComponent: React.FC<ToneCurveModuleComponentProps> =
         <div className="flex items-center gap-1.5">
           <button
             onClick={() => {
-              const autoParams = module.autoToneCurve();
-              setParams(autoParams);
-              onParamsChange(autoParams);
+              const img = imageService.getCurrentImage();
+              if (!img) return;
+              const stats = autoAdjustService.analyse(img.data, img.width, img.height);
+              const computed = autoAdjustService.autoToneCurve(stats);
+              module.setParams(computed as ToneCurveParams);
+              const newParams = module.getParams();
+              setParams(newParams);
+              onParamsChange(newParams);
             }}
             className="p-1.5 rounded border"
             style={{
@@ -342,9 +349,9 @@ export const ToneCurveModuleComponent: React.FC<ToneCurveModuleComponentProps> =
       <div className="flex gap-1 rounded-lg p-1" style={{backgroundColor: 'var(--gray-700)'}}>
         {[
           { id: 'base', label: 'RGB', color: 'text-white' },
-          { id: 'red', label: 'R', color: 'text-red-400' },
-          { id: 'green', label: 'G', color: 'text-green-400' },
-          { id: 'blue', label: 'B', color: 'text-blue-400' }
+          { id: 'red', label: 'R', color: 'text-gray-300' },
+          { id: 'green', label: 'G', color: 'text-gray-300' },
+          { id: 'blue', label: 'B', color: 'text-gray-300' }
         ].map(channel => (
           <button
             key={channel.id}

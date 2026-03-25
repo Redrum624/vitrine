@@ -654,6 +654,134 @@ export class PrintService {
   }
 
   /**
+   * Print the current image via the native system print dialog.
+   *
+   * Renders the processed Float32Array onto a temporary canvas, embeds it
+   * in a print-optimised window, and invokes the OS print dialog.
+   */
+  async printImage(
+    imageData: Float32Array,
+    width: number,
+    height: number,
+    options?: {
+      paperSize?: string;         // e.g. 'A4', '8x10"'
+      orientation?: 'portrait' | 'landscape';
+      margins?: Margins;          // mm
+      resolution?: number;        // DPI (informational — browser controls actual)
+      title?: string;
+      colorAdjustments?: PrintSettings['colorAdjustments'];
+    }
+  ): Promise<void> {
+    const paper = this.paperSizes.get(options?.paperSize || 'A4') || this.paperSizes.get('A4')!;
+    const orientation = options?.orientation ||
+      (width > height ? 'landscape' : 'portrait');
+    const margins = options?.margins || { top: 10, right: 10, bottom: 10, left: 10 };
+    const title = options?.title || 'Photo Editor Pro — Print';
+
+    // ── Apply colour adjustments if provided ──────────────────────────
+    let data = imageData;
+    if (options?.colorAdjustments) {
+      const adj = options.colorAdjustments;
+      const hasAdj = adj.brightness || adj.contrast || adj.saturation || adj.shadows || adj.highlights;
+      if (hasAdj) {
+        const mockJob = {
+          imageData, width, height,
+          settings: { colorAdjustments: adj },
+        } as unknown as PrintJob;
+        data = await this.applyPrintAdjustments(imageData, mockJob);
+      }
+    }
+
+    // ── Render to an off-screen canvas ────────────────────────────────
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d')!;
+    const imgData = ctx.createImageData(width, height);
+
+    // Detect normalisation range
+    const sampleMax = Math.max(...data.slice(0, Math.min(4000, data.length)));
+    const isNormalized = sampleMax <= 1.0;
+
+    for (let i = 0; i < data.length; i++) {
+      imgData.data[i] = isNormalized
+        ? Math.round(Math.max(0, Math.min(1, data[i])) * 255)
+        : Math.round(Math.max(0, Math.min(255, data[i])));
+    }
+    ctx.putImageData(imgData, 0, 0);
+
+    const dataUrl = canvas.toDataURL('image/png');
+
+    // ── Paper dimensions for CSS ──────────────────────────────────────
+    const paperW = orientation === 'landscape' ? paper.height : paper.width;
+    const paperH = orientation === 'landscape' ? paper.width : paper.height;
+
+    // ── Open a print window ───────────────────────────────────────────
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const printWindow = window.open('', '_blank', 'width=900,height=700') as any;
+    if (!printWindow || !printWindow.document) {
+      throw new Error('Could not open print window — check popup blocker');
+    }
+
+    printWindow.document.write(`<!DOCTYPE html>
+<html>
+<head>
+  <title>${title}</title>
+  <style>
+    @page {
+      size: ${paperW}mm ${paperH}mm;
+      margin: ${margins.top}mm ${margins.right}mm ${margins.bottom}mm ${margins.left}mm;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; }
+
+    /* Screen preview */
+    body {
+      display: flex; align-items: center; justify-content: center;
+      background: #1a1a1a; font-family: system-ui, sans-serif;
+    }
+    .page {
+      background: #fff; padding: ${margins.top}mm ${margins.right}mm ${margins.bottom}mm ${margins.left}mm;
+      width: ${paperW}mm; min-height: ${paperH}mm;
+      display: flex; align-items: center; justify-content: center;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.5);
+    }
+    img {
+      max-width: 100%; max-height: ${paperH - margins.top - margins.bottom}mm;
+      object-fit: contain; display: block;
+    }
+    .hint {
+      position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+      color: #888; font-size: 13px;
+    }
+
+    /* When actually printing */
+    @media print {
+      body { background: none; }
+      .page { box-shadow: none; padding: 0; width: 100%; min-height: auto; }
+      img { max-width: 100%; max-height: 100%; }
+      .hint { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <img src="${dataUrl}" alt="Print" />
+  </div>
+  <div class="hint">Press Ctrl+P or close this window when done</div>
+  <script>
+    window.onafterprint = function() { window.close(); };
+    // Auto-trigger print after image loads
+    window.onload = function() { setTimeout(function() { window.print(); }, 400); };
+  </script>
+</body>
+</html>`);
+
+    printWindow.document.close();
+    logger.info(`Print dialog opened: ${width}x${height} on ${paper.name} (${orientation})`);
+  }
+
+  /**
    * Generate unique job ID
    */
   private generateJobId(): string {

@@ -25,7 +25,7 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasWrapperRef = useRef<HTMLDivElement>(null);
-  const { viewport, setViewport, processedImageData, isAdjustingRotation, selectedTool, triggerReprocessing } = useAppStore();
+  const { viewport, setViewport, processedImageData, isAdjustingRotation, selectedTool, triggerReprocessing, showGrid, showRulers } = useAppStore();
   const [isDragging, setIsDragging] = useState(false);
   const [lastPan, setLastPan] = useState({ x: 0, y: 0 });
   const [displayImage, setDisplayImage] = useState<ImageFileInfo | null>(null);
@@ -156,23 +156,20 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
   }, [viewport]);
 
   const drawPlaceholder = useCallback((ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement) => {
-    // Draw grid pattern
-    ctx.strokeStyle = '#262626';
-    ctx.lineWidth = 1;
-    const gridSize = 20;
+    // Fill background
+    ctx.fillStyle = '#0d0d0d';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    for (let x = 0; x < canvas.width; x += gridSize) {
-      ctx.beginPath();
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x, canvas.height);
-      ctx.stroke();
-    }
-
-    for (let y = 0; y < canvas.height; y += gridSize) {
-      ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(canvas.width, y);
-      ctx.stroke();
+    // Draw dot pattern
+    ctx.fillStyle = '#1a1a1a';
+    const dotSize = 1.5;
+    const spacing = 32;
+    for (let x = 0; x < canvas.width; x += spacing) {
+      for (let y = 0; y < canvas.height; y += spacing) {
+        ctx.beginPath();
+        ctx.arc(x, y, dotSize, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
 
     // Draw placeholder text
@@ -182,14 +179,13 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
 
-    ctx.fillStyle = '#525252';
-    ctx.font = 'bold 24px system-ui';
-    ctx.fillText('No Image Loaded', centerX, centerY - 30);
+    ctx.fillStyle = '#555555';
+    ctx.font = '600 32px Inter, system-ui';
+    ctx.fillText('Photo Editor Pro', centerX, centerY - 30);
 
-    ctx.fillStyle = '#404040';
-    ctx.font = '16px system-ui';
-    ctx.fillText('Select an image from the file browser', centerX, centerY + 5);
-    ctx.fillText('or drag and drop a file here', centerX, centerY + 28);
+    ctx.fillStyle = '#3a3a3a';
+    ctx.font = '400 15px Inter, system-ui';
+    ctx.fillText('Select an image from the browser to begin your editing session', centerX, centerY + 15);
   }, []);
 
   // Performance optimization: cache canvas context and ImageData
@@ -713,7 +709,7 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
       if (!container) return;
 
       // Check if click is outside the canvas container
-      if (!container.contains(e.target as Node)) {
+      if (!container.contains(e.target as unknown as HTMLElement)) {
         setShowCropOverlay(false);
       }
     };
@@ -879,6 +875,67 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
                 display: 'block'
               }}
             />
+
+            {/* Grid Overlay */}
+            {showGrid && displayImage && canvasDimensions.width > 0 && (
+              <svg
+                className="absolute inset-0 pointer-events-none"
+                width={canvasDimensions.width}
+                height={canvasDimensions.height}
+                style={{ opacity: 0.3 }}
+              >
+                {/* Thirds grid */}
+                {[1, 2].map(i => (
+                  <g key={`grid-${i}`}>
+                    <line x1={canvasDimensions.width * i / 3} y1={0} x2={canvasDimensions.width * i / 3} y2={canvasDimensions.height} stroke="#fff" strokeWidth="0.5" />
+                    <line x1={0} y1={canvasDimensions.height * i / 3} x2={canvasDimensions.width} y2={canvasDimensions.height * i / 3} stroke="#fff" strokeWidth="0.5" />
+                  </g>
+                ))}
+                {/* Center crosshair */}
+                <line x1={canvasDimensions.width / 2 - 10} y1={canvasDimensions.height / 2} x2={canvasDimensions.width / 2 + 10} y2={canvasDimensions.height / 2} stroke="#fff" strokeWidth="0.5" />
+                <line x1={canvasDimensions.width / 2} y1={canvasDimensions.height / 2 - 10} x2={canvasDimensions.width / 2} y2={canvasDimensions.height / 2 + 10} stroke="#fff" strokeWidth="0.5" />
+              </svg>
+            )}
+
+            {/* Rulers Overlay */}
+            {showRulers && displayImage && canvasDimensions.width > 0 && (
+              <>
+                {/* Top ruler */}
+                <div
+                  className="absolute top-0 left-0 pointer-events-none"
+                  style={{ width: canvasDimensions.width, height: 20, backgroundColor: 'rgba(30,30,30,0.85)' }}
+                >
+                  <svg width={canvasDimensions.width} height={20}>
+                    {Array.from({ length: Math.ceil(canvasDimensions.width / 50) + 1 }, (_, i) => {
+                      const x = i * 50;
+                      return (
+                        <g key={`rtick-${i}`}>
+                          <line x1={x} y1={14} x2={x} y2={20} stroke="#888" strokeWidth="0.5" />
+                          <text x={x + 2} y={12} fill="#888" fontSize="8" fontFamily="monospace">{Math.round(x)}</text>
+                        </g>
+                      );
+                    })}
+                  </svg>
+                </div>
+                {/* Left ruler */}
+                <div
+                  className="absolute top-0 left-0 pointer-events-none"
+                  style={{ width: 20, height: canvasDimensions.height, backgroundColor: 'rgba(30,30,30,0.85)' }}
+                >
+                  <svg width={20} height={canvasDimensions.height}>
+                    {Array.from({ length: Math.ceil(canvasDimensions.height / 50) + 1 }, (_, i) => {
+                      const y = i * 50;
+                      return (
+                        <g key={`ltick-${i}`}>
+                          <line x1={14} y1={y} x2={20} y2={y} stroke="#888" strokeWidth="0.5" />
+                          <text x={2} y={y + 10} fill="#888" fontSize="8" fontFamily="monospace">{Math.round(y)}</text>
+                        </g>
+                      );
+                    })}
+                  </svg>
+                </div>
+              </>
+            )}
 
             {/* Crop/Transform Overlay - 3x3 grid and darkened areas */}
             {cropModule && displayImage && canvasDimensions.width > 0 && (() => {

@@ -215,16 +215,16 @@ export const CopyrightModule: React.FC<CopyrightModuleProps> = ({
       {/* Module Header */}
       <div className="flex items-center justify-between p-4 border-b border-gray-700">
         <div className="flex items-center gap-3">
-          <Copyright className="w-5 h-5 text-blue-400" />
+          <Copyright className="w-5 h-5 text-gray-300" />
           <span className="text-white font-medium">Copyright & Metadata</span>
           {isEmbedding && (
-            <div className="w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+            <div className="w-4 h-4 border-2 border-gray-600 border-t-transparent rounded-full animate-spin" />
           )}
         </div>
         <div className="flex items-center gap-2">
           <button
             onClick={exportMetadata}
-            className="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors"
+            className="px-2 py-1 text-xs bg-gray-800 hover:bg-gray-800 text-white rounded transition-colors"
             title="Export metadata"
           >
             Export
@@ -236,7 +236,7 @@ export const CopyrightModule: React.FC<CopyrightModuleProps> = ({
               onChange={(e) => onToggle(e.target.checked)}
               className="sr-only peer"
             />
-            <div className="w-11 h-6 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-500"></div>
+            <div className="w-11 h-6 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-gray-400"></div>
           </label>
         </div>
       </div>
@@ -258,7 +258,7 @@ export const CopyrightModule: React.FC<CopyrightModuleProps> = ({
                 <select
                   value={selectedTemplate}
                   onChange={(e) => applyTemplate(e.target.value)}
-                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-blue-400 focus:outline-none"
+                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-gray-600 focus:outline-none"
                 >
                   <option value="">Select template...</option>
                   {categories.map(category => (
@@ -280,7 +280,7 @@ export const CopyrightModule: React.FC<CopyrightModuleProps> = ({
                 <select
                   value={selectedPreset}
                   onChange={(e) => applyPreset(e.target.value)}
-                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-blue-400 focus:outline-none"
+                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-gray-600 focus:outline-none"
                 >
                   <option value="">Select preset...</option>
                   {presets.map(preset => (
@@ -303,7 +303,7 @@ export const CopyrightModule: React.FC<CopyrightModuleProps> = ({
                       type="text"
                       value={value}
                       onChange={(e) => updateTemplateVariable(variable, e.target.value)}
-                      className="w-full bg-gray-700 text-white text-xs rounded px-2 py-1 border border-gray-600 focus:border-blue-400 focus:outline-none"
+                      className="w-full bg-gray-700 text-white text-xs rounded px-2 py-1 border border-gray-600 focus:border-gray-600 focus:outline-none"
                       placeholder={variable}
                     />
                   </div>
@@ -326,7 +326,7 @@ export const CopyrightModule: React.FC<CopyrightModuleProps> = ({
                   type="text"
                   value={iptcMetadata.copyrightNotice || ''}
                   onChange={(e) => updateIptcField('copyrightNotice', e.target.value)}
-                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-blue-400 focus:outline-none"
+                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-gray-600 focus:outline-none"
                   placeholder="© 2024 Your Name. All rights reserved."
                 />
               </div>
@@ -337,7 +337,7 @@ export const CopyrightModule: React.FC<CopyrightModuleProps> = ({
                   <select
                     value={iptcMetadata.copyrightStatus || 'copyrighted'}
                     onChange={(e) => updateIptcField('copyrightStatus', e.target.value as 'copyrighted' | 'public-domain' | 'unknown')}
-                    className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-blue-400 focus:outline-none"
+                    className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-gray-600 focus:outline-none"
                   >
                     {copyrightStatuses.map(status => (
                       <option key={status.value} value={status.value}>
@@ -353,7 +353,7 @@ export const CopyrightModule: React.FC<CopyrightModuleProps> = ({
                     type="text"
                     value={iptcMetadata.credit || ''}
                     onChange={(e) => updateIptcField('credit', e.target.value)}
-                    className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-blue-400 focus:outline-none"
+                    className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-gray-600 focus:outline-none"
                     placeholder="Photo credit"
                   />
                 </div>
@@ -364,7 +364,7 @@ export const CopyrightModule: React.FC<CopyrightModuleProps> = ({
                 <textarea
                   value={iptcMetadata.rightsUsageTerms || ''}
                   onChange={(e) => updateIptcField('rightsUsageTerms', e.target.value)}
-                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-blue-400 focus:outline-none resize-none"
+                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-gray-600 focus:outline-none resize-none"
                   rows={2}
                   placeholder="Terms and conditions for usage rights"
                 />
@@ -376,7 +376,7 @@ export const CopyrightModule: React.FC<CopyrightModuleProps> = ({
                   type="url"
                   value={iptcMetadata.webStatement || ''}
                   onChange={(e) => updateIptcField('webStatement', e.target.value)}
-                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-blue-400 focus:outline-none"
+                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-gray-600 focus:outline-none"
                   placeholder="https://yourwebsite.com/copyright"
                 />
               </div>
@@ -387,7 +387,7 @@ export const CopyrightModule: React.FC<CopyrightModuleProps> = ({
                   type="text"
                   value={xmpMetadata.rights || ''}
                   onChange={(e) => updateXmpField('rights', e.target.value)}
-                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-blue-400 focus:outline-none"
+                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-gray-600 focus:outline-none"
                   placeholder="XMP rights statement"
                 />
               </div>
@@ -408,7 +408,7 @@ export const CopyrightModule: React.FC<CopyrightModuleProps> = ({
                   type="text"
                   value={iptcMetadata.creator || ''}
                   onChange={(e) => updateIptcField('creator', e.target.value)}
-                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-blue-400 focus:outline-none"
+                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-gray-600 focus:outline-none"
                   placeholder="Your Name"
                 />
               </div>
@@ -419,7 +419,7 @@ export const CopyrightModule: React.FC<CopyrightModuleProps> = ({
                   type="text"
                   value={iptcMetadata.creatorJobTitle || ''}
                   onChange={(e) => updateIptcField('creatorJobTitle', e.target.value)}
-                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-blue-400 focus:outline-none"
+                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-gray-600 focus:outline-none"
                   placeholder="Photographer"
                 />
               </div>
@@ -432,7 +432,7 @@ export const CopyrightModule: React.FC<CopyrightModuleProps> = ({
                   type="email"
                   value={iptcMetadata.creatorEmail || ''}
                   onChange={(e) => updateIptcField('creatorEmail', e.target.value)}
-                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-blue-400 focus:outline-none"
+                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-gray-600 focus:outline-none"
                   placeholder="your.email@example.com"
                 />
               </div>
@@ -443,7 +443,7 @@ export const CopyrightModule: React.FC<CopyrightModuleProps> = ({
                   type="url"
                   value={iptcMetadata.creatorWebsite || ''}
                   onChange={(e) => updateIptcField('creatorWebsite', e.target.value)}
-                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-blue-400 focus:outline-none"
+                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-gray-600 focus:outline-none"
                   placeholder="https://yourwebsite.com"
                 />
               </div>
@@ -464,7 +464,7 @@ export const CopyrightModule: React.FC<CopyrightModuleProps> = ({
                   type="text"
                   value={iptcMetadata.title || ''}
                   onChange={(e) => updateIptcField('title', e.target.value)}
-                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-blue-400 focus:outline-none"
+                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-gray-600 focus:outline-none"
                   placeholder="Image title"
                 />
               </div>
@@ -475,7 +475,7 @@ export const CopyrightModule: React.FC<CopyrightModuleProps> = ({
                   type="text"
                   value={iptcMetadata.category || ''}
                   onChange={(e) => updateIptcField('category', e.target.value)}
-                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-blue-400 focus:outline-none"
+                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-gray-600 focus:outline-none"
                   placeholder="Photo category"
                 />
               </div>
@@ -486,7 +486,7 @@ export const CopyrightModule: React.FC<CopyrightModuleProps> = ({
               <textarea
                 value={iptcMetadata.description || ''}
                 onChange={(e) => updateIptcField('description', e.target.value)}
-                className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-blue-400 focus:outline-none resize-none"
+                className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-gray-600 focus:outline-none resize-none"
                 rows={2}
                 placeholder="Image description"
               />
@@ -504,7 +504,7 @@ export const CopyrightModule: React.FC<CopyrightModuleProps> = ({
               <input
                 type="text"
                 placeholder="Add keyword and press Enter"
-                className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-blue-400 focus:outline-none"
+                className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-gray-600 focus:outline-none"
                 onKeyPress={(e) => {
                   if (e.key === 'Enter') {
                     addKeyword((e.target as HTMLInputElement).value);
@@ -519,7 +519,7 @@ export const CopyrightModule: React.FC<CopyrightModuleProps> = ({
                 {iptcMetadata.keywords.map((keyword, index) => (
                   <span
                     key={index}
-                    className="inline-flex items-center gap-1 px-2 py-1 bg-blue-600 text-white text-xs rounded cursor-pointer hover:bg-blue-700"
+                    className="inline-flex items-center gap-1 px-2 py-1 bg-gray-800 text-white text-xs rounded cursor-pointer hover:bg-gray-800"
                     onClick={() => removeKeyword(index)}
                   >
                     {keyword}
@@ -544,7 +544,7 @@ export const CopyrightModule: React.FC<CopyrightModuleProps> = ({
                   type="text"
                   value={iptcMetadata.location || ''}
                   onChange={(e) => updateIptcField('location', e.target.value)}
-                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-blue-400 focus:outline-none"
+                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-gray-600 focus:outline-none"
                   placeholder="Specific location"
                 />
               </div>
@@ -555,7 +555,7 @@ export const CopyrightModule: React.FC<CopyrightModuleProps> = ({
                   type="text"
                   value={iptcMetadata.city || ''}
                   onChange={(e) => updateIptcField('city', e.target.value)}
-                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-blue-400 focus:outline-none"
+                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-gray-600 focus:outline-none"
                   placeholder="City"
                 />
               </div>
@@ -568,7 +568,7 @@ export const CopyrightModule: React.FC<CopyrightModuleProps> = ({
                   type="text"
                   value={iptcMetadata.state || ''}
                   onChange={(e) => updateIptcField('state', e.target.value)}
-                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-blue-400 focus:outline-none"
+                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-gray-600 focus:outline-none"
                   placeholder="State or Province"
                 />
               </div>
@@ -579,7 +579,7 @@ export const CopyrightModule: React.FC<CopyrightModuleProps> = ({
                   type="text"
                   value={iptcMetadata.country || ''}
                   onChange={(e) => updateIptcField('country', e.target.value)}
-                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-blue-400 focus:outline-none"
+                  className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-gray-600 focus:outline-none"
                   placeholder="Country"
                 />
               </div>
@@ -592,16 +592,16 @@ export const CopyrightModule: React.FC<CopyrightModuleProps> = ({
               <div className="text-sm font-medium text-white">Validation</div>
 
               {validationResult.valid ? (
-                <div className="flex items-center gap-2 p-2 bg-green-900/20 border border-green-500/20 rounded">
-                  <CheckCircle className="w-4 h-4 text-green-400" />
-                  <span className="text-green-200 text-sm">Metadata validation passed</span>
+                <div className="flex items-center gap-2 p-2 bg-gray-800 border border-gray-600 rounded">
+                  <CheckCircle className="w-4 h-4 text-gray-300" />
+                  <span className="text-gray-300 text-sm">Metadata validation passed</span>
                 </div>
               ) : (
                 <div className="space-y-2">
                   {validationResult.errors.map((error, index) => (
-                    <div key={index} className="flex items-center gap-2 p-2 bg-red-900/20 border border-red-500/20 rounded">
-                      <AlertTriangle className="w-4 h-4 text-red-400" />
-                      <span className="text-red-200 text-sm">{error}</span>
+                    <div key={index} className="flex items-center gap-2 p-2 bg-gray-800 border border-gray-600 rounded">
+                      <AlertTriangle className="w-4 h-4 text-gray-300" />
+                      <span className="text-gray-300 text-sm">{error}</span>
                     </div>
                   ))}
                 </div>
@@ -610,9 +610,9 @@ export const CopyrightModule: React.FC<CopyrightModuleProps> = ({
               {validationResult.warnings.length > 0 && (
                 <div className="space-y-1">
                   {validationResult.warnings.map((warning, index) => (
-                    <div key={index} className="flex items-center gap-2 p-2 bg-yellow-900/20 border border-yellow-500/20 rounded">
-                      <AlertTriangle className="w-4 h-4 text-yellow-400" />
-                      <span className="text-yellow-200 text-sm">{warning}</span>
+                    <div key={index} className="flex items-center gap-2 p-2 bg-gray-800 border border-gray-600 rounded">
+                      <AlertTriangle className="w-4 h-4 text-gray-300" />
+                      <span className="text-gray-300 text-sm">{warning}</span>
                     </div>
                   ))}
                 </div>
@@ -625,7 +625,7 @@ export const CopyrightModule: React.FC<CopyrightModuleProps> = ({
             <button
               onClick={embedMetadata}
               disabled={isEmbedding || !currentImage || !validationResult?.valid}
-              className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white text-sm font-medium py-2 px-4 rounded transition-colors flex items-center justify-center gap-2"
+              className="flex-1 bg-gray-800 hover:bg-gray-800 disabled:bg-gray-600 disabled:cursor-not-allowed text-white text-sm font-medium py-2 px-4 rounded transition-colors flex items-center justify-center gap-2"
             >
               <Copyright className="w-4 h-4" />
               {isEmbedding ? 'Embedding...' : 'Embed Metadata'}
@@ -653,12 +653,12 @@ export const CopyrightModule: React.FC<CopyrightModuleProps> = ({
 
           {/* Current Image Info */}
           {currentImage && (
-            <div className="bg-blue-900/20 border border-blue-500/20 rounded-lg p-3">
+            <div className="bg-gray-800 border border-gray-600 rounded-lg p-3">
               <div className="flex items-center gap-2 mb-2">
-                <Calendar className="w-4 h-4 text-blue-400" />
+                <Calendar className="w-4 h-4 text-gray-300" />
                 <span className="text-sm font-medium text-white">Current Image</span>
               </div>
-              <div className="text-xs text-blue-200">
+              <div className="text-xs text-gray-300">
                 <div>File: {currentImage.name}</div>
                 <div>Size: {currentImage.metadata.width}×{currentImage.metadata.height}</div>
                 <div>Created: {currentImage.metadata.dateCreated.toLocaleDateString()}</div>

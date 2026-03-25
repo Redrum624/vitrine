@@ -149,10 +149,10 @@ export const NoiseReductionModule: React.FC<NoiseReductionModuleProps> = ({
   };
 
   const getNoiseDescription = (level: number): { text: string; color: string } => {
-    if (level < 0.005) return { text: 'Very Low', color: 'text-green-400' };
-    if (level < 0.015) return { text: 'Low', color: 'text-yellow-400' };
-    if (level < 0.030) return { text: 'Moderate', color: 'text-orange-400' };
-    return { text: 'High', color: 'text-red-400' };
+    if (level < 0.005) return { text: 'Very Low', color: 'text-gray-300' };
+    if (level < 0.015) return { text: 'Low', color: 'text-gray-300' };
+    if (level < 0.030) return { text: 'Moderate', color: 'text-gray-300' };
+    return { text: 'High', color: 'text-gray-300' };
   };
 
   return (
@@ -160,17 +160,17 @@ export const NoiseReductionModule: React.FC<NoiseReductionModuleProps> = ({
       {/* Module Header */}
       <div className="flex items-center justify-between p-4 border-b border-gray-700">
         <div className="flex items-center gap-3">
-          <TrendingDown className="w-5 h-5 text-purple-400" />
+          <TrendingDown className="w-5 h-5 text-gray-300" />
           <span className="text-white font-medium">Noise Reduction</span>
           {isProcessing && (
-            <RefreshCw className="w-4 h-4 text-purple-400 animate-spin" />
+            <RefreshCw className="w-4 h-4 text-gray-300 animate-spin" />
           )}
         </div>
         <div className="flex items-center gap-2">
           <button
             onClick={() => setAutoMode(!autoMode)}
             className={`px-2 py-1 text-xs rounded transition-colors ${
-              autoMode ? 'bg-purple-500 text-white' : 'bg-gray-700 text-gray-300'
+              autoMode ? 'bg-gray-800 text-white' : 'bg-gray-700 text-gray-300'
             }`}
             title="Auto-adjust based on noise analysis"
           >
@@ -190,7 +190,7 @@ export const NoiseReductionModule: React.FC<NoiseReductionModuleProps> = ({
               onChange={(e) => onToggle(e.target.checked)}
               className="sr-only peer"
             />
-            <div className="w-11 h-6 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-500"></div>
+            <div className="w-11 h-6 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-gray-400"></div>
           </label>
         </div>
       </div>
@@ -201,9 +201,9 @@ export const NoiseReductionModule: React.FC<NoiseReductionModuleProps> = ({
 
           {/* Noise Analysis */}
           {noiseEstimate && (
-            <div className="bg-purple-900/20 border border-purple-500/20 rounded-lg p-3">
+            <div className="bg-gray-800 border border-gray-600 rounded-lg p-3">
               <div className="flex items-center gap-2 mb-2">
-                <Zap className="w-4 h-4 text-purple-400" />
+                <Zap className="w-4 h-4 text-gray-300" />
                 <span className="text-sm font-medium text-white">Noise Analysis</span>
               </div>
 
@@ -230,19 +230,19 @@ export const NoiseReductionModule: React.FC<NoiseReductionModuleProps> = ({
 
               <div className="mt-2 grid grid-cols-3 gap-2 text-xs">
                 <div className="text-center">
-                  <div className="text-red-400">Red</div>
+                  <div className="text-gray-300">Red</div>
                   <div className="text-white font-mono">
                     {(noiseEstimate.channelNoise.red * 1000).toFixed(1)}
                   </div>
                 </div>
                 <div className="text-center">
-                  <div className="text-green-400">Green</div>
+                  <div className="text-gray-300">Green</div>
                   <div className="text-white font-mono">
                     {(noiseEstimate.channelNoise.green * 1000).toFixed(1)}
                   </div>
                 </div>
                 <div className="text-center">
-                  <div className="text-blue-400">Blue</div>
+                  <div className="text-gray-300">Blue</div>
                   <div className="text-white font-mono">
                     {(noiseEstimate.channelNoise.blue * 1000).toFixed(1)}
                   </div>
@@ -253,14 +253,14 @@ export const NoiseReductionModule: React.FC<NoiseReductionModuleProps> = ({
 
           {/* Camera Noise Profile */}
           {selectedProfile && (
-            <div className="bg-green-900/20 border border-green-500/20 rounded-lg p-3">
+            <div className="bg-gray-800 border border-gray-600 rounded-lg p-3">
               <div className="flex items-center gap-2 mb-2">
-                <Camera className="w-4 h-4 text-green-400" />
+                <Camera className="w-4 h-4 text-gray-300" />
                 <span className="text-sm font-medium text-white">Noise Profile</span>
               </div>
-              <div className="text-xs text-green-200">
+              <div className="text-xs text-gray-300">
                 <div className="font-medium">{selectedProfile.camera} {selectedProfile.model}</div>
-                <div className="text-green-300">ISO {selectedProfile.iso}</div>
+                <div className="text-gray-300">ISO {selectedProfile.iso}</div>
               </div>
             </div>
           )}
@@ -277,7 +277,7 @@ export const NoiseReductionModule: React.FC<NoiseReductionModuleProps> = ({
               <select
                 value={options.algorithm}
                 onChange={(e) => updateOption('algorithm', e.target.value as NoiseReductionOptions['algorithm'])}
-                className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-purple-400 focus:outline-none"
+                className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-gray-600 focus:outline-none"
                 disabled={isProcessing}
               >
                 <option value="wavelet">Wavelet (Best Quality)</option>
@@ -300,7 +300,7 @@ export const NoiseReductionModule: React.FC<NoiseReductionModuleProps> = ({
                 max="100"
                 value={options.strength}
                 onChange={(e) => updateOption('strength', parseInt(e.target.value))}
-                className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-purple-400"
+                className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-gray-200"
                 disabled={isProcessing || autoMode}
               />
             </div>
@@ -315,7 +315,7 @@ export const NoiseReductionModule: React.FC<NoiseReductionModuleProps> = ({
                 max="100"
                 value={options.detail}
                 onChange={(e) => updateOption('detail', parseInt(e.target.value))}
-                className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-purple-400"
+                className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-gray-200"
                 disabled={isProcessing}
               />
             </div>
@@ -334,7 +334,7 @@ export const NoiseReductionModule: React.FC<NoiseReductionModuleProps> = ({
                   max="100"
                   value={options.luminanceStrength}
                   onChange={(e) => updateOption('luminanceStrength', parseInt(e.target.value))}
-                  className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-purple-400"
+                  className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-gray-200"
                   disabled={isProcessing || autoMode}
                 />
               </div>
@@ -349,7 +349,7 @@ export const NoiseReductionModule: React.FC<NoiseReductionModuleProps> = ({
                   max="100"
                   value={options.chromaStrength}
                   onChange={(e) => updateOption('chromaStrength', parseInt(e.target.value))}
-                  className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-purple-400"
+                  className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-gray-200"
                   disabled={isProcessing || autoMode}
                 />
               </div>
@@ -367,7 +367,7 @@ export const NoiseReductionModule: React.FC<NoiseReductionModuleProps> = ({
                   step="0.01"
                   value={options.edgeThreshold}
                   onChange={(e) => updateOption('edgeThreshold', parseFloat(e.target.value))}
-                  className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-purple-400"
+                  className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-gray-200"
                   disabled={isProcessing}
                 />
               </div>
@@ -384,7 +384,7 @@ export const NoiseReductionModule: React.FC<NoiseReductionModuleProps> = ({
                   max="5"
                   value={options.iterations}
                   onChange={(e) => updateOption('iterations', parseInt(e.target.value))}
-                  className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-purple-400"
+                  className="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-gray-200"
                   disabled={isProcessing}
                 />
               </div>
@@ -396,7 +396,7 @@ export const NoiseReductionModule: React.FC<NoiseReductionModuleProps> = ({
             <button
               onClick={applyNoiseReduction}
               disabled={isProcessing || !processedImageData || !currentImage}
-              className="w-full bg-purple-600 hover:bg-purple-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white text-sm font-medium py-2 px-4 rounded transition-colors"
+              className="w-full bg-gray-800 hover:bg-gray-800 disabled:bg-gray-600 disabled:cursor-not-allowed text-white text-sm font-medium py-2 px-4 rounded transition-colors"
             >
               {isProcessing ? 'Processing...' : 'Apply Noise Reduction'}
             </button>

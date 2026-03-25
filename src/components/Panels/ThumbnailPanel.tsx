@@ -357,6 +357,13 @@ export function ThumbnailPanel({
                   backgroundColor: 'var(--gray-800)',
                   boxShadow: isSelected ? '0 0 0 1px var(--white)' : 'none'
                 }}
+                draggable
+                onDragStart={(e) => {
+                  e.dataTransfer.setData('application/x-photo-id', image.id);
+                  e.dataTransfer.setData('application/x-photo-path', image.path);
+                  e.dataTransfer.setData('application/x-photo-name', image.name);
+                  e.dataTransfer.effectAllowed = 'copy';
+                }}
                 onClick={() => handleThumbnailClick(image)}
                 onMouseEnter={(e) => {
                   if (!isSelected) {

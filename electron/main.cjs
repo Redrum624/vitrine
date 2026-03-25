@@ -520,8 +520,9 @@ ipcMain.handle('read-image-as-data-url', async (event, filePath) => {
     const ext = path.extname(filePath).toLowerCase();
     const rawFormats = ['.cr2', '.cr3', '.nef', '.arw', '.orf', '.dng', '.raf', '.rw2', '.pef', '.srw'];
 
-    // For RAW files, use Sharp to generate a JPEG thumbnail
+    // For RAW files, extract embedded JPEG preview
     if (rawFormats.includes(ext)) {
+      // Try Sharp first (works for some RAW formats like DNG)
       try {
         const sharp = require('sharp');
         const thumbnailBuffer = await sharp(filePath, { failOnError: false })
@@ -531,9 +532,47 @@ ipcMain.handle('read-image-as-data-url', async (event, filePath) => {
 
         const base64 = thumbnailBuffer.toString('base64');
         return `data:image/jpeg;base64,${base64}`;
-      } catch (sharpError) {
-        console.warn(`Sharp failed for RAW file ${filePath}:`, sharpError.message);
-        // Fall back to placeholder for unsupported RAW formats
+      } catch (_sharpError) {
+        // Sharp doesn't support this RAW format, extract embedded JPEG preview
+      }
+
+      // Extract the largest embedded JPEG from the RAW file
+      // All major RAW formats (ORF, CR2, NEF, ARW, etc.) embed a JPEG preview
+      try {
+        const fileData = await fs.promises.readFile(filePath);
+        const scanLimit = Math.min(fileData.length, 5 * 1024 * 1024);
+        let largest = { offset: -1, size: 0 };
+
+        for (let i = 0; i < scanLimit - 1; i++) {
+          if (fileData[i] === 0xFF && fileData[i + 1] === 0xD8) {
+            for (let j = i + 2; j < fileData.length - 1; j++) {
+              if (fileData[j] === 0xFF && fileData[j + 1] === 0xD9) {
+                const size = j - i + 2;
+                if (size > largest.size) {
+                  largest = { offset: i, size };
+                }
+                break;
+              }
+            }
+          }
+        }
+
+        if (largest.offset >= 0 && largest.size > 1000) {
+          const jpegBuffer = fileData.subarray(largest.offset, largest.offset + largest.size);
+          const sharp = require('sharp');
+          const thumbnailBuffer = await sharp(jpegBuffer)
+            .resize(300, 200, { fit: 'inside', withoutEnlargement: true })
+            .jpeg({ quality: 80 })
+            .toBuffer();
+
+          const base64 = thumbnailBuffer.toString('base64');
+          return `data:image/jpeg;base64,${base64}`;
+        }
+
+        console.warn(`No embedded JPEG preview found in RAW file ${filePath}`);
+        return null;
+      } catch (extractError) {
+        console.warn(`Failed to extract preview from RAW file ${filePath}:`, extractError.message);
         return null;
       }
     }

@@ -70,7 +70,7 @@ export function WhiteBalanceModuleComponent({
           <div className="w-1 h-3 rounded-sm" style={{backgroundColor: 'var(--gray-600)'}} />
           <span className="text-xs font-medium uppercase tracking-wider" style={{color: 'var(--gray-500)', letterSpacing: '0.5px'}}>Controls</span>
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1.5">
           <button
             onClick={handleAutoDetect}
             className="p-1.5 rounded border"

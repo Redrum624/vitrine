@@ -3,6 +3,8 @@ import { Sun, Moon, Sliders, RotateCcw, Zap, Settings } from 'lucide-react';
 import { ShadowsHighlightsModule, ShadowsHighlightsParams } from '../../modules/ShadowsHighlightsModule';
 import { logger } from '../../utils/Logger';
 import { DelayedInputControl } from '../Controls/DelayedInputControl';
+import { autoAdjustService } from '../../services/AutoAdjustService';
+import { imageService } from '../../services/ImageService';
 
 interface ShadowsHighlightsModuleComponentProps {
   module: ShadowsHighlightsModule;
@@ -80,10 +82,15 @@ export const ShadowsHighlightsModuleComponent: React.FC<ShadowsHighlightsModuleC
         <div className="flex items-center gap-1.5">
           <button
             onClick={() => {
-              const autoParams = module.autoAdjust();
-              setParams(autoParams);
-              onParamsChange?.(autoParams);
-              logger.info('Auto shadows/highlights applied');
+              const img = imageService.getCurrentImage();
+              if (!img) { logger.warn('No image for auto SH'); return; }
+              const stats = autoAdjustService.analyse(img.data, img.width, img.height);
+              const computed = autoAdjustService.autoShadowsHighlights(stats);
+              module.setParams(computed as ShadowsHighlightsParams);
+              const newParams = module.getParams();
+              setParams(newParams);
+              onParamsChange?.(newParams);
+              logger.info('Auto shadows/highlights applied (image-aware)');
             }}
             className="p-1.5 rounded border"
             style={{

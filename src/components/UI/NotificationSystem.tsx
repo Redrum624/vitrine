@@ -1,12 +1,12 @@
-import { useEffect, useRef } from 'react';
-import { CheckCircle, XCircle, AlertCircle, Info, X } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { CheckCircle, XCircle, AlertTriangle, Info, X } from 'lucide-react';
 
 export interface Notification {
   id: string;
   type: 'success' | 'error' | 'warning' | 'info';
   title: string;
   message: string;
-  duration?: number; // Auto-dismiss after duration (ms), 0 = no auto-dismiss
+  duration?: number;
 }
 
 interface NotificationSystemProps {
@@ -14,99 +14,125 @@ interface NotificationSystemProps {
   onDismiss: (id: string) => void;
 }
 
+const ACCENT: Record<Notification['type'], string> = {
+  success: '#22c55e',
+  error:   '#ef4444',
+  warning: '#eab308',
+  info:    '#3b82f6',
+};
 
-export function NotificationSystem({ notifications, onDismiss }: NotificationSystemProps) {
-  const timersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+function ToastItem({ notification, onDismiss }: { notification: Notification; onDismiss: (id: string) => void }) {
+  const [exiting, setExiting] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Handle auto-dismiss timers
+  const dismiss = () => {
+    if (exiting) return;
+    setExiting(true);
+    setTimeout(() => onDismiss(notification.id), 250);
+  };
+
   useEffect(() => {
-    const currentTimers = timersRef.current;
-
-    notifications.forEach(notification => {
-      // Only set timer if not already set and has a duration
-      if (notification.duration && notification.duration > 0 && !currentTimers.has(notification.id)) {
-        const timer = setTimeout(() => {
-          onDismiss(notification.id);
-          currentTimers.delete(notification.id);
-        }, notification.duration);
-        currentTimers.set(notification.id, timer);
-      }
-    });
-
-    // Clean up timers for dismissed notifications
-    currentTimers.forEach((timer, id) => {
-      if (!notifications.some(n => n.id === id)) {
-        clearTimeout(timer);
-        currentTimers.delete(id);
-      }
-    });
-
-    return () => {
-      currentTimers.forEach(timer => clearTimeout(timer));
-    };
-  }, [notifications, onDismiss]);
-
-  const getIcon = (type: Notification['type']) => {
-    switch (type) {
-      case 'success':
-        return <CheckCircle className="w-5 h-5 text-green-400" />;
-      case 'error':
-        return <XCircle className="w-5 h-5 text-red-400" />;
-      case 'warning':
-        return <AlertCircle className="w-5 h-5 text-yellow-400" />;
-      case 'info':
-        return <Info className="w-5 h-5 text-blue-400" />;
-      default:
-        return <Info className="w-5 h-5 text-blue-400" />;
+    if (notification.duration && notification.duration > 0) {
+      timerRef.current = setTimeout(dismiss, notification.duration);
     }
-  };
+    return () => { if (timerRef.current) clearTimeout(timerRef.current); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  const getStyles = (type: Notification['type']) => {
-    const baseStyles = "rounded-lg shadow-lg border-l-4 transition-all duration-300 ease-in-out";
+  const accent = ACCENT[notification.type];
 
-    switch (type) {
-      case 'success':
-        return `${baseStyles} bg-green-50 border-green-400 text-green-800`;
-      case 'error':
-        return `${baseStyles} bg-red-50 border-red-400 text-red-800`;
-      case 'warning':
-        return `${baseStyles} bg-yellow-50 border-yellow-400 text-yellow-800`;
-      case 'info':
-        return `${baseStyles} bg-blue-50 border-blue-400 text-blue-800`;
-      default:
-        return `${baseStyles} bg-gray-50 border-gray-400 text-gray-800`;
+  const icon = (() => {
+    const cls = 'w-4 h-4 flex-shrink-0';
+    switch (notification.type) {
+      case 'success': return <CheckCircle className={cls} style={{ color: accent }} />;
+      case 'error':   return <XCircle className={cls} style={{ color: accent }} />;
+      case 'warning': return <AlertTriangle className={cls} style={{ color: accent }} />;
+      case 'info':    return <Info className={cls} style={{ color: accent }} />;
     }
-  };
-
-  if (notifications.length === 0) {
-    return null;
-  }
+  })();
 
   return (
-    <div className="fixed top-4 right-4 z-50 space-y-3 max-w-sm">
-      {notifications.map((notification) => (
-        <div
-          key={notification.id}
-          className={`${getStyles(notification.type)} p-4 animate-slide-in-right`}
-        >
-          <div className="flex items-start">
-            <div className="flex-shrink-0 mr-3">
-              {getIcon(notification.type)}
-            </div>
-            <div className="flex-1">
-              <h4 className="text-sm font-semibold mb-1">{notification.title}</h4>
-              <p className="text-sm">{notification.message}</p>
-            </div>
-            <button
-              onClick={() => onDismiss(notification.id)}
-              className="ml-3 text-gray-400 hover:text-gray-600 transition-colors"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
+    <div
+      className="toast-item"
+      style={{
+        backgroundColor: 'var(--gray-900)',
+        border: '1px solid var(--border)',
+        borderRadius: '4px',
+        padding: '10px 12px',
+        display: 'flex',
+        alignItems: 'flex-start',
+        gap: '10px',
+        minWidth: '260px',
+        maxWidth: '360px',
+        boxShadow: '0 4px 20px rgba(0,0,0,0.45)',
+        borderLeft: `3px solid ${accent}`,
+        animation: exiting ? 'toast-out 0.25s ease-in forwards' : 'toast-in 0.3s ease-out forwards',
+        cursor: 'default',
+        pointerEvents: 'auto',
+      }}
+      onMouseEnter={() => { if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; } }}
+      onMouseLeave={() => {
+        if (notification.duration && notification.duration > 0 && !exiting) {
+          timerRef.current = setTimeout(dismiss, 2000);
+        }
+      }}
+    >
+      <div style={{ marginTop: '1px' }}>{icon}</div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--white)', lineHeight: '16px' }}>
+          {notification.title}
         </div>
-      ))}
+        <div style={{ fontSize: '11px', color: 'var(--gray-400)', lineHeight: '15px', marginTop: '2px' }}>
+          {notification.message}
+        </div>
+      </div>
+      <button
+        onClick={dismiss}
+        style={{
+          background: 'none', border: 'none', padding: '2px', cursor: 'pointer',
+          color: 'var(--gray-500)', flexShrink: 0, display: 'flex',
+        }}
+        onMouseEnter={e => { e.currentTarget.style.color = 'var(--white)'; }}
+        onMouseLeave={e => { e.currentTarget.style.color = 'var(--gray-500)'; }}
+      >
+        <X size={13} />
+      </button>
     </div>
   );
 }
 
+export function NotificationSystem({ notifications, onDismiss }: NotificationSystemProps) {
+  if (notifications.length === 0) return null;
+
+  return (
+    <>
+      {/* Keyframes injected once */}
+      <style>{`
+        @keyframes toast-in {
+          from { opacity: 0; transform: translateX(40px); }
+          to   { opacity: 1; transform: translateX(0); }
+        }
+        @keyframes toast-out {
+          from { opacity: 1; transform: translateX(0); }
+          to   { opacity: 0; transform: translateX(40px); }
+        }
+      `}</style>
+      <div
+        style={{
+          position: 'fixed',
+          bottom: '16px',
+          right: '16px',
+          zIndex: 9999,
+          display: 'flex',
+          flexDirection: 'column-reverse',
+          gap: '8px',
+          pointerEvents: 'none',
+        }}
+      >
+        {notifications.map(n => (
+          <ToastItem key={n.id} notification={n} onDismiss={onDismiss} />
+        ))}
+      </div>
+    </>
+  );
+}
