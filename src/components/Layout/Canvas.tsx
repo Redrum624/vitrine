@@ -641,10 +641,10 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
         return;
       }
 
-      // Clear render cache AND store's processed data so the Canvas
-      // can't accidentally reuse stale renders from the previous image.
-      canvasCache.current = {};
-      useAppStore.getState().setProcessedImageData(null);
+      // Clear ALL caches so the new image gets a completely fresh render:
+      canvasCache.current = {};                                    // 1. Canvas render cache
+      useAppStore.getState().setProcessedImageData(null);          // 2. Store's processed data
+      imageProcessingPipeline.clearCache();                        // 3. Pipeline module output cache
 
       setImageLoading(true);
       setDisplayImage(image);

@@ -599,6 +599,13 @@ export class ImageProcessingPipeline {
     };
   }
 
+  // Clear all cached processing results without resetting module parameters.
+  // Call this when switching images so the pipeline reprocesses with new input data.
+  clearCache(): void {
+    this.moduleCache.clear();
+    logger.debug('Pipeline cache cleared');
+  }
+
   // Reset all modules to default parameters
   resetAllModules(): void {
     logger.info('Resetting all modules to default parameters');
