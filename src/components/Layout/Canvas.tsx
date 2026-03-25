@@ -641,20 +641,16 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
         return;
       }
 
-      // Clear the render cache so the new image isn't blocked by stale data
+      // Clear render cache AND store's processed data so the Canvas
+      // can't accidentally reuse stale renders from the previous image.
       canvasCache.current = {};
+      useAppStore.getState().setProcessedImageData(null);
 
       setImageLoading(true);
       setDisplayImage(image);
 
       // Load image using ImageService (will use cache if available)
       await imageService.loadImage(image.path);
-
-      // Canvas will be redrawn by the useEffect that watches for processedImageData changes
-      // No need to manually call redrawCanvas here
-
-      // Trigger initial processing with the loaded image
-      // This will be handled by the AdjustmentPanel's useEffect
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error loading image';
       logger.error('Failed to load image:', error);
