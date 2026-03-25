@@ -541,7 +541,7 @@ ipcMain.handle('read-image-as-data-url', async (event, filePath) => {
       // Try Sharp first (works for some RAW formats like DNG)
       try {
         const sharp = require('sharp');
-        const thumbnailBuffer = await sharp(filePath, { failOnError: false })
+        const thumbnailBuffer = await sharp(filePath, { failOn: 'none' })
           .resize(300, 200, { fit: 'inside', withoutEnlargement: true })
           .jpeg({ quality: 80 })
           .toBuffer();
@@ -553,13 +553,13 @@ ipcMain.handle('read-image-as-data-url', async (event, filePath) => {
       }
 
       // Extract the largest embedded JPEG from the RAW file
-      // All major RAW formats (ORF, CR2, NEF, ARW, etc.) embed a JPEG preview
+      // Scan the ENTIRE file (not just first 5MB) — DNG files can be 40MB+
+      // with the JPEG preview embedded deep in the file
       try {
         const fileData = await fs.promises.readFile(filePath);
-        const scanLimit = Math.min(fileData.length, 5 * 1024 * 1024);
         let largest = { offset: -1, size: 0 };
 
-        for (let i = 0; i < scanLimit - 1; i++) {
+        for (let i = 0; i < fileData.length - 1; i++) {
           if (fileData[i] === 0xFF && fileData[i + 1] === 0xD8) {
             for (let j = i + 2; j < fileData.length - 1; j++) {
               if (fileData[j] === 0xFF && fileData[j + 1] === 0xD9) {
@@ -599,7 +599,8 @@ ipcMain.handle('read-image-as-data-url', async (event, filePath) => {
     const base64 = data.toString('base64');
     return `data:${mimeType};base64,${base64}`;
   } catch (error) {
-    throw error;
+    console.warn(`Failed to read image as data URL: ${filePath}`, error.message);
+    return null; // Return null instead of throwing — prevents thumbnail loading from stopping
   }
 });
 
