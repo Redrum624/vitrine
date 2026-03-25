@@ -421,9 +421,9 @@ export class ImageProcessingPipeline {
 
         // Smart skipping: check if module has identity parameters
         if (this.isModuleIdentity(module)) {
-          logger.debug(`Module ${module.getName()} skipped - identity parameters`);
           continue;
         }
+
 
         // Check cache for this module
         const cacheKey = this.getModuleCacheKey(module);
@@ -614,8 +614,11 @@ export class ImageProcessingPipeline {
     this.moduleCache.clear();
 
     for (const module of this.modules.values()) {
-      if (module.resetParams) {
+      // Try resetParams() first (most modules), then reset() (adapter modules like ToneCurve)
+      if (typeof module.resetParams === 'function') {
         module.resetParams();
+      } else if (typeof (module as unknown as { reset?: () => void }).reset === 'function') {
+        (module as unknown as { reset: () => void }).reset();
       }
     }
   }

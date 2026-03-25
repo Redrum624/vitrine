@@ -638,6 +638,7 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
       useAppStore.getState().setProcessedImageData(null);
       imageProcessingPipeline.resetAllModules();
 
+
       setImageLoading(true);
       setDisplayImage(image);
 
