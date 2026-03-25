@@ -632,19 +632,11 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
 
   const loadImage = useCallback(async (image: ImageFileInfo) => {
     try {
-      // Check if image is already the current one (avoid redundant loads)
-      const currentImg = imageService.getCurrentImage();
-      if (currentImg && currentImg.filePath === image.path) {
-        logger.debug('Image already loaded, skipping reload');
-        setDisplayImage(image);
-        redrawCanvas();
-        return;
-      }
-
-      // Clear all caches and reset modules so each photo starts clean:
-      canvasCache.current = {};                                    // 1. Canvas render cache
-      useAppStore.getState().setProcessedImageData(null);          // 2. Stale processed data
-      imageProcessingPipeline.resetAllModules();                   // 3. Reset params + clear cache
+      // Always reset modules and caches when switching images so
+      // styles/edits don't bleed between photos.
+      canvasCache.current = {};
+      useAppStore.getState().setProcessedImageData(null);
+      imageProcessingPipeline.resetAllModules();
 
       setImageLoading(true);
       setDisplayImage(image);
