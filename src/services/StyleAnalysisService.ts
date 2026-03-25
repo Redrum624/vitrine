@@ -282,19 +282,19 @@ class StyleAnalysisService {
     const dz = (val: number, threshold: number) =>
       Math.abs(val) < threshold ? 0 : val;
 
-    // ── Exposure / Brightness (very gentle) ─────────────────────────────
+    // ── Exposure / Brightness ──────────────────────────────────────────
     const lumDelta = dz(source.meanLuminance - target.meanLuminance, 0.05);
-    const exposureAdj = Math.max(-0.3, Math.min(0.3, lumDelta * 0.4));
-    const brightnessAdj = Math.max(-0.15, Math.min(0.15, lumDelta * 0.2));
+    const exposureAdj = Math.max(-0.15, Math.min(0.15, lumDelta * 0.2));
+    const brightnessAdj = Math.max(-0.08, Math.min(0.08, lumDelta * 0.1));
 
     // ── Contrast ───────────────────────────────────────────────────────
     const contrastRatio = target.stdLuminance > 0.01
       ? source.stdLuminance / target.stdLuminance : 1;
-    const contrastAdj = Math.max(-0.3, Math.min(0.3, dz(contrastRatio - 1, 0.08) * 0.4));
+    const contrastAdj = Math.max(-0.15, Math.min(0.15, dz(contrastRatio - 1, 0.08) * 0.2));
 
     // ── Saturation ─────────────────────────────────────────────────────
     const satDelta = dz(source.meanSaturation - target.meanSaturation, 0.03);
-    const saturationAdj = Math.max(-0.3, Math.min(0.3, satDelta * 0.5));
+    const saturationAdj = Math.max(-0.15, Math.min(0.15, satDelta * 0.25));
 
     params['basicadj'] = {
       exposure: exposureAdj,
@@ -305,11 +305,11 @@ class StyleAnalysisService {
       black_point: 0,
     };
 
-    // ── White Balance (conservative) ───────────────────────────────────
+    // ── White Balance ──────────────────────────────────────────────────
     const tempDelta = dz(source.estimatedTemp - target.estimatedTemp, 200);
-    const targetTemp = Math.max(3000, Math.min(9000, 5500 + tempDelta * 0.06));
+    const targetTemp = Math.max(4000, Math.min(8000, 5500 + tempDelta * 0.03));
     const tintDelta = dz(source.estimatedTint - target.estimatedTint, 5);
-    const tintAdj = Math.max(-15, Math.min(15, tintDelta * 0.1));
+    const tintAdj = Math.max(-8, Math.min(8, tintDelta * 0.05));
 
     params['temperature'] = {
       temperature: Math.round(targetTemp),
@@ -320,11 +320,11 @@ class StyleAnalysisService {
     const shadowLumDelta = dz(source.shadows.meanLuminance - target.shadows.meanLuminance, 0.03);
     const highlightLumDelta = dz(source.highlights.meanLuminance - target.highlights.meanLuminance, 0.03);
 
-    const shadowRecovery = Math.max(0, Math.min(25, shadowLumDelta * 20));
-    const highlightRecovery = Math.max(0, Math.min(25, -highlightLumDelta * 20));
+    const shadowRecovery = Math.max(0, Math.min(12, shadowLumDelta * 10));
+    const highlightRecovery = Math.max(0, Math.min(12, -highlightLumDelta * 10));
 
-    const blackPointAdj = Math.max(-0.5, Math.min(0.5, dz(source.p5 - target.p5, 0.03) * 0.8));
-    const whitePointAdj = Math.max(-0.5, Math.min(0.5, dz(source.p95 - target.p95, 0.03) * 0.8));
+    const blackPointAdj = Math.max(-0.25, Math.min(0.25, dz(source.p5 - target.p5, 0.03) * 0.4));
+    const whitePointAdj = Math.max(-0.25, Math.min(0.25, dz(source.p95 - target.p95, 0.03) * 0.4));
 
     params['shadowshighlights'] = {
       shadows: shadowRecovery,
@@ -334,13 +334,12 @@ class StyleAnalysisService {
       enabled: shadowRecovery > 2 || highlightRecovery > 2,
     };
 
-    // ── Tone Curve (gentle blend) ──────────────────────────────────────
-    // Only apply curve if histograms are meaningfully different
+    // ── Tone Curve ─────────────────────────────────────────────────────
     const curveDivergence = Math.abs(source.p50 - target.p50) + Math.abs(source.p25 - target.p25) + Math.abs(source.p75 - target.p75);
-    const curveBlend = Math.min(1, Math.max(0, (curveDivergence - 0.05) * 2)); // dead zone at 0.05
+    const curveBlend = Math.min(1, Math.max(0, (curveDivergence - 0.05) * 1.5));
 
     const blendPt = (srcVal: number, tgtVal: number) =>
-      tgtVal + (srcVal - tgtVal) * curveBlend * 0.5; // extra 50% dampening
+      tgtVal + (srcVal - tgtVal) * curveBlend * 0.25;
 
     const curve = [
       { x: 0, y: 0 },
@@ -364,12 +363,12 @@ class StyleAnalysisService {
         return { cyan_red: 0, magenta_green: 0, yellow_blue: 0 };
       }
       return {
-        cyan_red: Math.max(-0.1, Math.min(0.1, dz(srcZone.meanR - tgtZone.meanR, 0.015) * 0.3)),
-        magenta_green: Math.max(-0.1, Math.min(0.1, dz(
+        cyan_red: Math.max(-0.05, Math.min(0.05, dz(srcZone.meanR - tgtZone.meanR, 0.015) * 0.15)),
+        magenta_green: Math.max(-0.05, Math.min(0.05, dz(
           ((srcZone.meanR + srcZone.meanB) / 2 - srcZone.meanG) -
           ((tgtZone.meanR + tgtZone.meanB) / 2 - tgtZone.meanG), 0.015
-        ) * 0.3)),
-        yellow_blue: Math.max(-0.1, Math.min(0.1, dz(srcZone.meanB - tgtZone.meanB, 0.015) * 0.3)),
+        ) * 0.15)),
+        yellow_blue: Math.max(-0.05, Math.min(0.05, dz(srcZone.meanB - tgtZone.meanB, 0.015) * 0.15)),
       };
     };
 
