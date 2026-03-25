@@ -376,6 +376,9 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
     // Add listener for new image loads
     const cleanup = imageService.addImageLoadListener(() => {
       logger.debug('New image loaded, triggering real-time processing');
+      // Force module components to remount so they re-read the (reset) module params
+      // instead of keeping stale styled values in their local useState
+      setResetCounter(prev => prev + 1);
       processCurrentImageRealTime();
     });
 
