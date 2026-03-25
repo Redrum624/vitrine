@@ -116,9 +116,8 @@ export function ThumbnailPanel({
   useEffect(() => {
     if (!visible || images.length === 0) return;
 
-    // Load first few thumbnails immediately
-    const initialLoad = images.slice(0, 10);
-    initialLoad.forEach(loadThumbnail);
+    // Load all thumbnails — they're small (300x200 JPEG) and load via IPC
+    images.forEach(loadThumbnail);
   }, [images, visible, loadThumbnail]);
 
   // Scroll to selected image
