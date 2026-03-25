@@ -44,6 +44,7 @@ export interface ElectronAPI {
   // File system
   readFile: (filePath: string) => Promise<Buffer>;
   readFileBuffer: (filePath: string) => Promise<ArrayBuffer>;
+  decodeRawFile: (filePath: string) => Promise<{ data: ArrayBuffer; width: number; height: number; channels: number }>;
   readImageAsDataURL: (filePath: string) => Promise<string>;
   writeFile: (filePath: string, data: Buffer | string) => Promise<boolean>;
   writeLog: (logEntry: Record<string, unknown>) => Promise<boolean>;

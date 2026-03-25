@@ -8,6 +8,7 @@ import { CropTransformOverlay } from '../Canvas/CropTransformOverlay';
 import { InteractiveCropHandles } from '../Canvas/InteractiveCropHandles';
 import { imageProcessingPipeline } from '../../services/ImageProcessingPipeline';
 import { CropPipelineModule } from '../../modules/CropPipelineModule';
+import { notificationService } from '../../services/NotificationService';
 
 // Debug mode for canvas rendering - set to false for production
 const DEBUG_CANVAS = process.env.NODE_ENV === 'development';
@@ -651,7 +652,9 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
       // Trigger initial processing with the loaded image
       // This will be handled by the AdjustmentPanel's useEffect
     } catch (error) {
-      console.error('Failed to load image:', error);
+      const message = error instanceof Error ? error.message : 'Unknown error loading image';
+      logger.error('Failed to load image:', error);
+      notificationService.error('Image Load Failed', message);
     } finally {
       setImageLoading(false);
     }

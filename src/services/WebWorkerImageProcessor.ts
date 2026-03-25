@@ -75,8 +75,9 @@ export class WebWorkerImageProcessor {
       logger.info(`Web Worker image processing initialized in ${initTime.toFixed(2)}ms`);
 
     } catch (error) {
-      logger.error('Failed to initialize Web Worker image processing:', error);
-      throw error;
+      logger.warn('Web Worker initialization failed, will use main-thread processing:', error);
+      // Don't throw — the pipeline falls back to main thread automatically
+      this.isInitialized = false;
     }
   }
 

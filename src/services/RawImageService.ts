@@ -19,6 +19,7 @@ export interface RawImageData {
   format: string;
   metadata: RawMetadata;
   histogram?: HistogramData;
+  isLibRawProcessed?: boolean;
 }
 
 export interface RawMetadata {
@@ -115,112 +116,74 @@ export class RawImageService {
     }
   }
 
+  /**
+   * Primary decoder: uses Electron main process (Node.js + Sharp) to extract
+   * the embedded JPEG from the RAW file. This is 100% reliable for every file
+   * and avoids the browser SharedArrayBuffer/Emscripten issues entirely.
+   */
   private async decodeRawFile(filePath: string, extension: string): Promise<RawImageData> {
-    logger.debug(`Decoding RAW file with LibRaw: ${extension.toUpperCase()}`);
+    // Try Electron main-process decoder first (embedded JPEG extraction via Sharp)
+    if (typeof window !== 'undefined' && window.electronAPI?.decodeRawFile) {
+      try {
+        logger.info(`Decoding RAW file via Electron main process: ${extension.toUpperCase()}`);
+        const result = await window.electronAPI.decodeRawFile(filePath);
+
+        const uint8 = new Uint8Array(result.data);
+        const floatData = this.convertUint8ToFloat32Array(uint8, result.width, result.height);
+
+        logger.info(`RAW decoded via main process: ${result.width}x${result.height}, ${uint8.length} bytes, ${result.channels}ch`);
+
+        const rawData: RawImageData = {
+          width: result.width,
+          height: result.height,
+          data: floatData,
+          isLibRawProcessed: true,
+          fileName: filePath.split(/[\\/]/).pop() || 'unknown',
+          filePath,
+          format: extension.toUpperCase(),
+          metadata: this.extractBasicMetadata(extension),
+        };
+
+        return rawData;
+      } catch (mainProcessError) {
+        const msg = mainProcessError instanceof Error ? mainProcessError.message : String(mainProcessError);
+        logger.warn(`Main-process RAW decode failed, trying LibRaw WASM: ${msg}`);
+      }
+    }
+
+    // Fallback: LibRaw WASM (iframe-based, works for first file per session)
+    logger.info(`Decoding RAW file with LibRaw WASM: ${extension.toUpperCase()}`);
 
     try {
-      // Read the file buffer
       let buffer: ArrayBuffer;
-
       if (typeof window !== 'undefined' && window.electronAPI) {
-        // Electron environment - use IPC to read file as ArrayBuffer
         buffer = await window.electronAPI.readFileBuffer(filePath);
       } else {
-        // Browser environment - file should be provided as ArrayBuffer
         throw new Error('Browser RAW processing requires file buffer, not file path');
       }
 
-      // Process with LibRaw WebAssembly using quality preset
-      const result = await libRawService.processRawFileWithPreset(
-        buffer,
-        'quality'
-      );
+      const result = await libRawService.processRawFileWithPreset(buffer, 'quality');
 
-      // RESEARCH: Extract real pixel data from LibRaw result
-      console.log('RawImageService: LibRaw result.imageData - length:', result.imageData?.length, 'type:', typeof result.imageData);
-
-      // Try to extract actual pixel data from the LibRaw result
       let pixelData: Uint8Array | null = null;
-
       if (result.imageData instanceof Uint8Array) {
-        // Direct Uint8Array - ideal case
         pixelData = result.imageData;
-        console.log('RawImageService: Found direct Uint8Array data, length:', pixelData.length);
       } else if (result.imageData && typeof result.imageData === 'object') {
-        // Object with pixel data properties - investigate common patterns
-        const imageDataObj = result.imageData as Record<string, unknown>; // Type assertion for dynamic object
-        console.log('RawImageService: Investigating object structure:', Object.keys(imageDataObj));
-
-        // Check common property names for pixel data
-        if (imageDataObj.data instanceof Uint8Array) {
-          pixelData = imageDataObj.data;
-          console.log('RawImageService: Found pixel data in .data property, length:', pixelData?.length || 0);
-        } else if (imageDataObj.buffer instanceof ArrayBuffer) {
-          pixelData = new Uint8Array(imageDataObj.buffer);
-          console.log('RawImageService: Found pixel data in .buffer property, length:', pixelData?.length || 0);
-        } else if (imageDataObj.pixels instanceof Uint8Array) {
-          pixelData = imageDataObj.pixels;
-          console.log('RawImageService: Found pixel data in .pixels property, length:', pixelData?.length || 0);
-        } else if (Array.isArray(imageDataObj)) {
-          // Convert array to Uint8Array
-          pixelData = new Uint8Array(imageDataObj);
-          console.log('RawImageService: Converted array to Uint8Array, length:', pixelData?.length || 0);
-        }
+        const obj = result.imageData as Record<string, unknown>;
+        if (obj.data instanceof Uint8Array) pixelData = obj.data;
+        else if (obj.buffer instanceof ArrayBuffer) pixelData = new Uint8Array(obj.buffer);
       }
 
       if (pixelData && pixelData.length > 0) {
-        console.log('RawImageService: Successfully extracted pixel data, converting to Float32Array');
-
-        // Convert LibRaw RGB output to RGBA Float32Array for our pipeline
-        const floatData = this.convertUint8ToFloat32Array(pixelData);
-
-        // Debug the converted data
-        const max = Math.max(...floatData.slice(0, 1000));
-        const min = Math.min(...floatData.slice(0, 1000));
-        const sample = floatData.slice(0, 8);
-        console.log('RawImageService: Converted data - min:', min, 'max:', max, 'length:', floatData.length, 'sample:', Array.from(sample));
-
-        // Use the real pixel data instead of gradient pattern
+        const floatData = this.convertUint8ToFloat32Array(pixelData, result.width, result.height);
         return this.finishRawProcessing(result as ProcessedRawData, floatData, filePath);
       }
 
-      console.log('RawImageService: Unable to extract pixel data, using fallback test pattern');
-
-      // Generate a simple gradient test pattern in RGBA format
-      const floatData = this.generateTestPattern(result.width, result.height);
-      return this.finishRawProcessing(result as ProcessedRawData, floatData, filePath);
-
+      throw new Error(`LibRaw returned unusable pixel data`);
     } catch (error) {
-      logger.warn(`LibRaw processing failed for ${filePath}, falling back to mock processing:`, error);
-
-      // Fallback to mock processing for development/testing
-      return this.processMockRawFile(filePath, extension);
+      const msg = error instanceof Error ? error.message : String(error);
+      logger.error(`LibRaw WASM failed for ${filePath}: ${msg}`);
+      throw error;
     }
-  }
-
-  // Helper method to generate test pattern when LibRaw fails
-  private generateTestPattern(width: number, height: number): Float32Array {
-    const pixels = width * height;
-    const floatData = new Float32Array(pixels * 4); // RGBA
-
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        const idx = (y * width + x) * 4;
-        // Create a simple gradient pattern so we can see SOMETHING
-        floatData[idx] = x / width;     // R gradient
-        floatData[idx + 1] = y / height; // G gradient
-        floatData[idx + 2] = 0.5;              // B constant
-        floatData[idx + 3] = 1.0;              // A opaque
-      }
-    }
-
-    // Debug the converted data
-    const max = Math.max(...floatData.slice(0, 1000));
-    const min = Math.min(...floatData.slice(0, 1000));
-    const sample = floatData.slice(0, 8);
-    console.log('RawImageService: Test pattern - min:', min, 'max:', max, 'length:', floatData.length, 'sample:', Array.from(sample));
-
-    return floatData;
   }
 
   // Helper method to finish RAW processing with camera profiles and final result
@@ -260,6 +223,7 @@ export class RawImageService {
       width: result.width,
       height: result.height,
       data: floatData,
+      isLibRawProcessed: true,
       fileName: filePath.split(/[\\/]/).pop() || 'unknown',
       filePath: filePath,
       format: filePath.substring(filePath.lastIndexOf('.')).toUpperCase(),
@@ -277,13 +241,13 @@ export class RawImageService {
 
     logger.info(`RAW file decoded successfully: ${result.width}x${result.height} (${result.processingTime.toFixed(2)}ms)`);
 
-    // Debug final result
-    console.log('RawImageService: Final result - data length:', rawData.data.length, 'data exists:', !!rawData.data);
+    logger.debug(`RAW final result — data length: ${rawData.data.length}`);
 
     return rawData;
   }
 
   // Fallback mock processing method
+  // @ts-expect-error — kept as potential fallback but no longer called from the main pipeline
   private async processMockRawFile(filePath: string, extension: string): Promise<RawImageData> {
     try {
       // For development, we'll try to read it as a regular image first
@@ -506,44 +470,46 @@ export class RawImageService {
     return processed;
   }
 
-  // Convert Uint8Array to Float32Array (for LibRaw output)
-  // INVESTIGATION: Check if LibRaw outputs RGB or BGR
-  private convertUint8ToFloat32Array(uint8Data: Uint8Array): Float32Array {
-    // LibRaw outputs RGB (3 channels), convert to RGBA (4 channels)
-    const rgbPixels = uint8Data.length / 3;
-    const rgbaData = new Float32Array(rgbPixels * 4);
+  /**
+   * Convert LibRaw Uint8Array output to Float32Array RGBA (0-1 normalized).
+   * Auto-detects whether the input is RGB (3ch) or RGBA (4ch) from data length.
+   */
+  private convertUint8ToFloat32Array(uint8Data: Uint8Array, width: number, height: number): Float32Array {
+    const totalPixels = width * height;
+    const rgbaData = new Float32Array(totalPixels * 4);
 
-    // Debug first few pixels to check channel order
-    const firstPixels = Array.from(uint8Data.slice(0, 12));
-    console.log('RawImageService: RGB conversion debug - first 12 bytes:', firstPixels);
-    console.log('RawImageService: First 4 RGB pixels - Raw [R,G,B]: ',
-      `[${firstPixels[0]},${firstPixels[1]},${firstPixels[2]}]`,
-      `[${firstPixels[3]},${firstPixels[4]},${firstPixels[5]}]`,
-      `[${firstPixels[6]},${firstPixels[7]},${firstPixels[8]}]`,
-      `[${firstPixels[9]},${firstPixels[10]},${firstPixels[11]}]`
-    );
-
-    for (let i = 0; i < rgbPixels; i++) {
-      const rgbIdx = i * 3;
-      const rgbaIdx = i * 4;
-
-      // TRY: Standard RGB order first to see if BGR swap was causing issues
-      // The ultra-neutral LibRaw settings might have fixed the channel order
-      rgbaData[rgbaIdx] = uint8Data[rgbIdx] / 255.0;     // R (from R position)
-      rgbaData[rgbaIdx + 1] = uint8Data[rgbIdx + 1] / 255.0; // G (unchanged)
-      rgbaData[rgbaIdx + 2] = uint8Data[rgbIdx + 2] / 255.0; // B (from B position)
-      rgbaData[rgbaIdx + 3] = 1.0; // A (full opacity)
+    // Detect channel count from data length
+    let channels: number;
+    if (uint8Data.length === totalPixels * 3) {
+      channels = 3;
+    } else if (uint8Data.length === totalPixels * 4) {
+      channels = 4;
+    } else {
+      // Best guess: try 3 channels first, fall back to 4
+      channels = uint8Data.length >= totalPixels * 4 ? 4 : 3;
+      logger.warn(`Unexpected pixel data length ${uint8Data.length} for ${width}x${height}. Assuming ${channels} channels.`);
     }
 
-    // Debug converted data
-    const convertedSample = Array.from(rgbaData.slice(0, 16));
-    console.log('RawImageService: RGB→RGBA conversion - first 16 floats (4 RGBA pixels):', convertedSample);
-    console.log('RawImageService: First 4 RGBA pixels - Converted [R,G,B,A]: ',
-      `[${convertedSample[0].toFixed(3)},${convertedSample[1].toFixed(3)},${convertedSample[2].toFixed(3)},${convertedSample[3].toFixed(3)}]`,
-      `[${convertedSample[4].toFixed(3)},${convertedSample[5].toFixed(3)},${convertedSample[6].toFixed(3)},${convertedSample[7].toFixed(3)}]`,
-      `[${convertedSample[8].toFixed(3)},${convertedSample[9].toFixed(3)},${convertedSample[10].toFixed(3)},${convertedSample[11].toFixed(3)}]`,
-      `[${convertedSample[12].toFixed(3)},${convertedSample[13].toFixed(3)},${convertedSample[14].toFixed(3)},${convertedSample[15].toFixed(3)}]`
-    );
+    logger.debug(`Converting ${channels}-channel Uint8 → RGBA Float32 (${width}x${height}, ${uint8Data.length} bytes)`);
+
+    if (channels === 3) {
+      for (let i = 0; i < totalPixels; i++) {
+        const srcIdx = i * 3;
+        const dstIdx = i * 4;
+        rgbaData[dstIdx]     = uint8Data[srcIdx] / 255.0;
+        rgbaData[dstIdx + 1] = uint8Data[srcIdx + 1] / 255.0;
+        rgbaData[dstIdx + 2] = uint8Data[srcIdx + 2] / 255.0;
+        rgbaData[dstIdx + 3] = 1.0;
+      }
+    } else {
+      for (let i = 0; i < totalPixels; i++) {
+        const idx = i * 4;
+        rgbaData[idx]     = uint8Data[idx] / 255.0;
+        rgbaData[idx + 1] = uint8Data[idx + 1] / 255.0;
+        rgbaData[idx + 2] = uint8Data[idx + 2] / 255.0;
+        rgbaData[idx + 3] = uint8Data[idx + 3] / 255.0;
+      }
+    }
 
     return rgbaData;
   }
@@ -571,7 +537,7 @@ export class RawImageService {
       const result = await libRawService.processRawFileWithPreset(buffer, preset, customOptions);
 
       // Convert LibRaw output to our format
-      const floatData = this.convertUint8ToFloat32Array(result.imageData);
+      const floatData = this.convertUint8ToFloat32Array(result.imageData, result.width, result.height);
 
       const extension = fileName.substring(fileName.lastIndexOf('.')).toLowerCase();
 

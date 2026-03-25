@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html><head>
+<meta charset="utf-8">
+</head>
+<body>
+<script type="module">
+/**
+ * Isolated LibRaw processing frame.
+ * Each iframe gets a completely fresh JS/WASM environment,
+ * bypassing the SharedArrayBuffer heap corruption issue
+ * that prevents processing multiple files in the same context.
+ */
+
+let LibRaw;
+
+async function init() {
+  try {
+    // We need each iframe to get a completely isolated Worker (separate
+    // Emscripten pthread pool / WASM heap). To do this we create an
+    // inline module that creates the Worker from a cache-busted URL.
+    const workerUrl = '/libraw/worker.js?t=' + Date.now();
+    const src = `
+      var o = class {
+        constructor() {
+          this.worker = new Worker("${workerUrl}", { type: "module" });
+          this.waitForWorker = false;
+          this.worker.onmessage = ({ data: t }) => {
+            if (this.waitForWorker) {
+              let { return: r, throw: a } = this.waitForWorker;
+              this.waitForWorker = false;
+              t?.error ? a(t.error) : r(t?.out);
+            }
+          };
+        }
+        async runFn(t, ...r) {
+          let a = new Promise((e, n) => { this.waitForWorker = { error: n, return: e }; });
+          this.worker.postMessage({ fn: t, args: r }, r.map(e => {
+            if ([ArrayBuffer, Uint8Array, Int8Array, Uint16Array, Int16Array,
+                 Uint32Array, Int32Array, Float32Array, Float64Array]
+                .some(n => e instanceof n)) return e.buffer;
+          }).filter(e => e));
+          return await a;
+        }
+        async open(t, r) { return await this.runFn("open", t, r); }
+        async metadata(t) {
+          let r = await this.runFn("metadata", !!t);
+          if (r?.hasOwnProperty("thumb_format"))
+            r.thumb_format = ["unknown","jpeg","bitmap","bitmap16","layer","rollei","h265"][r.thumb_format] || "unknown";
+          if (r?.hasOwnProperty("timestamp"))
+            r.timestamp = new Date(r.timestamp);
+          return r;
+        }
+        async imageData() { return await this.runFn("imageData"); }
+      };
+      export { o as default };
+    `;
+    const blob = new Blob([src], { type: 'application/javascript' });
+    const blobUrl = URL.createObjectURL(blob);
+    const mod = await import(blobUrl);
+    URL.revokeObjectURL(blobUrl);
+
+    LibRaw = mod.default || mod;
+    parent.postMessage({ type: 'ready' }, '*');
+  } catch (e) {
+    parent.postMessage({ type: 'init-error', message: e.message }, '*');
+  }
+}
+
+window.addEventListener('message', async (event) => {
+  if (event.data?.type !== 'process') return;
+
+  const { id, buffer, options } = event.data;
+
+  try {
+    const raw = new LibRaw();
+    const uint8 = new Uint8Array(buffer);
+
+    await raw.open(uint8, options || {
+      userQual: 3,
+      useCameraWb: true,
+      outputBps: 8,
+      outputColor: 1,
+    });
+
+    const metadata = await raw.metadata();
+    const imgData = await raw.imageData();
+
+    // Normalise to Uint8Array
+    let pixels = null;
+    if (imgData instanceof Uint8Array && imgData.length > 0) {
+      pixels = imgData;
+    } else if (ArrayBuffer.isView(imgData)) {
+      pixels = new Uint8Array(imgData.buffer, imgData.byteOffset, imgData.byteLength);
+    } else if (imgData && typeof imgData === 'object') {
+      // Serialised typed array
+      const keys = Object.keys(imgData);
+      if (keys.length > 0) {
+        const arr = new Uint8Array(keys.length);
+        for (let i = 0; i < keys.length; i++) arr[i] = imgData[i] || 0;
+        pixels = arr;
+      }
+    }
+
+    // Debug: log the actual type and buffer details
+    console.log('[libraw-frame] imgData type:', typeof imgData,
+      'constructor:', imgData?.constructor?.name,
+      'length:', imgData?.length,
+      'buffer type:', imgData?.buffer?.constructor?.name,
+      'byteLength:', imgData?.buffer?.byteLength,
+      'isShared:', imgData?.buffer instanceof SharedArrayBuffer);
+
+    if (!pixels || pixels.length === 0) {
+      throw new Error(`imageData() returned unusable data (type: ${typeof imgData}, constructor: ${imgData?.constructor?.name}, length: ${imgData?.length}, buffer: ${imgData?.buffer?.constructor?.name})`);
+    }
+
+    // If the pixel data lives on a SharedArrayBuffer (pthreads mode),
+    // we MUST copy it because SharedArrayBuffer can't be transferred.
+    if (pixels.buffer instanceof SharedArrayBuffer) {
+      console.log('[libraw-frame] Pixels on SharedArrayBuffer — copying to regular ArrayBuffer');
+      const fresh = new Uint8Array(pixels.length);
+      fresh.set(pixels);
+      pixels = fresh;
+    }
+
+    const totalPixels = metadata.width * metadata.height;
+    const channels = pixels.length === totalPixels * 4 ? 4 : 3;
+
+    // CRITICAL: copy into a standalone ArrayBuffer before transferring.
+    // The pixels may be a view into the WASM SharedArrayBuffer heap —
+    // transferring that heap would break everything and lose data.
+    const copy = new Uint8Array(pixels.length);
+    copy.set(pixels);
+
+    parent.postMessage({
+      type: 'result',
+      id,
+      imageData: copy,
+      width: metadata.width,
+      height: metadata.height,
+      channels,
+      metadata: {
+        make: metadata.make,
+        model: metadata.model,
+        iso: metadata.iso,
+        aperture: metadata.aperture,
+        shutter: metadata.shutter,
+        focal_length: metadata.focal_length,
+        timestamp: metadata.timestamp,
+        width: metadata.width,
+        height: metadata.height,
+      }
+    }, '*', [copy.buffer]);
+
+  } catch (e) {
+    parent.postMessage({ type: 'error', id, message: e.message }, '*');
+  }
+});
+
+init();
+</script>
+</body>
+</html>

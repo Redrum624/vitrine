@@ -99,7 +99,23 @@ function createWindow() {
   console.log('App packaged:', app.isPackaged);
   console.log('NODE_ENV:', process.env.NODE_ENV);
 
+  // Enable SharedArrayBuffer for libraw-wasm (Emscripten pthreads)
+  mainWindow.webContents.session.webRequest.onHeadersReceived((details, callback) => {
+    callback({
+      responseHeaders: {
+        ...details.responseHeaders,
+        'Cross-Origin-Opener-Policy': ['same-origin'],
+        'Cross-Origin-Embedder-Policy': ['require-corp'],
+      }
+    });
+  });
+
   mainWindow.loadURL(startUrl);
+
+  // Open DevTools automatically in development
+  if (isDev) {
+    mainWindow.webContents.openDevTools();
+  }
 
   // Window is ready but we wait for app to signal it's fully loaded
   mainWindow.once('ready-to-show', () => {
@@ -802,6 +818,123 @@ ipcMain.handle('write-log', async (event, logEntry) => {
 
 ipcMain.handle('get-log-file', async () => {
   return logFile;
+});
+
+// Decode a RAW file by extracting its embedded JPEG and returning raw pixels.
+// This runs in the main process (Node.js) to avoid the browser's
+// SharedArrayBuffer/Emscripten issues with libraw-wasm.
+ipcMain.handle('decode-raw-file', async (event, filePath) => {
+  const sharp = require('sharp');
+
+  try {
+    const buf = await fs.promises.readFile(filePath);
+
+    // 1. Read sensor dimensions from TIFF/IFD header (tag 256=width, 257=height)
+    let sensorWidth = 0, sensorHeight = 0;
+    try {
+      const le = buf[0] === 0x49; // 'II' = little-endian
+      const r16 = le ? (o) => buf[o] | (buf[o+1] << 8) : (o) => (buf[o] << 8) | buf[o+1];
+      const r32 = le
+        ? (o) => (buf[o] | (buf[o+1] << 8) | (buf[o+2] << 16) | (buf[o+3] << 24)) >>> 0
+        : (o) => ((buf[o] << 24) | (buf[o+1] << 16) | (buf[o+2] << 8) | buf[o+3]) >>> 0;
+      const ifd0 = r32(4);
+      const n = r16(ifd0);
+      for (let i = 0; i < Math.min(n, 40); i++) {
+        const off = ifd0 + 2 + i * 12;
+        const tag = r16(off);
+        if (tag === 256) sensorWidth = r32(off + 8);
+        if (tag === 257) sensorHeight = r32(off + 8);
+      }
+    } catch (_) { /* ignore parse errors */ }
+
+    // 2. Find the largest embedded JPEG (FF D8 ... FF D9)
+    let bestStart = -1, bestSize = 0;
+    for (let i = 0; i < buf.length - 1; i++) {
+      if (buf[i] === 0xFF && buf[i + 1] === 0xD8) {
+        for (let j = i + 2; j < buf.length - 1; j++) {
+          if (buf[j] === 0xFF && buf[j + 1] === 0xD9) {
+            const size = j - i + 2;
+            if (size > bestSize) {
+              bestStart = i;
+              bestSize = size;
+            }
+            break;
+          }
+        }
+      }
+    }
+
+    let pixelBuffer, info;
+
+    if (bestSize > 50000) {
+      // Use the embedded JPEG, upscale to sensor dimensions if needed
+      const jpeg = buf.slice(bestStart, bestStart + bestSize);
+      let pipeline = sharp(jpeg);
+
+      // Upscale to full sensor resolution with high-quality Lanczos
+      if (sensorWidth > 0 && sensorHeight > 0) {
+        const meta = await sharp(jpeg).metadata();
+        if (meta.width < sensorWidth || meta.height < sensorHeight) {
+          // Respect orientation: if JPEG is landscape but sensor is portrait (or vice versa), swap
+          let targetW = sensorWidth, targetH = sensorHeight;
+          if ((meta.width > meta.height) !== (sensorWidth > sensorHeight)) {
+            targetW = sensorHeight;
+            targetH = sensorWidth;
+          }
+          pipeline = pipeline.resize(targetW, targetH, {
+            kernel: sharp.kernel.lanczos3,
+            fit: 'fill',
+          });
+          console.log(`RAW decode: upscaling ${meta.width}x${meta.height} → ${targetW}x${targetH}`);
+        }
+      }
+
+      const result = await pipeline.raw().toBuffer({ resolveWithObject: true });
+      pixelBuffer = result.data;
+      info = result.info;
+      console.log(`RAW decode: ${info.width}x${info.height} (${info.channels}ch) from ${filePath}`);
+    } else {
+      // No usable embedded JPEG — try Sharp directly (works for some DNGs)
+      const result = await sharp(filePath, { failOn: 'none' })
+        .raw()
+        .toBuffer({ resolveWithObject: true });
+
+      // If Sharp returns a thumbnail, upscale to sensor dimensions
+      if (sensorWidth > 0 && sensorHeight > 0 && result.info.width < sensorWidth) {
+        let targetW = sensorWidth, targetH = sensorHeight;
+        if ((result.info.width > result.info.height) !== (sensorWidth > sensorHeight)) {
+          targetW = sensorHeight; targetH = sensorWidth;
+        }
+        const upscaled = await sharp(result.data, {
+          raw: { width: result.info.width, height: result.info.height, channels: result.info.channels }
+        }).resize(targetW, targetH, { kernel: sharp.kernel.lanczos3, fit: 'fill' })
+          .raw().toBuffer({ resolveWithObject: true });
+        pixelBuffer = upscaled.data;
+        info = upscaled.info;
+        console.log(`RAW decode: upscaled DNG ${result.info.width}x${result.info.height} → ${info.width}x${info.height}`);
+      } else {
+        pixelBuffer = result.data;
+        info = result.info;
+      }
+      console.log(`RAW decode: Sharp direct ${info.width}x${info.height} from ${filePath}`);
+    }
+
+    // Convert Node Buffer to ArrayBuffer for IPC transfer
+    const ab = pixelBuffer.buffer.slice(
+      pixelBuffer.byteOffset,
+      pixelBuffer.byteOffset + pixelBuffer.byteLength
+    );
+
+    return {
+      data: ab,
+      width: info.width,
+      height: info.height,
+      channels: info.channels,
+    };
+  } catch (error) {
+    console.error('RAW decode failed:', error);
+    throw new Error(`RAW decode failed: ${error.message}`);
+  }
 });
 
 // Read file as ArrayBuffer for RAW files

@@ -7,7 +7,11 @@ export default defineConfig({
   server: {
     port: 3005,
     strictPort: true,
-    open: false // Don't open browser automatically since we're using Electron
+    open: false, // Don't open browser automatically since we're using Electron
+    headers: {
+      'Cross-Origin-Opener-Policy': 'same-origin',
+      'Cross-Origin-Embedder-Policy': 'require-corp',
+    }
   },
   build: {
     rollupOptions: {

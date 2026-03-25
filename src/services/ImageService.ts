@@ -27,6 +27,7 @@ export class ImageService {
   private originalImageData: { data: Float32Array; width: number; height: number } | null = null;
   private imageLoadListeners: (() => void)[] = [];
   private processingPipeline: ImageProcessingPipeline | null = null;
+  private loadGeneration = 0;
 
   static getInstance(): ImageService {
     if (!ImageService.instance) {
@@ -88,6 +89,8 @@ export class ImageService {
   }
 
   async loadImage(filePath: string): Promise<ImageData> {
+    const thisGeneration = ++this.loadGeneration;
+
     const result = await errorHandlingService.withErrorHandling(
       async () => {
         // Validate file path
@@ -137,10 +140,8 @@ export class ImageService {
           // LibRaw already provides properly processed RGB data with accurate colors
           let autoAdjustmentResult: RAWDetectionResult | undefined;
 
-          // Check if this was processed by LibRaw (has proper color range and valid data)
-          const isLibRawProcessed = rawData.data.length > 0 &&
-            Math.max(...rawData.data.slice(0, 1000)) <= 1.0 &&
-            Math.min(...rawData.data.slice(0, 1000)) > 0.0;
+          // Check if this was processed by LibRaw (flag set by RawImageService)
+          const isLibRawProcessed = (rawData as { isLibRawProcessed?: boolean }).isLibRawProcessed === true;
 
           if (isLibRawProcessed) {
             logger.info('LibRaw processed file detected, skipping all auto-adjustments to preserve accurate colors');
@@ -203,6 +204,12 @@ export class ImageService {
             undefined,
             { isRaw: false, ...result.metadata }
           );
+        }
+
+        // Guard against stale loads (user switched images during loading)
+        if (thisGeneration !== this.loadGeneration) {
+          logger.info('Image load superseded by newer request, discarding');
+          return result;
         }
 
         this.currentImage = result;
@@ -392,7 +399,17 @@ export class ImageService {
             reject(new Error(`Failed to load image: ${filePath}`));
           };
 
-          img.src = filePath;
+          // Use Electron IPC to read the file (direct file:// URLs are blocked by CSP)
+          if (typeof window !== 'undefined' && window.electronAPI?.readImageAsDataURL) {
+            window.electronAPI.readImageAsDataURL(filePath)
+              .then((dataUrl: string) => { img.src = dataUrl; })
+              .catch((err: Error) => {
+                logger.error('Failed to read image via Electron for export:', err);
+                reject(err);
+              });
+          } else {
+            img.src = filePath; // Browser fallback (blob URLs, etc.)
+          }
         });
       },
       'ImageService.loadImageForExport',

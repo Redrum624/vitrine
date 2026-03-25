@@ -134,17 +134,23 @@ export class LibRawWasm {
       // Try to load the actual WASM module first
       logger.info('Attempting to load LibRaw WebAssembly module...');
 
-      // Check if compiled WASM is available
+      // Check if compiled WASM is available via fetch (public assets can't be imported)
       const wasmPath = '/wasm/libraw.js';
       const response = await fetch(wasmPath);
-      if (response.ok) {
-        const wasmModule = await import(/* @vite-ignore */ wasmPath);
+      if (!response.ok) throw new Error('LibRaw WASM module not found');
+
+      // Load as script via blob URL to avoid Vite's import restrictions on public files
+      const scriptText = await response.text();
+      const blob = new Blob([scriptText], { type: 'application/javascript' });
+      const blobUrl = URL.createObjectURL(blob);
+      try {
+        const wasmModule = await import(/* @vite-ignore */ blobUrl);
         const libraw = await wasmModule.default();
         logger.info('LibRaw WASM module loaded successfully');
         return libraw;
+      } finally {
+        URL.revokeObjectURL(blobUrl);
       }
-
-      throw new Error('LibRaw WASM module not found');
     } catch (error) {
       // Fallback to mock implementation
       logger.warn('LibRaw WASM module not available, using mock implementation:', error);
