@@ -641,6 +641,9 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
         return;
       }
 
+      // Clear the render cache so the new image isn't blocked by stale data
+      canvasCache.current = {};
+
       setImageLoading(true);
       setDisplayImage(image);
 
