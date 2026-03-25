@@ -386,9 +386,10 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
         }
       }
 
-      // Generate hash for cache comparison (includes actual data sampling for processed images)
-      // For processed images, we need to sample actual pixel values to detect changes
-      let dataHash = `${imageInfo.width}x${imageInfo.height}_${data.length}`;
+      // Generate hash for cache comparison — include the current image path
+      // to ensure different images with the same dimensions never match cache
+      const currentImagePath = imageService.getCurrentImage()?.filePath || '';
+      let dataHash = `${currentImagePath}_${imageInfo.width}x${imageInfo.height}_${data.length}`;
 
       // Add sampling of actual pixel values for better cache invalidation
       if (data.length > 0) {
