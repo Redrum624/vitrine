@@ -832,23 +832,18 @@ describe('Full Auto simulation', () => {
   it('should produce valid output for dark image', () => {
     const img = createDarkImage();
     const beforeAvg = calculateAveragePixel(img);
-    const { output, params } = runFullAuto(img);
+    const { output } = runFullAuto(img);
 
     expect(isValidImageData(output)).toBe(true);
     const afterAvg = calculateAveragePixel(output);
 
-    // Should be brighter
     const beforeLum = beforeAvg[0] * 0.2126 + beforeAvg[1] * 0.7152 + beforeAvg[2] * 0.0722;
     const afterLum = afterAvg[0] * 0.2126 + afterAvg[1] * 0.7152 + afterAvg[2] * 0.0722;
-    expect(afterLum).toBeGreaterThan(beforeLum);
 
     console.log(`\n  ── Full Auto on dark ──`);
     console.log(`  Before lum: ${beforeLum.toFixed(4)}, After lum: ${afterLum.toFixed(4)}`);
-    logVisual('Full Auto dark params', {
-      exposure: params.exposureParams.exposure,
-      wb_temp: params.wbParams.temperature,
-      basicadj_exp: (params.baParams as Record<string, unknown>).exposure,
-    }, beforeAvg, afterAvg);
+    expect(afterLum).toBeGreaterThan(beforeLum);
+    logVisual('Full Auto dark', {}, beforeAvg, afterAvg);
   });
 
   it('should produce valid output for bright image', () => {

@@ -221,22 +221,44 @@ class AutoAdjustService {
   // ── Tone Curve ───────────────────────────────────────────────────────────
 
   autoToneCurve(stats: ImageStats): Record<string, unknown> {
+    const tonalSpan = stats.p95 - stats.p5;
+
+    // For narrow-range images (uniform dark/bright), return identity curve — no modification.
+    if (tonalSpan < 0.15) {
+      logger.info(`AutoToneCurve: narrow span=${tonalSpan.toFixed(3)}, returning identity`);
+      return {
+        baseCurve: [{ x: 0, y: 0 }, { x: 1, y: 1 }],
+        baseCurveNodes: 2,
+        baseCurveType: 1,
+        autoLevels: false,
+        autoContrast: false,
+      };
+    }
+
     // Build a curve that stretches the actual tonal range to fill 0-1
     // while adding a gentle S-curve for perceived contrast.
-    const lo = Math.max(0, stats.p5 - 0.02);  // shadows floor
-    const hi = Math.min(1, stats.p95 + 0.02);  // highlights ceiling
+    const lo = Math.max(0, stats.p5 - 0.02);
+    const hi = Math.min(1, stats.p95 + 0.02);
 
-    // Map current percentiles into a 0-1 output with an S-curve shape
-    // The S-curve pushes shadows slightly down and highlights slightly up
-    const sCurveStrength = clamp(0.22 - stats.stdLum, 0, 0.15); // stronger if flat image
+    // S-curve strength: stronger for flat images, scaled by tonal span
+    const rawStrength = clamp(0.22 - stats.stdLum, 0, 0.12);
+    const sCurveStrength = rawStrength * clamp(tonalSpan / 0.6, 0, 1);
+
+    // Ensure minimum spacing between x-points to avoid spline overshoots.
+    const minSpacing = 0.08;
+    const xLo  = clamp(lo, 0.05, 0.25);
+    const xP25 = Math.max(xLo + minSpacing, clamp(stats.p25, 0.15, 0.40));
+    const xP50 = Math.max(xP25 + minSpacing, clamp(stats.p50, 0.35, 0.65));
+    const xP75 = Math.max(xP50 + minSpacing, clamp(stats.p75, 0.60, 0.85));
+    const xHi  = Math.max(xP75 + minSpacing, clamp(hi, 0.75, 0.95));
 
     const baseCurve = [
       { x: 0, y: 0 },
-      { x: lo, y: Math.max(0, 0.0 - sCurveStrength * 0.5) },
-      { x: stats.p25, y: clamp(0.25 - sCurveStrength, 0.05, 0.35) },
-      { x: stats.p50, y: 0.50 },
-      { x: stats.p75, y: clamp(0.75 + sCurveStrength, 0.65, 0.95) },
-      { x: hi, y: Math.min(1, 1.0 + sCurveStrength * 0.5) },
+      { x: xLo,  y: xLo },  // near-identity at shadow floor
+      { x: xP25, y: clamp(xP25 - sCurveStrength, 0.05, 0.40) },
+      { x: xP50, y: 0.50 },
+      { x: xP75, y: clamp(xP75 + sCurveStrength, 0.60, 0.95) },
+      { x: xHi,  y: xHi },  // near-identity at highlight ceiling
       { x: 1, y: 1 },
     ];
 
@@ -244,7 +266,7 @@ class AutoAdjustService {
     return {
       baseCurve,
       baseCurveNodes: baseCurve.length,
-      baseCurveType: 1, // smooth
+      baseCurveType: 1,
       autoLevels: false,
       autoContrast: false,
     };

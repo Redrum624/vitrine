@@ -422,7 +422,8 @@ export class ShadowsHighlightsModule implements ImageProcessingModule {
   }
 
   private applyWhiteBlackPointAdjustment(data: Float32Array, _width: number, _height: number): void {
-    const whiteAdjust = Math.pow(2, this.params.whitePoint);
+    // Linear formula: whitePoint 0 → 1x, +2 → 1.5x, -2 → 0.5x (gentle range)
+    const whiteAdjust = 1.0 + this.params.whitePoint * 0.25;
     const blackAdjust = this.params.blackPoint / 100.0;
 
     for (let i = 0; i < data.length; i += 4) {

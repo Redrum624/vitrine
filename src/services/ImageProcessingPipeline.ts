@@ -110,7 +110,7 @@ export class ImageProcessingPipeline {
     const localAdjustmentsModule = new LocalAdjustmentsPipelineModule();
     const noiseReductionModule = new NoiseReductionModule();
 
-    // Pipeline order: Geometric → Color/Tone → Local → Denoise
+    // Pipeline order: Geometric → Color/Tone → Denoise → Tone Recovery → Local
     // Note: Transform (rotate/flip) is now integrated into CropModule
     this.addModule(cropModule, 0); // First - crop/transform (unified)
     this.addModule(lensCorrectionsModule, 1); // Second - lens corrections (geometric)
@@ -119,9 +119,9 @@ export class ImageProcessingPipeline {
     this.addModule(basicAdjModule, 4); // Fifth - basic adjustments
     this.addModule(toneCurveModule, 5); // Sixth - tone curve
     this.addModule(colorBalanceModule, 6); // Seventh - color balance
-    this.addModule(shadowsHighlightsModule, 7); // Eighth - shadows/highlights recovery
-    this.addModule(localAdjustmentsModule, 8); // Ninth - local adjustments
-    this.addModule(noiseReductionModule, 9); // Tenth - world-class noise reduction (BM3D, NLMeans, Wavelet, Hybrid)
+    this.addModule(noiseReductionModule, 7); // Eighth - noise reduction (before SH to avoid amplifying noise)
+    this.addModule(shadowsHighlightsModule, 8); // Ninth - shadows/highlights recovery
+    this.addModule(localAdjustmentsModule, 9); // Tenth - local adjustments
 
     logger.info('Image processing pipeline initialized with 10 modules:', this.processingOrder);
   }

@@ -228,6 +228,9 @@ export class ToneCurveModule implements ImageProcessingModule {
   private buildCurveLUT(curve: CurveNode[], lut: Float32Array): void {
     const nodes = curve.slice().sort((a, b) => a.x - b.x);
 
+    // 2-point curves are always linear (avoids Hermite smoothstep distortion)
+    const forceLinear = nodes.length <= 2;
+
     for (let i = 0; i < 65536; i++) {
       const input = i / 65535.0;
       let output = input;
@@ -239,7 +242,7 @@ export class ToneCurveModule implements ImageProcessingModule {
           const p2 = nodes[j];
 
           // Linear interpolation between control points
-          if (this.params.baseCurveType === 0) {
+          if (forceLinear || this.params.baseCurveType === 0) {
             const t = (input - p1.x) / (p2.x - p1.x);
             output = p1.y + t * (p2.y - p1.y);
           }
