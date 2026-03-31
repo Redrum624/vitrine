@@ -138,7 +138,8 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
         if (pipeline) {
           logger.info(`Processing full-resolution image: ${fullResImageData.width}x${fullResImageData.height}`);
           const context = { width: fullResImageData.width, height: fullResImageData.height, channels: 4 };
-          const processedData = await pipeline.processImage(fullResImageData.data, context);
+          // Force main-thread processing for exports (web workers may produce different results)
+          const processedData = await pipeline.processImage(fullResImageData.data, context, false);
 
           if (processedData && typeof processedData === 'object' && 'data' in processedData) {
             const previewData = processedData as unknown as { data: Float32Array; width: number; height: number; isPreview: boolean };

@@ -139,8 +139,8 @@ class AutoAdjustService {
     const targetMedian = 0.45;
     const medianDelta = targetMedian - stats.p50;
 
-    // Exposure in EV-like scale: +1 roughly doubles brightness
-    const exposure = clamp(medianDelta * 2, -1, 1);
+    // Conservative multiplier: only push hard when image is clearly off
+    const exposure = clamp(medianDelta * 1.2, -0.8, 0.8);
 
     // Black level: lift if deepest shadows are clipped
     const black = clamp(stats.p1 < 0.01 ? 0.005 : 0, 0, 0.05);
@@ -155,25 +155,25 @@ class AutoAdjustService {
     black_point: number; exposure: number; contrast: number;
     brightness: number; saturation: number; vibrance: number;
   } {
-    // Exposure: push median towards 0.45
-    const exposure = clamp((0.45 - stats.p50) * 1.8, -1, 1);
+    // Exposure: push median towards 0.45 (gentle — ExposureModule already handles the main correction)
+    const exposure = clamp((0.45 - stats.p50) * 1.0, -0.6, 0.6);
 
-    // Contrast: if image is flat (low stddev), add contrast; if already contrasty, leave alone
+    // Contrast: gentle boost for flat images, leave contrasty images alone
     const idealStd = 0.18;
-    const contrast = clamp((idealStd - stats.stdLum) * 5, -0.5, 0.8);
+    const contrast = clamp((idealStd - stats.stdLum) * 2.5, -0.3, 0.5);
 
-    // Brightness: fine-tune after exposure
-    const brightness = clamp((0.48 - stats.meanLum) * 0.5, -0.3, 0.3);
+    // Brightness: very gentle fine-tune
+    const brightness = clamp((0.48 - stats.meanLum) * 0.25, -0.15, 0.15);
 
-    // Saturation: boost if undersaturated, reduce if oversaturated
+    // Saturation: conservative boost
     const idealSat = 0.35;
-    const saturation = clamp((idealSat - stats.meanSat) * 1.5, -0.5, 0.5);
+    const saturation = clamp((idealSat - stats.meanSat) * 0.8, -0.3, 0.3);
 
-    // Vibrance: boost less-saturated colours more than already-saturated ones
-    const vibrance = clamp(saturation * 0.7, -0.3, 0.4);
+    // Vibrance: proportional to saturation correction
+    const vibrance = clamp(saturation * 0.5, -0.2, 0.25);
 
     // Black point: lower shadows floor if shadows are crushed
-    const black_point = clamp(stats.p1 > 0.05 ? -(stats.p1 - 0.02) * 0.5 : 0, -0.1, 0.1);
+    const black_point = clamp(stats.p1 > 0.05 ? -(stats.p1 - 0.02) * 0.3 : 0, -0.05, 0.05);
 
     logger.info(`AutoBasicAdj: lum=${stats.meanLum.toFixed(3)}, std=${stats.stdLum.toFixed(3)}, sat=${stats.meanSat.toFixed(3)} → exp=${exposure.toFixed(2)}, cont=${contrast.toFixed(2)}, sat=${saturation.toFixed(2)}`);
     return { black_point, exposure, contrast, brightness, saturation, vibrance };
@@ -184,12 +184,12 @@ class AutoAdjustService {
   autoShadowsHighlights(stats: ImageStats): Record<string, unknown> {
     // Shadow adjustment: 50 = neutral, >50 = lift shadows, <50 = darken shadows
     const shadowDeficit = 0.12 - stats.shadowMeanLum; // ideal shadow mean ~0.12
-    const shadowDelta = clamp(shadowDeficit > 0 ? shadowDeficit * 300 * stats.shadowPixelRatio * 4 : 0, 0, 50);
+    const shadowDelta = clamp(shadowDeficit > 0 ? shadowDeficit * 150 * stats.shadowPixelRatio * 2 : 0, 0, 25);
     const shadows = 50 + shadowDelta; // offset from neutral
 
     // Highlight adjustment: 50 = neutral, >50 = recover highlights, <50 = brighten
     const highlightExcess = stats.highlightMeanLum - 0.88;
-    const highlightDelta = clamp(highlightExcess > 0 ? highlightExcess * 300 * stats.highlightPixelRatio * 4 : 0, 0, 50);
+    const highlightDelta = clamp(highlightExcess > 0 ? highlightExcess * 150 * stats.highlightPixelRatio * 2 : 0, 0, 25);
     const highlights = 50 + highlightDelta; // offset from neutral
 
     // White/black point: expand dynamic range if clipped

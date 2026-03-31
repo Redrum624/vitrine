@@ -652,13 +652,24 @@ ipcMain.handle('write-image-file', async (event, filePath, imageData, format, op
   try {
     const sharp = require('sharp');
 
-    let sharpInstance = sharp(Buffer.from(imageData), {
+    const rawBuffer = Buffer.from(imageData);
+    const expectedSize = options.width * options.height * (options.channels || 4);
+    if (rawBuffer.length !== expectedSize) {
+      console.warn(`Export buffer size mismatch: got ${rawBuffer.length}, expected ${expectedSize}`);
+    }
+
+    let sharpInstance = sharp(rawBuffer, {
       raw: {
         width: options.width,
         height: options.height,
         channels: options.channels || 4
       }
-    });
+    })
+
+    // Remove alpha channel for formats that don't support it
+    if (format.toLowerCase() === 'jpeg') {
+      sharpInstance = sharpInstance.removeAlpha();
+    }
 
     // Apply format-specific options
     switch (format.toLowerCase()) {
