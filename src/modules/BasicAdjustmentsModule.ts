@@ -110,9 +110,9 @@ export class BasicAdjustmentsModule {
             }
           }
 
-          // Apply black point adjustment
+          // Apply black point adjustment (scaled down — raw param is -1 to 1)
           if (this.params.black_point !== 0.0) {
-            pixel = Math.max(0.0, pixel - this.params.black_point);
+            pixel = Math.max(0.0, pixel - this.params.black_point * 0.1);
           }
 
           // Apply brightness adjustment (additive)
@@ -120,10 +120,10 @@ export class BasicAdjustmentsModule {
             pixel += this.params.brightness * 0.1; // Scale to reasonable range
           }
 
-          // Apply contrast adjustment
+          // Apply contrast adjustment (scaled — raw param is -1 to 5)
           if (this.params.contrast !== 0.0) {
             // Contrast around midpoint (0.5)
-            const contrastFactor = 1.0 + this.params.contrast;
+            const contrastFactor = 1.0 + this.params.contrast * 0.1;
             pixel = 0.5 + (pixel - 0.5) * contrastFactor;
           }
 
