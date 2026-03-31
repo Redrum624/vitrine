@@ -386,10 +386,11 @@ function App() {
       imageProcessingPipeline.invalidateModuleCache('temperature');
     }
 
-    // Basic Adjustments
+    // Basic Adjustments (zero out exposure — ExposureModule already handles it)
     const baMod = imageProcessingPipeline.getModule('basicadj');
     if (baMod) {
       const p = autoAdjustService.autoBasicAdj(stats);
+      p.exposure = 0;
       (baMod as unknown as { setParams: (p: Record<string, unknown>) => void }).setParams(p);
       imageProcessingPipeline.invalidateModuleCache('basicadj');
     }

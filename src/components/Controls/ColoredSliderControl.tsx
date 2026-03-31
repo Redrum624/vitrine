@@ -7,6 +7,7 @@ interface ColoredSliderControlProps {
   max?: number;
   step?: number;
   onChange: (value: number) => void;
+  onInput?: (value: number) => void;
   disabled?: boolean;
   unit?: string;
   precision?: number;
@@ -32,6 +33,7 @@ const ColoredSliderControl: React.FC<ColoredSliderControlProps> = ({
   description = '',
   defaultValue = 0,
   sliderType,
+  onInput,
 }) => {
   const displayValue = precision > 0 ? value.toFixed(precision) : Math.round(value);
   const sliderId = React.useId();
@@ -58,48 +60,40 @@ const ColoredSliderControl: React.FC<ColoredSliderControlProps> = ({
         background: `linear-gradient(to right, #000000 0%, ${color} 50%, #ffffff 100%)`
       };
     } else if (type === 'hue') {
-      // For hue: show hue shift spectrum
-      // Extract RGB from hex color
+      // For hue: show what the color BECOMES when shifted
+      // Extract base hue from the color
       const hexValue = parseInt(color.replace('#', ''), 16);
       const r = ((hexValue >> 16) & 0xFF) / 255;
       const g = ((hexValue >> 8) & 0xFF) / 255;
       const b = (hexValue & 0xFF) / 255;
 
-      // Convert RGB to HSL to get base hue and saturation
-      const max = Math.max(r, g, b);
-      const min = Math.min(r, g, b);
-      const l = (max + min) / 2;
+      const cMax = Math.max(r, g, b);
+      const cMin = Math.min(r, g, b);
       let baseHue = 0;
-      let baseSat = 0;
 
-      if (max !== min) {
-        const delta = max - min;
-        baseSat = l > 0.5 ? delta / (2 - max - min) : delta / (max + min);
-
-        if (max === r) {
+      if (cMax !== cMin) {
+        const delta = cMax - cMin;
+        if (cMax === r) {
           baseHue = ((g - b) / delta + (g < b ? 6 : 0)) / 6;
-        } else if (max === g) {
+        } else if (cMax === g) {
           baseHue = ((b - r) / delta + 2) / 6;
         } else {
           baseHue = ((r - g) / delta + 4) / 6;
         }
       }
       baseHue *= 360;
-      baseSat *= 100;
 
-      // Use higher saturation and fixed lightness for more vibrant gradient
-      const saturation = Math.max(70, baseSat);
-      const lightness = 50;
-
-      // Create gradient showing hue shift with more steps for smoother transition
-      return {
-        background: `linear-gradient(to right,
-          hsl(${(baseHue - 180 + 360) % 360}, ${saturation}%, ${lightness}%) 0%,
-          hsl(${(baseHue - 90 + 360) % 360}, ${saturation}%, ${lightness}%) 25%,
-          hsl(${baseHue}, ${saturation}%, ${lightness}%) 50%,
-          hsl(${(baseHue + 90) % 360}, ${saturation}%, ${lightness}%) 75%,
-          hsl(${(baseHue + 180) % 360}, ${saturation}%, ${lightness}%) 100%)`
-      };
+      // Show full hue wheel: left = -180° shift, center = original, right = +180° shift
+      // Use 9 stops for smooth hue rotation
+      const sat = 80;
+      const lit = 50;
+      const stops = [];
+      for (let i = 0; i <= 8; i++) {
+        const shift = -180 + (i / 8) * 360;
+        const h = (baseHue + shift + 360) % 360;
+        stops.push(`hsl(${h}, ${sat}%, ${lit}%) ${(i / 8 * 100).toFixed(1)}%`);
+      }
+      return { background: `linear-gradient(to right, ${stops.join(', ')})` };
     }
     return { background: `linear-gradient(to right, #6b7280 0%, ${color} 50%, #6b7280 100%)` };
   };
@@ -110,11 +104,12 @@ const ColoredSliderControl: React.FC<ColoredSliderControlProps> = ({
         <label
           id={labelId}
           htmlFor={sliderId}
-          className="text-xs text-dark-300"
+          className="text-xs"
+          style={{color: 'var(--gray-300)'}}
         >
           {label}
         </label>
-        <span className="text-xs text-dark-400">{displayValue}{unit}</span>
+        <span className="text-xs font-mono" style={{color: 'var(--gray-400)'}}>{displayValue}{unit}</span>
       </div>
       <div className="relative">
         {/* Gradient background track */}
@@ -137,6 +132,7 @@ const ColoredSliderControl: React.FC<ColoredSliderControlProps> = ({
           max={max}
           step={step}
           value={value}
+          onInput={onInput ? (e) => onInput(parseFloat((e.target as HTMLInputElement).value)) : undefined}
           onChange={(e) => onChange(parseFloat(e.target.value))}
           onDoubleClick={() => onChange(defaultValue)}
           disabled={disabled}

@@ -20,35 +20,35 @@ export const ShadowsHighlightsModuleComponent: React.FC<ShadowsHighlightsModuleC
   const [params, setParams] = useState<ShadowsHighlightsParams>(module.getParams());
   const [activeSection, setActiveSection] = useState<'shadows' | 'highlights' | 'advanced'>('shadows');
   const paramsRef = useRef<ShadowsHighlightsParams>(params);
+  const updateTimeoutRef = useRef<Record<string, NodeJS.Timeout>>({});
 
   // Keep ref in sync
   React.useEffect(() => {
     paramsRef.current = params;
   }, [params]);
 
-  // Real-time update with processing (for smooth dragging with live preview)
+  // Real-time update for onInput (during drag) - immediate UI + processing
   const handleParamChangeRealTime = useCallback((paramName: keyof ShadowsHighlightsParams, value: number) => {
-    // Update ref immediately without re-render
     const newParams = { ...paramsRef.current, [paramName]: value };
     paramsRef.current = newParams;
-
-    // Update module and trigger processing
+    setParams(newParams);
     module.setParams({ [paramName]: value });
     onParamsChange?.(newParams);
-
-    // Update state for display (this may lag behind but won't block dragging)
-    setParams(newParams);
   }, [module, onParamsChange]);
 
-  // Final update (same as real-time, kept for consistency)
+  // Throttled update for onChange - immediate UI, deferred processing
   const handleParamChange = useCallback((paramName: keyof ShadowsHighlightsParams, value: number) => {
     const newParams = { ...paramsRef.current, [paramName]: value };
     paramsRef.current = newParams;
     setParams(newParams);
-    module.setParams({ [paramName]: value });
-    onParamsChange?.(newParams);
 
-    logger.debug(`ShadowsHighlights ${paramName} changed to:`, value);
+    const key = paramName as string;
+    if (updateTimeoutRef.current[key]) clearTimeout(updateTimeoutRef.current[key]);
+    updateTimeoutRef.current[key] = setTimeout(() => {
+      module.setParams({ [paramName]: value });
+      onParamsChange?.(newParams);
+      delete updateTimeoutRef.current[key];
+    }, 16);
   }, [module, onParamsChange]);
 
   const handlePresetApply = useCallback((preset: PresetType) => {
@@ -248,7 +248,7 @@ export const ShadowsHighlightsModuleComponent: React.FC<ShadowsHighlightsModuleC
         <div className="space-y-3">
           <div className="flex items-center gap-1.5 mb-2">
             <Moon className="w-4 h-4" style={{color: 'var(--blue-400)'}} />
-            <span className="text-sm font-medium" style={{color: 'var(--gray-300)'}}>Shadow Recovery</span>
+            <span className="text-sm font-medium" style={{color: 'var(--gray-300)'}}>Shadows</span>
           </div>
 
           {/* Amount */}
@@ -266,7 +266,7 @@ export const ShadowsHighlightsModuleComponent: React.FC<ShadowsHighlightsModuleC
                 />
                 <span className="text-xs font-mono" style={{color: 'var(--gray-500)', width: '20px'}}>%</span>
                 <button
-                  onClick={() => resetParam('shadows', 0)}
+                  onClick={() => resetParam('shadows', 50)}
                   className="p-1 rounded"
                   style={{
                     backgroundColor: 'transparent',
@@ -295,7 +295,7 @@ export const ShadowsHighlightsModuleComponent: React.FC<ShadowsHighlightsModuleC
               value={params.shadows}
               onInput={(e) => handleParamChangeRealTime('shadows', parseFloat((e.target as HTMLInputElement).value))}
               onChange={(e) => handleParamChange('shadows', parseFloat(e.target.value))}
-              onDoubleClick={() => handleParamChange('shadows', 0)}
+              onDoubleClick={() => handleParamChange('shadows', 50)}
               className="slider w-full"
               style={{
                 background: 'linear-gradient(to right, #000000, #4b5563, #9ca3af)',
@@ -470,7 +470,7 @@ export const ShadowsHighlightsModuleComponent: React.FC<ShadowsHighlightsModuleC
         <div className="space-y-3">
           <div className="flex items-center gap-1.5 mb-2">
             <Sun className="w-4 h-4" style={{color: 'var(--yellow-400)'}} />
-            <span className="text-sm font-medium" style={{color: 'var(--gray-300)'}}>Highlight Recovery</span>
+            <span className="text-sm font-medium" style={{color: 'var(--gray-300)'}}>Highlights</span>
           </div>
 
           {/* Amount */}
@@ -488,7 +488,7 @@ export const ShadowsHighlightsModuleComponent: React.FC<ShadowsHighlightsModuleC
                 />
                 <span className="text-xs font-mono" style={{color: 'var(--gray-500)', width: '20px'}}>%</span>
                 <button
-                  onClick={() => resetParam('highlights', 0)}
+                  onClick={() => resetParam('highlights', 50)}
                   className="p-1 rounded"
                   style={{
                     backgroundColor: 'transparent',
@@ -517,7 +517,7 @@ export const ShadowsHighlightsModuleComponent: React.FC<ShadowsHighlightsModuleC
               value={params.highlights}
               onInput={(e) => handleParamChangeRealTime('highlights', parseFloat((e.target as HTMLInputElement).value))}
               onChange={(e) => handleParamChange('highlights', parseFloat(e.target.value))}
-              onDoubleClick={() => handleParamChange('highlights', 0)}
+              onDoubleClick={() => handleParamChange('highlights', 50)}
               className="slider w-full"
               style={{
                 background: 'linear-gradient(to right, #9ca3af, #f3f4f6, #ffffff)',

@@ -56,13 +56,13 @@ export class ShadowsHighlightsModule implements ImageProcessingModule {
   private params: ShadowsHighlightsParams = {
     enabled: true,
 
-    // Shadow recovery - start with neutral values
-    shadows: 0.0,
+    // Shadow adjustment - 50 = neutral (no change)
+    shadows: 50.0,
     shadowsRadius: 50.0,
     shadowsColorTransfer: 0.0,
 
-    // Highlight recovery - start with neutral values
-    highlights: 0.0,
+    // Highlight adjustment - 50 = neutral (no change)
+    highlights: 50.0,
     highlightsRadius: 50.0,
     highlightsColorTransfer: 0.0,
 
@@ -105,10 +105,10 @@ export class ShadowsHighlightsModule implements ImageProcessingModule {
   resetParams(): void {
     this.params = {
       enabled: true,
-      shadows: 0.0,
+      shadows: 50.0,
       shadowsRadius: 50.0,
       shadowsColorTransfer: 0.0,
-      highlights: 0.0,
+      highlights: 50.0,
       highlightsRadius: 50.0,
       highlightsColorTransfer: 0.0,
       whitePoint: 0.0,
@@ -130,10 +130,10 @@ export class ShadowsHighlightsModule implements ImageProcessingModule {
     // Auto adjustment for shadows and highlights
     const autoParams: ShadowsHighlightsParams = {
       ...this.params,
-      shadows: 25.0,              // Moderate shadow recovery
+      shadows: 63.0,              // 50 + 13 (moderate shadow lift)
       shadowsRadius: 40.0,        // Slightly tighter radius
       shadowsColorTransfer: 30.0, // Enhanced color transfer
-      highlights: 15.0,           // Mild highlight recovery
+      highlights: 58.0,           // 50 + 8 (mild highlight recovery)
       highlightsRadius: 45.0,     // Standard highlight radius
       highlightsColorTransfer: 20.0, // Moderate color transfer
       compress: 40.0,             // Reduced compression for more natural look
@@ -151,8 +151,8 @@ export class ShadowsHighlightsModule implements ImageProcessingModule {
     }
 
     // Check if all parameters are at neutral values - if so, pass through unchanged
-    const isNeutral = this.params.shadows === 0 &&
-                     this.params.highlights === 0 &&
+    const isNeutral = this.params.shadows === 50 &&
+                     this.params.highlights === 50 &&
                      this.params.whitePoint === 0 &&
                      this.params.blackPoint === 0 &&
                      this.params.compress === 0 &&
@@ -197,13 +197,13 @@ export class ShadowsHighlightsModule implements ImageProcessingModule {
 
       // Process multiple iterations for stronger effects
       for (let iter = 0; iter < this.params.iterations; iter++) {
-        // Apply shadow recovery
-        if (this.params.shadows > 0) {
+        // Apply shadow adjustment (50 = neutral, >50 = lift, <50 = darken)
+        if (this.params.shadows !== 50) {
           this.applyShadowRecovery(processedData, shadowMask, width, height);
         }
 
-        // Apply highlight recovery
-        if (this.params.highlights > 0) {
+        // Apply highlight adjustment (50 = neutral, >50 = recover, <50 = brighten)
+        if (this.params.highlights !== 50) {
           this.applyHighlightRecovery(processedData, highlightMask, width, height);
         }
 
@@ -351,7 +351,8 @@ export class ShadowsHighlightsModule implements ImageProcessingModule {
   }
 
   private applyShadowRecovery(data: Float32Array, shadowMask: Float32Array, _width: number, _height: number): void {
-    const shadowAmount = this.params.shadows / 100.0;
+    // Remap: 0=-1 (darken), 50=0 (neutral), 100=+1 (lift)
+    const shadowAmount = (this.params.shadows - 50) / 50.0;
     const colorTransfer = this.params.shadowsColorTransfer / 100.0;
     const strength = this.params.strength;
 
@@ -359,37 +360,35 @@ export class ShadowsHighlightsModule implements ImageProcessingModule {
       const maskValue = shadowMask[i / 4];
       const effect = maskValue * shadowAmount * strength;
 
-      if (effect > 0) {
-        // Calculate current luminance
+      if (effect !== 0) {
         const r = data[i];
         const g = data[i + 1];
         const b = data[i + 2];
         const lum = r * this.luminanceWeights.r + g * this.luminanceWeights.g + b * this.luminanceWeights.b;
 
-        // Shadow recovery with tone mapping
+        // Positive = lift shadows, negative = darken shadows
         const recovery = Math.pow(1 - lum, 0.5) * effect;
 
         if (this.params.preserveColor) {
-          // Preserve color ratios while lifting shadows
           const lift = 1.0 + recovery;
-          data[i] = Math.min(1.0, r * lift);
-          data[i + 1] = Math.min(1.0, g * lift);
-          data[i + 2] = Math.min(1.0, b * lift);
+          data[i] = Math.max(0.0, Math.min(1.0, r * lift));
+          data[i + 1] = Math.max(0.0, Math.min(1.0, g * lift));
+          data[i + 2] = Math.max(0.0, Math.min(1.0, b * lift));
         } else {
-          // Apply color transfer for more natural shadow recovery
-          const mixAmount = colorTransfer * effect;
+          const mixAmount = colorTransfer * Math.abs(effect);
           const avgColor = (r + g + b) / 3;
 
-          data[i] = Math.min(1.0, r + recovery + (avgColor - r) * mixAmount);
-          data[i + 1] = Math.min(1.0, g + recovery + (avgColor - g) * mixAmount);
-          data[i + 2] = Math.min(1.0, b + recovery + (avgColor - b) * mixAmount);
+          data[i] = Math.max(0.0, Math.min(1.0, r + recovery + (avgColor - r) * mixAmount));
+          data[i + 1] = Math.max(0.0, Math.min(1.0, g + recovery + (avgColor - g) * mixAmount));
+          data[i + 2] = Math.max(0.0, Math.min(1.0, b + recovery + (avgColor - b) * mixAmount));
         }
       }
     }
   }
 
   private applyHighlightRecovery(data: Float32Array, highlightMask: Float32Array, _width: number, _height: number): void {
-    const highlightAmount = this.params.highlights / 100.0;
+    // Remap: 0=-1 (brighten), 50=0 (neutral), 100=+1 (recover/darken)
+    const highlightAmount = (this.params.highlights - 50) / 50.0;
     const colorTransfer = this.params.highlightsColorTransfer / 100.0;
     const strength = this.params.strength;
 
@@ -397,24 +396,21 @@ export class ShadowsHighlightsModule implements ImageProcessingModule {
       const maskValue = highlightMask[i / 4];
       const effect = maskValue * highlightAmount * strength;
 
-      if (effect > 0) {
-        // Calculate current luminance
+      if (effect !== 0) {
         const r = data[i];
         const g = data[i + 1];
         const b = data[i + 2];
         const lum = r * this.luminanceWeights.r + g * this.luminanceWeights.g + b * this.luminanceWeights.b;
 
-        // Highlight recovery - reduce highlights without darkening
-        const recovery = Math.pow(lum, 0.5) * effect * 0.3; // Gentler recovery
+        // Positive = recover/darken highlights, negative = brighten highlights
+        const recovery = Math.pow(lum, 0.5) * effect * 0.3;
 
         if (this.params.preserveColor) {
-          // Preserve color ratios - use subtractive recovery
           data[i] = Math.max(0.0, Math.min(1.0, r - recovery));
           data[i + 1] = Math.max(0.0, Math.min(1.0, g - recovery));
           data[i + 2] = Math.max(0.0, Math.min(1.0, b - recovery));
         } else {
-          // Apply color transfer for more natural highlight recovery
-          const mixAmount = colorTransfer * effect * 0.3; // Reduced strength
+          const mixAmount = colorTransfer * Math.abs(effect) * 0.3;
           const avgColor = (r + g + b) / 3;
 
           data[i] = Math.max(0.0, Math.min(1.0, r - recovery + (avgColor - r) * mixAmount));
@@ -537,8 +533,8 @@ export class ShadowsHighlightsModule implements ImageProcessingModule {
     switch (preset) {
       case 'subtle':
         this.setParams({
-          shadows: 15.0,
-          highlights: 10.0,
+          shadows: 58.0,   // 50 + 8 (light lift)
+          highlights: 55.0, // 50 + 5 (light recovery)
           shadowsRadius: 40.0,
           highlightsRadius: 40.0,
           compress: 25.0,
@@ -548,8 +544,8 @@ export class ShadowsHighlightsModule implements ImageProcessingModule {
 
       case 'moderate':
         this.setParams({
-          shadows: 30.0,
-          highlights: 25.0,
+          shadows: 65.0,   // 50 + 15
+          highlights: 63.0, // 50 + 13
           shadowsRadius: 50.0,
           highlightsRadius: 50.0,
           compress: 40.0,
@@ -559,8 +555,8 @@ export class ShadowsHighlightsModule implements ImageProcessingModule {
 
       case 'strong':
         this.setParams({
-          shadows: 50.0,
-          highlights: 40.0,
+          shadows: 75.0,   // 50 + 25
+          highlights: 70.0, // 50 + 20
           shadowsRadius: 60.0,
           highlightsRadius: 60.0,
           compress: 60.0,
@@ -571,8 +567,8 @@ export class ShadowsHighlightsModule implements ImageProcessingModule {
 
       case 'highlights-only':
         this.setParams({
-          shadows: 0.0,
-          highlights: 35.0,
+          shadows: 50.0,   // neutral
+          highlights: 68.0, // 50 + 18
           highlightsRadius: 45.0,
           compress: 50.0,
           strength: 1.0
@@ -581,8 +577,8 @@ export class ShadowsHighlightsModule implements ImageProcessingModule {
 
       case 'shadows-only':
         this.setParams({
-          shadows: 40.0,
-          highlights: 0.0,
+          shadows: 70.0,   // 50 + 20
+          highlights: 50.0, // neutral
           shadowsRadius: 55.0,
           compress: 30.0,
           strength: 1.0

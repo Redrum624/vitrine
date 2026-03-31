@@ -243,8 +243,8 @@ export class ImageProcessingPipeline {
 
         case 'temperature': {
           const wb = params as WhiteBalanceParams;
-          // 5500K is neutral daylight, tint 0 is neutral
-          const tempNeutral = Math.abs((wb.temperature ?? 5500) - 5500) < 10;
+          // 6500K is D65 reference (identity / no correction), tint 0 is neutral
+          const tempNeutral = Math.abs((wb.temperature ?? 6500) - 6500) < 10;
           const tintNeutral = Math.abs(wb.tint ?? 0) < 0.1;
           return tempNeutral && tintNeutral;
         }

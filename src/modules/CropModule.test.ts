@@ -48,7 +48,7 @@ describe('CropModule', () => {
       expect(params.y).toBe(0.0);
       expect(params.width).toBe(1.0);
       expect(params.height).toBe(1.0);
-      expect(params.aspectRatio).toBe('free');
+      expect(params.aspectRatio).toBe('original');
       expect(params.angle).toBe(0.0);
       expect(params.flipHorizontal).toBe(false);
       expect(params.flipVertical).toBe(false);

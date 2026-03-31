@@ -182,13 +182,15 @@ class AutoAdjustService {
   // ── Shadows & Highlights ─────────────────────────────────────────────────
 
   autoShadowsHighlights(stats: ImageStats): Record<string, unknown> {
-    // Shadow recovery: proportional to how dark the shadows are and how many shadow pixels
+    // Shadow adjustment: 50 = neutral, >50 = lift shadows, <50 = darken shadows
     const shadowDeficit = 0.12 - stats.shadowMeanLum; // ideal shadow mean ~0.12
-    const shadows = clamp(shadowDeficit > 0 ? shadowDeficit * 300 * stats.shadowPixelRatio * 4 : 0, 0, 80);
+    const shadowDelta = clamp(shadowDeficit > 0 ? shadowDeficit * 300 * stats.shadowPixelRatio * 4 : 0, 0, 50);
+    const shadows = 50 + shadowDelta; // offset from neutral
 
-    // Highlight recovery: proportional to how bright highlights are and how many
+    // Highlight adjustment: 50 = neutral, >50 = recover highlights, <50 = brighten
     const highlightExcess = stats.highlightMeanLum - 0.88;
-    const highlights = clamp(highlightExcess > 0 ? highlightExcess * 300 * stats.highlightPixelRatio * 4 : 0, 0, 80);
+    const highlightDelta = clamp(highlightExcess > 0 ? highlightExcess * 300 * stats.highlightPixelRatio * 4 : 0, 0, 50);
+    const highlights = 50 + highlightDelta; // offset from neutral
 
     // White/black point: expand dynamic range if clipped
     const whitePoint = clamp(stats.p99 < 0.9 ? (0.95 - stats.p99) * 4 : 0, -2, 2);
@@ -299,10 +301,10 @@ class AutoAdjustService {
     // R/B ratio maps to colour temperature, G deviation maps to tint.
     const rb = stats.meanB > 0.001 ? stats.meanR / stats.meanB : 1;
 
-    // Map R/B ratio to Kelvin.  rb=1 → 5500K (daylight neutral)
-    // rb > 1 (warm image, excess red) → we need to cool it → higher K
-    // rb < 1 (cool image, excess blue) → we need to warm it → lower K
-    const temperature = clamp(Math.round(5500 * Math.pow(1 / rb, 0.55)), 2000, 12000);
+    // Map R/B ratio to Kelvin.  rb=1 → 6500K (D65 reference, identity in WB process)
+    // rb > 1 (warm image, excess red) → we need to cool it → lower K
+    // rb < 1 (cool image, excess blue) → we need to warm it → higher K
+    const temperature = clamp(Math.round(6500 * Math.pow(1 / rb, 0.55)), 2000, 12000);
 
     // Tint: green/magenta. Positive = more magenta needed (green cast in image)
     const expectedG = (stats.meanR + stats.meanB) / 2;

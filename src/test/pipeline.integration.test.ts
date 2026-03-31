@@ -339,8 +339,8 @@ describe('Pipeline Integration Tests', () => {
       const context: ProcessingContext = { width, height, channels: 4 };
 
       const module = new WhiteBalanceModule();
-      // Default 5500K should be nearly neutral
-      module.setParams({ temperature: 5500, tint: 0 });
+      // 6500K is D65 reference (identity / no correction)
+      module.setParams({ temperature: 6500, tint: 0 });
 
       const output = module.process(input, context);
 

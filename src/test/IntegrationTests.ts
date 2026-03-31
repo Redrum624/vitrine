@@ -675,7 +675,7 @@ export class IntegrationTests {
 
     // White Balance
     const wbModule = imageProcessingPipeline.getModule<WhiteBalanceModule>('whitebalance');
-    wbModule?.setParams({ temperature: 5500, tint: 0, mode: 'manual' });
+    wbModule?.setParams({ temperature: 6500, tint: 0, mode: 'manual' });
 
     // Basic adjustments
     const basicModule = imageProcessingPipeline.getModule<BasicAdjustmentsModule>('basicadj');

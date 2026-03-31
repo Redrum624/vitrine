@@ -178,7 +178,7 @@ export function WhiteBalanceModuleComponent({
               />
               <span className="text-xs font-mono" style={{color: 'var(--gray-500)', width: '12px'}}>K</span>
               <button
-                onClick={() => resetParam('temperature', 5500)}
+                onClick={() => resetParam('temperature', 6500)}
                 className="p-1 rounded"
                 style={{
                   backgroundColor: 'transparent',

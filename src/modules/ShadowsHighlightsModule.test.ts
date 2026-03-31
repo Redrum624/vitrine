@@ -53,9 +53,9 @@ describe('ShadowsHighlightsModule', () => {
     it('should return default parameters', () => {
       const params = module.getParams();
       expect(params.enabled).toBe(true);
-      expect(params.shadows).toBe(0.0);
+      expect(params.shadows).toBe(50.0);
       expect(params.shadowsRadius).toBe(50.0);
-      expect(params.highlights).toBe(0.0);
+      expect(params.highlights).toBe(50.0);
       expect(params.highlightsRadius).toBe(50.0);
       expect(params.whitePoint).toBe(0.0);
       expect(params.blackPoint).toBe(0.0);
@@ -73,17 +73,17 @@ describe('ShadowsHighlightsModule', () => {
     });
 
     it('should update parameters with setParams', () => {
-      module.setParams({ shadows: 50 });
-      expect(module.getParams().shadows).toBe(50);
+      module.setParams({ shadows: 75 });
+      expect(module.getParams().shadows).toBe(75);
       // Other params should remain unchanged
-      expect(module.getParams().highlights).toBe(0.0);
+      expect(module.getParams().highlights).toBe(50.0);
     });
 
     it('should merge partial parameters', () => {
-      module.setParams({ shadows: 30, highlights: 20 });
+      module.setParams({ shadows: 80, highlights: 70 });
       const params = module.getParams();
-      expect(params.shadows).toBe(30);
-      expect(params.highlights).toBe(20);
+      expect(params.shadows).toBe(80);
+      expect(params.highlights).toBe(70);
       expect(params.compress).toBe(0.0); // Unchanged
     });
 
@@ -96,8 +96,8 @@ describe('ShadowsHighlightsModule', () => {
       });
       module.resetParams();
       const params = module.getParams();
-      expect(params.shadows).toBe(0.0);
-      expect(params.highlights).toBe(0.0);
+      expect(params.shadows).toBe(50.0);
+      expect(params.highlights).toBe(50.0);
       expect(params.compress).toBe(0.0);
       expect(params.strength).toBe(1.0);
     });
@@ -193,7 +193,7 @@ describe('ShadowsHighlightsModule', () => {
       const data = createTestImage(width, height, 0.1, 0.1, 0.1);
       const imageData = createImageData(width, height, data);
 
-      module.setParams({ highlights: 50, shadows: 0, strength: 1.0 });
+      module.setParams({ highlights: 80, shadows: 50, strength: 1.0 });
       const result = module.process(imageData);
 
       expect(isValidImageData(result.data)).toBe(true);
@@ -269,24 +269,24 @@ describe('ShadowsHighlightsModule', () => {
     it('should apply subtle preset', () => {
       module.applyPreset('subtle');
       const params = module.getParams();
-      expect(params.shadows).toBe(15.0);
-      expect(params.highlights).toBe(10.0);
+      expect(params.shadows).toBe(58.0);
+      expect(params.highlights).toBe(55.0);
       expect(params.strength).toBe(0.7);
     });
 
     it('should apply moderate preset', () => {
       module.applyPreset('moderate');
       const params = module.getParams();
-      expect(params.shadows).toBe(30.0);
-      expect(params.highlights).toBe(25.0);
+      expect(params.shadows).toBe(65.0);
+      expect(params.highlights).toBe(63.0);
       expect(params.strength).toBe(1.0);
     });
 
     it('should apply strong preset', () => {
       module.applyPreset('strong');
       const params = module.getParams();
-      expect(params.shadows).toBe(50.0);
-      expect(params.highlights).toBe(40.0);
+      expect(params.shadows).toBe(75.0);
+      expect(params.highlights).toBe(70.0);
       expect(params.strength).toBe(1.3);
       expect(params.iterations).toBe(2);
     });
@@ -294,23 +294,23 @@ describe('ShadowsHighlightsModule', () => {
     it('should apply highlights-only preset', () => {
       module.applyPreset('highlights-only');
       const params = module.getParams();
-      expect(params.shadows).toBe(0.0);
-      expect(params.highlights).toBe(35.0);
+      expect(params.shadows).toBe(50.0);
+      expect(params.highlights).toBe(68.0);
     });
 
     it('should apply shadows-only preset', () => {
       module.applyPreset('shadows-only');
       const params = module.getParams();
-      expect(params.shadows).toBe(40.0);
-      expect(params.highlights).toBe(0.0);
+      expect(params.shadows).toBe(70.0);
+      expect(params.highlights).toBe(50.0);
     });
   });
 
   describe('Auto adjustment', () => {
     it('should return auto-adjusted parameters', () => {
       const autoParams = module.autoAdjust();
-      expect(autoParams.shadows).toBe(25.0);
-      expect(autoParams.highlights).toBe(15.0);
+      expect(autoParams.shadows).toBe(63.0);
+      expect(autoParams.highlights).toBe(58.0);
       expect(autoParams.strength).toBe(1.2);
     });
 
@@ -347,7 +347,7 @@ describe('ShadowsHighlightsModule', () => {
       const data = createGradientImage(width, height);
       const imageData = createImageData(width, height, data);
 
-      module.setParams({ bilateralFilter: true, shadows: 30 });
+      module.setParams({ bilateralFilter: true, shadows: 80 });
       const result = module.process(imageData);
 
       expect(isValidImageData(result.data)).toBe(true);
@@ -365,14 +365,14 @@ describe('ShadowsHighlightsModule', () => {
       const data2 = createTestImage(width, height, 0.1, 0.1, 0.1);
       const imageData2 = createImageData(width, height, data2);
 
-      // Process with 1 iteration
-      module.setParams({ shadows: 30, iterations: 1 });
+      // Process with 1 iteration (80 = strong shadow lift, since 50 is neutral)
+      module.setParams({ shadows: 80, iterations: 1 });
       const result1 = module.process(imageData1);
       const [r1] = getPixel(result1.data, width, 0, 0);
 
       // Reset and process with 2 iterations
       module.resetParams();
-      module.setParams({ shadows: 30, iterations: 2 });
+      module.setParams({ shadows: 80, iterations: 2 });
       const result2 = module.process(imageData2);
       const [r2] = getPixel(result2.data, width, 0, 0);
 
@@ -388,7 +388,7 @@ describe('ShadowsHighlightsModule', () => {
       const data = createTestImage(width, height, 0.5, 0.5, 0.5);
       const imageData = createImageData(width, height, data);
 
-      module.setParams({ shadows: 30, highlights: 20 });
+      module.setParams({ shadows: 80, highlights: 70 });
       const result = module.process(imageData);
 
       expect(result.data.length).toBe(4);
@@ -401,7 +401,7 @@ describe('ShadowsHighlightsModule', () => {
       const data = createTestImage(width, height, 0, 0, 0);
       const imageData = createImageData(width, height, data);
 
-      module.setParams({ shadows: 50 });
+      module.setParams({ shadows: 80 });
       const result = module.process(imageData);
 
       expect(isValidImageData(result.data)).toBe(true);
@@ -435,7 +435,7 @@ describe('ShadowsHighlightsModule', () => {
       const data = createGradientImage(width, height);
       const imageData = createImageData(width, height, data);
 
-      module.setParams({ shadows: 30, highlights: 20 });
+      module.setParams({ shadows: 80, highlights: 70 });
       const result = module.process(imageData);
 
       expect(isValidImageData(result.data)).toBe(true);
@@ -448,7 +448,7 @@ describe('ShadowsHighlightsModule', () => {
       const data = createTestImage(width, height, 0.5, 0.5, 0.5, 0.75);
       const imageData = createImageData(width, height, data);
 
-      module.setParams({ shadows: 30 });
+      module.setParams({ shadows: 80 });
       const result = module.process(imageData);
 
       const [, , , a] = getPixel(result.data, width, 0, 0);
@@ -487,7 +487,7 @@ describe('ShadowsHighlightsModule', () => {
       const imageData = createImageData(width, height, data);
 
       // Larger radius should affect more of the tonal range
-      module.setParams({ shadows: 40, shadowsRadius: 80 });
+      module.setParams({ shadows: 80, shadowsRadius: 80 });
       const result = module.process(imageData);
 
       expect(isValidImageData(result.data)).toBe(true);
@@ -500,7 +500,7 @@ describe('ShadowsHighlightsModule', () => {
       const imageData = createImageData(width, height, data);
 
       // Larger radius should affect more of the tonal range
-      module.setParams({ highlights: 40, highlightsRadius: 80 });
+      module.setParams({ highlights: 80, highlightsRadius: 80 });
       const result = module.process(imageData);
 
       expect(isValidImageData(result.data)).toBe(true);
@@ -515,7 +515,7 @@ describe('ShadowsHighlightsModule', () => {
       const imageData = createImageData(width, height, data);
 
       module.setParams({
-        shadows: 40,
+        shadows: 80,
         shadowsColorTransfer: 50,
         preserveColor: false,
       });
@@ -531,7 +531,7 @@ describe('ShadowsHighlightsModule', () => {
       const imageData = createImageData(width, height, data);
 
       module.setParams({
-        highlights: 40,
+        highlights: 80,
         highlightsColorTransfer: 50,
         preserveColor: false,
       });
@@ -549,7 +549,7 @@ describe('ShadowsHighlightsModule', () => {
       const imageData = createImageData(width, height, data);
 
       module.setParams({
-        shadows: 30,
+        shadows: 80,
         shadowsColorCorrection: 30,
       });
       const result = module.process(imageData);
@@ -564,7 +564,7 @@ describe('ShadowsHighlightsModule', () => {
       const imageData = createImageData(width, height, data);
 
       module.setParams({
-        highlights: 30,
+        highlights: 80,
         highlightsColorCorrection: 30,
       });
       const result = module.process(imageData);

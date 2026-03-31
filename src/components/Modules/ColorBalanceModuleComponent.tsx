@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import { RotateCcw, Zap } from 'lucide-react';
 import { ColorBalanceModule, ColorBalanceParams } from '../../modules/ColorBalanceModule';
 import ColorWheel from '../Controls/ColorWheel';
@@ -31,8 +31,9 @@ export const ColorBalanceModuleComponent: React.FC<ColorBalanceModuleComponentPr
   onParamsChange
 }) => {
   const [params, setParams] = useState<ColorBalanceParams>(module.getParams());
-  const paramsRef = React.useRef<ColorBalanceParams>(params);
-  const [activeTab, setActiveTab] = useState<TabType>('traditional');
+  const paramsRef = useRef<ColorBalanceParams>(params);
+  const updateTimeoutRef = useRef<Record<string, NodeJS.Timeout>>({});
+  const [activeTab, setActiveTab] = useState<TabType>('global');
   const [globalTab, setGlobalTab] = useState<GlobalTabType>('saturation');
   const [activeRange, setActiveRange] = useState<'shadows' | 'midtones' | 'highlights'>('midtones');
 
@@ -41,13 +42,28 @@ export const ColorBalanceModuleComponent: React.FC<ColorBalanceModuleComponentPr
     paramsRef.current = params;
   }, [params]);
 
+  // Throttled update: immediate UI, deferred processing
   const updateParams = useCallback((newParams: Partial<ColorBalanceParams>) => {
+    const updatedParams = { ...paramsRef.current, ...newParams };
+    paramsRef.current = updatedParams;
+    setParams(updatedParams);
+
+    const key = Object.keys(newParams)[0] || 'cb';
+    if (updateTimeoutRef.current[key]) clearTimeout(updateTimeoutRef.current[key]);
+    updateTimeoutRef.current[key] = setTimeout(() => {
+      module.setParams(updatedParams);
+      onParamsChange(updatedParams);
+      delete updateTimeoutRef.current[key];
+    }, 16);
+  }, [module, onParamsChange]);
+
+  // Real-time update for onInput (during drag)
+  const updateParamsRealTime = useCallback((newParams: Partial<ColorBalanceParams>) => {
     const updatedParams = { ...paramsRef.current, ...newParams };
     paramsRef.current = updatedParams;
     setParams(updatedParams);
     module.setParams(updatedParams);
     onParamsChange(updatedParams);
-    logger.debug('Color balance updated:', newParams);
   }, [module, onParamsChange]);
 
   const resetParams = useCallback(() => {
@@ -105,6 +121,11 @@ export const ColorBalanceModuleComponent: React.FC<ColorBalanceModuleComponentPr
   const handleGlobalSliderChange = (colorId: string, tab: GlobalTabType, value: number) => {
     const paramKey = `${colorId}_${tab}` as keyof ColorBalanceParams;
     updateParams({ [paramKey]: value });
+  };
+
+  const handleGlobalSliderInput = (colorId: string, tab: GlobalTabType, value: number) => {
+    const paramKey = `${colorId}_${tab}` as keyof ColorBalanceParams;
+    updateParamsRealTime({ [paramKey]: value });
   };
 
   const renderTraditionalControls = () => {
@@ -175,6 +196,7 @@ export const ColorBalanceModuleComponent: React.FC<ColorBalanceModuleComponentPr
                 max={1}
                 step={0.01}
                 value={rangeParams.yellow_blue}
+                onInput={(e) => updateTraditionalParam(activeRange, 'yellow_blue', parseFloat((e.target as HTMLInputElement).value))}
                 onChange={(e) => updateTraditionalParam(activeRange, 'yellow_blue', parseFloat(e.target.value))}
                 onDoubleClick={() => updateTraditionalParam(activeRange, 'yellow_blue', 0)}
                 className="slider w-full absolute top-0"
@@ -237,6 +259,7 @@ export const ColorBalanceModuleComponent: React.FC<ColorBalanceModuleComponentPr
                     min={sliderProps.min}
                     max={sliderProps.max}
                     step={sliderProps.step}
+                    onInput={(value) => handleGlobalSliderInput(color.id, globalTab, value)}
                     onChange={(value) => handleGlobalSliderChange(color.id, globalTab, value)}
                     precision={sliderProps.precision}
                     unit={sliderProps.unit}
@@ -331,20 +354,6 @@ export const ColorBalanceModuleComponent: React.FC<ColorBalanceModuleComponentPr
       {/* Main Tabs */}
       <div className="flex gap-1 rounded-lg p-1" style={{backgroundColor: 'var(--gray-700)'}}>
         <button
-          onClick={() => setActiveTab('traditional')}
-          className={`flex-1 px-3 py-2 text-xs font-medium rounded-md transition-all ${
-            activeTab === 'traditional'
-              ? 'shadow-sm'
-              : 'bg-transparent'
-          }`}
-          style={{
-            backgroundColor: activeTab === 'traditional' ? 'var(--gray-600)' : 'transparent',
-            color: activeTab === 'traditional' ? 'var(--white)' : 'var(--gray-300)'
-          }}
-        >
-          Traditional
-        </button>
-        <button
           onClick={() => setActiveTab('global')}
           className={`flex-1 px-3 py-2 text-xs font-medium rounded-md transition-all ${
             activeTab === 'global'
@@ -358,11 +367,25 @@ export const ColorBalanceModuleComponent: React.FC<ColorBalanceModuleComponentPr
         >
           Global Colors
         </button>
+        <button
+          onClick={() => setActiveTab('traditional')}
+          className={`flex-1 px-3 py-2 text-xs font-medium rounded-md transition-all ${
+            activeTab === 'traditional'
+              ? 'shadow-sm'
+              : 'bg-transparent'
+          }`}
+          style={{
+            backgroundColor: activeTab === 'traditional' ? 'var(--gray-600)' : 'transparent',
+            color: activeTab === 'traditional' ? 'var(--white)' : 'var(--gray-300)'
+          }}
+        >
+          Traditional
+        </button>
       </div>
 
       {/* Content */}
-      {activeTab === 'traditional' && renderTraditionalControls()}
       {activeTab === 'global' && renderGlobalControls()}
+      {activeTab === 'traditional' && renderTraditionalControls()}
     </div>
   );
 };

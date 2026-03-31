@@ -42,7 +42,7 @@ describe('WhiteBalanceModule', () => {
   describe('Parameter management', () => {
     it('should return default parameters', () => {
       const params = module.getParams();
-      expect(params.temperature).toBe(5500);
+      expect(params.temperature).toBe(6500);
       expect(params.tint).toBe(0);
       expect(params.auto).toBe(false);
       expect(params.preset).toBe('custom');
@@ -74,7 +74,7 @@ describe('WhiteBalanceModule', () => {
       module.setParams({ temperature: 3000, tint: 50, auto: true });
       module.resetParams();
       const params = module.getParams();
-      expect(params.temperature).toBe(5500);
+      expect(params.temperature).toBe(6500);
       expect(params.tint).toBe(0);
       expect(params.auto).toBe(false);
     });
@@ -118,13 +118,13 @@ describe('WhiteBalanceModule', () => {
   });
 
   describe('Processing with neutral parameters', () => {
-    it('should produce minimal change with 5500K (neutral daylight)', () => {
+    it('should produce no change with 6500K (D65 reference / identity)', () => {
       const width = 4;
       const height = 4;
       const input = createTestImage(width, height, 0.5, 0.5, 0.5);
       const context = createProcessingContext(width, height);
 
-      // Default is 5500K which is neutral daylight
+      // Default is now 6500K which is the D65 reference (identity transform)
       const output = module.process(input, context);
 
       // Output should be very close to input for neutral gray
