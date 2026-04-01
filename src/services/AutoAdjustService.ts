@@ -224,37 +224,37 @@ class AutoAdjustService {
       };
     }
 
-    // Simple linear tonal range stretching: map p5→0 and p95→1.
-    // No S-curve — it darkens shadows on dark images and compounds with other modules.
-    const lo = Math.max(0.01, stats.p5);
-    const hi = Math.min(0.99, stats.p95);
+    // Gentle midtone-lift curve: keep blacks black, gently brighten lower midtones,
+    // leave highlights mostly untouched. Like a subtle upward bow in the lower half.
+    // The lift amount is proportional to how dark the image is.
+    const midLum = stats.p50;
+    // Dark images (p50~0.2) get more lift, well-exposed (p50~0.45) get almost none
+    const liftAmount = clamp((0.45 - midLum) * 0.3, 0, 0.12);
 
-    // Only stretch if the range is meaningfully narrower than 0-1
-    if (hi - lo > 0.8) {
-      // Image already uses nearly the full range — return identity
-      logger.info(`AutoToneCurve: range=${lo.toFixed(3)}-${hi.toFixed(3)}, near-full range → identity`);
+    if (liftAmount < 0.01) {
+      logger.info(`AutoToneCurve: p50=${midLum.toFixed(3)}, well-exposed → identity`);
       return {
         baseCurve: [{ x: 0, y: 0 }, { x: 1, y: 1 }],
         baseCurveNodes: 2,
-        baseCurveType: 0, // linear
+        baseCurveType: 0,
         autoLevels: false,
         autoContrast: false,
       };
     }
 
-    // 3-point linear stretch: black→0, white→1, with a gentle midpoint
     const baseCurve = [
       { x: 0, y: 0 },
-      { x: lo, y: 0.0 },    // crush below p5 to black
-      { x: hi, y: 1.0 },    // push above p95 to white
+      { x: 0.25, y: 0.25 + liftAmount },       // gentle shadow lift
+      { x: 0.50, y: 0.50 + liftAmount * 0.6 },  // midtone lift (less than shadows)
+      { x: 0.75, y: 0.75 + liftAmount * 0.2 },  // minimal highlight change
       { x: 1, y: 1 },
     ];
 
-    logger.info(`AutoToneCurve: range=${lo.toFixed(3)}-${hi.toFixed(3)}, linear stretch`);
+    logger.info(`AutoToneCurve: p50=${midLum.toFixed(3)}, lift=${liftAmount.toFixed(3)}`);
     return {
       baseCurve,
       baseCurveNodes: baseCurve.length,
-      baseCurveType: 0, // linear interpolation — safe, predictable
+      baseCurveType: 0, // linear — safe, predictable
       autoLevels: false,
       autoContrast: false,
     };
