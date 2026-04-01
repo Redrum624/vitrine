@@ -224,38 +224,37 @@ class AutoAdjustService {
       };
     }
 
-    // Build a curve that stretches the actual tonal range to fill 0-1
-    // while adding a gentle S-curve for perceived contrast.
-    const lo = Math.max(0, stats.p5 - 0.02);
-    const hi = Math.min(1, stats.p95 + 0.02);
+    // Simple linear tonal range stretching: map p5→0 and p95→1.
+    // No S-curve — it darkens shadows on dark images and compounds with other modules.
+    const lo = Math.max(0.01, stats.p5);
+    const hi = Math.min(0.99, stats.p95);
 
-    // S-curve strength: stronger for flat images, scaled by tonal span
-    const rawStrength = clamp(0.22 - stats.stdLum, 0, 0.12);
-    const sCurveStrength = rawStrength * clamp(tonalSpan / 0.6, 0, 1);
+    // Only stretch if the range is meaningfully narrower than 0-1
+    if (hi - lo > 0.8) {
+      // Image already uses nearly the full range — return identity
+      logger.info(`AutoToneCurve: range=${lo.toFixed(3)}-${hi.toFixed(3)}, near-full range → identity`);
+      return {
+        baseCurve: [{ x: 0, y: 0 }, { x: 1, y: 1 }],
+        baseCurveNodes: 2,
+        baseCurveType: 0, // linear
+        autoLevels: false,
+        autoContrast: false,
+      };
+    }
 
-    // Ensure minimum spacing between x-points to avoid spline overshoots.
-    const minSpacing = 0.08;
-    const xLo  = clamp(lo, 0.05, 0.25);
-    const xP25 = Math.max(xLo + minSpacing, clamp(stats.p25, 0.15, 0.40));
-    const xP50 = Math.max(xP25 + minSpacing, clamp(stats.p50, 0.35, 0.65));
-    const xP75 = Math.max(xP50 + minSpacing, clamp(stats.p75, 0.60, 0.85));
-    const xHi  = Math.max(xP75 + minSpacing, clamp(hi, 0.75, 0.95));
-
+    // 3-point linear stretch: black→0, white→1, with a gentle midpoint
     const baseCurve = [
       { x: 0, y: 0 },
-      { x: xLo,  y: xLo },  // near-identity at shadow floor
-      { x: xP25, y: clamp(xP25 - sCurveStrength, 0.05, 0.40) },
-      { x: xP50, y: 0.50 },
-      { x: xP75, y: clamp(xP75 + sCurveStrength, 0.60, 0.95) },
-      { x: xHi,  y: xHi },  // near-identity at highlight ceiling
+      { x: lo, y: 0.0 },    // crush below p5 to black
+      { x: hi, y: 1.0 },    // push above p95 to white
       { x: 1, y: 1 },
     ];
 
-    logger.info(`AutoToneCurve: range=${lo.toFixed(3)}-${hi.toFixed(3)}, sCurve=${sCurveStrength.toFixed(3)}`);
+    logger.info(`AutoToneCurve: range=${lo.toFixed(3)}-${hi.toFixed(3)}, linear stretch`);
     return {
       baseCurve,
       baseCurveNodes: baseCurve.length,
-      baseCurveType: 1,
+      baseCurveType: 0, // linear interpolation — safe, predictable
       autoLevels: false,
       autoContrast: false,
     };
