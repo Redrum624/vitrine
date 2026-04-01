@@ -198,28 +198,11 @@ class AutoAdjustService {
     const highlightDelta = clamp(highlightExcess > 0 ? highlightExcess * 80 * stats.highlightPixelRatio : 0, 0, 10);
     const highlights = 50 + highlightDelta;
 
-    // White/black point: only adjust if truly clipped
-    const whitePoint = clamp(stats.p99 < 0.85 ? (0.9 - stats.p99) * 2 : 0, 0, 1);
-    const blackPoint = clamp(stats.p1 > 0.08 ? -(stats.p1 - 0.03) * 2 : 0, -1, 0);
-
-    // Compression: only for extreme dynamic range
-    const dynamicRange = stats.p99 - stats.p1;
-    const compress = clamp(dynamicRange > 0.9 ? (dynamicRange - 0.9) * 100 : 0, 0, 30);
-
-    const strength = 1.0;
-
-    logger.info(`AutoSH: shadow=${shadows.toFixed(1)}, highlight=${highlights.toFixed(1)}, wp=${whitePoint.toFixed(2)}, bp=${blackPoint.toFixed(2)}, compress=${compress.toFixed(1)}`);
+    // Only set Shadows/Highlights amounts — leave Advanced Settings untouched
+    logger.info(`AutoSH: shadow=${shadows.toFixed(1)}, highlight=${highlights.toFixed(1)}`);
     return {
       shadows,
-      shadowsRadius: 40,
-      shadowsColorTransfer: 30,
       highlights,
-      highlightsRadius: 45,
-      highlightsColorTransfer: 20,
-      whitePoint,
-      blackPoint,
-      compress,
-      strength,
       enabled: true,
     };
   }
