@@ -314,12 +314,12 @@ class AutoAdjustService {
     // Map R/B ratio to Kelvin.  rb=1 → 6500K (D65 reference, identity in WB process)
     // rb > 1 (warm image, excess red) → we need to cool it → lower K
     // rb < 1 (cool image, excess blue) → we need to warm it → higher K
-    // Power of 0.4 gives gentler correction (0.55 was over-correcting → blue tint)
-    const temperature = clamp(Math.round(6500 * Math.pow(1 / rb, 0.4)), 2000, 12000);
+    // Power of 0.3: gentle correction that preserves natural warmth
+    const temperature = clamp(Math.round(6500 * Math.pow(1 / rb, 0.3)), 2000, 12000);
 
-    // Tint: green/magenta. Positive = more magenta needed (green cast in image)
+    // Tint: green/magenta. Keep very conservative (multiplier -80 instead of -200)
     const expectedG = (stats.meanR + stats.meanB) / 2;
-    const tint = clamp(Math.round((stats.meanG - expectedG) * -200), -100, 100);
+    const tint = clamp(Math.round((stats.meanG - expectedG) * -80), -50, 50);
 
     logger.info(`AutoWB: R/B=${rb.toFixed(3)} → temp=${temperature}K, G-deviation=${(stats.meanG - expectedG).toFixed(4)} → tint=${tint}`);
     return { temperature, tint };
