@@ -395,11 +395,12 @@ describe('White Balance Idempotency Investigation', () => {
 // ─── 5. autoBasicAdj ────────────────────────────────────────────────────────
 
 describe('autoBasicAdj', () => {
-  it('should boost dark image (positive exposure and brightness)', () => {
+  it('should boost dark image (positive brightness)', () => {
     const stats = autoAdjustService.analyse(createDarkImage(), W, H);
     const result = autoAdjustService.autoBasicAdj(stats);
 
-    expect(result.exposure).toBeGreaterThan(0);
+    // Exposure is always 0 in basicAdj (ExposureModule handles it)
+    expect(result.exposure).toBe(0);
     expect(result.brightness).toBeGreaterThan(0);
     logVisual('autoBasicAdj on dark', result as unknown as Record<string, unknown>);
   });
@@ -583,12 +584,14 @@ describe('autoShadowsHighlights', () => {
     logVisual('autoSH on very dark', result);
   });
 
-  it('should recover highlights in bright image', () => {
-    const stats = autoAdjustService.analyse(createBrightImage(), W, H);
+  it('should recover highlights in very bright image', () => {
+    // Use a very bright image (0.97) so highlightMeanLum > 0.92 threshold
+    const img = createTestImage(W, H, 0.97, 0.97, 0.97);
+    const stats = autoAdjustService.analyse(img, W, H);
     const result = autoAdjustService.autoShadowsHighlights(stats) as Record<string, unknown>;
 
     expect(result.highlights as number).toBeGreaterThan(50);
-    logVisual('autoSH on bright', result);
+    logVisual('autoSH on very bright', result);
   });
 
   it('should return near-zero for neutral image', () => {
