@@ -6,7 +6,8 @@ import {
   Zap,
   File,
   X,
-  AlertTriangle
+  AlertTriangle,
+  FolderOpen
 } from 'lucide-react';
 import SliderControl from '../Controls/SliderControl';
 import { ExportOptions, ExportPreset, exportService } from '../../services/ExportService';
@@ -41,6 +42,22 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
   const [presets, setPresets] = useState<ExportPreset[]>([]);
   const [estimatedFileSize, setEstimatedFileSize] = useState<string>('');
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
+  const [outputDirectory, setOutputDirectory] = useState<string>('');
+
+  const handleChooseFolder = useCallback(async () => {
+    try {
+      const result = await (window as unknown as { electronAPI?: { showOpenDialog: (opts: Record<string, unknown>) => Promise<{ canceled: boolean; filePaths: string[] }> } }).electronAPI?.showOpenDialog({
+        properties: ['openDirectory'],
+        title: 'Choose Export Folder'
+      });
+      if (result && !result.canceled && result.filePaths?.length > 0) {
+        setOutputDirectory(result.filePaths[0]);
+        setExportOptions(prev => ({ ...prev, outputDirectory: result.filePaths[0] }));
+      }
+    } catch (error) {
+      logger.error('Failed to open folder dialog:', error);
+    }
+  }, []);
 
   useEffect(() => {
     setPresets(exportService.getPresets());
@@ -598,6 +615,33 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
 
         {/* Footer */}
         <div className="px-5 py-4 border-t" style={{ borderTopColor: 'var(--border)' }}>
+          {/* Output folder row */}
+          <div className="flex items-center gap-2 mb-3 text-sm">
+            <span style={{ color: 'var(--gray-500)' }}>Output:</span>
+            <span className="flex-1 truncate text-xs font-mono" style={{ color: 'var(--gray-300)' }}>
+              {outputDirectory || 'Same folder as original'}
+            </span>
+            {outputDirectory && (
+              <button
+                onClick={() => { setOutputDirectory(''); setExportOptions(prev => ({ ...prev, outputDirectory: undefined })); }}
+                className="p-1 rounded"
+                style={{ color: 'var(--gray-500)' }}
+                title="Reset to original folder"
+              >
+                <X size={12} />
+              </button>
+            )}
+            <button
+              onClick={handleChooseFolder}
+              className="flex items-center gap-1.5 px-2.5 py-1 text-xs rounded border transition-colors"
+              style={{ backgroundColor: 'var(--gray-800)', borderColor: 'var(--border)', color: 'var(--gray-300)' }}
+              title="Choose output folder"
+            >
+              <FolderOpen size={12} />
+              Browse
+            </button>
+          </div>
+
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4 text-sm">
               <div style={{ color: 'var(--gray-400)' }}>

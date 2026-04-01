@@ -32,6 +32,9 @@ interface AppStore extends AppState {
   referenceImageName: string | null;
   toggleReferenceMode: () => void;
   setReferenceImage: (url: string | null, name: string | null) => void;
+  // Star ratings (1-5, 0 = unrated)
+  imageRatings: Record<string, number>;
+  setImageRating: (imageId: string, rating: number) => void;
 }
 
 export const useAppStore = create<AppStore>((set) => ({
@@ -54,6 +57,7 @@ export const useAppStore = create<AppStore>((set) => ({
   referenceMode: false,
   referenceImageUrl: null,
   referenceImageName: null,
+  imageRatings: {},
 
   triggerReprocessing: () => set((state) => ({
     processingVersion: state.processingVersion + 1
@@ -98,6 +102,10 @@ export const useAppStore = create<AppStore>((set) => ({
   toggleOriginal: () => set((state) => ({ showOriginal: !state.showOriginal, referenceMode: false })),
   toggleReferenceMode: () => set((state) => ({ referenceMode: !state.referenceMode, showOriginal: false })),
   setReferenceImage: (url, name) => set({ referenceImageUrl: url, referenceImageName: name }),
+
+  setImageRating: (imageId, rating) => set((state) => ({
+    imageRatings: { ...state.imageRatings, [imageId]: rating }
+  })),
 
   getCurrentPipelineSettings: () => {
     // This would need to be implemented to collect current settings from all modules

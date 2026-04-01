@@ -918,7 +918,7 @@ function App() {
                 className="flex items-center justify-center"
                 style={{ width: '50%', height: '100%', borderRight: '2px solid var(--border)', position: 'relative' }}
               >
-                <OriginalPane />
+                <OriginalPane key={currentImage?.id ?? 'none'} />
               </div>
             )}
 

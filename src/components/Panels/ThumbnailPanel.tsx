@@ -1,6 +1,7 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { ChevronLeft, ChevronRight, X } from 'lucide-react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { ChevronLeft, ChevronRight, X, Star } from 'lucide-react';
 import { ImageFileInfo } from '../../services/FileSystemService';
+import { useAppStore } from '../../stores/appStore';
 import { logger } from '../../utils/Logger';
 
 interface ThumbnailPanelProps {
@@ -20,8 +21,15 @@ export function ThumbnailPanel({
 }: ThumbnailPanelProps) {
   const [thumbnails, setThumbnails] = useState<Map<string, string>>(new Map());
   const [loadingThumbnails, setLoadingThumbnails] = useState<Set<string>>(new Set());
+  const [ratingFilter, setRatingFilter] = useState<number>(0); // 0 = show all
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const selectedImageRef = useRef<HTMLDivElement>(null);
+  const { imageRatings, setImageRating } = useAppStore();
+
+  const filteredImages = useMemo(() => {
+    if (ratingFilter === 0) return images;
+    return images.filter(img => (imageRatings[img.id] || 0) >= ratingFilter);
+  }, [images, imageRatings, ratingFilter]);
 
   // Load thumbnail for an image
   const loadThumbnail = useCallback(async (image: ImageFileInfo) => {
@@ -138,20 +146,18 @@ export function ThumbnailPanel({
   // Navigate with arrow keys
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (!visible || images.length === 0) return;
+      if (!visible || filteredImages.length === 0) return;
 
-      const currentIndex = selectedImage ? images.findIndex(img => img.id === selectedImage.id) : -1;
+      const currentIndex = selectedImage ? filteredImages.findIndex(img => img.id === selectedImage.id) : -1;
 
       if (e.key === 'ArrowLeft' && currentIndex > 0) {
-        const prevImage = images[currentIndex - 1];
+        const prevImage = filteredImages[currentIndex - 1];
         onImageSelect(prevImage);
-        // Trigger thumbnail load (will be a no-op if already loaded/loading)
         loadThumbnail(prevImage);
         e.preventDefault();
-      } else if (e.key === 'ArrowRight' && currentIndex < images.length - 1) {
-        const nextImage = images[currentIndex + 1];
+      } else if (e.key === 'ArrowRight' && currentIndex < filteredImages.length - 1) {
+        const nextImage = filteredImages[currentIndex + 1];
         onImageSelect(nextImage);
-        // Trigger thumbnail load (will be a no-op if already loaded/loading)
         loadThumbnail(nextImage);
         e.preventDefault();
       } else if (e.key === 'Escape') {
@@ -165,10 +171,10 @@ export function ThumbnailPanel({
   }, [visible, images, selectedImage, onImageSelect, onClose, loadThumbnail]);
 
   const handlePrevious = () => {
-    if (!selectedImage || images.length === 0) return;
-    const currentIndex = images.findIndex(img => img.id === selectedImage.id);
+    if (!selectedImage || filteredImages.length === 0) return;
+    const currentIndex = filteredImages.findIndex(img => img.id === selectedImage.id);
     if (currentIndex > 0) {
-      const prevImage = images[currentIndex - 1];
+      const prevImage = filteredImages[currentIndex - 1];
       onImageSelect(prevImage);
       // Trigger thumbnail load (will be a no-op if already loaded/loading)
       loadThumbnail(prevImage);
@@ -176,10 +182,10 @@ export function ThumbnailPanel({
   };
 
   const handleNext = () => {
-    if (!selectedImage || images.length === 0) return;
-    const currentIndex = images.findIndex(img => img.id === selectedImage.id);
-    if (currentIndex < images.length - 1) {
-      const nextImage = images[currentIndex + 1];
+    if (!selectedImage || filteredImages.length === 0) return;
+    const currentIndex = filteredImages.findIndex(img => img.id === selectedImage.id);
+    if (currentIndex < filteredImages.length - 1) {
+      const nextImage = filteredImages[currentIndex + 1];
       onImageSelect(nextImage);
       // Trigger thumbnail load (will be a no-op if already loaded/loading)
       loadThumbnail(nextImage);
@@ -219,9 +225,9 @@ export function ThumbnailPanel({
     return null;
   }
 
-  const currentIndex = selectedImage ? images.findIndex(img => img.id === selectedImage.id) : -1;
+  const currentIndex = selectedImage ? filteredImages.findIndex(img => img.id === selectedImage.id) : -1;
   const canGoPrevious = currentIndex > 0;
-  const canGoNext = currentIndex < images.length - 1;
+  const canGoNext = currentIndex < filteredImages.length - 1;
 
   return (
     <div className="border-t flex flex-col" style={{backgroundColor: 'var(--gray-900)', borderTopColor: 'var(--border)', height: '140px'}}>
@@ -229,13 +235,29 @@ export function ThumbnailPanel({
       <div className="flex items-center justify-between px-4 py-1 border-b" style={{borderBottomColor: 'var(--border)'}}>
         <div className="flex items-center gap-4">
           <h3 className="text-xs font-semibold uppercase tracking-wider" style={{color: 'var(--gray-500)'}}>
-            {images.length} image{images.length !== 1 ? 's' : ''}
+            {filteredImages.length}{ratingFilter > 0 ? ` / ${images.length}` : ''} image{filteredImages.length !== 1 ? 's' : ''}
           </h3>
-          {selectedImage && (
+          {selectedImage && currentIndex >= 0 && (
             <span className="text-xs font-mono" style={{color: 'var(--gray-400)'}}>
-              {currentIndex + 1} / {images.length}
+              {currentIndex + 1} / {filteredImages.length}
             </span>
           )}
+          {/* Rating filter */}
+          <div className="flex items-center gap-0.5 ml-1">
+            {[0, 1, 2, 3, 4, 5].map((min) => (
+              <button
+                key={min}
+                onClick={() => setRatingFilter(min)}
+                className="px-1.5 py-0.5 text-xs rounded transition-colors"
+                style={{
+                  backgroundColor: ratingFilter === min ? 'var(--gray-700)' : 'transparent',
+                  color: ratingFilter === min ? 'var(--white)' : 'var(--gray-500)',
+                }}
+              >
+                {min === 0 ? 'All' : `≥${min}★`}
+              </button>
+            ))}
+          </div>
         </div>
 
         <div className="flex items-center gap-2">
@@ -333,15 +355,11 @@ export function ThumbnailPanel({
         }}
       >
         <div className="flex gap-2 h-full">
-          {images.map((image) => {
+          {filteredImages.map((image) => {
             const isSelected = selectedImage?.id === image.id;
             const thumbnail = thumbnails.get(image.id);
             const isLoading = loadingThumbnails.has(image.id);
-
-            // Determine aspect ratio from image metadata or default
-            // Most images will have metadata available from the ImageFileInfo
-            // For now, we'll use a default and let the actual image determine the aspect ratio
-            // when it loads, but we can optimize this later with metadata
+            const rating = imageRatings[image.id] || 0;
 
             return (
               <div
@@ -399,6 +417,29 @@ export function ThumbnailPanel({
                     </span>
                   </div>
                 )}
+
+                {/* Star rating overlay */}
+                <div
+                  className="absolute bottom-0 left-0 right-0 flex justify-center gap-0.5 py-0.5"
+                  style={{ backgroundColor: 'rgba(0,0,0,0.6)' }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {[1, 2, 3, 4, 5].map((star) => (
+                    <Star
+                      key={star}
+                      size={10}
+                      className="cursor-pointer"
+                      style={{
+                        color: star <= rating ? '#facc15' : 'var(--gray-600)',
+                        fill: star <= rating ? '#facc15' : 'none',
+                      }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setImageRating(image.id, star === rating ? 0 : star);
+                      }}
+                    />
+                  ))}
+                </div>
 
                 {/* Selected indicator */}
                 {isSelected && (
