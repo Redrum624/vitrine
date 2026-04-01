@@ -314,7 +314,8 @@ class AutoAdjustService {
     // Map R/B ratio to Kelvin.  rb=1 → 6500K (D65 reference, identity in WB process)
     // rb > 1 (warm image, excess red) → we need to cool it → lower K
     // rb < 1 (cool image, excess blue) → we need to warm it → higher K
-    const temperature = clamp(Math.round(6500 * Math.pow(1 / rb, 0.55)), 2000, 12000);
+    // Power of 0.4 gives gentler correction (0.55 was over-correcting → blue tint)
+    const temperature = clamp(Math.round(6500 * Math.pow(1 / rb, 0.4)), 2000, 12000);
 
     // Tint: green/magenta. Positive = more magenta needed (green cast in image)
     const expectedG = (stats.meanR + stats.meanB) / 2;
