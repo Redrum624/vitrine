@@ -308,6 +308,38 @@ class AutoAdjustService {
     logger.info(`AutoWB[${name}]: R/B=${rb.toFixed(3)}, targetR/B=${targetRb.toFixed(3)} → temp=${temperature}K, tint=${tint}`);
     return { temperature, tint };
   }
+
+  // ── Auto All (coordinator) ─────────────────────────────────────────────────
+
+  /**
+   * Run every auto adjustment in pipeline order and return the bundle of params
+   * the UI should dispatch into each module. Caller decides whether to apply
+   * them as a single transaction (preferred) or piecewise.
+   */
+  autoAll(data: Float32Array, width: number, height: number): {
+    bucket: BucketName;
+    stats: ImageStats;
+    exposure: ReturnType<AutoAdjustService['autoExposure']>;
+    basicAdj: ReturnType<AutoAdjustService['autoBasicAdj']>;
+    shadowsHighlights: ReturnType<AutoAdjustService['autoShadowsHighlights']>;
+    toneCurve: ReturnType<AutoAdjustService['autoToneCurve']>;
+    colorBalance: ReturnType<AutoAdjustService['autoColorBalance']>;
+    whiteBalance: ReturnType<AutoAdjustService['autoWhiteBalance']>;
+  } {
+    const stats = this.analyse(data, width, height);
+    const { name: bucket } = this.pickProfile(stats);
+    logger.info(`AutoAll: bucket=${bucket}, samples=${userStyleProfile[bucket].sampleCount}`);
+    return {
+      bucket,
+      stats,
+      exposure: this.autoExposure(stats),
+      basicAdj: this.autoBasicAdj(stats),
+      shadowsHighlights: this.autoShadowsHighlights(stats),
+      toneCurve: this.autoToneCurve(stats),
+      colorBalance: this.autoColorBalance(stats),
+      whiteBalance: this.autoWhiteBalance(stats),
+    };
+  }
 }
 
 // Singleton
