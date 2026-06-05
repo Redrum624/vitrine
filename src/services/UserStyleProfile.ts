@@ -5,11 +5,11 @@
  * Re-run the script after grading more photos:
  *
  *   python scripts/extract_style_profile.py \
- *     --portfolio "C:\Users\<user>\Pictures\Portfolio-Sep 22, 2019 – Feb 6, 2025" \
+ *     --portfolio "C:\Users\<user>\Pictures\Portfolio-Sep 22, 2019 – Feb 6, 2025" \
  *     --out src/services/UserStyleProfile.ts
  *
  * Generated:   2026-06-05 22:31:14 UTC
- * Source:      C:\Users\<user>\Pictures\Portfolio-Sep 22, 2019 – Feb 6, 2025
+ * Source:      C:\Users\<user>\Pictures\Portfolio-Sep 22, 2019 – Feb 6, 2025
  * Photo count: 200 processed
  *
  * AutoAdjustService imports this module and uses the bucket-appropriate

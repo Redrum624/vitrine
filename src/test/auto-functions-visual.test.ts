@@ -952,7 +952,7 @@ describe('Full Auto idempotency', () => {
   }
 
   it('should converge after 2 passes on dark warm image', () => {
-    let img = createWarmImage();
+    const img = createWarmImage();
     // Make it dark-warm
     for (let i = 0; i < img.length; i += 4) {
       img[i] *= 0.3;

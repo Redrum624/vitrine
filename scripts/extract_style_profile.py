@@ -219,6 +219,8 @@ def build_profile_ts(buckets: dict[str, dict], portfolio_count: int,
                      portfolio_path: str, generated_at: str) -> str:
     """Render the aggregated bucket stats into a TypeScript profile module."""
 
+    portfolio_path = (portfolio_path.replace(" ", " ").replace(" ", " ").replace(" ", " "))
+
     def render_bucket(name: str, agg: dict) -> str:
         if not agg or "__count__" not in agg:
             return f"  // bucket '{name}' had no samples"
