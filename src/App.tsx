@@ -368,64 +368,60 @@ function App() {
     const img = imageService.getCurrentImage();
     if (!img) { showError('Auto All', 'No image loaded'); return; }
 
-    const stats = autoAdjustService.analyse(img.data, img.width, img.height);
+    // Single coordinator call: analyses once, picks the user-style bucket, and
+    // returns the bundled params for every module.
+    const result = autoAdjustService.autoAll(img.data, img.width, img.height);
+    logger.info(`Auto All: bucket=${result.bucket} (${result.stats.meanLum.toFixed(3)} lum)`);
 
     // Exposure
     const exposureMod = imageProcessingPipeline.getModule('exposure');
     if (exposureMod) {
-      const p = autoAdjustService.autoExposure(stats);
-      (exposureMod as unknown as { setCurrentParams: (p: Record<string, unknown>) => void }).setCurrentParams(p);
+      (exposureMod as unknown as { setCurrentParams: (p: Record<string, unknown>) => void }).setCurrentParams(result.exposure);
       imageProcessingPipeline.invalidateModuleCache('exposure');
     }
 
     // White Balance
     const wbMod = imageProcessingPipeline.getModule('temperature');
     if (wbMod) {
-      const p = autoAdjustService.autoWhiteBalance(stats);
-      (wbMod as unknown as { setParams: (p: Record<string, unknown>) => void }).setParams(p);
+      (wbMod as unknown as { setParams: (p: Record<string, unknown>) => void }).setParams(result.whiteBalance);
       imageProcessingPipeline.invalidateModuleCache('temperature');
     }
 
-    // Basic Adjustments (zero out exposure — ExposureModule already handles it)
+    // Basic Adjustments (autoBasicAdj already returns exposure: 0)
     const baMod = imageProcessingPipeline.getModule('basicadj');
     if (baMod) {
-      const p = autoAdjustService.autoBasicAdj(stats);
-      p.exposure = 0;
-      (baMod as unknown as { setParams: (p: Record<string, unknown>) => void }).setParams(p);
+      (baMod as unknown as { setParams: (p: Record<string, unknown>) => void }).setParams(result.basicAdj);
       imageProcessingPipeline.invalidateModuleCache('basicadj');
     }
 
     // Tone Curve
     const tcPipeMod = imageProcessingPipeline.getModule('tonecurve');
     if (tcPipeMod) {
-      const p = autoAdjustService.autoToneCurve(stats);
       const inner = (tcPipeMod as unknown as { getToneCurveModule?: () => { setParams: (p: Record<string, unknown>) => void } }).getToneCurveModule?.();
-      if (inner) inner.setParams(p);
+      if (inner) inner.setParams(result.toneCurve);
       imageProcessingPipeline.invalidateModuleCache('tonecurve');
     }
 
     // Color Balance
     const cbPipeMod = imageProcessingPipeline.getModule('colorbalance');
     if (cbPipeMod) {
-      const p = autoAdjustService.autoColorBalance(stats);
       const inner = (cbPipeMod as unknown as { getColorBalanceModule?: () => { setParams: (p: Record<string, unknown>) => void } }).getColorBalanceModule?.();
-      if (inner) inner.setParams(p);
+      if (inner) inner.setParams(result.colorBalance);
       imageProcessingPipeline.invalidateModuleCache('colorbalance');
     }
 
     // Shadows / Highlights
     const shPipeMod = imageProcessingPipeline.getModule('shadowshighlights');
     if (shPipeMod) {
-      const p = autoAdjustService.autoShadowsHighlights(stats);
       const inner = (shPipeMod as unknown as { getShadowsHighlightsModule?: () => { setParams: (p: Record<string, unknown>) => void } }).getShadowsHighlightsModule?.();
-      if (inner) inner.setParams(p);
+      if (inner) inner.setParams(result.shadowsHighlights);
       imageProcessingPipeline.invalidateModuleCache('shadowshighlights');
     }
 
     // Trigger reprocessing
     useAppStore.getState().triggerReprocessing();
-    showSuccess('Auto All', 'All modules auto-adjusted from image analysis');
-    logger.info('Auto All: all modules adjusted based on image statistics');
+    showSuccess('Auto All', `Applied "${result.bucket}" style profile`);
+    logger.info(`Auto All: all modules adjusted from user style profile (bucket=${result.bucket})`);
   }, [showSuccess, showError]);
 
   // ─── Print ─────────────────────────────────────────────────────────────
