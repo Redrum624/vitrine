@@ -115,7 +115,25 @@
         "filter": [
           "**/*"
         ]
+      },
+      {
+        "from": "vendor/libraw",
+        "to": "vendor/libraw",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "public/libraw",
+        "to": "libraw",
+        "filter": [
+          "**/*"
+        ]
       }
+    ],
+    "asarUnpack": [
+      "electron/librawWasmWorker.cjs",
+      "electron/librawWasmNode.cjs"
     ]
   }
 }
