@@ -4,10 +4,11 @@ A **desktop RAW photo editor** built with Electron + React, featuring a WebGL2/C
 processing pipeline, native LibRaw demosaicing, colour-managed export, and
 non-destructive local adjustments.
 
-![Version](https://img.shields.io/badge/Version-1.0.1-blue)
+![Version](https://img.shields.io/badge/Version-1.1.0-blue)
 ![TypeScript](https://img.shields.io/badge/TypeScript-0_errors-blue)
-![Tests](https://img.shields.io/badge/Tests-777_passing-brightgreen)
+![Tests](https://img.shields.io/badge/Tests-794_passing-brightgreen)
 ![Lint](https://img.shields.io/badge/Lint-clean-brightgreen)
+![GPU](https://img.shields.io/badge/GPU-WebGL2_accelerated-success)
 
 ## 🌟 Features
 
@@ -33,8 +34,18 @@ non-destructive local adjustments.
   plus Auto Levels / Contrast / Color.
 - Non-destructive: adjustments are reversible and re-processed live.
 
+### GPU acceleration (WebGL2)
+- The editing pipeline runs on the **GPU** when available: Basic Adjustments, White
+  Balance, Color Balance, Tone Curve, Hue Curves, Lens vignetting/distortion/chromatic
+  aberration, and a **GPU Non-Local-Means noise reducer** (sub-second even on RAW).
+- Each GPU op carries a CPU reference and an init **self-check** — the GPU path is
+  used only if its output matches the CPU within tolerance, so a faulty shader
+  **falls back silently rather than corrupting an image**. Fully transparent, with
+  automatic CPU fallback when WebGL2 is unavailable.
+
 ### Export & workflow
-- **Export** to JPEG / PNG / TIFF / WebP, 8- and 16-bit, in **sRGB or wide-gamut**
+- **Export** to JPEG / PNG / TIFF / WebP, 8- and 16-bit (**defaults to PNG 16-bit**
+  to preserve the 32-bit float pipeline), in **sRGB or wide-gamut**
   (Adobe RGB / ProPhoto / Rec.2020) using generated ICC profiles, with **EXIF/XMP**
   metadata embedding.
 - Filmstrip (mouse-wheel scroll, collapsible) with star ratings and filtering,
@@ -58,7 +69,7 @@ pnpm run electron-dev   # Vite dev server + Electron
 ### Build a Windows release
 ```bash
 npm run build:win       # clean dist + release -> tsc + vite build -> NSIS installer + portable (x64)
-# Output: release/Photo Editor Pro Setup 1.0.1.exe  and  release/Photo Editor Pro 1.0.1.exe
+# Output: release/Photo Editor Pro Setup 1.1.0.exe  and  release/Photo Editor Pro 1.1.0.exe
 npm run build:win:dir   # fast unpacked build (no installer)
 npm run dist            # electron-builder for the current platform
 ```

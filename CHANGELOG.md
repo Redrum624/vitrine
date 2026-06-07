@@ -4,6 +4,32 @@ All notable changes to **Photo Editor Pro** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.1.0] - 2026-06-07
+
+### Added
+- **GPU acceleration (WebGL2).** A new `WebGLImageProcessor` runs the editing
+  pipeline on the GPU: uploads RGBA Float32 → float texture → fragment-shader pass →
+  RGBA32F framebuffer → Float32 readback. GPU-accelerated: **Basic Adjustments,
+  White Balance, Color Balance, Tone Curve, Hue Curves, Lens vignetting, Lens
+  distortion, Lens chromatic aberration**, and a **GPU Non-Local-Means** noise
+  reducer (replaces the slow CPU BM3D — sub-second even on RAW). Each op carries a
+  CPU reference and an init **self-check**: the GPU path is used only if its output
+  matches the CPU within tolerance, so a faulty shader silently falls back rather
+  than corrupting an image. Geometric ops (distortion/CA) use manual `texelFetch`
+  bilinear to match the CPU exactly. Transparent: no UI change, automatic CPU
+  fallback when WebGL2 is unavailable.
+
+### Fixed
+- **Hue Curves produced NaN when enabled.** Cause: `rgbToHsl` returns hue 0–360 and
+  s/l 0–100, but the curve `sampleLUT` expects `[0,1]` (`idx = x*255`) → out-of-bounds.
+  Fix: normalise h/360, s/100, l/100 after `rgbToHsl` and scale back before
+  `hslToRgb`. Affects: `src/modules/HueCurvesModule.ts`.
+
+### Changed
+- **Default export is now PNG 16-bit** (was JPEG 8-bit). The pipeline is 32-bit
+  float end-to-end; an 8-bit default discarded that precision. JPEG presets stay
+  8-bit (JPEG is 8-bit only).
+
 ## [1.0.2] - 2026-06-07
 
 ### Fixed
