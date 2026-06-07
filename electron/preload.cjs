@@ -33,6 +33,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Metadata operations
   readImageMetadata: (filePath) => ipcRenderer.invoke('read-image-metadata', filePath),
   writeImageMetadata: (filePath, metadata) => ipcRenderer.invoke('write-image-metadata', filePath, metadata),
+  writeImageRating: (filePath, rating) => ipcRenderer.invoke('write-image-rating', filePath, rating),
 
   // Menu actions - listen for events from main process
   onFileOpen: (callback) => ipcRenderer.on('file-open', (event, filePath) => callback(filePath)),

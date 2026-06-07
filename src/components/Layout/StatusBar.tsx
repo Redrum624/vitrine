@@ -1,5 +1,4 @@
-import React from 'react';
-import { Clock, Image, Cpu, HardDrive, Zap, Activity } from 'lucide-react';
+import { Image, Cpu, HardDrive, Zap, Activity } from 'lucide-react';
 import { useAppStore } from '../../stores/appStore';
 
 interface StatusBarProps {
@@ -35,22 +34,6 @@ export function StatusBar({ currentImage, processingStats }: StatusBarProps) {
     const megapixels = ((width * height) / 1000000).toFixed(1);
     return `${width} × ${height} (${megapixels} MP)`;
   };
-
-  // Get current time
-  const getCurrentTime = (): string => {
-    return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  };
-
-  const [currentTime, setCurrentTime] = React.useState(getCurrentTime());
-
-  // Update time every minute
-  React.useEffect(() => {
-    const interval = setInterval(() => {
-      setCurrentTime(getCurrentTime());
-    }, 60000);
-
-    return () => clearInterval(interval);
-  }, []);
 
   // Get memory usage (if available)
   const getMemoryInfo = (): string => {
@@ -143,11 +126,6 @@ export function StatusBar({ currentImage, processingStats }: StatusBarProps) {
           </>
         )}
 
-        {/* Current time */}
-        <div className="flex items-center space-x-1">
-          <Clock className="w-3 h-3" />
-          <span>{currentTime}</span>
-        </div>
       </div>
     </div>
   );

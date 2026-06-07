@@ -103,6 +103,10 @@ function buildXmpPacket(xmp) {
       `<xmpRights:UsageTerms><rdf:Alt><rdf:li xml:lang="x-default">${xmlEscape(xmp.usageTerms)}</rdf:li></rdf:Alt></xmpRights:UsageTerms>`
     );
   }
+  // xmp:Rating (0-5) — Windows Explorer and Lightroom/Bridge read this as the star rating.
+  if (typeof xmp.rating === 'number' && xmp.rating >= 0) {
+    props.push(`<xmp:Rating>${Math.round(xmp.rating)}</xmp:Rating>`);
+  }
 
   // The XMP packet header conventionally starts with a UTF-8 BOM (U+FEFF)
   // inside begin="..."; use the escape form so no irregular literal whitespace
@@ -114,7 +118,8 @@ function buildXmpPacket(xmp) {
     `<rdf:Description rdf:about="" ` +
     `xmlns:dc="http://purl.org/dc/elements/1.1/" ` +
     `xmlns:photoshop="http://ns.adobe.com/photoshop/1.0/" ` +
-    `xmlns:xmpRights="http://ns.adobe.com/xap/1.0/rights/">` +
+    `xmlns:xmpRights="http://ns.adobe.com/xap/1.0/rights/" ` +
+    `xmlns:xmp="http://ns.adobe.com/xap/1.0/">` +
     props.join('') +
     `</rdf:Description>` +
     `</rdf:RDF>` +

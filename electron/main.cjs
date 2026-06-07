@@ -706,6 +706,27 @@ ipcMain.handle('write-image-metadata', async (event, filePath, metadata) => {
   }
 });
 
+// Write a star rating (xmp:Rating 0-5) to the file so it shows in the OS file
+// details. For RAW (which sharp can't re-encode) write a standard sidecar .xmp;
+// for everything else embed the XMP in-place.
+ipcMain.handle('write-image-rating', async (event, filePath, rating) => {
+  try {
+    const ext = path.extname(filePath).toLowerCase();
+    const rawFormats = ['.cr2', '.cr3', '.nef', '.nrw', '.arw', '.sr2', '.srf', '.orf', '.dng', '.raf', '.rw2', '.pef', '.srw', '.x3f'];
+    if (rawFormats.includes(ext)) {
+      const { buildXmpPacket } = require('./imageWriter.cjs');
+      const sidecar = filePath.slice(0, -ext.length) + '.xmp';
+      await fs.promises.writeFile(sidecar, buildXmpPacket({ rating }), 'utf8');
+      return { ok: true, method: 'sidecar', path: sidecar };
+    }
+    await writeImageMetadata(filePath, { xmp: { rating } });
+    return { ok: true, method: 'embedded' };
+  } catch (error) {
+    console.warn('Failed to write image rating:', error.message);
+    return { ok: false, error: error.message };
+  }
+});
+
 // Logging handlers
 const logDir = path.join(os.homedir(), 'Photo Editor Pro', 'logs');
 const logFile = path.join(logDir, `app-${new Date().toISOString().split('T')[0]}.log`);

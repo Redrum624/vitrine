@@ -12,6 +12,10 @@ interface ThumbnailPanelProps {
   visible: boolean;
 }
 
+const RAW_EXTENSIONS = ['cr2', 'cr3', 'nef', 'nrw', 'arw', 'sr2', 'srf', 'orf', 'dng', 'raf', 'rw2', 'pef', 'srw', 'x3f', 'raw'];
+const isRawImage = (img: ImageFileInfo): boolean =>
+  RAW_EXTENSIONS.includes((img.name.split('.').pop() || '').toLowerCase());
+
 export function ThumbnailPanel({
   images,
   selectedImage,
@@ -437,10 +441,24 @@ export function ThumbnailPanel({
                   </div>
                 )}
 
+                {/* RAW badge (top-right) */}
+                {isRawImage(image) && (
+                  <div
+                    className="absolute"
+                    style={{
+                      top: '3px', right: '3px', padding: '0 4px', borderRadius: '3px',
+                      backgroundColor: 'rgba(0,0,0,0.7)', color: '#fff', fontSize: '8px',
+                      fontWeight: 700, letterSpacing: '0.5px', lineHeight: '14px', pointerEvents: 'none',
+                    }}
+                  >
+                    RAW
+                  </div>
+                )}
+
                 {/* Star rating overlay */}
                 <div
                   className="absolute bottom-0 left-0 right-0 flex justify-center gap-0.5 py-0.5"
-                  style={{ backgroundColor: 'rgba(0,0,0,0.6)' }}
+                  style={{ backgroundColor: 'rgba(0,0,0,0.45)' }}
                   onClick={(e) => e.stopPropagation()}
                 >
                   {[1, 2, 3, 4, 5].map((star) => (
@@ -449,12 +467,15 @@ export function ThumbnailPanel({
                       size={10}
                       className="cursor-pointer"
                       style={{
-                        color: star <= rating ? '#facc15' : 'var(--gray-600)',
+                        color: star <= rating ? '#facc15' : 'rgba(255,255,255,0.75)',
                         fill: star <= rating ? '#facc15' : 'none',
                       }}
                       onClick={(e) => {
                         e.stopPropagation();
-                        setImageRating(image.id, star === rating ? 0 : star);
+                        const newRating = star === rating ? 0 : star;
+                        setImageRating(image.id, newRating);
+                        // Persist to the file (xmp:Rating) so it shows in OS file details.
+                        window.electronAPI?.writeImageRating?.(image.path, newRating);
                       }}
                     />
                   ))}
