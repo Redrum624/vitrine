@@ -315,6 +315,40 @@ void main() {
   }
 }`;
 
+// Lateral chromatic aberration: radially shift the R and B channels, bilinear-sampled
+// (manual, out-of-bounds -> 0). Mirrors correctLateralCA + sampleChannel.
+const LATERALCA_FRAG_SRC = `#version 300 es
+precision highp float;
+uniform sampler2D u_image;
+uniform vec2 u_res;
+uniform float u_redShift, u_blueShift;
+in vec2 v_uv;
+out vec4 outColor;
+float pick(vec4 v, int ch) { return ch == 0 ? v.r : ch == 2 ? v.b : v.g; }
+float sampleCh(vec2 p, int ch) {
+  if (p.x < 0.0 || p.x >= u_res.x - 1.0 || p.y < 0.0 || p.y >= u_res.y - 1.0) return 0.0;
+  float x0 = floor(p.x), y0 = floor(p.y);
+  float wx = p.x - x0, wy = p.y - y0;
+  int ix0 = int(x0), iy0 = int(y0);
+  float v00 = pick(texelFetch(u_image, ivec2(ix0, iy0), 0), ch);
+  float v01 = pick(texelFetch(u_image, ivec2(ix0 + 1, iy0), 0), ch);
+  float v10 = pick(texelFetch(u_image, ivec2(ix0, iy0 + 1), 0), ch);
+  float v11 = pick(texelFetch(u_image, ivec2(ix0 + 1, iy0 + 1), 0), ch);
+  return mix(mix(v00, v01, wx), mix(v10, v11, wx), wy);
+}
+void main() {
+  vec4 src = texture(u_image, v_uv);
+  float cx = u_res.x / 2.0, cy = u_res.y / 2.0;
+  float maxR = sqrt(cx * cx + cy * cy);
+  float dx = (gl_FragCoord.x - 0.5) - cx, dy = (gl_FragCoord.y - 0.5) - cy;
+  float dist = sqrt(dx * dx + dy * dy) / maxR;
+  float rs = 1.0 + u_redShift * dist * dist;
+  float bs = 1.0 + u_blueShift * dist * dist;
+  float r = sampleCh(vec2(cx + dx * rs, cy + dy * rs), 0);
+  float b = sampleCh(vec2(cx + dx * bs, cy + dy * bs), 2);
+  outColor = vec4(r, src.g, b, src.a);
+}`;
+
 // Faithful GLSL port of BasicAdjustmentsModule.process (see that file for intent).
 const BASICADJ_FRAG_SRC = `#version 300 es
 precision highp float;
@@ -422,6 +456,8 @@ class WebGLImageProcessor {
   private hueCurvesVerified: boolean | null = null;
   private distortionProgram: WebGLProgram | null = null;
   private distortionVerified: boolean | null = null;
+  private lateralCAProgram: WebGLProgram | null = null;
+  private lateralCAVerified: boolean | null = null;
   private vao: WebGLVertexArrayObject | null = null;
   private initTried = false;
 
@@ -444,7 +480,8 @@ class WebGLImageProcessor {
       const toneCurveProgram = this.buildProgram(gl, VERT_SRC, TONECURVE_FRAG_SRC);
       const vignetteProgram = this.buildProgram(gl, VERT_SRC, VIGNETTE_FRAG_SRC);
       const distortionProgram = this.buildProgram(gl, VERT_SRC, DISTORTION_FRAG_SRC);
-      if (!exposureProgram || !basicAdjProgram || !gainsProgram || !denoiseProgram || !colorBalanceProgram || !toneCurveProgram || !vignetteProgram || !distortionProgram) return (this.gl = null);
+      const lateralCAProgram = this.buildProgram(gl, VERT_SRC, LATERALCA_FRAG_SRC);
+      if (!exposureProgram || !basicAdjProgram || !gainsProgram || !denoiseProgram || !colorBalanceProgram || !toneCurveProgram || !vignetteProgram || !distortionProgram || !lateralCAProgram) return (this.gl = null);
 
       const quad = gl.createBuffer();
       gl.bindBuffer(gl.ARRAY_BUFFER, quad);
@@ -465,6 +502,7 @@ class WebGLImageProcessor {
       this.toneCurveProgram = toneCurveProgram;
       this.vignetteProgram = vignetteProgram;
       this.distortionProgram = distortionProgram;
+      this.lateralCAProgram = lateralCAProgram;
       // Optional program: the hue-curves shader uses array uniforms some drivers may
       // reject. A compile failure must NOT disable the other (required) GPU ops, so
       // build it here without gating the context on it.
@@ -1006,6 +1044,68 @@ class WebGLImageProcessor {
       }
     }
     return result;
+  }
+
+  /** Apply lateral chromatic aberration (R/B radial shift). GPU when verified, else CPU. */
+  applyLateralCA(data: Float32Array, width: number, height: number, redCyan: number, blueMagenta: number): Float32Array {
+    const redShift = redCyan * 0.001, blueShift = blueMagenta * 0.001;
+    const gl = this.ensureContext();
+    if (gl && this.lateralCAProgram && this.vao && this.verifyLateralCA()) {
+      try {
+        return this.runPass(this.lateralCAProgram, data, width, height, (g, prog) => {
+          g.uniform2f(g.getUniformLocation(prog, 'u_res'), width, height);
+          g.uniform1f(g.getUniformLocation(prog, 'u_redShift'), redShift);
+          g.uniform1f(g.getUniformLocation(prog, 'u_blueShift'), blueShift);
+        });
+      } catch (e) { logger.warn('[GPU] lateral-CA failed — CPU:', e instanceof Error ? e.message : String(e)); }
+    }
+    return this.lateralCACPU(data, width, height, redShift, blueShift);
+  }
+
+  private verifyLateralCA(): boolean {
+    if (this.lateralCAVerified !== null) return this.lateralCAVerified;
+    let ok = false;
+    try {
+      const { data, w, h } = CB_SELFTEST;
+      const a = this.runPass(this.lateralCAProgram!, data, w, h, (g, prog) => {
+        g.uniform2f(g.getUniformLocation(prog, 'u_res'), w, h);
+        g.uniform1f(g.getUniformLocation(prog, 'u_redShift'), 0.02);
+        g.uniform1f(g.getUniformLocation(prog, 'u_blueShift'), -0.01);
+      });
+      const c = this.lateralCACPU(data, w, h, 0.02, -0.01);
+      let maxDiff = 0;
+      for (let i = 0; i < c.length; i++) maxDiff = Math.max(maxDiff, Math.abs(a[i] - c[i]));
+      ok = maxDiff < 0.02;
+      logger.info(`[GPU] lateral-CA self-check maxDiff=${maxDiff.toExponential(2)} -> ${ok ? 'GPU' : 'CPU fallback'}`);
+    } catch (e) { logger.warn('[GPU] lateral-CA self-check error:', e instanceof Error ? e.message : String(e)); }
+    this.lateralCAVerified = ok;
+    return ok;
+  }
+
+  /** CPU reference — a replica of LensCorrectionsModule.correctLateralCA. */
+  lateralCACPU(data: Float32Array, width: number, height: number, redShift: number, blueShift: number): Float32Array {
+    const out = new Float32Array(data); // R/B replaced below; G/A preserved
+    const cx = width / 2, cy = height / 2;
+    const maxR = Math.sqrt(cx * cx + cy * cy);
+    const sampleCh = (sx: number, sy: number, ch: number): number => {
+      if (sx < 0 || sx >= width - 1 || sy < 0 || sy >= height - 1) return 0;
+      const x0 = Math.floor(sx), y0 = Math.floor(sy), x1 = x0 + 1, y1 = y0 + 1;
+      const wx = sx - x0, wy = sy - y0;
+      const p00 = data[(y0 * width + x0) * 4 + ch], p01 = data[(y0 * width + x1) * 4 + ch];
+      const p10 = data[(y1 * width + x0) * 4 + ch], p11 = data[(y1 * width + x1) * 4 + ch];
+      return (p00 * (1 - wx) + p01 * wx) * (1 - wy) + (p10 * (1 - wx) + p11 * wx) * wy;
+    };
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const i = y * width + x;
+        const dx = x - cx, dy = y - cy;
+        const dist = Math.sqrt(dx * dx + dy * dy) / maxR;
+        const rs = 1 + redShift * dist * dist, bs = 1 + blueShift * dist * dist;
+        out[i * 4] = sampleCh(cx + dx * rs, cy + dy * rs, 0);
+        out[i * 4 + 2] = sampleCh(cx + dx * bs, cy + dy * bs, 2);
+      }
+    }
+    return out;
   }
 
   /** Generic single-pass shader run: source texture → program → float readback. */

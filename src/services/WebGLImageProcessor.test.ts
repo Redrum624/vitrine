@@ -165,6 +165,30 @@ describe('GPU hue-curves CPU reference matches HueCurvesModule', () => {
   });
 });
 
+describe('GPU lateral-CA CPU reference matches LensCorrectionsModule', () => {
+  const w = 8, h = 6;
+  const src = new Float32Array(w * h * 4);
+  for (let i = 0; i < w * h; i++) {
+    src[i * 4] = (i % 8) / 8; src[i * 4 + 1] = ((i * 4) % 9) / 9;
+    src[i * 4 + 2] = ((i * 5) % 7) / 7; src[i * 4 + 3] = 1;
+  }
+
+  test('parity (lateral R/B radial shift)', () => {
+    const mod = new LensCorrectionsModule();
+    mod.setParams({
+      chromaticAberration: {
+        enabled: true, redCyan: 30, blueMagenta: -20,
+        purple: { amount: 0, hue: 300, range: 10 }, green: { amount: 0, hue: 60, range: 10 },
+      },
+    });
+    const expected = mod.processImage(new Float32Array(src), w, h);
+    const ref = webGLImageProcessor.lateralCACPU(new Float32Array(src), w, h, 30 * 0.001, -20 * 0.001);
+    let maxDiff = 0;
+    for (let i = 0; i < expected.length; i++) maxDiff = Math.max(maxDiff, Math.abs(expected[i] - ref[i]));
+    expect(maxDiff).toBeLessThan(1e-5);
+  });
+});
+
 describe('GPU distortion CPU reference matches LensCorrectionsModule', () => {
   const w = 8, h = 6;
   const src = new Float32Array(w * h * 4);

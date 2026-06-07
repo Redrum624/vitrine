@@ -133,8 +133,15 @@ export class LensCorrectionsModule {
       }
 
       if (this.params.chromaticAberration.enabled) {
-        const caResult = this.correctChromaticAberration(result, width, height);
-        result = new Float32Array(caResult);
+        const { redCyan, blueMagenta, purple, green } = this.params.chromaticAberration;
+        // GPU lateral CA (R/B radial shift) when available; the niche purple/green
+        // fringing stays on the CPU and runs after.
+        if ((redCyan !== 0 || blueMagenta !== 0) && result.length === width * height * 4 && webGLImageProcessor.isAvailable()) {
+          result = new Float32Array(webGLImageProcessor.applyLateralCA(result, width, height, redCyan, blueMagenta));
+          if (purple.amount > 0 || green.amount > 0) this.correctColorFringing(result, width, height, purple, green);
+        } else {
+          result = new Float32Array(this.correctChromaticAberration(result, width, height));
+        }
       }
 
       if (this.params.vignetting.enabled) {
