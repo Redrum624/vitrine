@@ -1,4 +1,41 @@
 import { logger } from '../utils/Logger';
+import { isElectron, EmbeddableMetadata } from '../types/electron';
+
+/**
+ * Minimal structural shape of an exifreader tag. exifreader decodes string tags
+ * into `.description`; XMP tags carry `.value` (string | child tags | object).
+ * We only read the two fields the mapper needs, so a narrow local type avoids a
+ * hard dependency on exifreader's full declaration here.
+ */
+interface ExifReaderTag {
+  description?: unknown;
+  value?: unknown;
+}
+
+type ExifReaderTagMap = Record<string, ExifReaderTag | ExifReaderTag[] | undefined>;
+
+/** The single bridge method extractMetadata depends on. */
+interface ElectronMetadataApi {
+  readImageMetadata?: (filePath: string) => Promise<{
+    exif?: ExifReaderTagMap;
+    iptc?: ExifReaderTagMap;
+    xmp?: ExifReaderTagMap;
+    icc?: unknown;
+    thumbnail?: unknown;
+  }>;
+}
+
+/**
+ * Return a shallow copy of `obj` with all keys whose value is undefined removed,
+ * so consumers (summary/validation) only see populated fields.
+ */
+function stripUndefined<T extends Record<string, unknown>>(obj: T): T {
+  const out = {} as Record<string, unknown>;
+  for (const [key, value] of Object.entries(obj)) {
+    if (value !== undefined) out[key] = value;
+  }
+  return out as T;
+}
 
 // IPTC Core Schema fields
 export interface IPTCMetadata {
@@ -310,27 +347,96 @@ export class CopyrightService {
   }
 
   /**
-   * Extract metadata from image file (simulated - would use exifr or similar in production)
+   * Extract IPTC/EXIF/XMP metadata from an image file by reading it through the
+   * main-process exifreader IPC (read-image-metadata) and mapping the returned
+   * tag shapes onto IPTCMetadata + XMPMetadata. Returns null on any failure or
+   * when the desktop bridge is unavailable.
    */
   async extractMetadata(filePath: string): Promise<{ iptc: IPTCMetadata; xmp: XMPMetadata } | null> {
     try {
       logger.debug(`Extracting metadata from: ${filePath}`);
 
-      // In a real implementation, this would use a library like exifr, piexifjs, or node-exif
-      // For now, we'll return a basic structure
+      // contextIsolation keeps electronAPI off the typed Window in tests/web;
+      // access via a cast, matching the existing renderer pattern.
+      const api = (window as unknown as { electronAPI?: ElectronMetadataApi }).electronAPI;
+      if (!api?.readImageMetadata) {
+        logger.warn('Metadata extraction requires the desktop app');
+        return null;
+      }
 
-      const basicMetadata = {
-        iptc: {
-          dateCreated: new Date(),
-          digitalCreationDate: new Date()
-        } as IPTCMetadata,
-        xmp: {
-          format: this.getFormatFromPath(filePath)
-        } as XMPMetadata
+      const md = await api.readImageMetadata(filePath);
+      const exif: ExifReaderTagMap = md?.exif ?? {};
+      const iptcTags: ExifReaderTagMap = md?.iptc ?? {};
+      const xmpTags: ExifReaderTagMap = md?.xmp ?? {};
+
+      // --- IPTC mapping ----------------------------------------------------
+      const keywords = this.tagList(iptcTags['Keywords']);
+      const copyrightNotice =
+        this.tagStr(iptcTags['Copyright Notice']) ?? this.tagStr(exif['Copyright']);
+      const creator =
+        this.tagList(iptcTags['By-line'])[0] ?? this.tagStr(exif['Artist']);
+      const dateCreated =
+        this.iptcDate(iptcTags['Date Created'], iptcTags['Time Created']) ??
+        this.exifDate(exif['DateTimeOriginal'] ?? exif['DateTimeDigitized']);
+
+      const iptc: IPTCMetadata = {
+        creator,
+        creatorJobTitle: this.tagStr(iptcTags['By-line Title']),
+        title: this.tagStr(iptcTags['Object Name']),
+        description: this.tagStr(iptcTags['Caption/Abstract']),
+        keywords: keywords.length > 0 ? keywords : undefined,
+        category: this.tagStr(iptcTags['Category']),
+        urgency: this.tagNumber(iptcTags['Urgency']),
+        copyrightNotice,
+        copyrightStatus: copyrightNotice ? 'copyrighted' : 'unknown',
+        headline: this.tagStr(iptcTags['Headline']),
+        credit: this.tagStr(iptcTags['Credit']),
+        source: this.tagStr(iptcTags['Source']),
+        instructions: this.tagStr(iptcTags['Special Instructions']),
+        captionWriter: this.tagList(iptcTags['Writer/Editor'])[0],
+        city: this.tagStr(iptcTags['City']),
+        state: this.tagStr(iptcTags['Province/State']),
+        country: this.tagStr(iptcTags['Country/Primary Location Name']),
+        countryCode: this.tagStr(iptcTags['Country/Primary Location Code']),
+        sublocation: this.tagStr(iptcTags['Sub-location']),
+        dateCreated,
+        digitalCreationDate: this.iptcDate(
+          iptcTags['Digital Creation Date'],
+          iptcTags['Digital Creation Time']
+        )
       };
 
+      // --- XMP mapping -----------------------------------------------------
+      // exifreader (expanded) keys XMP tags by their BARE local name with the
+      // original casing — NOT the namespace-prefixed form. dc:* tags become
+      // {title,description,rights,creator,subject}, photoshop:* -> {Credit,Source},
+      // xmpRights:* -> {UsageTerms,WebStatement}. (Verified by a write->read
+      // round-trip through imageWriter.buildXmpPacket + sharp.withXmp.)
+      const xmp: XMPMetadata = {
+        title: this.xmpStr(xmpTags, 'title'),
+        description: this.xmpStr(xmpTags, 'description'),
+        creator: this.emptyToUndefined(this.xmpList(xmpTags, 'creator')),
+        subject: this.emptyToUndefined(this.xmpList(xmpTags, 'subject')),
+        rights: this.xmpStr(xmpTags, 'rights'),
+        format: this.xmpStr(xmpTags, 'format') ?? this.getFormatFromPath(filePath),
+        identifier: this.xmpStr(xmpTags, 'identifier'),
+        language: this.xmpStr(xmpTags, 'language'),
+        relation: this.xmpStr(xmpTags, 'relation'),
+        coverage: this.xmpStr(xmpTags, 'coverage')
+      };
+
+      // Cross-fill IPTC rights fields from the XMP rights namespace when absent.
+      // xmpRights tags are keyed by their bare local name with original casing.
+      iptc.rightsUsageTerms =
+        iptc.rightsUsageTerms ?? this.xmpStr(xmpTags, 'UsageTerms');
+      iptc.webStatement =
+        iptc.webStatement ?? this.xmpStr(xmpTags, 'WebStatement');
+
       logger.debug('Metadata extracted successfully');
-      return basicMetadata;
+      return {
+        iptc: stripUndefined(iptc as unknown as Record<string, unknown>) as unknown as IPTCMetadata,
+        xmp: stripUndefined(xmp as unknown as Record<string, unknown>) as unknown as XMPMetadata
+      };
 
     } catch (error) {
       logger.error('Failed to extract metadata:', error);
@@ -339,7 +445,133 @@ export class CopyrightService {
   }
 
   /**
-   * Embed metadata into image (simulated)
+   * Read a scalar string from an exifreader tag. exifreader decodes EXIF/IPTC
+   * string tags into `.description`; fall back to a string `.value`. Empty
+   * strings collapse to undefined.
+   */
+  private tagStr(tag: ExifReaderTag | ExifReaderTag[] | undefined): string | undefined {
+    if (!tag) return undefined;
+    const one = Array.isArray(tag) ? tag[0] : tag;
+    if (!one) return undefined;
+    const raw =
+      typeof one.description === 'string'
+        ? one.description
+        : typeof one.value === 'string'
+          ? one.value
+          : undefined;
+    if (raw === undefined) return undefined;
+    const trimmed = raw.trim();
+    return trimmed === '' ? undefined : trimmed;
+  }
+
+  /**
+   * Normalize a repeatable IPTC tag into a string list. exifreader returns such
+   * tags as EITHER a single tag object OR an array of tag objects; handle both.
+   */
+  private tagList(tag: ExifReaderTag | ExifReaderTag[] | undefined): string[] {
+    if (tag === undefined) return [];
+    const tags = Array.isArray(tag) ? tag : [tag];
+    return tags
+      .map(t => this.tagStr(t))
+      .filter((s): s is string => s !== undefined);
+  }
+
+  /**
+   * Read a numeric IPTC tag (e.g. Urgency). Values arrive as decoded strings.
+   */
+  private tagNumber(tag: ExifReaderTag | ExifReaderTag[] | undefined): number | undefined {
+    const s = this.tagStr(tag);
+    if (s === undefined) return undefined;
+    const n = Number(s);
+    return Number.isFinite(n) ? n : undefined;
+  }
+
+  /**
+   * Parse an IPTC date ('YYYY-MM-DD') optionally combined with an IPTC time,
+   * into a Date. Returns undefined when absent or unparseable.
+   */
+  private iptcDate(
+    dateTag: ExifReaderTag | ExifReaderTag[] | undefined,
+    timeTag?: ExifReaderTag | ExifReaderTag[] | undefined
+  ): Date | undefined {
+    const date = this.tagStr(dateTag);
+    if (!date) return undefined;
+    const time = this.tagStr(timeTag);
+    const iso = time ? `${date}T${time}` : date;
+    const parsed = new Date(iso);
+    return isNaN(parsed.getTime()) ? undefined : parsed;
+  }
+
+  /**
+   * Parse an EXIF datetime ('YYYY:MM:DD HH:MM:SS') into a Date. The date portion
+   * uses colon separators, so swap the first two colons for hyphens first.
+   */
+  private exifDate(tag: ExifReaderTag | ExifReaderTag[] | undefined): Date | undefined {
+    const s = this.tagStr(tag);
+    if (!s) return undefined;
+    const normalized = s.replace(':', '-').replace(':', '-');
+    const parsed = new Date(normalized);
+    return isNaN(parsed.getTime()) ? undefined : parsed;
+  }
+
+  /**
+   * Read a scalar string from an XMP tag. XmpTag.value may be a string, an
+   * array of child tags, or a nested object; prefer `.description`, then a
+   * string `.value`.
+   */
+  private xmpStr(tags: ExifReaderTagMap, key: string): string | undefined {
+    const raw = tags[key];
+    if (!raw) return undefined;
+    const tag = Array.isArray(raw) ? raw[0] : raw;
+    if (!tag) return undefined;
+    if (typeof tag.description === 'string' && tag.description.trim() !== '') {
+      return tag.description.trim();
+    }
+    if (typeof tag.value === 'string') {
+      const trimmed = tag.value.trim();
+      return trimmed === '' ? undefined : trimmed;
+    }
+    return undefined;
+  }
+
+  /**
+   * Read a string list from an XMP tag (e.g. dc:creator, dc:subject). The value
+   * is typically an array of child XmpTags; map each child's `.value`/`.description`.
+   */
+  private xmpList(tags: ExifReaderTagMap, key: string): string[] {
+    const raw = tags[key];
+    if (!raw) return [];
+    const tag = Array.isArray(raw) ? raw[0] : raw;
+    if (!tag) return [];
+    const value = tag.value;
+    if (Array.isArray(value)) {
+      return value
+        .map(child => {
+          if (typeof child === 'string') return child.trim();
+          if (child && typeof (child as ExifReaderTag).value === 'string') {
+            return ((child as ExifReaderTag).value as string).trim();
+          }
+          if (child && typeof (child as ExifReaderTag).description === 'string') {
+            return ((child as ExifReaderTag).description as string).trim();
+          }
+          return '';
+        })
+        .filter((s): s is string => s !== '');
+    }
+    // Single-value fallback.
+    const single = this.xmpStr(tags, key);
+    return single ? [single] : [];
+  }
+
+  /** Collapse an empty array to undefined (so stripUndefined drops the key). */
+  private emptyToUndefined<T>(arr: T[]): T[] | undefined {
+    return arr.length > 0 ? arr : undefined;
+  }
+
+  /**
+   * Embed IPTC/XMP/EXIF metadata into an existing image file via the
+   * main-process writer (sharp withExif/withXmp). Only available under Electron;
+   * in a non-Electron context this is a no-op that returns false.
    */
   async embedMetadata(
     filePath: string,
@@ -347,18 +579,25 @@ export class CopyrightService {
     xmpData: XMPMetadata
   ): Promise<boolean> {
     try {
+      if (!isElectron() || !window.electronAPI?.writeImageMetadata) {
+        logger.warn('Metadata embedding requires the desktop app');
+        return false;
+      }
+
       logger.info(`Embedding metadata into: ${filePath}`);
 
-      // In a real implementation, this would use a library to write IPTC/XMP data
-      // For now, we'll simulate the process
+      const payload = this.toEmbeddableMetadata(iptcData, xmpData);
+      if (!payload.exif && !payload.xmp) {
+        logger.warn('No embeddable metadata fields present; nothing to write');
+        return false;
+      }
 
-      const metadataSize = JSON.stringify({ iptc: iptcData, xmp: xmpData }).length;
+      const success = await window.electronAPI.writeImageMetadata(filePath, payload);
 
-      // Simulate processing time
-      await new Promise(resolve => setTimeout(resolve, 100));
-
-      logger.info(`Metadata embedded successfully (${metadataSize} bytes)`);
-      return true;
+      if (success) {
+        logger.info('Metadata embedded successfully');
+      }
+      return success;
 
     } catch (error) {
       logger.error('Failed to embed metadata:', error);
@@ -506,6 +745,65 @@ export class CopyrightService {
    */
   formatDateForMetadata(date: Date): string {
     return date.toISOString().split('T')[0]; // YYYY-MM-DD format
+  }
+
+  /**
+   * Format a date as an EXIF DateTimeOriginal string: 'YYYY:MM:DD HH:MM:SS'.
+   * EXIF uses colon-separated date components, not the ISO hyphen format.
+   */
+  formatDateForExif(date: Date): string {
+    const pad = (n: number): string => String(n).padStart(2, '0');
+    const y = date.getFullYear();
+    const mo = pad(date.getMonth() + 1);
+    const d = pad(date.getDate());
+    const h = pad(date.getHours());
+    const mi = pad(date.getMinutes());
+    const s = pad(date.getSeconds());
+    return `${y}:${mo}:${d} ${h}:${mi}:${s}`;
+  }
+
+  /**
+   * Map the module's IPTC/XMP metadata onto the writer's embeddable shape
+   * ({ exif, xmp }) consumed by the main-process image writer.
+   *
+   * EXIF carries the universally-readable copyright/artist tags (Windows
+   * Explorer, most viewers read these). The rest of the IPTC/XMP fields are
+   * expressed as XMP namespaces (dc:*, photoshop:*, xmpRights:*), which is the
+   * accepted modern equivalent of legacy IPTC-IIM and what this app's own
+   * reader consumes back.
+   */
+  toEmbeddableMetadata(iptc: IPTCMetadata, xmp: XMPMetadata): EmbeddableMetadata {
+    const exif: NonNullable<EmbeddableMetadata['exif']> = {};
+    if (iptc.copyrightNotice) exif.Copyright = iptc.copyrightNotice;
+    if (iptc.creator) exif.Artist = iptc.creator;
+    const description = iptc.description ?? xmp.description;
+    if (description) exif.ImageDescription = description;
+    if (iptc.dateCreated instanceof Date && !isNaN(iptc.dateCreated.getTime())) {
+      exif.DateTimeOriginal = this.formatDateForExif(iptc.dateCreated);
+    }
+
+    const xmpOut: NonNullable<EmbeddableMetadata['xmp']> = {};
+    const rights = iptc.copyrightNotice ?? xmp.rights;
+    if (rights) xmpOut.rights = rights;
+    // dc:creator is a list; prefer the XMP creator array, fall back to IPTC.
+    const creator = xmp.creator && xmp.creator.length > 0
+      ? xmp.creator
+      : (iptc.creator ? [iptc.creator] : undefined);
+    if (creator && creator.length > 0) xmpOut.creator = creator;
+    const title = iptc.title ?? xmp.title;
+    if (title) xmpOut.title = title;
+    if (description) xmpOut.description = description;
+    const subject = (xmp.subject && xmp.subject.length > 0) ? xmp.subject : iptc.keywords;
+    if (subject && subject.length > 0) xmpOut.subject = subject;
+    if (iptc.credit) xmpOut.credit = iptc.credit;
+    if (iptc.source) xmpOut.source = iptc.source;
+    if (iptc.webStatement) xmpOut.webStatement = iptc.webStatement;
+    if (iptc.rightsUsageTerms) xmpOut.usageTerms = iptc.rightsUsageTerms;
+
+    const result: EmbeddableMetadata = {};
+    if (Object.keys(exif).length > 0) result.exif = exif;
+    if (Object.keys(xmpOut).length > 0) result.xmp = xmpOut;
+    return result;
   }
 
   /**

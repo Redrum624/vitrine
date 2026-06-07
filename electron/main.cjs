@@ -2,6 +2,7 @@ const { app, BrowserWindow, Menu, dialog, ipcMain, shell } = require('electron')
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const { writeImageFile, writeImageMetadata } = require('./imageWriter.cjs');
 
 // Keep a global reference of the window objects
 let mainWindow;
@@ -650,68 +651,9 @@ ipcMain.handle('write-file', async (event, filePath, data) => {
 // Write image file (for exports)
 ipcMain.handle('write-image-file', async (event, filePath, imageData, format, options) => {
   try {
-    const sharp = require('sharp');
-
-    const rawBuffer = Buffer.from(imageData);
-    const expectedSize = options.width * options.height * (options.channels || 4);
-    if (rawBuffer.length !== expectedSize) {
-      console.warn(`Export buffer size mismatch: got ${rawBuffer.length}, expected ${expectedSize}`);
-    }
-
-    let sharpInstance = sharp(rawBuffer, {
-      raw: {
-        width: options.width,
-        height: options.height,
-        channels: options.channels || 4
-      }
-    })
-
-    // Remove alpha channel for formats that don't support it
-    if (format.toLowerCase() === 'jpeg') {
-      sharpInstance = sharpInstance.removeAlpha();
-    }
-
-    // Apply format-specific options
-    switch (format.toLowerCase()) {
-      case 'jpeg':
-        sharpInstance = sharpInstance.jpeg({
-          quality: options.quality || 90,
-          progressive: options.progressive || false,
-          mozjpeg: true
-        });
-        break;
-      case 'png':
-        sharpInstance = sharpInstance.png({
-          compressionLevel: options.compressionLevel || 6,
-          progressive: options.progressive || false
-        });
-        break;
-      case 'tiff':
-        sharpInstance = sharpInstance.tiff({
-          compression: options.compression || 'lzw',
-          quality: options.quality || 90
-        });
-        break;
-      case 'webp':
-        sharpInstance = sharpInstance.webp({
-          quality: options.quality || 80,
-          lossless: options.lossless || false
-        });
-        break;
-      default:
-        throw new Error(`Unsupported format: ${format}`);
-    }
-
-    // Resize if needed
-    if (options.resize && (options.resize.width || options.resize.height)) {
-      sharpInstance = sharpInstance.resize(options.resize.width, options.resize.height, {
-        fit: options.resize.fit || 'inside',
-        withoutEnlargement: true
-      });
-    }
-
-    await sharpInstance.toFile(filePath);
-    return true;
+    // Delegates to electron/imageWriter.cjs (unit-tested). Correctly handles
+    // 8-bit and 16-bit raw RGBA buffers and embeds an sRGB ICC profile.
+    return await writeImageFile(filePath, imageData, format, options);
   } catch (error) {
     console.error('Failed to write image file:', error);
     throw error;
@@ -760,20 +702,12 @@ ipcMain.handle('read-image-metadata', async (event, filePath) => {
   }
 });
 
-// Write image metadata
+// Write image metadata (EXIF copyright/artist + IPTC-as-XMP) into an existing
+// raster file. Delegates to electron/imageWriter.cjs (unit-tested). Throws on
+// failure so the renderer promise rejects (no silent success).
 ipcMain.handle('write-image-metadata', async (event, filePath, metadata) => {
   try {
-    // For now, we'll use exiftool if available, otherwise log the operation
-    logger.info(`Would write metadata to ${filePath}:`, metadata);
-
-    // In production, you'd use exiftool or similar:
-    // const exiftool = require('node-exiftool');
-    // const ep = new exiftool.ExiftoolProcess();
-    // await ep.open();
-    // await ep.writeMetadata(filePath, metadata);
-    // await ep.close();
-
-    return true;
+    return await writeImageMetadata(filePath, metadata);
   } catch (error) {
     console.error('Failed to write image metadata:', error);
     throw error;
