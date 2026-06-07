@@ -6,6 +6,34 @@ import { DelayedInputControl } from '../Controls/DelayedInputControl';
 import { autoAdjustService } from '../../services/AutoAdjustService';
 import { imageService } from '../../services/ImageService';
 
+type SliderKey = 'exposure' | 'contrast' | 'highlights' | 'brightness' | 'black_point' | 'shadows' | 'dehaze' | 'saturation' | 'vibrance';
+
+interface SliderCfg {
+  key: SliderKey;
+  label: string;
+  min: number;
+  max: number;
+  step?: number;       // DelayedInput + default range step
+  rangeStep?: number;  // slider step override
+  gradient: string;    // CSS gradient stops (without the linear-gradient wrapper)
+  unit?: string;
+}
+
+// Slider order: Exposure, Contrast, Highlights, Brightness, Black Point, Shadows,
+// Dehaze, Saturation, Vibrance. Highlights/Shadows replace the old standalone
+// Shadows & Highlights module.
+const BASIC_ADJ_SLIDERS: SliderCfg[] = [
+  { key: 'exposure', label: 'Exposure', min: -1, max: 1, step: 0.01, gradient: '#000000, #6b7280, #ffffff', unit: 'EV' },
+  { key: 'contrast', label: 'Contrast', min: -2.5, max: 2.5, step: 0.01, gradient: '#6b7280, #000000' },
+  { key: 'highlights', label: 'Highlights', min: -1, max: 1, step: 0.01, gradient: '#6b7280, #ffffff' },
+  { key: 'brightness', label: 'Brightness', min: -2, max: 2, step: 0.01, gradient: '#000000, #6b7280, #ffffff' },
+  { key: 'black_point', label: 'Black Point', min: -1, max: 1, step: 0.01, gradient: '#ffffff, #000000' },
+  { key: 'shadows', label: 'Shadows', min: -1, max: 1, step: 0.01, gradient: '#000000, #6b7280' },
+  { key: 'dehaze', label: 'Dehaze', min: -1, max: 1, step: 0.01, rangeStep: 0.05, gradient: '#94a3b8, #64748b, #334155, #0ea5e9' },
+  { key: 'saturation', label: 'Saturation', min: -1, max: 1, step: 0.01, rangeStep: 0.05, gradient: '#6b7280, #3b82f6, #10b981, #eab308, #f97316, #ef4444' },
+  { key: 'vibrance', label: 'Vibrance', min: -1, max: 1, step: 0.01, rangeStep: 0.05, gradient: '#64748b, #a855f7, #ec4899, #f43f5e, #f97316' },
+];
+
 interface BasicAdjustmentsModuleComponentProps {
   module: BasicAdjustmentsModule;
   onParamsChange?: (params: Partial<BasicAdjParams>) => void;
@@ -82,6 +110,52 @@ export function BasicAdjustmentsModuleComponent({
   // Use formatValue to prevent unused variable warning
   console.debug('formatValue available:', formatValue);
 
+  const renderSlider = (cfg: SliderCfg) => {
+    const value = params[cfg.key] as number;
+    const rangeStep = cfg.rangeStep ?? cfg.step ?? 0.01;
+    return (
+      <div key={cfg.key} className="space-y-1.5">
+        <div className="flex items-center justify-between">
+          <label className="text-xs font-medium" style={{ color: 'var(--gray-300)' }}>{cfg.label}</label>
+          <div className="flex items-center gap-1.5">
+            <DelayedInputControl
+              value={value}
+              onChange={(v) => updateParam(cfg.key, v)}
+              min={cfg.min}
+              max={cfg.max}
+              step={cfg.step ?? 0.01}
+              precision={2}
+            />
+            {cfg.unit && <span className="text-xs font-mono" style={{ color: 'var(--gray-500)', width: '20px' }}>{cfg.unit}</span>}
+            <button
+              onClick={() => resetParam(cfg.key, 0.0)}
+              className="p-1 rounded"
+              style={{ backgroundColor: 'transparent', color: 'var(--gray-500)', transition: 'var(--transition-fast)' }}
+              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--gray-800)'; e.currentTarget.style.color = 'var(--white)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.color = 'var(--gray-500)'; }}
+              title={`Reset ${cfg.label.toLowerCase()}`}
+            >
+              <RotateCcw className="w-3 h-3" />
+            </button>
+          </div>
+        </div>
+        <input
+          type="range"
+          min={cfg.min}
+          max={cfg.max}
+          step={rangeStep}
+          value={value}
+          onInput={(e) => updateParamRealTime(cfg.key, parseFloat((e.target as HTMLInputElement).value))}
+          onChange={(e) => updateParam(cfg.key, parseFloat(e.target.value))}
+          onDoubleClick={() => updateParam(cfg.key, 0.0)}
+          className="slider w-full"
+          style={{ background: `linear-gradient(to right, ${cfg.gradient})` }}
+          title="Double-click to reset"
+        />
+      </div>
+    );
+  };
+
   return (
     <div className="space-y-3">
       {/* Header - Redesigned */}
@@ -151,370 +225,7 @@ export function BasicAdjustmentsModuleComponent({
       </div>
 
       <div className="space-y-3">
-        {/* Exposure */}
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between">
-            <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Exposure</label>
-            <div className="flex items-center gap-1.5">
-              <DelayedInputControl
-                value={params.exposure}
-                onChange={(value) => updateParam('exposure', value)}
-                min={-1}
-                max={1}
-                step={0.01}
-                precision={2}
-              />
-              <span className="text-xs font-mono" style={{color: 'var(--gray-500)', width: '20px'}}>EV</span>
-              <button
-                onClick={() => resetParam('exposure', 0.0)}
-                className="p-1 rounded"
-                style={{
-                  backgroundColor: 'transparent',
-                  color: 'var(--gray-500)',
-                  transition: 'var(--transition-fast)'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = 'var(--gray-800)';
-                  e.currentTarget.style.color = 'var(--white)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = 'transparent';
-                  e.currentTarget.style.color = 'var(--gray-500)';
-                }}
-                title="Reset"
-              >
-                <RotateCcw className="w-3 h-3" />
-              </button>
-            </div>
-          </div>
-          <input
-            type="range"
-            min="-1"
-            max="1"
-            step="0.01"
-            value={params.exposure}
-            onInput={(e) => updateParamRealTime('exposure', parseFloat((e.target as HTMLInputElement).value))}
-            onChange={(e) => updateParam('exposure', parseFloat(e.target.value))}
-            onDoubleClick={() => updateParam('exposure', 0.0)}
-            className="slider w-full"
-            style={{
-              background: 'linear-gradient(to right, #000000, #6b7280, #ffffff)',
-            }}
-            title="Double-click to reset"
-          />
-        </div>
-
-        {/* Black Point */}
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between">
-            <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Black Point</label>
-            <div className="flex items-center gap-1.5">
-              <DelayedInputControl
-                value={params.black_point}
-                onChange={(value) => updateParam('black_point', value)}
-                min={-1}
-                max={1}
-                step={0.01}
-                precision={2}
-              />
-              <button
-                onClick={() => resetParam('black_point', 0.0)}
-                className="p-1 rounded"
-                style={{
-                  backgroundColor: 'transparent',
-                  color: 'var(--gray-500)',
-                  transition: 'var(--transition-fast)'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = 'var(--gray-800)';
-                  e.currentTarget.style.color = 'var(--white)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = 'transparent';
-                  e.currentTarget.style.color = 'var(--gray-500)';
-                }}
-                title="Reset black point"
-              >
-                <RotateCcw className="w-3 h-3" />
-              </button>
-            </div>
-          </div>
-          <input
-              type="range"
-              min="-1"
-              max="1"
-              step="0.01"
-              value={params.black_point}
-              onInput={(e) => updateParamRealTime('black_point', parseFloat((e.target as HTMLInputElement).value))}
-              onChange={(e) => updateParam('black_point', parseFloat(e.target.value))}
-              onDoubleClick={() => updateParam('black_point', 0.0)}
-              className="slider w-full"
-              style={{
-                background: 'linear-gradient(to right, #ffffff, #000000)',
-              }}
-              title="Double-click to reset"
-            />
-        </div>
-
-        {/* Contrast */}
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between">
-            <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Contrast</label>
-            <div className="flex items-center gap-1.5">
-              <DelayedInputControl
-                value={params.contrast}
-                onChange={(value) => updateParam('contrast', value)}
-                min={-2.5}
-                max={2.5}
-                step={0.01}
-                precision={2}
-              />
-              <button
-                onClick={() => resetParam('contrast', 0.0)}
-                className="p-1 rounded"
-                style={{
-                  backgroundColor: 'transparent',
-                  color: 'var(--gray-500)',
-                  transition: 'var(--transition-fast)'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = 'var(--gray-800)';
-                  e.currentTarget.style.color = 'var(--white)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = 'transparent';
-                  e.currentTarget.style.color = 'var(--gray-500)';
-                }}
-                title="Reset contrast"
-              >
-                <RotateCcw className="w-3 h-3" />
-              </button>
-            </div>
-          </div>
-          <input
-              type="range"
-              min="-2.5"
-              max="2.5"
-              step="0.01"
-              value={params.contrast}
-              onInput={(e) => updateParamRealTime('contrast', parseFloat((e.target as HTMLInputElement).value))}
-              onChange={(e) => updateParam('contrast', parseFloat(e.target.value))}
-              onDoubleClick={() => updateParam('contrast', 0.0)}
-              className="slider w-full"
-              style={{
-                background: 'linear-gradient(to right, #6b7280, #000000)',
-              }}
-              title="Double-click to reset"
-            />
-        </div>
-
-        {/* Brightness */}
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between">
-            <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Brightness</label>
-            <div className="flex items-center gap-1.5">
-              <DelayedInputControl
-                value={params.brightness}
-                onChange={(value) => updateParam('brightness', value)}
-                min={-2}
-                max={2}
-                step={0.01}
-                precision={2}
-              />
-              <button
-                onClick={() => resetParam('brightness', 0.0)}
-                className="p-1 rounded"
-                style={{
-                  backgroundColor: 'transparent',
-                  color: 'var(--gray-500)',
-                  transition: 'var(--transition-fast)'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = 'var(--gray-800)';
-                  e.currentTarget.style.color = 'var(--white)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = 'transparent';
-                  e.currentTarget.style.color = 'var(--gray-500)';
-                }}
-                title="Reset brightness"
-              >
-                <RotateCcw className="w-3 h-3" />
-              </button>
-            </div>
-          </div>
-          <input
-              type="range"
-              min="-2"
-              max="2"
-              step="0.01"
-              value={params.brightness}
-              onInput={(e) => updateParamRealTime('brightness', parseFloat((e.target as HTMLInputElement).value))}
-              onChange={(e) => updateParam('brightness', parseFloat(e.target.value))}
-              onDoubleClick={() => updateParam('brightness', 0.0)}
-              className="slider w-full"
-              style={{
-                background: 'linear-gradient(to right, #000000, #6b7280, #ffffff)',
-              }}
-              title="Double-click to reset"
-            />
-        </div>
-
-        {/* Saturation */}
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between">
-            <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Saturation</label>
-            <div className="flex items-center gap-1.5">
-              <DelayedInputControl
-                value={params.saturation}
-                onChange={(value) => updateParam('saturation', value)}
-                min={-1}
-                max={1}
-                step={0.01}
-                precision={2}
-              />
-              <button
-                onClick={() => resetParam('saturation', 0.0)}
-                className="p-1 rounded"
-                style={{
-                  backgroundColor: 'transparent',
-                  color: 'var(--gray-500)',
-                  transition: 'var(--transition-fast)'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = 'var(--gray-800)';
-                  e.currentTarget.style.color = 'var(--white)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = 'transparent';
-                  e.currentTarget.style.color = 'var(--gray-500)';
-                }}
-                title="Reset saturation"
-              >
-                <RotateCcw className="w-3 h-3" />
-              </button>
-            </div>
-          </div>
-          <input
-              type="range"
-              min="-1"
-              max="1"
-              step="0.05"
-              value={params.saturation}
-              onInput={(e) => updateParamRealTime('saturation', parseFloat((e.target as HTMLInputElement).value))}
-              onChange={(e) => updateParam('saturation', parseFloat(e.target.value))}
-              onDoubleClick={() => updateParam('saturation', 0.0)}
-              className="slider w-full"
-              style={{
-                background: 'linear-gradient(to right, #6b7280, #3b82f6, #10b981, #eab308, #f97316, #ef4444)',
-              }}
-              title="Double-click to reset"
-            />
-        </div>
-
-        {/* Vibrance */}
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between">
-            <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Vibrance</label>
-            <div className="flex items-center gap-1.5">
-              <DelayedInputControl
-                value={params.vibrance}
-                onChange={(value) => updateParam('vibrance', value)}
-                min={-1}
-                max={1}
-                step={0.01}
-                precision={2}
-              />
-              <button
-                onClick={() => resetParam('vibrance', 0.0)}
-                className="p-1 rounded"
-                style={{
-                  backgroundColor: 'transparent',
-                  color: 'var(--gray-500)',
-                  transition: 'var(--transition-fast)'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = 'var(--gray-800)';
-                  e.currentTarget.style.color = 'var(--white)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = 'transparent';
-                  e.currentTarget.style.color = 'var(--gray-500)';
-                }}
-                title="Reset vibrance"
-              >
-                <RotateCcw className="w-3 h-3" />
-              </button>
-            </div>
-          </div>
-          <input
-              type="range"
-              min="-1"
-              max="1"
-              step="0.05"
-              value={params.vibrance}
-              onInput={(e) => updateParamRealTime('vibrance', parseFloat((e.target as HTMLInputElement).value))}
-              onChange={(e) => updateParam('vibrance', parseFloat(e.target.value))}
-              onDoubleClick={() => updateParam('vibrance', 0.0)}
-              className="slider w-full"
-              style={{
-                background: 'linear-gradient(to right, #64748b, #a855f7, #ec4899, #f43f5e, #f97316)',
-              }}
-              title="Double-click to reset"
-            />
-        </div>
-
-        {/* Dehaze */}
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between">
-            <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Dehaze</label>
-            <div className="flex items-center gap-1.5">
-              <DelayedInputControl
-                value={params.dehaze}
-                onChange={(value) => updateParam('dehaze', value)}
-                min={-1}
-                max={1}
-                step={0.01}
-                precision={2}
-              />
-              <button
-                onClick={() => resetParam('dehaze', 0.0)}
-                className="p-1 rounded"
-                style={{
-                  backgroundColor: 'transparent',
-                  color: 'var(--gray-500)',
-                  transition: 'var(--transition-fast)'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = 'var(--gray-800)';
-                  e.currentTarget.style.color = 'var(--white)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = 'transparent';
-                  e.currentTarget.style.color = 'var(--gray-500)';
-                }}
-                title="Reset dehaze"
-              >
-                <RotateCcw className="w-3 h-3" />
-              </button>
-            </div>
-          </div>
-          <input
-              type="range"
-              min="-1"
-              max="1"
-              step="0.05"
-              value={params.dehaze}
-              onInput={(e) => updateParamRealTime('dehaze', parseFloat((e.target as HTMLInputElement).value))}
-              onChange={(e) => updateParam('dehaze', parseFloat(e.target.value))}
-              onDoubleClick={() => updateParam('dehaze', 0.0)}
-              className="slider w-full"
-              style={{
-                background: 'linear-gradient(to right, #94a3b8, #64748b, #334155, #0ea5e9)',
-              }}
-              title="Double-click to reset"
-            />
-        </div>
+        {BASIC_ADJ_SLIDERS.map(renderSlider)}
       </div>
     </div>
   );

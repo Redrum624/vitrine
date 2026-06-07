@@ -9,6 +9,8 @@ export interface BasicAdjParams {
   saturation: number;     // -1.0 to 1.0, default: 0.0
   vibrance: number;       // -1.0 to 1.0, default: 0.0
   dehaze: number;         // -1.0 to 1.0, default: 0.0
+  highlights: number;     // -1.0 to 1.0, default: 0.0 (negative recovers, positive brightens)
+  shadows: number;        // -1.0 to 1.0, default: 0.0 (positive lifts, negative deepens)
   [key: string]: unknown; // Index signature for Record compatibility
 }
 
@@ -26,7 +28,9 @@ export class BasicAdjustmentsModule {
     brightness: 0.0,
     saturation: 0.0,
     vibrance: 0.0,
-    dehaze: 0.0
+    dehaze: 0.0,
+    highlights: 0.0,
+    shadows: 0.0
   };
 
   getId(): string {
@@ -54,7 +58,9 @@ export class BasicAdjustmentsModule {
       brightness: 0.0,
       saturation: 0.0,
       vibrance: 0.0,
-      dehaze: 0.0
+      dehaze: 0.0,
+      highlights: 0.0,
+      shadows: 0.0
     };
     logger.debug('BasicAdj params reset to neutral defaults');
   }
@@ -69,7 +75,9 @@ export class BasicAdjustmentsModule {
       brightness: 0.1,        // Slight brightness boost
       saturation: 0.1,        // Slight saturation boost
       vibrance: 0.15,         // Moderate vibrance increase
-      dehaze: 0.0             // No haze removal by default
+      dehaze: 0.0,            // No haze removal by default
+      highlights: 0.0,
+      shadows: 0.0
     };
 
     this.params = { ...autoParams };
@@ -122,9 +130,22 @@ export class BasicAdjustmentsModule {
     const hazeStrength = dehazeActive ? clampedDehaze * 0.5 * hazeFloor : 0.0;
     const hazeDivisor = 1.0 - hazeStrength;
 
+    // Highlights / Shadows: simple luminance-masked tone shifts (params -1..1).
+    const clampedHighlights = Math.max(-1.0, Math.min(1.0, this.params.highlights));
+    const clampedShadows = Math.max(-1.0, Math.min(1.0, this.params.shadows));
+    const highlightsActive = Math.abs(clampedHighlights) > 0.001;
+    const shadowsActive = Math.abs(clampedShadows) > 0.001;
+
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
         const pixelIndex = (y * width + x) * channels;
+
+        // Luminance masks for highlights/shadows, from the as-yet-unmodified pixel.
+        const lumHS = (highlightsActive || shadowsActive)
+          ? calculateLuminance(output[pixelIndex], output[pixelIndex + 1], output[pixelIndex + 2])
+          : 0;
+        const hMask = highlightsActive ? lumHS * lumHS : 0;
+        const sMask = shadowsActive ? (1 - lumHS) * (1 - lumHS) : 0;
 
         for (let c = 0; c < 3; c++) { // Process RGB channels
           let pixel = output[pixelIndex + c];
@@ -170,6 +191,10 @@ export class BasicAdjustmentsModule {
             const dehazeContrastFactor = 1.0 + clampedDehaze * 0.15;
             pixel = 0.5 + (pixel - 0.5) * dehazeContrastFactor;
           }
+
+          // Highlights / Shadows tone shift (luminance-masked).
+          if (highlightsActive) pixel += clampedHighlights * 0.4 * hMask;
+          if (shadowsActive) pixel += clampedShadows * 0.4 * sMask;
 
           // Clamp to valid range and ensure minimum visibility
           pixel = Math.max(0.0, Math.min(1.0, pixel));

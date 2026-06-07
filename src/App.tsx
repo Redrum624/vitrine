@@ -427,6 +427,8 @@ function App() {
     const img = imageService.getCurrentImage();
     if (!img) { showError('Auto All', 'No image loaded'); return; }
 
+    useAppStore.getState().setIsProcessing(true); // canvas spinner while applying
+
     // Single coordinator call: analyses once, picks the user-style bucket, and
     // returns the bundled params for every module.
     const result = autoAdjustService.autoAll(img.data, img.width, img.height);
@@ -446,10 +448,18 @@ function App() {
       imageProcessingPipeline.invalidateModuleCache('temperature');
     }
 
-    // Basic Adjustments (autoBasicAdj already returns exposure: 0)
+    // Basic Adjustments (autoBasicAdj already returns exposure: 0). Fold the auto
+    // shadows/highlights into the new Basic Adjustments sliders, since the
+    // standalone Shadows & Highlights module was replaced by them.
     const baMod = imageProcessingPipeline.getModule('basicadj');
     if (baMod) {
-      (baMod as unknown as { setParams: (p: Record<string, unknown>) => void }).setParams(result.basicAdj);
+      const sh = result.shadowsHighlights as { shadows?: number; highlights?: number } | undefined;
+      const baParams: Record<string, unknown> = { ...result.basicAdj };
+      if (sh) {
+        baParams.shadows = (((sh.shadows ?? 50) - 50) / 50) * 0.6;        // +lift shadows
+        baParams.highlights = -(((sh.highlights ?? 50) - 50) / 50) * 0.6; // -recover highlights
+      }
+      (baMod as unknown as { setParams: (p: Record<string, unknown>) => void }).setParams(baParams);
       imageProcessingPipeline.invalidateModuleCache('basicadj');
     }
 
@@ -469,13 +479,7 @@ function App() {
       imageProcessingPipeline.invalidateModuleCache('colorbalance');
     }
 
-    // Shadows / Highlights
-    const shPipeMod = imageProcessingPipeline.getModule('shadowshighlights');
-    if (shPipeMod) {
-      const inner = (shPipeMod as unknown as { getShadowsHighlightsModule?: () => { setParams: (p: Record<string, unknown>) => void } }).getShadowsHighlightsModule?.();
-      if (inner) inner.setParams(result.shadowsHighlights);
-      imageProcessingPipeline.invalidateModuleCache('shadowshighlights');
-    }
+    // (Shadows / Highlights are now applied via Basic Adjustments above.)
 
     // Refresh the open module panel's sliders, then reprocess.
     useAppStore.getState().notifyExternalParamsChange();
@@ -506,10 +510,12 @@ function App() {
       showError('Paste Style', 'No style copied yet');
       return;
     }
+    useAppStore.getState().setIsProcessing(true); // canvas spinner while applying
     const ok = styleAnalysisService.pasteStyle();
     if (ok) {
       showSuccess('Style Pasted', 'Adaptive adjustments applied');
     } else {
+      useAppStore.getState().setIsProcessing(false);
       showError('Paste Style', 'No target image loaded');
     }
   }, [showSuccess, showError]);

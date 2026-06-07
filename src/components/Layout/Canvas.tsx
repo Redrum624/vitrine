@@ -26,7 +26,7 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasWrapperRef = useRef<HTMLDivElement>(null);
-  const { viewport, setViewport, processedImageData, isAdjustingRotation, selectedTool, triggerReprocessing, showGrid, showRulers } = useAppStore();
+  const { viewport, setViewport, processedImageData, isAdjustingRotation, selectedTool, triggerReprocessing, showGrid, showRulers, showOriginal, referenceMode, isProcessing } = useAppStore();
   const [isDragging, setIsDragging] = useState(false);
   const [lastPan, setLastPan] = useState({ x: 0, y: 0 });
   const [displayImage, setDisplayImage] = useState<ImageFileInfo | null>(null);
@@ -1002,8 +1002,8 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
           </div>
         )}
 
-        {/* Image Navigation Arrows */}
-        {displayImage && (
+        {/* Image Navigation Arrows (hidden in Before/After + Reference comparison) */}
+        {displayImage && !showOriginal && !referenceMode && (
           <>
             <button
               onClick={() => navigateImage('prev')}
@@ -1034,12 +1034,14 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
           </div>
         )}
 
-        {/* Loading Indicator */}
-        {imageLoading && (
+        {/* Loading / Applying Indicator */}
+        {(imageLoading || isProcessing) && (
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-dark-900/80 backdrop-blur-sm">
             <div className="animate-spin rounded-full h-12 w-12 border-2 border-gray-600 border-t-white mb-4" />
             <div className="text-white text-sm font-medium">
-              {currentImage?.format.toLowerCase() === 'orf' ||
+              {isProcessing && !imageLoading ? (
+                'Applying…'
+              ) : currentImage?.format.toLowerCase() === 'orf' ||
                currentImage?.format.toLowerCase() === 'cr2' ||
                currentImage?.format.toLowerCase() === 'cr3' ||
                currentImage?.format.toLowerCase() === 'nef' ||

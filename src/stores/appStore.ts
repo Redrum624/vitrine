@@ -24,6 +24,11 @@ interface AppStore extends AppState {
   // edits (that would remount the panel mid-drag).
   externalParamsVersion: number;
   notifyExternalParamsChange: () => void;
+  // True while the pipeline is (re)processing after a bulk apply (Auto All /
+  // Paste Style) so the canvas can show its spinner; cleared when the new
+  // processed image lands (setProcessedImageData).
+  isProcessing: boolean;
+  setIsProcessing: (v: boolean) => void;
   // Live processing stats (surfaced in the StatusBar)
   lastProcessingTimeMs: number;
   modulesActive: number;
@@ -63,6 +68,7 @@ export const useAppStore = create<AppStore>((set) => ({
   isAdjustingRotation: false,
   processingVersion: 0,
   externalParamsVersion: 0,
+  isProcessing: false,
   lastProcessingTimeMs: 0,
   modulesActive: 0,
   modulesTotal: 0,
@@ -82,11 +88,14 @@ export const useAppStore = create<AppStore>((set) => ({
     externalParamsVersion: state.externalParamsVersion + 1
   })),
 
+  setIsProcessing: (v) => set({ isProcessing: v }),
+
   setCurrentImage: (image) => set({ currentImage: image }),
 
   setIsAdjustingRotation: (adjusting) => set({ isAdjustingRotation: adjusting }),
 
-  setProcessedImageData: (data) => set({ processedImageData: data }),
+  // Clear the processing spinner whenever fresh processed data lands.
+  setProcessedImageData: (data) => set({ processedImageData: data, isProcessing: false }),
 
   setProcessingStats: ({ timeMs, active, total }) => set({
     lastProcessingTimeMs: timeMs,

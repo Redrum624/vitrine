@@ -1,4 +1,4 @@
-import { HardDrive, Settings, BarChart3, Sun, Droplet, Activity, Contrast, Crop, Palette, Brush, Focus, Filter } from 'lucide-react';
+import { HardDrive, Settings, BarChart3, Sun, Droplet, Activity, Crop, Palette, Brush, Focus, Filter } from 'lucide-react';
 
 interface IconSidebarProps {
   onToolSelect?: (tool: string) => void;
@@ -15,13 +15,12 @@ interface Tool {
 const tools: Tool[] = [
   { id: 'file-explorer', icon: <HardDrive className="w-5 h-5" />, name: 'File Explorer' },
   { id: 'crop', icon: <Crop className="w-5 h-5" />, name: 'Crop & Transform' },
+  { id: 'localadjustments', icon: <Brush className="w-5 h-5" />, name: 'Local Adjustments' },
   { id: 'basicadj', icon: <Sun className="w-5 h-5" />, name: 'Basic Adjustments' },
   { id: 'whitebalance', icon: <Droplet className="w-5 h-5" />, name: 'White Balance' },
   { id: 'tonecurve', icon: <Activity className="w-5 h-5" />, name: 'Tone Curve' },
   { id: 'noisereduction', icon: <Filter className="w-5 h-5" />, name: 'Noise Reduction' },
-  { id: 'shadowshighlights', icon: <Contrast className="w-5 h-5" />, name: 'Shadows & Highlights' },
   { id: 'colorbalance', icon: <Palette className="w-5 h-5" />, name: 'Color Balance' },
-  { id: 'localadjustments', icon: <Brush className="w-5 h-5" />, name: 'Local Adjustments' },
   { id: 'lenscorrections', icon: <Focus className="w-5 h-5" />, name: 'Lens Corrections' },
 ];
 

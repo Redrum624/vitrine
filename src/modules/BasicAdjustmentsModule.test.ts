@@ -30,6 +30,48 @@ describe('BasicAdjustmentsModule', () => {
     module = new BasicAdjustmentsModule();
   });
 
+  describe('Highlights and Shadows', () => {
+    const width = 4, height = 4;
+    const ctx = () => createProcessingContext(width, height);
+
+    it('defaults to neutral (0) highlights and shadows', () => {
+      const p = module.getParams();
+      expect(p.highlights).toBe(0);
+      expect(p.shadows).toBe(0);
+    });
+
+    it('shadows > 0 lifts dark tones', () => {
+      module.setParams({ shadows: 1.0 });
+      const [r] = getPixel(module.process(createTestImage(width, height, 0.15, 0.15, 0.15), ctx()), width, 0, 0);
+      expect(r).toBeGreaterThan(0.15);
+    });
+
+    it('shadows < 0 deepens dark tones', () => {
+      module.setParams({ shadows: -1.0 });
+      const [r] = getPixel(module.process(createTestImage(width, height, 0.25, 0.25, 0.25), ctx()), width, 0, 0);
+      expect(r).toBeLessThan(0.25);
+    });
+
+    it('highlights < 0 recovers (darkens) bright tones', () => {
+      module.setParams({ highlights: -1.0 });
+      const [r] = getPixel(module.process(createTestImage(width, height, 0.9, 0.9, 0.9), ctx()), width, 0, 0);
+      expect(r).toBeLessThan(0.9);
+    });
+
+    it('highlights > 0 brightens bright tones', () => {
+      module.setParams({ highlights: 1.0 });
+      const [r] = getPixel(module.process(createTestImage(width, height, 0.8, 0.8, 0.8), ctx()), width, 0, 0);
+      expect(r).toBeGreaterThan(0.8);
+    });
+
+    it('shadows affect dark tones more than bright tones (luminance mask)', () => {
+      module.setParams({ shadows: 1.0 });
+      const darkDelta = getPixel(module.process(createTestImage(width, height, 0.1, 0.1, 0.1), ctx()), width, 0, 0)[0] - 0.1;
+      const brightDelta = getPixel(module.process(createTestImage(width, height, 0.9, 0.9, 0.9), ctx()), width, 0, 0)[0] - 0.9;
+      expect(darkDelta).toBeGreaterThan(brightDelta);
+    });
+  });
+
   describe('Module identification', () => {
     it('should return correct id', () => {
       expect(module.getId()).toBe('basicadj');
