@@ -21,6 +21,7 @@ import { imageProcessingPipeline } from '../../services/ImageProcessingPipeline'
 import { imageService } from '../../services/ImageService';
 import { progressivePreviewService } from '../../services/ProgressivePreviewService';
 import { adaptiveDebounceService } from '../../services/AdaptiveDebounceService';
+import { autoAdjustService } from '../../services/AutoAdjustService';
 import { useAppStore } from '../../stores/appStore';
 import { logger } from '../../utils/Logger';
 
@@ -307,11 +308,11 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
     if (!currentImage || !whiteBalanceModule) return;
 
     try {
-      whiteBalanceModule.autoDetectWhiteBalance(currentImage.data, {
-        width: currentImage.width,
-        height: currentImage.height,
-        channels: 4
-      });
+      // Use the user style profile (style_profile_report.json) — the SAME WB as Auto All —
+      // so the WB "Auto" button and Auto All agree, with the neutral tint fix applied there.
+      const stats = autoAdjustService.analyse(currentImage.data, currentImage.width, currentImage.height);
+      const wb = autoAdjustService.autoWhiteBalance(stats);
+      whiteBalanceModule.setParams({ temperature: wb.temperature, tint: wb.tint, auto: true });
 
       // Trigger immediate update after auto detection
       adaptiveDebounceService.debounce(

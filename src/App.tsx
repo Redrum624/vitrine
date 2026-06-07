@@ -443,7 +443,8 @@ function App() {
       imageProcessingPipeline.invalidateModuleCache('exposure');
     }
 
-    // White Balance
+    // White Balance — from the user style profile (style_profile_report.json), same as
+    // every other Auto here. The per-module WB "Auto" button uses this same function.
     const wbMod = imageProcessingPipeline.getModule('temperature');
     if (wbMod) {
       (wbMod as unknown as { setParams: (p: Record<string, unknown>) => void }).setParams(result.whiteBalance);

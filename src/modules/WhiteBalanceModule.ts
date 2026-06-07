@@ -190,10 +190,14 @@ export class WhiteBalanceModule {
       const rbRatio = safeDivide(rAvg, bAvg, 1);
       const estimatedTemp = Math.max(2000, Math.min(50000, safeDivide(6500, rbRatio, 6500)));
 
-      // Estimate tint based on G deviation from average
-      const avgColor = (rAvg + gAvg + bAvg) / 3;
-      const gDeviation = safeDivide(gAvg - avgColor, avgColor, 0);
-      const estimatedTint = Math.max(-100, Math.min(100, gDeviation * 100));
+      // Estimate tint: green/magenta. Compare green to the NON-green channels (R+B)/2
+      // (using (R+G+B)/3 dilutes the green signal), and pull toward neutral. NEGATIVE
+      // tint removes green — demosaiced RAW usually carries a slight green cast. The
+      // previous code used the WRONG sign (positive tint ADDS green), which is what made
+      // auto white balance come out too green.
+      const expectedG = (rAvg + bAvg) / 2;
+      const gExcess = safeDivide(gAvg - expectedG, expectedG, 0);
+      const estimatedTint = Math.max(-80, Math.min(80, -gExcess * 400));
 
       this.setParams({
         temperature: Math.round(estimatedTemp),

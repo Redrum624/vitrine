@@ -301,9 +301,13 @@ class AutoAdjustService {
     // gentle; if the image already matches targetRb, temperature stays at 6500K.
     const temperature = clamp(Math.round(6500 * Math.pow(targetRb / rb, 0.3)), 2000, 12000);
 
-    // Tint: green/magenta. Keep very conservative (multiplier -80 instead of -200)
+    // Tint: pull toward NEUTRAL by removing the image's green excess relative to the
+    // non-green channels (R+B)/2. Ratio-based and negative (negative tint removes green),
+    // so it actually neutralises the demosaic green cast — the previous absolute-diff × -80
+    // under-corrected and left auto white balance looking too green.
     const expectedG = (stats.meanR + stats.meanB) / 2;
-    const tint = clamp(Math.round((stats.meanG - expectedG) * -80), -50, 50);
+    const gExcess = expectedG > 0.001 ? (stats.meanG - expectedG) / expectedG : 0;
+    const tint = clamp(Math.round(-gExcess * 400), -80, 80);
 
     logger.info(`AutoWB[${name}]: R/B=${rb.toFixed(3)}, targetR/B=${targetRb.toFixed(3)} → temp=${temperature}K, tint=${tint}`);
     return { temperature, tint };
