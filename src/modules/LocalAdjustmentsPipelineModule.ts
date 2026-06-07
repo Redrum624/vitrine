@@ -6,6 +6,7 @@ import {
   LocalAdjustmentLayer,
   MaskGeometry
 } from './LocalAdjustmentsModule';
+import { BasicAdjParams } from './BasicAdjustmentsModule';
 import { logger } from '../utils/Logger';
 
 export interface LocalAdjustmentsPipelineParams {
@@ -221,6 +222,14 @@ export class LocalAdjustmentsPipelineModule implements PipelineModule {
 
   setLayerGeometry(layerId: string, geom: MaskGeometry, width: number, height: number): boolean {
     const success = localAdjustmentsModule.setLayerGeometry(layerId, geom, width, height);
+    if (success) {
+      this.syncLayersFromModule();
+    }
+    return success;
+  }
+
+  updateLayerBasicAdj(layerId: string, params: Partial<BasicAdjParams>): boolean {
+    const success = localAdjustmentsModule.updateLayerBasicAdj(layerId, params);
     if (success) {
       this.syncLayersFromModule();
     }

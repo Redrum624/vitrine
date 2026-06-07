@@ -1,10 +1,19 @@
-import React, { useState, useCallback, useRef } from 'react';
-import { RotateCcw, Zap } from 'lucide-react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
+import { RotateCcw, Zap, Circle, Trash2 } from 'lucide-react';
 import { BasicAdjustmentsModule, BasicAdjParams } from '../../modules/BasicAdjustmentsModule';
 import { logger } from '../../utils/Logger';
 import { DelayedInputControl } from '../Controls/DelayedInputControl';
 import { autoAdjustService } from '../../services/AutoAdjustService';
 import { imageService } from '../../services/ImageService';
+import { imageProcessingPipeline } from '../../services/ImageProcessingPipeline';
+import { useAppStore } from '../../stores/appStore';
+import type { LocalAdjustmentsPipelineModule } from '../../modules/LocalAdjustmentsPipelineModule';
+import type { LocalAdjustmentLayer } from '../../modules/LocalAdjustmentsModule';
+
+const NEUTRAL_BA: BasicAdjParams = {
+  black_point: 0, exposure: 0, contrast: 0, brightness: 0,
+  saturation: 0, vibrance: 0, dehaze: 0, highlights: 0, shadows: 0,
+};
 
 type SliderKey = 'exposure' | 'contrast' | 'highlights' | 'brightness' | 'black_point' | 'shadows' | 'dehaze' | 'saturation' | 'vibrance';
 
@@ -102,6 +111,97 @@ export function BasicAdjustmentsModuleComponent({
     onParamsChange?.(resetParams);
     logger.info('BasicAdj: All parameters reset to defaults');
   }, [module, onParamsChange]);
+
+  // ── Local Adjustments: mask tools + per-mask "second Basic Adjustments" ─────
+  const [masks, setMasks] = useState<LocalAdjustmentLayer[]>([]);
+  const [selectedMaskId, setSelectedMaskId] = useState<string | null>(null);
+  const [maskBA, setMaskBA] = useState<BasicAdjParams>(NEUTRAL_BA);
+  const [maskFeather, setMaskFeather] = useState(0.5);
+
+  const getLA = useCallback(
+    () => imageProcessingPipeline.getModule<LocalAdjustmentsPipelineModule>('localadjustments') ?? null,
+    []
+  );
+  const reprocess = () => useAppStore.getState().triggerReprocessing();
+
+  const refreshMasks = useCallback(() => {
+    const la = getLA();
+    setMasks(la ? la.getParameters().layers.filter(l => l.type === 'radial_gradient' || l.type === 'linear_gradient') : []);
+  }, [getLA]);
+
+  useEffect(() => { refreshMasks(); }, [refreshMasks]);
+
+  const selectMask = useCallback((id: string) => {
+    const la = getLA(); if (!la) return;
+    la.setActiveLayer(id);
+    setSelectedMaskId(id);
+    const layer = la.getParameters().layers.find(l => l.id === id);
+    setMaskBA({ ...NEUTRAL_BA, ...(layer?.basicAdj ?? {}) });
+    setMaskFeather(layer?.geometry?.feather ?? 0.5);
+    reprocess();
+  }, [getLA]);
+
+  const createMask = useCallback((type: 'radial_gradient' | 'linear_gradient') => {
+    const la = getLA(); const img = imageService.getCurrentImage();
+    if (!la || !img) { logger.warn('Local Adjustments: no image/module'); return; }
+    const base = type === 'radial_gradient' ? 'Circle' : 'Gradient';
+    const n = la.getParameters().layers.filter(l => l.name.startsWith(base)).length;
+    const id = la.createLayer(type, n > 0 ? `${base} ${n + 1}` : base, img.width, img.height);
+    la.updateLayerBasicAdj(id, {}); // mark it as a Basic-Adjustments mask
+    refreshMasks();
+    selectMask(id);
+  }, [getLA, refreshMasks, selectMask]);
+
+  const deleteMask = useCallback((id: string) => {
+    const la = getLA(); if (!la) return;
+    la.removeLayer(id);
+    if (selectedMaskId === id) setSelectedMaskId(null);
+    refreshMasks();
+    reprocess();
+  }, [getLA, refreshMasks, selectedMaskId]);
+
+  const updateMaskBA = useCallback((key: keyof BasicAdjParams, value: number) => {
+    if (!selectedMaskId) return;
+    setMaskBA(prev => ({ ...prev, [key]: value }));
+    getLA()?.updateLayerBasicAdj(selectedMaskId, { [key]: value });
+    reprocess();
+  }, [getLA, selectedMaskId]);
+
+  const updateMaskFeather = useCallback((value: number) => {
+    const la = getLA(); const img = imageService.getCurrentImage();
+    if (!la || !img || !selectedMaskId) return;
+    setMaskFeather(value);
+    const layer = la.getParameters().layers.find(l => l.id === selectedMaskId);
+    if (layer?.geometry) la.setLayerGeometry(selectedMaskId, { ...layer.geometry, feather: value }, img.width, img.height);
+    reprocess();
+  }, [getLA, selectedMaskId]);
+
+  const selectedMask = masks.find(m => m.id === selectedMaskId) ?? null;
+
+  const renderMaskSlider = (cfg: SliderCfg, value: number, onChange: (v: number) => void) => {
+    const rangeStep = cfg.rangeStep ?? cfg.step ?? 0.01;
+    return (
+      <div key={cfg.key} className="space-y-1.5">
+        <div className="flex items-center justify-between">
+          <label className="text-xs font-medium" style={{ color: 'var(--gray-300)' }}>{cfg.label}</label>
+          <div className="flex items-center gap-1.5">
+            <DelayedInputControl value={value} onChange={onChange} min={cfg.min} max={cfg.max} step={cfg.step ?? 0.01} precision={2} />
+            {cfg.unit && <span className="text-xs font-mono" style={{ color: 'var(--gray-500)', width: '20px' }}>{cfg.unit}</span>}
+            <button onClick={() => onChange(0)} className="p-1 rounded" style={{ backgroundColor: 'transparent', color: 'var(--gray-500)' }} title="Reset"><RotateCcw className="w-3 h-3" /></button>
+          </div>
+        </div>
+        <input
+          type="range" min={cfg.min} max={cfg.max} step={rangeStep} value={value}
+          onInput={(e) => onChange(parseFloat((e.target as HTMLInputElement).value))}
+          onChange={(e) => onChange(parseFloat(e.target.value))}
+          onDoubleClick={() => onChange(0)}
+          className="slider w-full"
+          style={{ background: `linear-gradient(to right, ${cfg.gradient})` }}
+          title="Double-click to reset"
+        />
+      </div>
+    );
+  };
 
   const formatValue = (value: number, precision: number = 2): string => {
     return value.toFixed(precision);
@@ -224,9 +324,62 @@ export function BasicAdjustmentsModuleComponent({
         </div>
       </div>
 
+      {/* Local Adjustments mask tools */}
+      <div className="space-y-2 pb-2" style={{ borderBottom: '1px solid var(--border)' }}>
+        <label className="text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--gray-500)', letterSpacing: '0.5px' }}>Local Adjustments</label>
+        <div className="flex gap-1.5">
+          <button onClick={() => createMask('radial_gradient')} className="flex items-center justify-center gap-1.5 flex-1 px-3 py-1.5 rounded border text-xs"
+            style={{ backgroundColor: 'transparent', borderColor: 'var(--border)', color: 'var(--gray-300)' }} title="Add a circle / oval mask">
+            <Circle className="w-3.5 h-3.5" /> Circle
+          </button>
+          <button onClick={() => createMask('linear_gradient')} className="flex items-center justify-center gap-1.5 flex-1 px-3 py-1.5 rounded border text-xs"
+            style={{ backgroundColor: 'transparent', borderColor: 'var(--border)', color: 'var(--gray-300)' }} title="Add a linear gradient mask">
+            <span style={{ fontSize: '13px', lineHeight: 1 }}>▤</span> Gradient
+          </button>
+        </div>
+        {masks.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {masks.map(mk => (
+              <button key={mk.id} onClick={() => selectMask(mk.id)} className="px-2 py-1 rounded border text-xs"
+                style={{ backgroundColor: mk.id === selectedMaskId ? 'var(--gray-700)' : 'transparent', borderColor: mk.id === selectedMaskId ? 'var(--primary-500)' : 'var(--border)', color: 'var(--gray-200)' }}>
+                {mk.type === 'radial_gradient' ? '◯' : '▤'} {mk.name}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Global Basic Adjustments */}
       <div className="space-y-3">
         {BASIC_ADJ_SLIDERS.map(renderSlider)}
       </div>
+
+      {/* Per-mask "second Basic Adjustments" */}
+      {selectedMask && (
+        <div className="space-y-3 pt-3" style={{ borderTop: '2px solid var(--gray-700)' }}>
+          <div className="flex items-center justify-between">
+            <label className="text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--primary-400)' }}>
+              {selectedMask.type === 'radial_gradient' ? '◯' : '▤'} {selectedMask.name}
+            </label>
+            <button onClick={() => deleteMask(selectedMask.id)} className="p-1 rounded" style={{ color: 'var(--red-400)' }} title="Delete mask">
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          </div>
+          <div className="text-xs" style={{ color: 'var(--gray-500)' }}>Drag on the image to place / move this mask.</div>
+          <div className="space-y-1">
+            <div className="flex items-center justify-between">
+              <span className="text-xs" style={{ color: 'var(--gray-300)' }}>Feather</span>
+              <span className="text-xs font-mono" style={{ color: 'var(--gray-500)' }}>{maskFeather.toFixed(2)}</span>
+            </div>
+            <input type="range" min={0.01} max={1} step={0.01} value={maskFeather} className="slider w-full"
+              onInput={(e) => updateMaskFeather(parseFloat((e.target as HTMLInputElement).value))}
+              onChange={(e) => updateMaskFeather(parseFloat(e.target.value))} />
+          </div>
+          <div className="space-y-3">
+            {BASIC_ADJ_SLIDERS.map(cfg => renderMaskSlider(cfg, maskBA[cfg.key] as number, (v) => updateMaskBA(cfg.key, v)))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

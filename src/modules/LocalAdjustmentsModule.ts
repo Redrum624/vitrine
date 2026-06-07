@@ -1,5 +1,6 @@
 import { logger } from '../utils/Logger';
 import { smoothStep, rgbToHS } from './utils/ColorUtils';
+import { BasicAdjustmentsModule, BasicAdjParams } from './BasicAdjustmentsModule';
 
 export interface LocalAdjustmentLayer {
   id: string;
@@ -10,7 +11,8 @@ export interface LocalAdjustmentLayer {
   blendMode: 'normal' | 'multiply' | 'screen' | 'overlay' | 'soft_light';
   mask: Float32Array; // Grayscale mask (0=no effect, 1=full effect)
   parameters: LocalAdjustmentParams;
-  geometry?: MaskGeometry; // for radial/linear gradient layers (drives the mask)
+  geometry?: MaskGeometry;   // for radial/linear gradient layers (drives the mask)
+  basicAdj?: BasicAdjParams; // when set, the mask applies Basic Adjustments to the masked region
 }
 
 /** Normalised (0..1) geometry for a radial (circle/oval) or linear gradient mask. */
@@ -143,6 +145,17 @@ export class LocalAdjustmentsModule {
 
     logger.info(`Created local adjustment layer: ${name} (${type})`);
     return layer.id;
+  }
+
+  /** Update a mask's Basic Adjustments params (the per-mask "second Basic Adjustments"). */
+  updateLayerBasicAdj(layerId: string, params: Partial<BasicAdjParams>): boolean {
+    const layer = this.getLayer(layerId);
+    if (!layer) return false;
+    layer.basicAdj = { ...(layer.basicAdj ?? {
+      black_point: 0, exposure: 0, contrast: 0, brightness: 0,
+      saturation: 0, vibrance: 0, dehaze: 0, highlights: 0, shadows: 0,
+    }), ...params };
+    return true;
   }
 
   /**
@@ -428,10 +441,38 @@ export class LocalAdjustmentsModule {
     for (const layer of this.layers) {
       if (!layer.enabled || layer.opacity === 0) continue;
 
-      this.applyLayerToImage(result, layer, width, height);
+      if (layer.basicAdj) {
+        this.applyBasicAdjLayer(result, layer, width, height);
+      } else {
+        this.applyLayerToImage(result, layer, width, height);
+      }
     }
 
     return result;
+  }
+
+  // Apply a mask's Basic Adjustments to the masked region (per-mask "second Basic
+  // Adjustments"): run BasicAdjustmentsModule on the full image, then blend the
+  // result back in weighted by mask * opacity.
+  private applyBasicAdjLayer(
+    imageData: Float32Array,
+    layer: LocalAdjustmentLayer,
+    width: number,
+    height: number
+  ): void {
+    if (!layer.basicAdj) return;
+    const ba = new BasicAdjustmentsModule();
+    ba.setParams(layer.basicAdj);
+    const processed = ba.process(imageData, { width, height, channels: 4 });
+    const mask = layer.mask;
+    const op = layer.opacity;
+    for (let i = 0; i < imageData.length; i += 4) {
+      const w = mask[i >> 2] * op;
+      if (w === 0) continue;
+      imageData[i] = imageData[i] + w * (processed[i] - imageData[i]);
+      imageData[i + 1] = imageData[i + 1] + w * (processed[i + 1] - imageData[i + 1]);
+      imageData[i + 2] = imageData[i + 2] + w * (processed[i + 2] - imageData[i + 2]);
+    }
   }
 
   // Apply a single layer to the image

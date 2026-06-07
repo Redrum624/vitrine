@@ -994,8 +994,8 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
               );
             })()}
 
-            {/* Local Adjustments: drag-to-place mask overlay */}
-            {selectedTool === 'localadjustments' && (() => {
+            {/* Local Adjustments: drag-to-place mask overlay (masks live in Basic Adjustments) */}
+            {(selectedTool === 'basicadj' || selectedTool === 'localadjustments') && (() => {
               const la = imageProcessingPipeline.getModule<LocalAdjustmentsPipelineModule>('localadjustments');
               if (!la) return null;
               const p = la.getParameters();

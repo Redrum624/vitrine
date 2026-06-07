@@ -73,6 +73,17 @@ describe('LocalAdjustmentsModule', () => {
       const bottom = layer.mask[(height - 3) * width + width / 2]; // near bottom
       expect(bottom).toBeGreaterThan(top); // default gradient runs top -> bottom
     });
+
+    it('a mask with basicAdj applies Basic Adjustments to the masked region only', () => {
+      const id = module.createLayer('radial_gradient', 'Circle', width, height);
+      module.updateLayerBasicAdj(id, { exposure: 1.0 }); // +1 EV inside the mask
+      const input = createTestImage(width, height, 0.4, 0.4, 0.4);
+      const out = module.processImage(input, width, height);
+      const [cr] = getPixel(out, width, width / 2, height / 2);
+      const cornerR = getPixel(out, width, 0, 0)[0];
+      expect(cr).toBeGreaterThan(0.4 + 0.05); // centre brightened via masked Basic Adjustments
+      expect(cornerR).toBeCloseTo(0.4, 1);    // corner ~unchanged
+    });
   });
 
   describe('Module identification', () => {
