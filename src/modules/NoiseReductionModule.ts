@@ -1,5 +1,6 @@
 import { logger } from '../utils/Logger';
 import { AdvancedDenoisingService, DenoiseMethod, DenoiseParams } from '../services/AdvancedDenoisingService';
+import { webGLImageProcessor } from '../services/WebGLImageProcessor';
 
 /**
  * NoiseReductionModule - Professional noise reduction for the processing pipeline
@@ -224,6 +225,18 @@ export class NoiseReductionModule {
 
     const { width, height } = context;
     logger.info(`NoiseReduction processing: ${width}x${height}, method: ${this.params.method}, strength: ${this.params.strength}`);
+
+    // GPU fast-path: a fast WebGL2 Non-Local-Means denoise (sub-second even on
+    // RAW), replacing the slow CPU BM3D/NLMeans. Falls back to the CPU service when
+    // WebGL2 is unavailable. RGBA only.
+    if (input.length === width * height * 4 && webGLImageProcessor.isAvailable()) {
+      const gpu = webGLImageProcessor.denoise(input, width, height, this.params.strength);
+      if (gpu) {
+        logger.info(`NoiseReduction (GPU NLM) completed in ${(performance.now() - startTime).toFixed(2)}ms`);
+        this.logQualityMetrics(input, gpu);
+        return gpu;
+      }
+    }
 
     try {
       // Prepare parameters for AdvancedDenoisingService

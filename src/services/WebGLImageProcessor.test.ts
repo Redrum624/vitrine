@@ -51,6 +51,21 @@ describe('WebGLImageProcessor (CPU fallback in jsdom)', () => {
     expect(r.cpuMs).toBeGreaterThanOrEqual(0);
     expect(r.maxDiff).toBe(0);
   });
+
+  test('applyChannelGains multiplies + clamps per channel (CPU fallback)', () => {
+    const out = webGLImageProcessor.applyChannelGains(
+      new Float32Array([0.4, 0.5, 0.6, 1, 0.9, 0.2, 0.1, 1]), 2, 1, 1.5, 1.0, 2.0);
+    expect(out[0]).toBeCloseTo(0.6, 5);  // 0.4*1.5
+    expect(out[1]).toBeCloseTo(0.5, 5);  // 0.5*1.0
+    expect(out[2]).toBeCloseTo(1.0, 5);  // 0.6*2.0 = 1.2 -> clamp 1
+    expect(out[3]).toBe(1);              // alpha untouched
+    expect(out[4]).toBeCloseTo(1.0, 5);  // 0.9*1.5 = 1.35 -> clamp 1
+  });
+
+  test('denoise returns null in jsdom (no GPU) so the module falls back to CPU', () => {
+    const d = new Float32Array(4 * 4 * 4).fill(0.5);
+    expect(webGLImageProcessor.denoise(d, 4, 4, 50)).toBeNull();
+  });
 });
 
 /**

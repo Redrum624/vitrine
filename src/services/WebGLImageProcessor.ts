@@ -50,6 +50,40 @@ in vec2 v_uv;
 out vec4 outColor;
 void main() { vec4 c = texture(u_image, v_uv); outColor = vec4(clamp(c.rgb * u_gains, 0.0, 1.0), c.a); }`;
 
+// Non-Local Means denoise — a fast GPU replacement for the slow CPU BM3D/NLMeans.
+// Each output pixel is a weighted average of its search-window neighbours, weighted
+// by 3x3-patch similarity. Runs sub-second even on RAW (GPU does the gather).
+const NLMEANS_FRAG_SRC = `#version 300 es
+precision highp float;
+uniform sampler2D u_image;
+uniform vec2 u_texel;   // (1/width, 1/height)
+uniform float u_h2;     // filter strength denominator
+in vec2 v_uv;
+out vec4 outColor;
+const int R = 4;        // search radius -> 9x9 window
+const int P = 1;        // patch radius  -> 3x3 patch
+void main() {
+  vec3 sum = vec3(0.0);
+  float wsum = 0.0;
+  for (int dy = -R; dy <= R; dy++) {
+    for (int dx = -R; dx <= R; dx++) {
+      vec2 off = vec2(float(dx), float(dy)) * u_texel;
+      float dist = 0.0;
+      for (int py = -P; py <= P; py++) {
+        for (int px = -P; px <= P; px++) {
+          vec2 po = vec2(float(px), float(py)) * u_texel;
+          vec3 d = texture(u_image, v_uv + po).rgb - texture(u_image, v_uv + off + po).rgb;
+          dist += dot(d, d);
+        }
+      }
+      float w = exp(-dist / u_h2);
+      sum += texture(u_image, v_uv + off).rgb * w;
+      wsum += w;
+    }
+  }
+  outColor = vec4(sum / max(wsum, 1e-6), texture(u_image, v_uv).a);
+}`;
+
 // Faithful GLSL port of BasicAdjustmentsModule.process (see that file for intent).
 const BASICADJ_FRAG_SRC = `#version 300 es
 precision highp float;
@@ -114,6 +148,7 @@ class WebGLImageProcessor {
   private exposureProgram: WebGLProgram | null = null;
   private basicAdjProgram: WebGLProgram | null = null;
   private gainsProgram: WebGLProgram | null = null;
+  private denoiseProgram: WebGLProgram | null = null;
   private vao: WebGLVertexArrayObject | null = null;
   private initTried = false;
 
@@ -131,7 +166,8 @@ class WebGLImageProcessor {
       const exposureProgram = this.buildProgram(gl, VERT_SRC, EXPOSURE_FRAG_SRC);
       const basicAdjProgram = this.buildProgram(gl, VERT_SRC, BASICADJ_FRAG_SRC);
       const gainsProgram = this.buildProgram(gl, VERT_SRC, GAINS_FRAG_SRC);
-      if (!exposureProgram || !basicAdjProgram || !gainsProgram) return (this.gl = null);
+      const denoiseProgram = this.buildProgram(gl, VERT_SRC, NLMEANS_FRAG_SRC);
+      if (!exposureProgram || !basicAdjProgram || !gainsProgram || !denoiseProgram) return (this.gl = null);
 
       const quad = gl.createBuffer();
       gl.bindBuffer(gl.ARRAY_BUFFER, quad);
@@ -147,6 +183,7 @@ class WebGLImageProcessor {
       this.exposureProgram = exposureProgram;
       this.basicAdjProgram = basicAdjProgram;
       this.gainsProgram = gainsProgram;
+      this.denoiseProgram = denoiseProgram;
       this.vao = vao;
 
       // Self-check: only trust the GPU basic-adjustments path if it matches the CPU
@@ -264,6 +301,24 @@ class WebGLImageProcessor {
       out[i + 3] = data[i + 3];
     }
     return out;
+  }
+
+  /** GPU Non-Local-Means denoise. Returns null when no GPU (caller falls back to CPU). */
+  denoise(data: Float32Array, width: number, height: number, strength: number): Float32Array | null {
+    const gl = this.ensureContext();
+    if (!gl || !this.denoiseProgram || !this.vao) return null;
+    try {
+      const s = Math.max(0, Math.min(100, strength)) / 100;
+      const h = 0.015 + s * 0.12;  // filter strength grows with the denoise strength
+      const h2 = h * h * 27.0;     // 27 = 3x3 patch * 3 channels
+      return this.runPass(this.denoiseProgram, data, width, height, (g, prog) => {
+        g.uniform2f(g.getUniformLocation(prog, 'u_texel'), 1 / width, 1 / height);
+        g.uniform1f(g.getUniformLocation(prog, 'u_h2'), h2);
+      });
+    } catch (e) {
+      logger.warn('[GPU] denoise failed:', e instanceof Error ? e.message : String(e));
+      return null;
+    }
   }
 
   /** Generic single-pass shader run: source texture → program → float readback. */
