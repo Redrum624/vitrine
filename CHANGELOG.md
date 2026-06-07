@@ -4,6 +4,44 @@ All notable changes to **Photo Editor Pro** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.2.0] - 2026-06-07
+
+### Added
+- **Per-image edit persistence.** Edits now survive sessions **and** app updates. A new
+  durable JSON store under Electron `userData` (outside the install dir) keeps every
+  pipeline module's params + Local Adjustment layers (geometry only — the mask is rebuilt
+  on load) keyed by the image's file path. Saved debounced on edit, when switching images,
+  and on app close; restored automatically when you reopen a photo. (Settings already
+  persisted via localStorage.)
+- **Local Adjustments — graduated filter gradient.** The linear mask is now a proper
+  one-sided graduated filter: a line through the centre, effect on one side, with a
+  rotate handle and move-by-dragging-the-line. Feather is the spread — 0.5 ramps the
+  effect 100% at the edge to 0% at the line; 1.0 is a solid full-effect rectangle.
+- **Local Adjustments — rotate, delete, off-image masks.** Radial masks gain a rotation
+  handle; **Delete/Backspace** removes the selected mask; masks may extend outside the
+  image. The per-mask sliders moved under the mask buttons in a lighter card. Clicking
+  the canvas off the handles deselects/hides the mask.
+- **Noise Reduction — explicit Apply button.** No more algorithm dropdown (single engine);
+  the sliders stage settings and NR runs only on **Apply** (with the canvas spinner), never
+  on slider change.
+- **Thumbnails.** Lazy-load (only visible + a margin), a **RAW** badge, brighter star
+  outlines, and star ratings written to the file (`xmp:Rating`). Any range slider is now
+  **wheel-adjustable** on hover. Removed the redundant status-bar clock.
+- **Histogram** now stacks below the Controls instead of overlapping them.
+
+### Fixed
+- **RAW thumbnails for Olympus ORF (and similar).** The embedded-JPEG extractor scanned
+  bytes for `FF D8 .. FF D9`, but those markers also occur inside entropy-coded data, so
+  the preview came out truncated or spanning two images ("Corrupt JPEG / found marker
+  0xd8 instead of RST"). Now it parses the JPEG marker structure to bound each preview
+  exactly (ORF keeps its preview in the MakerNote); reads are capped before the raw strip.
+- **Masked edits did nothing.** Masks were baked at full resolution but the pipeline runs
+  a downscaled preview, so the mask indexed the wrong pixels. The mask is now rebuilt at
+  the processing resolution — which also makes Local Adjustments export at full resolution.
+- **Blurry/soft image after adding a mask + changing WB Tint.** The canvas `backdrop-blur`
+  processing overlay could get stuck on. The spinner is now guarded by a per-run id (can't
+  orphan), and a neutral mask skips its full-image pass so it no longer slows reprocessing.
+
 ## [1.1.0] - 2026-06-07
 
 ### Added

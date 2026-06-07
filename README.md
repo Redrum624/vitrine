@@ -4,9 +4,9 @@ A **desktop RAW photo editor** built with Electron + React, featuring a WebGL2/C
 processing pipeline, native LibRaw demosaicing, colour-managed export, and
 non-destructive local adjustments.
 
-![Version](https://img.shields.io/badge/Version-1.1.0-blue)
+![Version](https://img.shields.io/badge/Version-1.2.0-blue)
 ![TypeScript](https://img.shields.io/badge/TypeScript-0_errors-blue)
-![Tests](https://img.shields.io/badge/Tests-794_passing-brightgreen)
+![Tests](https://img.shields.io/badge/Tests-804_passing-brightgreen)
 ![Lint](https://img.shields.io/badge/Lint-clean-brightgreen)
 ![GPU](https://img.shields.io/badge/GPU-WebGL2_accelerated-success)
 
@@ -23,16 +23,19 @@ non-destructive local adjustments.
 - **Basic Adjustments** — exposure, contrast, highlights, brightness, black point,
   shadows, dehaze, saturation, vibrance. *(The old standalone Shadows & Highlights
   module was folded into Highlights/Shadows sliders here.)*
-- **Local Adjustments** — radial (circle/oval) and linear gradient masks created
-  from the top of Basic Adjustments. **Drag on the canvas to place / move / resize**
-  a mask; each mask gets its own Basic-Adjustments panel plus a feather control.
-- **White Balance**, **Tone Curve** (with auto-levels), **Noise Reduction**,
+- **Local Adjustments** — radial (circle/oval) masks with a rotation handle, and a
+  one-sided **graduated-filter** gradient (drag the line to move, the handle to rotate).
+  Created from the top of Basic Adjustments; drag on the canvas to place / move / resize /
+  rotate, click off to deselect, Delete to remove. Each mask gets its own Basic-Adjustments
+  panel plus a feather control.
+- **White Balance**, **Tone Curve** (with auto-levels), **Noise Reduction** (Apply button),
   **Color Balance**, **Lens Corrections**.
 - **Copy / Paste Style** — transfer a colour grade between images via per-channel
   histogram matching.
 - **Auto adjustments** — one-click *Auto All* driven by a per-image style profile,
   plus Auto Levels / Contrast / Color.
-- Non-destructive: adjustments are reversible and re-processed live.
+- Non-destructive: adjustments are reversible and re-processed live, and **persist per
+  image across sessions and app updates** (restored when you reopen a photo).
 
 ### GPU acceleration (WebGL2)
 - The editing pipeline runs on the **GPU** when available: Basic Adjustments, White
@@ -69,7 +72,7 @@ pnpm run electron-dev   # Vite dev server + Electron
 ### Build a Windows release
 ```bash
 npm run build:win       # clean dist + release -> tsc + vite build -> NSIS installer + portable (x64)
-# Output: release/Photo Editor Pro Setup 1.1.0.exe  and  release/Photo Editor Pro 1.1.0.exe
+# Output: release/Photo Editor Pro Setup 1.2.0.exe  and  release/Photo Editor Pro 1.2.0.exe
 npm run build:win:dir   # fast unpacked build (no installer)
 npm run dist            # electron-builder for the current platform
 ```
