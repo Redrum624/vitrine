@@ -155,6 +155,33 @@ void main() {
   outColor = vec4(clamp(hsl2rgb(nh, ns, nl), 0.0, 1.0), src.a);
 }`;
 
+// Tone Curve: base curve (luminance-preserve or per-channel) then per-channel RGB
+// curves. The 65536-entry LUTs are uploaded as 256x256 R32F textures; floor(v*65535)
+// indexes the exact texel (NEAREST). Mirrors ToneCurveModule (Rec.709 luma).
+const TONECURVE_FRAG_SRC = `#version 300 es
+precision highp float;
+uniform sampler2D u_image;
+uniform sampler2D u_master, u_red, u_green, u_blue;
+uniform float u_preserveColors;
+in vec2 v_uv;
+out vec4 outColor;
+float lut(sampler2D t, float v) {
+  float idx = floor(clamp(v, 0.0, 1.0) * 65535.0);
+  return texture(t, vec2((mod(idx, 256.0) + 0.5) / 256.0, (floor(idx / 256.0) + 0.5) / 256.0)).r;
+}
+void main() {
+  vec4 src = texture(u_image, v_uv);
+  vec3 rgb = src.rgb;
+  if (u_preserveColors == 1.0) {
+    float lum = 0.2126 * rgb.r + 0.7152 * rgb.g + 0.0722 * rgb.b;
+    if (lum > 0.0) rgb = clamp(rgb * (lut(u_master, lum) / lum), 0.0, 1.0);
+  } else {
+    rgb = vec3(lut(u_master, rgb.r), lut(u_master, rgb.g), lut(u_master, rgb.b));
+  }
+  rgb = vec3(lut(u_red, rgb.r), lut(u_green, rgb.g), lut(u_blue, rgb.b));
+  outColor = vec4(rgb, src.a);
+}`;
+
 // Faithful GLSL port of BasicAdjustmentsModule.process (see that file for intent).
 const BASICADJ_FRAG_SRC = `#version 300 es
 precision highp float;
@@ -254,6 +281,8 @@ class WebGLImageProcessor {
   private denoiseProgram: WebGLProgram | null = null;
   private colorBalanceProgram: WebGLProgram | null = null;
   private colorBalanceVerified: boolean | null = null;
+  private toneCurveProgram: WebGLProgram | null = null;
+  private toneCurveVerified: boolean | null = null;
   private vao: WebGLVertexArrayObject | null = null;
   private initTried = false;
 
@@ -273,7 +302,8 @@ class WebGLImageProcessor {
       const gainsProgram = this.buildProgram(gl, VERT_SRC, GAINS_FRAG_SRC);
       const denoiseProgram = this.buildProgram(gl, VERT_SRC, NLMEANS_FRAG_SRC);
       const colorBalanceProgram = this.buildProgram(gl, VERT_SRC, COLORBALANCE_FRAG_SRC);
-      if (!exposureProgram || !basicAdjProgram || !gainsProgram || !denoiseProgram || !colorBalanceProgram) return (this.gl = null);
+      const toneCurveProgram = this.buildProgram(gl, VERT_SRC, TONECURVE_FRAG_SRC);
+      if (!exposureProgram || !basicAdjProgram || !gainsProgram || !denoiseProgram || !colorBalanceProgram || !toneCurveProgram) return (this.gl = null);
 
       const quad = gl.createBuffer();
       gl.bindBuffer(gl.ARRAY_BUFFER, quad);
@@ -291,6 +321,7 @@ class WebGLImageProcessor {
       this.gainsProgram = gainsProgram;
       this.denoiseProgram = denoiseProgram;
       this.colorBalanceProgram = colorBalanceProgram;
+      this.toneCurveProgram = toneCurveProgram;
       this.vao = vao;
 
       // Self-check: only trust the GPU basic-adjustments path if it matches the CPU
@@ -495,6 +526,103 @@ class WebGLImageProcessor {
       }
       const [nr, ng, nb] = hslToRgb(nh, ns, nl);
       out[i] = clamp01(nr); out[i + 1] = clamp01(ng); out[i + 2] = clamp01(nb);
+    }
+    return out;
+  }
+
+  /** Apply Tone Curve (base curve + per-channel RGB curves). GPU when verified, else CPU. */
+  applyToneCurve(
+    data: Float32Array, width: number, height: number,
+    master: Float32Array, red: Float32Array, green: Float32Array, blue: Float32Array, preserveColors: number
+  ): Float32Array {
+    const gl = this.ensureContext();
+    if (gl && this.toneCurveProgram && this.vao && this.verifyToneCurve()) {
+      try { return this.runToneCurveGPU(gl, data, width, height, master, red, green, blue, preserveColors); }
+      catch (e) { logger.warn('[GPU] tone-curve failed — CPU:', e instanceof Error ? e.message : String(e)); }
+    }
+    return this.toneCurveCPU(data, width, height, master, red, green, blue, preserveColors);
+  }
+
+  private makeLutTexture(gl: WebGL2RenderingContext, lut: Float32Array): WebGLTexture | null {
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, 256, 256, 0, gl.RED, gl.FLOAT, lut); // 65536 entries
+    return tex;
+  }
+
+  private runToneCurveGPU(
+    gl: WebGL2RenderingContext, data: Float32Array, width: number, height: number,
+    master: Float32Array, red: Float32Array, green: Float32Array, blue: Float32Array, preserveColors: number
+  ): Float32Array {
+    const prog = this.toneCurveProgram!;
+    const tex = this.makeTexture(gl, width, height, data);
+    const luts = [this.makeLutTexture(gl, master), this.makeLutTexture(gl, red), this.makeLutTexture(gl, green), this.makeLutTexture(gl, blue)];
+    const dst = this.makeTexture(gl, width, height, null);
+    const fbo = gl.createFramebuffer();
+    const cleanup = () => { gl.deleteFramebuffer(fbo); gl.deleteTexture(tex); gl.deleteTexture(dst); luts.forEach(t => gl.deleteTexture(t)); };
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, dst, 0);
+    if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) { cleanup(); throw new Error('framebuffer incomplete'); }
+    gl.viewport(0, 0, width, height);
+    gl.useProgram(prog);
+    gl.uniform1f(gl.getUniformLocation(prog, 'u_preserveColors'), preserveColors);
+    const names = ['u_image', 'u_master', 'u_red', 'u_green', 'u_blue'];
+    [tex, ...luts].forEach((t, unit) => {
+      gl.activeTexture(gl.TEXTURE0 + unit);
+      gl.bindTexture(gl.TEXTURE_2D, t);
+      gl.uniform1i(gl.getUniformLocation(prog, names[unit]), unit);
+    });
+    gl.bindVertexArray(this.vao);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    gl.bindVertexArray(null);
+    const out = new Float32Array(width * height * 4);
+    gl.readPixels(0, 0, width, height, gl.RGBA, gl.FLOAT, out);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    cleanup();
+    return out;
+  }
+
+  private verifyToneCurve(): boolean {
+    if (this.toneCurveVerified !== null) return this.toneCurveVerified;
+    let ok = false;
+    try {
+      const master = new Float32Array(65536), red = new Float32Array(65536), green = new Float32Array(65536), blue = new Float32Array(65536);
+      for (let i = 0; i < 65536; i++) {
+        const v = i / 65535;
+        master[i] = Math.pow(v, 1 / 1.5); red[i] = Math.min(1, v * 1.1); green[i] = v; blue[i] = Math.max(0, v * 0.9);
+      }
+      const { data, w, h } = CB_SELFTEST;
+      const a = this.runToneCurveGPU(this.gl!, data, w, h, master, red, green, blue, 1);
+      const c = this.toneCurveCPU(data, w, h, master, red, green, blue, 1);
+      let maxDiff = 0;
+      for (let i = 0; i < c.length; i++) maxDiff = Math.max(maxDiff, Math.abs(a[i] - c[i]));
+      ok = maxDiff < 0.02;
+      logger.info(`[GPU] tone-curve self-check maxDiff=${maxDiff.toExponential(2)} -> ${ok ? 'GPU' : 'CPU fallback'}`);
+    } catch (e) { logger.warn('[GPU] tone-curve self-check error:', e instanceof Error ? e.message : String(e)); }
+    this.toneCurveVerified = ok;
+    return ok;
+  }
+
+  /** CPU reference — a replica of ToneCurveModule applyBaseCurve + applyRGBCurves. */
+  toneCurveCPU(
+    data: Float32Array, _width: number, _height: number,
+    master: Float32Array, red: Float32Array, green: Float32Array, blue: Float32Array, preserveColors: number
+  ): Float32Array {
+    const out = new Float32Array(data);
+    const idx = (v: number) => Math.min(65535, Math.floor(v * 65535));
+    for (let i = 0; i < out.length; i += 4) {
+      let r = out[i], g = out[i + 1], b = out[i + 2];
+      if (preserveColors === 1) {
+        const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        if (lum > 0) { const sc = master[idx(lum)] / lum; r = clamp01(r * sc); g = clamp01(g * sc); b = clamp01(b * sc); }
+      } else {
+        r = master[idx(r)]; g = master[idx(g)]; b = master[idx(b)];
+      }
+      out[i] = red[idx(r)]; out[i + 1] = green[idx(g)]; out[i + 2] = blue[idx(b)];
     }
     return out;
   }

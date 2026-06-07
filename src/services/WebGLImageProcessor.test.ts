@@ -9,6 +9,7 @@
 import { webGLImageProcessor } from './WebGLImageProcessor';
 import { BasicAdjustmentsModule } from '../modules/BasicAdjustmentsModule';
 import { ColorBalanceModule } from '../modules/ColorBalanceModule';
+import { ToneCurveModule } from '../modules/ToneCurveModule';
 
 function img(pixels: number[][]): Float32Array {
   const a = new Float32Array(pixels.length * 4);
@@ -96,6 +97,38 @@ describe('GPU basic-adjustments CPU reference matches BasicAdjustmentsModule', (
     const params = mod.getParams();
     const expected = mod.process(new Float32Array(src), { width: w, height: h, channels: 4 });
     const ref = webGLImageProcessor.basicAdjustmentsCPU(new Float32Array(src), w, h, params);
+    let maxDiff = 0;
+    for (let i = 0; i < expected.length; i++) maxDiff = Math.max(maxDiff, Math.abs(expected[i] - ref[i]));
+    expect(maxDiff).toBeLessThan(1e-5);
+  });
+});
+
+describe('GPU tone-curve CPU reference matches ToneCurveModule', () => {
+  const w = 4, h = 4;
+  const src = new Float32Array(w * h * 4);
+  for (let i = 0; i < w * h; i++) {
+    src[i * 4] = (i % 4) / 4; src[i * 4 + 1] = ((i * 5) % 7) / 7;
+    src[i * 4 + 2] = ((i * 3) % 5) / 5; src[i * 4 + 3] = 1;
+  }
+
+  test('parity (base curve + RGB curves, luminance preserve)', () => {
+    const mod = new ToneCurveModule();
+    mod.setParams({
+      baseCurve: [{ x: 0, y: 0 }, { x: 0.25, y: 0.15 }, { x: 0.75, y: 0.85 }, { x: 1, y: 1 }],
+      baseCurveType: 1, preserveColors: 1,
+      rgbCurve: {
+        red: [{ x: 0, y: 0 }, { x: 1, y: 0.95 }],
+        green: [{ x: 0, y: 0 }, { x: 1, y: 1 }],
+        blue: [{ x: 0, y: 0.05 }, { x: 1, y: 1 }],
+      },
+    });
+    const expected = mod.process({ width: w, height: h, channels: 4, data: new Float32Array(src) }).data as Float32Array;
+    const m = mod as unknown as { lookupTable: Float32Array; rgbLookupTables: { red: Float32Array; green: Float32Array; blue: Float32Array } };
+    const ref = webGLImageProcessor.toneCurveCPU(
+      new Float32Array(src), w, h,
+      m.lookupTable, m.rgbLookupTables.red, m.rgbLookupTables.green, m.rgbLookupTables.blue,
+      mod.getParams().preserveColors,
+    );
     let maxDiff = 0;
     for (let i = 0; i < expected.length; i++) maxDiff = Math.max(maxDiff, Math.abs(expected[i] - ref[i]));
     expect(maxDiff).toBeLessThan(1e-5);

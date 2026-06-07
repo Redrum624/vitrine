@@ -1,5 +1,6 @@
 import { logger } from '../utils/Logger';
 import { ModuleParams } from '../types/darktable';
+import { webGLImageProcessor } from '../services/WebGLImageProcessor';
 
 export interface ImageData {
   width: number;
@@ -188,11 +189,17 @@ export class ToneCurveModule implements ImageProcessingModule {
       processedData.set(data);
     }
 
-    // Apply base tone curve
-    this.applyBaseCurve(processedData, width, height);
-
-    // Apply RGB channel curves
-    this.applyRGBCurves(processedData, width, height);
+    // Apply base + RGB curves: GPU when available (verified), else the CPU passes.
+    if (data.length === width * height * 4 && webGLImageProcessor.isAvailable()) {
+      processedData.set(webGLImageProcessor.applyToneCurve(
+        processedData, width, height,
+        this.lookupTable, this.rgbLookupTables.red, this.rgbLookupTables.green, this.rgbLookupTables.blue,
+        this.params.preserveColors,
+      ));
+    } else {
+      this.applyBaseCurve(processedData, width, height);
+      this.applyRGBCurves(processedData, width, height);
+    }
 
     // Apply exposure fusion if enabled
     if (this.params.exposureFusion > 0) {
