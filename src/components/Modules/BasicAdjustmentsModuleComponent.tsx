@@ -122,7 +122,14 @@ export function BasicAdjustmentsModuleComponent({
     () => imageProcessingPipeline.getModule<LocalAdjustmentsPipelineModule>('localadjustments') ?? null,
     []
   );
-  const reprocess = () => useAppStore.getState().triggerReprocessing();
+  const reprocess = () => {
+    // The pipeline caches each module's result keyed by its params; the mask's huge
+    // Float32 mask in those params makes the key unreliable, so force-invalidate the
+    // Local Adjustments cache whenever a mask changes — otherwise the masked edit
+    // (slider/feather/geometry) is computed but the stale cached result is shown.
+    imageProcessingPipeline.invalidateModuleCache('localadjustments');
+    useAppStore.getState().triggerReprocessing();
+  };
 
   const refreshMasks = useCallback(() => {
     const la = getLA();

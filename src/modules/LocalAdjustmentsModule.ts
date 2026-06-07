@@ -138,9 +138,11 @@ export class LocalAdjustmentsModule {
         startX: 0.5, startY: 0.15, endX: 0.5, endY: 0.85, feather: 0.5, invert: false,
       }, imageWidth, imageHeight);
     } else if (type === 'linear_gradient') {
+      // Default: a horizontal line across the centre, effect on the bottom half,
+      // feather 0.5 (rotation 0). 1.0 feather → a solid full-effect rectangle below.
       this.setLayerGeometry(layer.id, {
         type: 'linear', centerX: 0.5, centerY: 0.5, radiusX: 0.3, radiusY: 0.3,
-        startX: 0.5, startY: 0.15, endX: 0.5, endY: 0.85, feather: 1, invert: false,
+        startX: 0.5, startY: 0.15, endX: 0.5, endY: 0.85, feather: 0.5, invert: false, rotation: 0,
       }, imageWidth, imageHeight);
     }
 
@@ -168,6 +170,10 @@ export class LocalAdjustmentsModule {
     if (!layer) return false;
 
     layer.geometry = { ...geom };
+    // Resize the mask buffer if the target resolution changed (e.g. preview vs export).
+    if (layer.mask.length !== width * height) {
+      layer.mask = new Float32Array(width * height);
+    }
     const mask = layer.mask;
 
     if (geom.type === 'radial') {
@@ -192,18 +198,19 @@ export class LocalAdjustmentsModule {
         }
       }
     } else {
-      const x1 = geom.startX * width, y1 = geom.startY * height;
-      const x2 = geom.endX * width, y2 = geom.endY * height;
-      const dxl = x2 - x1, dyl = y2 - y1;
-      const len2 = dxl * dxl + dyl * dyl || 1;
-      // Feather controls the transition band width around the line's midpoint:
-      // 1 = full smooth ramp, →0 = hard edge at the midpoint.
-      const f = Math.max(0.001, Math.min(1, geom.feather));
-      const lo = 0.5 - f / 2, hi = 0.5 + f / 2;
+      // Graduated filter: a line through (centerX, centerY) at angle `rotation`. The
+      // effect is on ONE side — the line's perpendicular +direction, which is "down"
+      // at rotation 0. `feather` is the spread: 1 = a solid full-effect rectangle
+      // (hard edge at the line); lower = a softer ramp from the line outward.
+      const cx = geom.centerX, cy = geom.centerY;
+      const rot = geom.rotation || 0;
+      const pxn = -Math.sin(rot), pyn = Math.cos(rot); // effect-side unit normal
+      const D = Math.max(1e-3, 1 - Math.max(0.001, Math.min(1, geom.feather)));
       for (let y = 0; y < height; y++) {
         for (let x = 0; x < width; x++) {
-          const t = ((x - x1) * dxl + (y - y1) * dyl) / len2;
-          let m = smoothStep(lo, hi, t);
+          // Signed perpendicular distance from the line (normalised image units).
+          const s = (x / width - cx) * pxn + (y / height - cy) * pyn;
+          let m = Math.max(0, Math.min(1, s / D));
           if (geom.invert) m = 1 - m;
           mask[y * width + x] = m;
         }
@@ -445,6 +452,15 @@ export class LocalAdjustmentsModule {
 
     for (const layer of this.layers) {
       if (!layer.enabled || layer.opacity === 0) continue;
+
+      // The mask is baked at the resolution it was last built at, but the pipeline
+      // processes at different sizes (e.g. the 1024px preview vs full-res export).
+      // If they differ, mask[i] would index the wrong pixels and the masked edit
+      // lands in the wrong place (or nowhere) — so rebuild the geometry mask at the
+      // current resolution first.
+      if (layer.geometry && layer.mask.length !== width * height) {
+        this.setLayerGeometry(layer.id, layer.geometry, width, height);
+      }
 
       if (layer.basicAdj) {
         this.applyBasicAdjLayer(result, layer, width, height);

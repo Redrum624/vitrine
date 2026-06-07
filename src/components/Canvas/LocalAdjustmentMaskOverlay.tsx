@@ -11,23 +11,15 @@ interface Props {
   onDragEnd?: () => void;
 }
 
-/** Distance from point P to segment AB, in the same units as the inputs. */
-function distToSeg(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
-  const dx = bx - ax, dy = by - ay;
-  const len2 = dx * dx + dy * dy || 1;
-  let t = ((px - ax) * dx + (py - ay) * dy) / len2;
-  t = Math.max(0, Math.min(1, t));
-  return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
-}
-
 type RadialMode = 'create' | 'move' | 'resize' | 'rotate';
-type LinearMode = 'create' | 'move' | 'moveStart' | 'moveEnd';
+type LinearMode = 'create' | 'move' | 'rotate';
 
 /**
- * Drag overlay for Local Adjustments masks. Drag empty space to (re)place a mask;
- * grab the centre/edge of a radial region to move/resize it, or an endpoint of a
- * linear gradient to move it. Coordinate mapping mirrors the crop overlay (image
- * drawn inside the canvas at offsetWidth*zoom, centred + panned).
+ * Drag overlay for Local Adjustments masks. Radial: grab the centre to move, the
+ * edge ring to resize, the top handle to rotate. Linear (graduated filter): a line
+ * through the centre with the effect on one side — drag the line to move, the blue
+ * handle/arrow to rotate. Coordinate mapping mirrors the crop overlay (image drawn
+ * inside the canvas at offsetWidth*zoom, centred + panned).
  */
 export function LocalAdjustmentMaskOverlay({
   canvasRef, viewport, layerType, geometry, onGeometryChange, onDragStart, onDragEnd,
@@ -84,10 +76,14 @@ export function LocalAdjustmentMaskOverlay({
       if (d < 0.82) return 'move';
       return 'create';
     }
-    const x1 = sx(g.startX), y1 = sy(g.startY), x2 = sx(g.endX), y2 = sy(g.endY);
-    if (Math.hypot(px - x1, py - y1) <= TOL) return 'moveStart';
-    if (Math.hypot(px - x2, py - y2) <= TOL) return 'moveEnd';
-    if (distToSeg(px, py, x1, y1, x2, y2) <= TOL) return 'move';
+    // linear: a line through the centre at angle `rotation`; effect on the perpendicular +side.
+    const cxp = sx(g.centerX), cyp = sy(g.centerY);
+    const rot = g.rotation || 0;
+    const perpX = -Math.sin(rot), perpY = Math.cos(rot);
+    const handleD = 34;
+    if (Math.hypot(px - (cxp + perpX * handleD), py - (cyp + perpY * handleD)) <= TOL) return 'rotate';
+    if (Math.abs((px - cxp) * perpX + (py - cyp) * perpY) <= TOL) return 'move'; // near the line
+    if (Math.hypot(px - cxp, py - cyp) <= TOL) return 'move';
     return 'create';
   };
 
@@ -132,14 +128,26 @@ export function LocalAdjustmentMaskOverlay({
           next = { ...startGeom, type: 'radial', centerX: start.nx, centerY: start.ny, radiusX: Math.max(0.04, Math.abs(cx - start.nx)), radiusY: Math.max(0.04, Math.abs(cy - start.ny)) };
         }
       } else {
-        if (mode === 'moveStart') {
-          next = { ...startGeom, startX: cx, startY: cy };
-        } else if (mode === 'moveEnd') {
-          next = { ...startGeom, endX: cx, endY: cy };
-        } else if (mode === 'move') {
-          next = { ...startGeom, startX: startGeom.startX + dnx, startY: startGeom.startY + dny, endX: startGeom.endX + dnx, endY: startGeom.endY + dny };
+        if (mode === 'move') {
+          next = { ...startGeom, centerX: startGeom.centerX + dnx, centerY: startGeom.centerY + dny };
+        } else if (mode === 'rotate') {
+          const mm = metrics(); const ll = toLocal(ev.clientX, ev.clientY);
+          if (mm && ll) {
+            const cxp = mm.imgX + startGeom.centerX * mm.scaledW;
+            const cyp = mm.imgY + startGeom.centerY * mm.scaledH;
+            // effect side points toward the cursor
+            next = { ...startGeom, rotation: Math.atan2(-(ll.px - cxp), ll.py - cyp) };
+          } else next = startGeom;
         } else {
-          next = { ...startGeom, type: 'linear', startX: start.nx, startY: start.ny, endX: cx, endY: cy };
+          // create: drop the line at the press point; drag points the effect at the cursor
+          const mm = metrics(); const ll = toLocal(ev.clientX, ev.clientY);
+          let rotation = startGeom.rotation || 0;
+          if (mm && ll) {
+            const cxp = mm.imgX + start.nx * mm.scaledW, cyp = mm.imgY + start.ny * mm.scaledH;
+            const ddx = ll.px - cxp, ddy = ll.py - cyp;
+            if (Math.hypot(ddx, ddy) > 6) rotation = Math.atan2(-ddx, ddy);
+          }
+          next = { ...startGeom, type: 'linear', centerX: start.nx, centerY: start.ny, rotation };
         }
       }
       latest = next;
@@ -188,13 +196,31 @@ export function LocalAdjustmentMaskOverlay({
         </g>
       );
     } else {
-      const x1 = sx(liveGeom.startX), y1 = sy(liveGeom.startY);
-      const x2 = sx(liveGeom.endX), y2 = sy(liveGeom.endY);
+      const cxp = sx(liveGeom.centerX), cyp = sy(liveGeom.centerY);
+      const rot = liveGeom.rotation || 0;
+      const dirX = Math.cos(rot), dirY = Math.sin(rot);
+      const perpX = -Math.sin(rot), perpY = Math.cos(rot);
+      const L = 2 * (m.scaledW + m.scaledH);
+      const lx1 = cxp - dirX * L, ly1 = cyp - dirY * L, lx2 = cxp + dirX * L, ly2 = cyp + dirY * L;
+      const handleD = 34;
+      const hx = cxp + perpX * handleD, hy = cyp + perpY * handleD;
       outline = (
         <>
-          <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="rgba(255,255,255,0.9)" strokeWidth={1.5} />
-          <circle cx={x1} cy={y1} r={4} fill="rgba(255,255,255,0.45)" />
-          <circle cx={x2} cy={y2} r={5} fill="rgba(255,255,255,0.95)" />
+          <defs>
+            <clipPath id="la-grad-clip">
+              <rect x={m.imgX} y={m.imgY} width={m.scaledW} height={m.scaledH} />
+            </clipPath>
+          </defs>
+          {/* the line + effect-side indicators, clipped to the image (full width, no overflow) */}
+          <g clipPath="url(#la-grad-clip)">
+            <line x1={lx1} y1={ly1} x2={lx2} y2={ly2} stroke="rgba(255,255,255,0.9)" strokeWidth={1.5} />
+            <line x1={lx1 + perpX * 16} y1={ly1 + perpY * 16} x2={lx2 + perpX * 16} y2={ly2 + perpY * 16} stroke="rgba(255,255,255,0.3)" strokeWidth={1} strokeDasharray="5 4" />
+            <line x1={lx1 + perpX * 30} y1={ly1 + perpY * 30} x2={lx2 + perpX * 30} y2={ly2 + perpY * 30} stroke="rgba(255,255,255,0.16)" strokeWidth={1} strokeDasharray="5 4" />
+          </g>
+          {/* centre dot + arrow/handle pointing to the effect side (drag to rotate) */}
+          <line x1={cxp} y1={cyp} x2={hx} y2={hy} stroke="rgba(120,200,255,0.9)" strokeWidth={1.5} />
+          <circle cx={cxp} cy={cyp} r={4} fill="rgba(255,255,255,0.95)" />
+          <circle cx={hx} cy={hy} r={5} fill="rgba(120,200,255,0.95)" />
         </>
       );
     }

@@ -1012,6 +1012,7 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
                   onGeometryChange={(geom) => {
                     const img = imageService.getCurrentImage();
                     if (img) la.setLayerGeometry(layer.id, geom, img.width, img.height);
+                    imageProcessingPipeline.invalidateModuleCache('localadjustments');
                     triggerReprocessing();
                   }}
                 />

@@ -5,7 +5,7 @@
  * brush parameters, and image processing with layers.
  */
 
-import { LocalAdjustmentsModule, GradientParameters, ParametricMaskParameters } from './LocalAdjustmentsModule';
+import { LocalAdjustmentsModule, GradientParameters, ParametricMaskParameters, MaskGeometry } from './LocalAdjustmentsModule';
 import {
   createTestImage,
   createGradientImage,
@@ -74,6 +74,28 @@ describe('LocalAdjustmentsModule', () => {
       expect(bottom).toBeGreaterThan(top); // default gradient runs top -> bottom
     });
 
+    it('the linear gradient is one-sided; feather 1 = solid below, 0.5 = ramp', () => {
+      const id = module.createLayer('linear_gradient', 'Grad', width, height);
+      const geom = (feather: number): MaskGeometry => ({
+        type: 'linear', centerX: 0.5, centerY: 0.5, radiusX: 0.3, radiusY: 0.3,
+        startX: 0.5, startY: 0.15, endX: 0.5, endY: 0.85, feather, invert: false, rotation: 0,
+      });
+      const mid = width >> 1;
+
+      module.setLayerGeometry(id, geom(1), width, height);
+      let mask = module.getLayer(id)!.mask;
+      expect(mask[2 * width + mid]).toBeLessThan(0.05);           // nothing above the line
+      expect(mask[(height - 3) * width + mid]).toBeGreaterThan(0.95); // solid full effect below
+
+      module.setLayerGeometry(id, geom(0.5), width, height);
+      mask = module.getLayer(id)!.mask;
+      const midBot = mask[Math.floor(height * 0.65) * width + mid];
+      const farBot = mask[(height - 3) * width + mid];
+      expect(mask[2 * width + mid]).toBeLessThan(0.05);           // still one-sided
+      expect(midBot).toBeLessThan(farBot);                        // ramps toward the bottom
+      expect(farBot).toBeGreaterThan(0.75);                       // near-full by the bottom edge
+    });
+
     it('a mask with basicAdj applies Basic Adjustments to the masked region only', () => {
       const id = module.createLayer('radial_gradient', 'Circle', width, height);
       module.updateLayerBasicAdj(id, { exposure: 1.0 }); // +1 EV inside the mask
@@ -83,6 +105,20 @@ describe('LocalAdjustmentsModule', () => {
       const cornerR = getPixel(out, width, 0, 0)[0];
       expect(cr).toBeGreaterThan(0.4 + 0.05); // centre brightened via masked Basic Adjustments
       expect(cornerR).toBeCloseTo(0.4, 1);    // corner ~unchanged
+    });
+
+    it('a masked adjustment applies when processed at a different resolution than the mask', () => {
+      // Mask built at 40x40, but processed at a 16x16 "preview" — the mask must be
+      // rebuilt at the processing resolution or it indexes the wrong pixels.
+      const id = module.createLayer('radial_gradient', 'Circle', 40, 40);
+      module.updateLayerBasicAdj(id, { exposure: 1.0 });
+      expect(module.getLayer(id)!.mask.length).toBe(40 * 40);
+
+      const pw = 16, ph = 16;
+      const out = module.processImage(createTestImage(pw, ph, 0.4, 0.4, 0.4), pw, ph);
+      expect(getPixel(out, pw, pw / 2, ph / 2)[0]).toBeGreaterThan(0.45); // centre brightened
+      expect(getPixel(out, pw, 0, 0)[0]).toBeCloseTo(0.4, 1);             // corner ~unchanged
+      expect(module.getLayer(id)!.mask.length).toBe(pw * ph);            // mask rebuilt at preview res
     });
   });
 
