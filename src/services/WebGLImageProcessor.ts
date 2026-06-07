@@ -15,6 +15,7 @@
  * only ever used when it matches the CPU result — no possibility of a regression.
  */
 import { logger } from '../utils/Logger';
+import { rgbToHsl, hslToRgb } from '../modules/utils/ColorUtils';
 
 export interface BasicAdjustmentsParams {
   black_point: number;
@@ -84,6 +85,76 @@ void main() {
   outColor = vec4(sum / max(wsum, 1e-6), texture(u_image, v_uv).a);
 }`;
 
+// Color Balance: 3-range tonal shift (shadows/midtones/highlights) + 8-hue HSL.
+// Mirrors ColorBalanceModule + ColorUtils rgbToHsl/hslToRgb exactly.
+const COLORBALANCE_FRAG_SRC = `#version 300 es
+precision highp float;
+uniform sampler2D u_image;
+uniform vec3 u_shadows, u_mid, u_high;   // (cyan_red, magenta_green, yellow_blue)
+uniform float u_sat[8];
+uniform float u_lum[8];
+uniform float u_hue[8];
+in vec2 v_uv;
+out vec4 outColor;
+
+float tonal(float l, int r) {
+  if (r == 0) return l < 0.33 ? 1.0 : max(0.0, (0.66 - l) / 0.33);
+  if (r == 1) return (l >= 0.33 && l <= 0.66) ? 1.0 : (l < 0.33 ? max(0.0, l / 0.33) : max(0.0, (1.0 - l) / 0.34));
+  return l > 0.66 ? 1.0 : max(0.0, (l - 0.33) / 0.33);
+}
+float cwRange(float h, float a, float b) {
+  if (h >= a && h <= b) return 1.0;
+  return max(0.0, 1.0 - min(abs(h - a), abs(h - b)) / 30.0);
+}
+float colorWeight(float h, int i) {
+  if (i == 0) {
+    if ((h >= 345.0 && h <= 360.0) || (h >= 0.0 && h <= 15.0)) return 1.0;
+    return max(0.0, 1.0 - min(min(abs(h - 345.0), abs(h - 360.0)), min(abs(h), abs(h - 15.0))) / 30.0);
+  }
+  vec2 r = i == 1 ? vec2(15.0, 45.0) : i == 2 ? vec2(45.0, 75.0) : i == 3 ? vec2(75.0, 165.0)
+         : i == 4 ? vec2(165.0, 195.0) : i == 5 ? vec2(195.0, 255.0) : i == 6 ? vec2(255.0, 285.0) : vec2(285.0, 345.0);
+  return cwRange(h, r.x, r.y);
+}
+vec3 rgb2hsl(vec3 c) {
+  float mx = max(c.r, max(c.g, c.b)), mn = min(c.r, min(c.g, c.b));
+  float diff = mx - mn, sum = mx + mn, h = 0.0, l = sum / 2.0, s = 0.0;
+  if (diff != 0.0) {
+    s = l > 0.5 ? diff / (2.0 - sum) : diff / sum;
+    if (mx == c.r) h = (c.g - c.b) / diff + (c.g < c.b ? 6.0 : 0.0);
+    else if (mx == c.g) h = (c.b - c.r) / diff + 2.0;
+    else h = (c.r - c.g) / diff + 4.0;
+    h /= 6.0;
+  }
+  return vec3(h * 360.0, s * 100.0, l * 100.0);
+}
+vec3 hsl2rgb(float h, float s, float l) {
+  h = mod(mod(h, 360.0) + 360.0, 360.0);
+  s = clamp(s, 0.0, 100.0) / 100.0;
+  l = clamp(l, 0.0, 100.0) / 100.0;
+  float c = (1.0 - abs(2.0 * l - 1.0)) * s;
+  float x = c * (1.0 - abs(mod(h / 60.0, 2.0) - 1.0));
+  float m = l - c / 2.0;
+  vec3 rgb = h < 60.0 ? vec3(c, x, 0.0) : h < 120.0 ? vec3(x, c, 0.0) : h < 180.0 ? vec3(0.0, c, x)
+           : h < 240.0 ? vec3(0.0, x, c) : h < 300.0 ? vec3(x, 0.0, c) : vec3(c, 0.0, x);
+  return rgb + m;
+}
+void main() {
+  vec4 src = texture(u_image, v_uv);
+  vec3 rgb = src.rgb;
+  float lum = 0.299 * rgb.r + 0.587 * rgb.g + 0.114 * rgb.b;
+  float ws = tonal(lum, 0); if (ws > 0.01) rgb += u_shadows * ws * 0.1;
+  float wm = tonal(lum, 1); if (wm > 0.01) rgb += u_mid * wm * 0.1;
+  float wh = tonal(lum, 2); if (wh > 0.01) rgb += u_high * wh * 0.1;
+  rgb = clamp(rgb, 0.0, 1.0);
+  vec3 hsl = rgb2hsl(rgb);
+  float nh = hsl.x, ns = hsl.y, nl = hsl.z;
+  for (int i = 0; i < 8; i++) {
+    float w = colorWeight(hsl.x, i);
+    if (w > 0.01) { nh += u_hue[i] * w; ns += u_sat[i] * w; nl += u_lum[i] * w; }
+  }
+  outColor = vec4(clamp(hsl2rgb(nh, ns, nl), 0.0, 1.0), src.a);
+}`;
+
 // Faithful GLSL port of BasicAdjustmentsModule.process (see that file for intent).
 const BASICADJ_FRAG_SRC = `#version 300 es
 precision highp float;
@@ -140,8 +211,40 @@ void main() {
 }`;
 
 const LUM = { R: 0.299, G: 0.587, B: 0.114 };
+const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
 
 interface DehazeState { active: boolean; hazeStrength: number; hazeDivisor: number; }
+
+// ── Color Balance helpers (mirror ColorBalanceModule exactly) ────────────────
+function cbTonalWeight(l: number, range: 0 | 1 | 2): number {
+  if (range === 0) return l < 0.33 ? 1.0 : Math.max(0, (0.66 - l) / 0.33);
+  if (range === 1) return (l >= 0.33 && l <= 0.66) ? 1.0 : (l < 0.33 ? Math.max(0, l / 0.33) : Math.max(0, (1.0 - l) / 0.34));
+  return l > 0.66 ? 1.0 : Math.max(0, (l - 0.33) / 0.33);
+}
+const CB_RANGES: number[][] = [[345, 360, 0, 15], [15, 45], [45, 75], [75, 165], [165, 195], [195, 255], [255, 285], [285, 345]];
+function cbColorWeight(hue: number, i: number): number {
+  const range = CB_RANGES[i];
+  if (range.length === 4) {
+    const [s1, e1, s2, e2] = range;
+    if ((hue >= s1 && hue <= e1) || (hue >= s2 && hue <= e2)) return 1.0;
+    return Math.max(0, 1 - Math.min(Math.min(Math.abs(hue - s1), Math.abs(hue - e1)), Math.min(Math.abs(hue - s2), Math.abs(hue - e2))) / 30);
+  }
+  const [s, e] = range;
+  if (hue >= s && hue <= e) return 1.0;
+  return Math.max(0, 1 - Math.min(Math.abs(hue - s), Math.abs(hue - e)) / 30);
+}
+const CB_SELFTEST = (() => {
+  const w = 8, h = 8;
+  const data = new Float32Array(w * h * 4);
+  for (let i = 0; i < w * h; i++) {
+    data[i * 4] = (i % 8) / 8; data[i * 4 + 1] = ((i * 5) % 8) / 8; data[i * 4 + 2] = ((i * 3) % 8) / 8; data[i * 4 + 3] = 1;
+  }
+  return { data, w, h };
+})();
+const CB_T = {
+  shadows: [0.3, -0.2, 0.1], mid: [0.1, 0.2, -0.1], high: [-0.2, 0.1, 0.3],
+  sat: [10, -5, 8, 0, 0, 12, 0, -8], lum: [5, 0, -5, 8, 0, 0, 10, 0], hue: [10, 0, -10, 0, 15, 0, 0, -12],
+};
 
 class WebGLImageProcessor {
   private gl: WebGL2RenderingContext | null = null;
@@ -149,6 +252,8 @@ class WebGLImageProcessor {
   private basicAdjProgram: WebGLProgram | null = null;
   private gainsProgram: WebGLProgram | null = null;
   private denoiseProgram: WebGLProgram | null = null;
+  private colorBalanceProgram: WebGLProgram | null = null;
+  private colorBalanceVerified: boolean | null = null;
   private vao: WebGLVertexArrayObject | null = null;
   private initTried = false;
 
@@ -167,7 +272,8 @@ class WebGLImageProcessor {
       const basicAdjProgram = this.buildProgram(gl, VERT_SRC, BASICADJ_FRAG_SRC);
       const gainsProgram = this.buildProgram(gl, VERT_SRC, GAINS_FRAG_SRC);
       const denoiseProgram = this.buildProgram(gl, VERT_SRC, NLMEANS_FRAG_SRC);
-      if (!exposureProgram || !basicAdjProgram || !gainsProgram || !denoiseProgram) return (this.gl = null);
+      const colorBalanceProgram = this.buildProgram(gl, VERT_SRC, COLORBALANCE_FRAG_SRC);
+      if (!exposureProgram || !basicAdjProgram || !gainsProgram || !denoiseProgram || !colorBalanceProgram) return (this.gl = null);
 
       const quad = gl.createBuffer();
       gl.bindBuffer(gl.ARRAY_BUFFER, quad);
@@ -184,6 +290,7 @@ class WebGLImageProcessor {
       this.basicAdjProgram = basicAdjProgram;
       this.gainsProgram = gainsProgram;
       this.denoiseProgram = denoiseProgram;
+      this.colorBalanceProgram = colorBalanceProgram;
       this.vao = vao;
 
       // Self-check: only trust the GPU basic-adjustments path if it matches the CPU
@@ -319,6 +426,77 @@ class WebGLImageProcessor {
       logger.warn('[GPU] denoise failed:', e instanceof Error ? e.message : String(e));
       return null;
     }
+  }
+
+  /** Apply Color Balance (3-range tonal + 8-hue HSL). GPU when verified, else CPU. */
+  applyColorBalance(
+    data: Float32Array, width: number, height: number,
+    shadows: number[], mid: number[], high: number[], sat: number[], lum: number[], hue: number[]
+  ): Float32Array {
+    const gl = this.ensureContext();
+    if (gl && this.colorBalanceProgram && this.vao && this.verifyColorBalance()) {
+      try { return this.runColorBalanceGPU(gl, data, width, height, shadows, mid, high, sat, lum, hue); }
+      catch (e) { logger.warn('[GPU] color-balance failed — CPU:', e instanceof Error ? e.message : String(e)); }
+    }
+    return this.colorBalanceCPU(data, width, height, shadows, mid, high, sat, lum, hue);
+  }
+
+  private runColorBalanceGPU(
+    gl: WebGL2RenderingContext, data: Float32Array, width: number, height: number,
+    shadows: number[], mid: number[], high: number[], sat: number[], lum: number[], hue: number[]
+  ): Float32Array {
+    void gl;
+    return this.runPass(this.colorBalanceProgram!, data, width, height, (g, prog) => {
+      g.uniform3f(g.getUniformLocation(prog, 'u_shadows'), shadows[0], shadows[1], shadows[2]);
+      g.uniform3f(g.getUniformLocation(prog, 'u_mid'), mid[0], mid[1], mid[2]);
+      g.uniform3f(g.getUniformLocation(prog, 'u_high'), high[0], high[1], high[2]);
+      g.uniform1fv(g.getUniformLocation(prog, 'u_sat'), sat);
+      g.uniform1fv(g.getUniformLocation(prog, 'u_lum'), lum);
+      g.uniform1fv(g.getUniformLocation(prog, 'u_hue'), hue);
+    });
+  }
+
+  private verifyColorBalance(): boolean {
+    if (this.colorBalanceVerified !== null) return this.colorBalanceVerified;
+    let ok = false;
+    try {
+      const { data, w, h } = CB_SELFTEST;
+      const a = this.runColorBalanceGPU(this.gl!, data, w, h, CB_T.shadows, CB_T.mid, CB_T.high, CB_T.sat, CB_T.lum, CB_T.hue);
+      const c = this.colorBalanceCPU(data, w, h, CB_T.shadows, CB_T.mid, CB_T.high, CB_T.sat, CB_T.lum, CB_T.hue);
+      let maxDiff = 0;
+      for (let i = 0; i < c.length; i++) maxDiff = Math.max(maxDiff, Math.abs(a[i] - c[i]));
+      ok = maxDiff < 0.02; // HSL round-trip → slightly looser than the per-pixel ops
+      logger.info(`[GPU] color-balance self-check maxDiff=${maxDiff.toExponential(2)} -> ${ok ? 'GPU' : 'CPU fallback'}`);
+    } catch (e) { logger.warn('[GPU] color-balance self-check error:', e instanceof Error ? e.message : String(e)); }
+    this.colorBalanceVerified = ok;
+    return ok;
+  }
+
+  /** CPU reference — a replica of ColorBalanceModule.process. */
+  colorBalanceCPU(
+    data: Float32Array, _width: number, _height: number,
+    shadows: number[], mid: number[], high: number[], sat: number[], lum: number[], hue: number[]
+  ): Float32Array {
+    const out = new Float32Array(data);
+    const ranges: [number[], 0 | 1 | 2][] = [[shadows, 0], [mid, 1], [high, 2]];
+    for (let i = 0; i < out.length; i += 4) {
+      let r = out[i], g = out[i + 1], b = out[i + 2];
+      const luminance = 0.299 * r + 0.587 * g + 0.114 * b;
+      for (const [vals, rng] of ranges) {
+        const w = cbTonalWeight(luminance, rng);
+        if (w > 0.01) { r += vals[0] * w * 0.1; g += vals[1] * w * 0.1; b += vals[2] * w * 0.1; }
+      }
+      r = clamp01(r); g = clamp01(g); b = clamp01(b);
+      const [h, s, l] = rgbToHsl(r, g, b);
+      let nh = h, ns = s, nl = l;
+      for (let c = 0; c < 8; c++) {
+        const w = cbColorWeight(h, c);
+        if (w > 0.01) { nh += hue[c] * w; ns += sat[c] * w; nl += lum[c] * w; }
+      }
+      const [nr, ng, nb] = hslToRgb(nh, ns, nl);
+      out[i] = clamp01(nr); out[i + 1] = clamp01(ng); out[i + 2] = clamp01(nb);
+    }
+    return out;
   }
 
   /** Generic single-pass shader run: source texture → program → float readback. */

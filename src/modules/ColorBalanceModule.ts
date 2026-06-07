@@ -1,5 +1,6 @@
 import { logger } from '../utils/Logger';
 import { validateInputDimensions, rgbToHsl, hslToRgb } from './utils/ColorUtils';
+import { webGLImageProcessor } from '../services/WebGLImageProcessor';
 
 export interface ColorBalanceParams {
   // Traditional 3-range color balance (shadows, midtones, highlights)
@@ -195,6 +196,22 @@ export class ColorBalanceModule {
     output.set(input);
 
     logger.debug(`Processing ColorBalance: ${width}x${height} with traditional + global controls`);
+
+    // GPU fast-path (RGBA only); falls back to the CPU loop below.
+    if (channels === 4 && webGLImageProcessor.isAvailable()) {
+      const sh = this.params.shadows, md = this.params.midtones, hl = this.params.highlights;
+      const colors = ['red', 'orange', 'yellow', 'green', 'cyan', 'blue', 'purple', 'magenta'];
+      const sat = colors.map(c => this.getNumericParam(`${c}_saturation`));
+      const lum = colors.map(c => this.getNumericParam(`${c}_luminance`));
+      const hue = colors.map(c => this.getNumericParam(`${c}_hue`));
+      return webGLImageProcessor.applyColorBalance(
+        output, width, height,
+        [sh.cyan_red, sh.magenta_green, sh.yellow_blue],
+        [md.cyan_red, md.magenta_green, md.yellow_blue],
+        [hl.cyan_red, hl.magenta_green, hl.yellow_blue],
+        sat, lum, hue,
+      );
+    }
 
     // Process each pixel
     for (let y = 0; y < height; y++) {

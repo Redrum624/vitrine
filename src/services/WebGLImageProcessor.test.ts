@@ -8,6 +8,7 @@
  */
 import { webGLImageProcessor } from './WebGLImageProcessor';
 import { BasicAdjustmentsModule } from '../modules/BasicAdjustmentsModule';
+import { ColorBalanceModule } from '../modules/ColorBalanceModule';
 
 function img(pixels: number[][]): Float32Array {
   const a = new Float32Array(pixels.length * 4);
@@ -95,6 +96,45 @@ describe('GPU basic-adjustments CPU reference matches BasicAdjustmentsModule', (
     const params = mod.getParams();
     const expected = mod.process(new Float32Array(src), { width: w, height: h, channels: 4 });
     const ref = webGLImageProcessor.basicAdjustmentsCPU(new Float32Array(src), w, h, params);
+    let maxDiff = 0;
+    for (let i = 0; i < expected.length; i++) maxDiff = Math.max(maxDiff, Math.abs(expected[i] - ref[i]));
+    expect(maxDiff).toBeLessThan(1e-5);
+  });
+});
+
+describe('GPU color-balance CPU reference matches ColorBalanceModule', () => {
+  const w = 4, h = 4;
+  const src = new Float32Array(w * h * 4);
+  for (let i = 0; i < w * h; i++) {
+    src[i * 4] = (i % 4) / 4; src[i * 4 + 1] = ((i * 5) % 7) / 7;
+    src[i * 4 + 2] = ((i * 3) % 5) / 5; src[i * 4 + 3] = 1;
+  }
+
+  test('parity (3-range tonal + 8-hue HSL)', () => {
+    const mod = new ColorBalanceModule();
+    mod.setParams({
+      shadows: { cyan_red: 0.3, magenta_green: -0.2, yellow_blue: 0.1 },
+      midtones: { cyan_red: 0.1, magenta_green: 0.2, yellow_blue: -0.1 },
+      highlights: { cyan_red: -0.2, magenta_green: 0.1, yellow_blue: 0.3 },
+      red_saturation: 10, red_luminance: 5, red_hue: 10,
+      yellow_saturation: 8, yellow_hue: -10, cyan_hue: 15,
+      blue_saturation: 12, purple_luminance: 10, magenta_saturation: -8,
+    });
+    const expected = mod.process(new Float32Array(src), { width: w, height: h, channels: 4 });
+
+    const p = mod.getParams();
+    const flat = p as unknown as Record<string, number>;
+    const colors = ['red', 'orange', 'yellow', 'green', 'cyan', 'blue', 'purple', 'magenta'];
+    const num = (k: string) => (typeof flat[k] === 'number' ? flat[k] : 0);
+    const ref = webGLImageProcessor.colorBalanceCPU(
+      new Float32Array(src), w, h,
+      [p.shadows.cyan_red, p.shadows.magenta_green, p.shadows.yellow_blue],
+      [p.midtones.cyan_red, p.midtones.magenta_green, p.midtones.yellow_blue],
+      [p.highlights.cyan_red, p.highlights.magenta_green, p.highlights.yellow_blue],
+      colors.map(c => num(`${c}_saturation`)),
+      colors.map(c => num(`${c}_luminance`)),
+      colors.map(c => num(`${c}_hue`)),
+    );
     let maxDiff = 0;
     for (let i = 0; i < expected.length; i++) maxDiff = Math.max(maxDiff, Math.abs(expected[i] - ref[i]));
     expect(maxDiff).toBeLessThan(1e-5);
