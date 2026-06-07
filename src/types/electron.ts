@@ -144,6 +144,9 @@ export interface ElectronAPI {
   }>;
   writeImageMetadata: (filePath: string, metadata: EmbeddableMetadata) => Promise<boolean>;
   writeImageRating: (filePath: string, rating: number) => Promise<{ ok: boolean; method?: string; path?: string; error?: string }>;
+  storeGet: <T = unknown>(key: string) => Promise<T | null>;
+  storeSet: (key: string, value: unknown) => Promise<boolean>;
+  storeDelete: (key: string) => Promise<boolean>;
 
   // Menu event listeners
   onFileOpen: (callback: (filePath: string) => void) => void;

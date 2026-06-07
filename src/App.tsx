@@ -27,6 +27,7 @@ import { electronService } from './services/ElectronService';
 import { imageService } from './services/ImageService';
 import { ImageFileInfo, fileSystemService } from './services/FileSystemService';
 import { useAppStore } from './stores/appStore';
+import { editPersistenceService } from './services/EditPersistenceService';
 import { logger } from './utils/Logger';
 import { historyService } from './services/HistoryService';
 import { AdjustmentPreset } from './services/PresetService';
@@ -890,6 +891,14 @@ function App() {
       `GPU=${r.gpuMs != null ? r.gpuMs.toFixed(1) + 'ms' : 'n/a'} CPU=${r.cpuMs.toFixed(1)}ms maxDiff=${r.maxDiff.toExponential(1)}`
     );
   }, []);
+
+  // Persist the current image's edits (debounced) whenever the processed result
+  // changes, so edits survive sessions. Restore happens in Canvas on image load;
+  // the service only writes when the state actually differs from the loaded baseline.
+  const processingVersion = useAppStore((s) => s.processingVersion);
+  useEffect(() => {
+    editPersistenceService.scheduleSave();
+  }, [processingVersion]);
 
   // Global: mouse-wheel over any range slider adjusts it one step per tick. Sets the
   // value via the native setter + dispatches input/change so React's onChange fires.

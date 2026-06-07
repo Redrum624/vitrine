@@ -1,4 +1,5 @@
 import { electronService } from './ElectronService';
+import { editPersistenceService } from './EditPersistenceService';
 import { logger } from '../utils/Logger';
 
 interface UnsavedChangesChecker {
@@ -174,6 +175,9 @@ class AppLifecycleService {
   private async saveAppState(): Promise<void> {
     try {
       logger.info('Saving app state before close...');
+
+      // Persist the current image's edits to the durable store on close.
+      editPersistenceService.flush();
 
       // Save current workspace state to localStorage
       const appState = {

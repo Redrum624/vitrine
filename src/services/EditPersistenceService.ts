@@ -1,0 +1,148 @@
+import { imageProcessingPipeline } from './ImageProcessingPipeline';
+import { imageService } from './ImageService';
+import { LocalAdjustmentsPipelineModule } from '../modules/LocalAdjustmentsPipelineModule';
+import type { MaskGeometry } from '../modules/LocalAdjustmentsModule';
+import { logger } from '../utils/Logger';
+
+const STORE_VERSION = 1;
+
+type LayerType = 'brush' | 'linear_gradient' | 'radial_gradient' | 'parametric';
+
+interface SerializedLayer {
+  name: string;
+  type: LayerType;
+  enabled: boolean;
+  opacity: number;
+  geometry?: MaskGeometry;
+  basicAdj?: Record<string, number>;
+  parameters?: Record<string, unknown>;
+}
+
+interface EditState {
+  version: number;
+  modules: Record<string, Record<string, unknown>>;
+  localAdjustments?: { enabled: boolean; layers: SerializedLayer[] };
+}
+
+/**
+ * Per-image edit persistence. Serializes every pipeline module's params plus the
+ * Local Adjustment layers (geometry only — the Float32 mask is rebuilt from geometry)
+ * to a durable userData JSON store keyed by the image's file path, and restores them
+ * when the image is reopened. Survives sessions AND app updates (userData persists).
+ */
+class EditPersistenceService {
+  private saveTimer: ReturnType<typeof setTimeout> | null = null;
+  private baseline = ''; // serialized post-load state — edits are saved only once it changes
+
+  private keyForPath(path: string): string {
+    return `edits:${path}`;
+  }
+
+  /** Snapshot the current pipeline state (all modules + LA layers, no mask buffers). */
+  serialize(): EditState {
+    const modules: Record<string, Record<string, unknown>> = {};
+    for (const [id, module] of imageProcessingPipeline.getModules()) {
+      if (id === 'localadjustments') continue; // handled separately (layers)
+      try {
+        const m = module as { getParams?: () => Record<string, unknown> };
+        if (typeof m.getParams === 'function') modules[id] = m.getParams();
+      } catch (e) {
+        logger.warn(`serialize: getParams failed for ${id}`, e);
+      }
+    }
+
+    const state: EditState = { version: STORE_VERSION, modules };
+
+    const la = imageProcessingPipeline.getModule<LocalAdjustmentsPipelineModule>('localadjustments');
+    if (la) {
+      const params = la.getParameters();
+      const layers: SerializedLayer[] = (params.layers || []).map((l) => ({
+        name: l.name,
+        type: l.type,
+        enabled: l.enabled,
+        opacity: l.opacity,
+        geometry: l.geometry,
+        basicAdj: l.basicAdj as Record<string, number> | undefined,
+        parameters: l.parameters as Record<string, unknown> | undefined,
+      }));
+      state.localAdjustments = { enabled: !!params.enabled, layers };
+    }
+    return state;
+  }
+
+  /** Apply a serialized edit state to the (already-reset) pipeline at width×height. */
+  restore(state: EditState, width: number, height: number): boolean {
+    if (!state || state.version !== STORE_VERSION) return false;
+
+    for (const [id, params] of Object.entries(state.modules || {})) {
+      const module = imageProcessingPipeline.getModule(id) as { setParams?: (p: unknown) => void } | undefined;
+      if (module && typeof module.setParams === 'function') {
+        try { module.setParams(params); } catch (e) { logger.warn(`restore: setParams failed for ${id}`, e); }
+      }
+    }
+
+    const la = imageProcessingPipeline.getModule<LocalAdjustmentsPipelineModule>('localadjustments');
+    if (la) {
+      for (const l of la.getParameters().layers || []) la.removeLayer(l.id);
+      const saved = state.localAdjustments;
+      if (saved) {
+        for (const sl of saved.layers) {
+          const id = la.createLayer(sl.type, sl.name, width, height);
+          if (sl.geometry) la.setLayerGeometry(id, sl.geometry, width, height);
+          if (sl.basicAdj) la.updateLayerBasicAdj(id, sl.basicAdj);
+          if (typeof sl.opacity === 'number') la.updateLayerOpacity(id, sl.opacity);
+          la.toggleLayer(id, sl.enabled);
+        }
+        if (saved.enabled) la.enable(); else la.disable();
+      }
+    }
+    imageProcessingPipeline.invalidateModuleCache('localadjustments');
+    return true;
+  }
+
+  /** Load + apply saved edits for an image path. Returns true if anything was restored. */
+  async restoreForPath(path: string, width: number, height: number): Promise<boolean> {
+    let restored = false;
+    try {
+      const state = window.electronAPI?.storeGet
+        ? await window.electronAPI.storeGet<EditState>(this.keyForPath(path))
+        : null;
+      if (state) {
+        restored = this.restore(state, width, height);
+        if (restored) logger.info(`Restored saved edits for ${path}`);
+      }
+    } catch (e) {
+      logger.warn('restoreForPath failed', e);
+    }
+    // Baseline = the post-load state. Edits are persisted only once the state differs,
+    // so unedited images and the load-triggered reprocess never write a spurious save.
+    this.baseline = JSON.stringify(this.serialize());
+    return restored;
+  }
+
+  /** Debounced save of the current image's edits — call after any edit. */
+  scheduleSave(): void {
+    if (this.saveTimer) clearTimeout(this.saveTimer);
+    this.saveTimer = setTimeout(() => {
+      this.saveTimer = null;
+      this.flush();
+    }, 800);
+  }
+
+  /** Immediate save of the current image's edits — call before switching images and on app close. */
+  flush(): void {
+    if (this.saveTimer) { clearTimeout(this.saveTimer); this.saveTimer = null; }
+    const img = imageService.getCurrentImage();
+    if (!img?.filePath || !window.electronAPI?.storeSet) return;
+    const json = JSON.stringify(this.serialize());
+    if (json === this.baseline) return; // unchanged since load — nothing to persist
+    this.baseline = json;
+    try {
+      window.electronAPI.storeSet(this.keyForPath(img.filePath), JSON.parse(json));
+    } catch (e) {
+      logger.warn('flush save failed', e);
+    }
+  }
+}
+
+export const editPersistenceService = new EditPersistenceService();

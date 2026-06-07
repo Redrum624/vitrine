@@ -35,6 +35,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   writeImageMetadata: (filePath, metadata) => ipcRenderer.invoke('write-image-metadata', filePath, metadata),
   writeImageRating: (filePath, rating) => ipcRenderer.invoke('write-image-rating', filePath, rating),
 
+  // Generic durable JSON store (userData; survives app updates)
+  storeGet: (key) => ipcRenderer.invoke('store-get', key),
+  storeSet: (key, value) => ipcRenderer.invoke('store-set', key, value),
+  storeDelete: (key) => ipcRenderer.invoke('store-delete', key),
+
   // Menu actions - listen for events from main process
   onFileOpen: (callback) => ipcRenderer.on('file-open', (event, filePath) => callback(filePath)),
   onFileImport: (callback) => ipcRenderer.on('file-import', (event, filePaths) => callback(filePaths)),

@@ -727,6 +727,43 @@ ipcMain.handle('write-image-rating', async (event, filePath, rating) => {
   }
 });
 
+// Generic JSON key-value store under userData (survives app updates — userData is
+// outside the install dir). Keys are hashed to a safe filename. Used for per-image
+// edit persistence and any other durable renderer state.
+const STORE_DIR = path.join(app.getPath('userData'), 'store');
+function storeFilePath(key) {
+  const hash = require('crypto').createHash('sha1').update(String(key)).digest('hex');
+  return path.join(STORE_DIR, `${hash}.json`);
+}
+ipcMain.handle('store-get', async (event, key) => {
+  try {
+    const data = await fs.promises.readFile(storeFilePath(key), 'utf8');
+    return JSON.parse(data);
+  } catch (error) {
+    if (error.code !== 'ENOENT') console.warn('store-get failed:', error.message);
+    return null;
+  }
+});
+ipcMain.handle('store-set', async (event, key, value) => {
+  try {
+    await fs.promises.mkdir(STORE_DIR, { recursive: true });
+    await fs.promises.writeFile(storeFilePath(key), JSON.stringify(value), 'utf8');
+    return true;
+  } catch (error) {
+    console.warn('store-set failed:', error.message);
+    return false;
+  }
+});
+ipcMain.handle('store-delete', async (event, key) => {
+  try {
+    await fs.promises.unlink(storeFilePath(key));
+    return true;
+  } catch (error) {
+    if (error.code !== 'ENOENT') console.warn('store-delete failed:', error.message);
+    return false;
+  }
+});
+
 // Logging handlers
 const logDir = path.join(os.homedir(), 'Photo Editor Pro', 'logs');
 const logFile = path.join(logDir, `app-${new Date().toISOString().split('T')[0]}.log`);

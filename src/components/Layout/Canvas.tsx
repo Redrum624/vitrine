@@ -7,6 +7,7 @@ import { logger } from '../../utils/Logger';
 import { CropTransformOverlay } from '../Canvas/CropTransformOverlay';
 import { InteractiveCropHandles } from '../Canvas/InteractiveCropHandles';
 import { imageProcessingPipeline } from '../../services/ImageProcessingPipeline';
+import { editPersistenceService } from '../../services/EditPersistenceService';
 import { CropPipelineModule } from '../../modules/CropPipelineModule';
 import { LocalAdjustmentsPipelineModule } from '../../modules/LocalAdjustmentsPipelineModule';
 import { LocalAdjustmentMaskOverlay } from '../Canvas/LocalAdjustmentMaskOverlay';
@@ -633,6 +634,9 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
 
   const loadImage = useCallback(async (image: ImageFileInfo) => {
     try {
+      // Persist the OUTGOING image's edits before we reset the pipeline.
+      editPersistenceService.flush();
+
       // Always reset modules and caches when switching images so
       // styles/edits don't bleed between photos.
       canvasCache.current = {};
@@ -645,6 +649,13 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
 
       // Load image using ImageService (will use cache if available)
       await imageService.loadImage(image.path);
+
+      // Restore previously-saved edits for this image, then reprocess so they show.
+      const decoded = imageService.getCurrentImage();
+      if (decoded) {
+        const restored = await editPersistenceService.restoreForPath(image.path, decoded.width, decoded.height);
+        if (restored) useAppStore.getState().triggerReprocessing();
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error loading image';
       logger.error('Failed to load image:', error);
