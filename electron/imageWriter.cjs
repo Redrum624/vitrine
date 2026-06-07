@@ -183,6 +183,30 @@ function toArrayBuffer(imageData) {
 }
 
 /**
+ * Resolve a bundled ICC profile path (assets/icc/<file>), trying the dev source
+ * layout first and then the packaged extraResources location.
+ * @param {string} file  e.g. 'AdobeRGB1998.icc'
+ * @returns {string|null}
+ */
+function resolveIccProfilePath(file) {
+  const fs = require('fs');
+  const path = require('path');
+  const candidates = [path.join(__dirname, '..', 'assets', 'icc', file)];
+  if (process.resourcesPath) {
+    candidates.push(path.join(process.resourcesPath, 'assets', 'icc', file));
+  }
+  for (const c of candidates) {
+    try { if (fs.existsSync(c)) return c; } catch { /* ignore */ }
+  }
+  return null;
+}
+
+// Wide-gamut output spaces -> bundled profile filename. Pixels reaching the
+// writer are already converted to the target space by ExportService; we only
+// ATTACH the matching profile so viewers interpret the values correctly.
+const WIDE_GAMUT_ICC = { adobergb: 'AdobeRGB1998.icc', prophoto: 'ProPhoto.icc', rec2020: 'Rec2020.icc' };
+
+/**
  * @param {string} filePath           destination path
  * @param {ArrayBuffer|Buffer} imageData  raw interleaved RGBA samples
  * @param {string} format             'jpeg' | 'png' | 'tiff' | 'webp'
@@ -210,17 +234,41 @@ async function writeImageFile(filePath, imageData, format, options = {}) {
     );
   }
 
-  // For 16-bit, hand sharp a Uint16Array so its raw reader picks depth 'ushort'.
-  // For 8-bit, a Buffer reads as 'uchar'.
-  const rawInput = is16 ? new Uint16Array(ab) : Buffer.from(ab);
+  const colorSpace = options.colorSpace || 'srgb';
+  const wideGamut = Object.prototype.hasOwnProperty.call(WIDE_GAMUT_ICC, colorSpace);
+
+  // Choose the raw input sharp sees:
+  //  - 16-bit (non-wide-gamut): a Uint16Array so sharp picks depth 'ushort'.
+  //  - 8-bit: a Buffer ('uchar').
+  //  - 16-bit + wide-gamut: downsample to 8-bit OURSELVES. Handing sharp a
+  //    ushort buffer here makes it treat the data as linear and re-encode gamma
+  //    on the 8-bit downconvert (corrupting the already-encoded wide-gamut
+  //    values); an 8-bit Buffer is read verbatim and then tagged.
+  let rawInput;
+  if (is16 && wideGamut) {
+    const u16 = new Uint16Array(ab);
+    const u8 = Buffer.allocUnsafe(u16.length);
+    for (let i = 0; i < u16.length; i++) u8[i] = Math.round(u16[i] / 257);
+    rawInput = u8;
+  } else if (is16) {
+    rawInput = new Uint16Array(ab);
+  } else {
+    rawInput = Buffer.from(ab);
+  }
 
   let img = sharp(rawInput, {
     raw: { width: options.width, height: options.height, channels }
   });
 
   const fmt = String(format).toLowerCase();
-  // Whether we keep a 16-bit working space (only PNG/TIFF can store it).
-  const keep16 = is16 && (fmt === 'png' || fmt === 'tiff');
+  // Keep a 16-bit working space (PNG/TIFF only). NOT for wide-gamut: sharp's
+  // rgb16 colourspace conversion combined with an attached profile re-transforms
+  // the pixels and shifts colours, so wide-gamut exports fall back to 8-bit
+  // (correct colour prioritised over bit depth) and carry the matching profile.
+  const keep16 = is16 && (fmt === 'png' || fmt === 'tiff') && !wideGamut;
+  if (is16 && wideGamut) {
+    console.warn(`16-bit ${colorSpace} export downgraded to 8-bit (16-bit + wide-gamut ICC is unsupported by the encoder).`);
+  }
 
   // JPEG cannot carry alpha; strip it (other formats keep the opaque alpha).
   if (fmt === 'jpeg') {
@@ -264,20 +312,25 @@ async function writeImageFile(filePath, imageData, format, options = {}) {
       throw new Error(`Unsupported format: ${format}`);
   }
 
-  // Embed an sRGB ICC profile so the file is correctly interpreted by viewers.
-  // Skipped for the 16-bit (rgb16) path: combining a 16-bit colourspace
-  // conversion with an embedded sRGB profile makes sharp re-convert the pixels
-  // and shifts the colours. The 16-bit pixels are already sRGB-encoded, so an
-  // untagged file still displays correctly. Wide-gamut spaces (Adobe RGB /
-  // ProPhoto / Rec.2020) need bundled profiles + a colour-managed conversion
-  // (tracked as a separate feature); for those we leave the file untagged
-  // rather than mislabel it as sRGB.
-  const colorSpace = options.colorSpace || 'srgb';
+  // Embed the matching ICC profile so viewers interpret the colours correctly.
+  // sRGB is skipped on the 16-bit (rgb16) path because combining the rgb16
+  // colourspace conversion with an attached profile makes sharp re-convert and
+  // shift the pixels; 16-bit sRGB pixels are already sRGB-encoded so an untagged
+  // file still displays correctly. Wide-gamut pixels were already converted by
+  // ExportService, so withIccProfile here only ATTACHES (it does not re-transform
+  // raw input) — verified against sharp 0.34.
   if (colorSpace === 'srgb' && !keep16) {
     if (typeof img.withIccProfile === 'function') {
       img = img.withIccProfile('srgb');
     } else if (typeof img.withMetadata === 'function') {
       img = img.withMetadata();
+    }
+  } else if (wideGamut) {
+    const iccPath = resolveIccProfilePath(WIDE_GAMUT_ICC[colorSpace]);
+    if (iccPath && typeof img.withIccProfile === 'function') {
+      img = img.withIccProfile(iccPath);
+    } else {
+      console.warn(`No bundled ICC profile for ${colorSpace} (${WIDE_GAMUT_ICC[colorSpace]}); exporting untagged.`);
     }
   }
 

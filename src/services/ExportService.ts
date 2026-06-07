@@ -1,6 +1,7 @@
 import { logger } from '../utils/Logger';
 import { isElectron, EmbeddableMetadata } from '../types/electron';
 import { watermarkService, WatermarkSettings } from './WatermarkService';
+import { COLOR_SPACE_CONVERSIONS } from './colorSpaceMatrices';
 
 export interface ExportOptions {
   // Output format
@@ -261,7 +262,10 @@ export class ExportService {
           'srgb',
           exportOptions.colorSpace
         );
-        warnings.push(`Color space conversion to ${exportOptions.colorSpace} is approximated`);
+        warnings.push(`Converted to ${exportOptions.colorSpace} with an embedded ICC profile`);
+        if (exportOptions.bitDepth === 16) {
+          warnings.push('16-bit + wide-gamut is exported at 8-bit (encoder limitation)');
+        }
       }
 
       // Convert to the appropriate bit depth
@@ -621,7 +625,12 @@ export class ExportService {
     return blurred;
   }
 
-  // Convert color space (simplified implementation)
+  // Convert from sRGB to a wide-gamut output space (Adobe RGB / ProPhoto /
+  // Rec.2020) using the linear-light matrices generated alongside the embedded
+  // ICC profiles (scripts/gen-icc-profiles.cjs). Decodes the sRGB gamma, applies
+  // the sRGB->target 3x3 matrix in linear light, then re-encodes with the target
+  // profile's TRC gamma so the pixel values match the ICC profile the writer
+  // attaches. Returns the input unchanged when no conversion is defined.
   private convertColorSpace(
     imageData: Float32Array,
     _width: number,
@@ -631,37 +640,33 @@ export class ExportService {
   ): Float32Array {
     if (fromSpace === toSpace) return imageData;
 
+    const conv = COLOR_SPACE_CONVERSIONS[toSpace];
+    if (fromSpace !== 'srgb' || !conv) {
+      logger.warn(`No color-space conversion for ${fromSpace} -> ${toSpace}; exporting sRGB values`);
+      return imageData;
+    }
+
     logger.debug(`Converting color space: ${fromSpace} → ${toSpace}`);
 
+    const m = conv.srgbToLinearTarget;
+    const encodeGamma = 1 / conv.gamma;
+    const srgbToLinear = (c: number): number =>
+      c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+
     const converted = new Float32Array(imageData);
+    for (let i = 0; i < imageData.length; i += 4) {
+      const r = srgbToLinear(imageData[i]);
+      const g = srgbToLinear(imageData[i + 1]);
+      const b = srgbToLinear(imageData[i + 2]);
 
-    // Simplified color space conversion matrices
-    const matrices = {
-      'srgb_to_adobergb': [
-        0.7151, 0.2849, 0.0000,
-        0.0000, 1.0000, 0.0000,
-        0.0000, 0.0411, 0.9589
-      ],
-      'srgb_to_prophoto': [
-        0.7976, 0.1352, 0.0313,
-        0.2880, 0.7118, 0.0001,
-        0.0000, 0.0000, 0.8252
-      ]
-    };
+      const lr = Math.max(0, m[0][0] * r + m[0][1] * g + m[0][2] * b);
+      const lg = Math.max(0, m[1][0] * r + m[1][1] * g + m[1][2] * b);
+      const lb = Math.max(0, m[2][0] * r + m[2][1] * g + m[2][2] * b);
 
-    const matrixKey = `${fromSpace}_to_${toSpace}` as keyof typeof matrices;
-    const matrix = matrices[matrixKey];
-
-    if (matrix) {
-      for (let i = 0; i < imageData.length; i += 4) {
-        const r = imageData[i];
-        const g = imageData[i + 1];
-        const b = imageData[i + 2];
-
-        converted[i] = Math.max(0, Math.min(1, matrix[0] * r + matrix[1] * g + matrix[2] * b));
-        converted[i + 1] = Math.max(0, Math.min(1, matrix[3] * r + matrix[4] * g + matrix[5] * b));
-        converted[i + 2] = Math.max(0, Math.min(1, matrix[6] * r + matrix[7] * g + matrix[8] * b));
-      }
+      converted[i] = Math.min(1, Math.pow(lr, encodeGamma));
+      converted[i + 1] = Math.min(1, Math.pow(lg, encodeGamma));
+      converted[i + 2] = Math.min(1, Math.pow(lb, encodeGamma));
+      // alpha (i + 3) left unchanged
     }
 
     return converted;
