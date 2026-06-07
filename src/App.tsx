@@ -28,6 +28,7 @@ import { imageService } from './services/ImageService';
 import { ImageFileInfo, fileSystemService } from './services/FileSystemService';
 import { useAppStore } from './stores/appStore';
 import { editPersistenceService } from './services/EditPersistenceService';
+import { checkpointService } from './services/CheckpointService';
 import { logger } from './utils/Logger';
 import { historyService } from './services/HistoryService';
 import { AdjustmentPreset } from './services/PresetService';
@@ -899,6 +900,16 @@ function App() {
   const processingVersion = useAppStore((s) => s.processingVersion);
   useEffect(() => {
     editPersistenceService.scheduleSave();
+    // Record a History checkpoint after the user stops editing, labelled by the active
+    // module. De-duped + debounced inside the service, so a slider drag = one checkpoint
+    // and the load-triggered reprocess records nothing new.
+    const TOOL_LABELS: Record<string, string> = {
+      crop: 'Crop & Transform', basicadj: 'Basic Adjustments', whitebalance: 'White Balance',
+      tonecurve: 'Tone Curve', noisereduction: 'Noise Reduction', colorbalance: 'Color Balance',
+      lenscorrections: 'Lens Corrections', localadjustments: 'Local Adjustments',
+    };
+    const tool = useAppStore.getState().selectedTool;
+    checkpointService.recordDebounced((tool && TOOL_LABELS[tool]) || 'Edit');
   }, [processingVersion]);
 
   // Global: mouse-wheel over any range slider adjusts it one step per tick. Sets the

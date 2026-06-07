@@ -8,6 +8,7 @@ import { CropTransformOverlay } from '../Canvas/CropTransformOverlay';
 import { InteractiveCropHandles } from '../Canvas/InteractiveCropHandles';
 import { imageProcessingPipeline } from '../../services/ImageProcessingPipeline';
 import { editPersistenceService } from '../../services/EditPersistenceService';
+import { checkpointService } from '../../services/CheckpointService';
 import { CropPipelineModule } from '../../modules/CropPipelineModule';
 import { LocalAdjustmentsPipelineModule } from '../../modules/LocalAdjustmentsPipelineModule';
 import { LocalAdjustmentMaskOverlay } from '../Canvas/LocalAdjustmentMaskOverlay';
@@ -634,8 +635,9 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
 
   const loadImage = useCallback(async (image: ImageFileInfo) => {
     try {
-      // Persist the OUTGOING image's edits before we reset the pipeline.
+      // Persist the OUTGOING image's edits + history before we reset the pipeline.
       editPersistenceService.flush();
+      checkpointService.flush();
 
       // Always reset modules and caches when switching images so
       // styles/edits don't bleed between photos.
@@ -655,6 +657,9 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
       if (decoded) {
         const restored = await editPersistenceService.restoreForPath(image.path, decoded.width, decoded.height);
         if (restored) useAppStore.getState().triggerReprocessing();
+        // Load this image's checkpoint history; seed an "Opened" baseline if empty.
+        await checkpointService.loadForPath(image.path);
+        if (checkpointService.getCheckpoints().length === 0) checkpointService.record('Opened');
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error loading image';

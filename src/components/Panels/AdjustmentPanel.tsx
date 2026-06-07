@@ -16,6 +16,7 @@ import { ShadowsHighlightsModuleComponent } from '../Modules/ShadowsHighlightsMo
 import { CropModuleComponent } from '../Modules/CropModuleComponent';
 import { LocalAdjustmentsModuleComponent } from '../Modules/LocalAdjustmentsModuleComponent';
 import { LensCorrectionsModuleComponent } from '../Modules/LensCorrectionsModuleComponent';
+import { HistoryPanel } from './HistoryPanel';
 import { NoiseReductionModuleComponent } from '../Modules/NoiseReductionModuleComponent';
 import { imageProcessingPipeline } from '../../services/ImageProcessingPipeline';
 import { imageService } from '../../services/ImageService';
@@ -461,7 +462,8 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
       shadowshighlights: 'Shadows & Highlights',
       colorbalance: 'Color Balance',
       localadjustments: 'Local Adjustments',
-      lenscorrections: 'Lens Corrections'
+      lenscorrections: 'Lens Corrections',
+      history: 'History'
     };
     return titles[selectedModule || ''] || 'Develop';
   };
@@ -677,6 +679,12 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
                 handleModuleParamsChange('lenscorrections', lensCorrectionsModule.getParameters().lensCorrectionsParams);
               }}
             />
+          </div>
+        )}
+
+        {selectedModule === 'history' && (
+          <div className="px-5 pt-4">
+            <HistoryPanel />
           </div>
         )}
 
