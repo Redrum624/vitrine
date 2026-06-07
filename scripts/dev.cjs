@@ -1,45 +1,44 @@
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 // Development helper script for concurrent Vite + Electron
 
 let viteProcess;
 let electronProcess;
+let cleaningUp = false;
 
-function cleanup() {
-  console.log('\nCleaning up processes...');
-
-  if (viteProcess) {
-    console.log('Terminating Vite development server...');
-    if (process.platform === 'win32') {
-      // On Windows, use taskkill to properly terminate the process tree
-      spawn('taskkill', ['/pid', viteProcess.pid, '/t', '/f'], { shell: true });
-    } else {
-      viteProcess.kill('SIGTERM');
-    }
-    viteProcess = null;
+function killTree(proc, name) {
+  if (!proc || !proc.pid) return;
+  console.log(`Terminating ${name}...`);
+  if (process.platform === 'win32') {
+    // SYNCHRONOUSLY force-kill the whole process tree. The npm/electron commands run
+    // through cmd.exe wrappers; if we don't kill them before exiting they sit on a
+    // "Terminate batch job (Y/N)?" prompt and orphan — which hangs the terminal forever.
+    spawnSync('taskkill', ['/pid', String(proc.pid), '/t', '/f'], { stdio: 'ignore' });
+  } else {
+    try { proc.kill('SIGTERM'); } catch { /* already gone */ }
   }
-
-  if (electronProcess) {
-    console.log('Terminating Electron process...');
-    if (process.platform === 'win32') {
-      // On Windows, use taskkill to properly terminate the process tree
-      spawn('taskkill', ['/pid', electronProcess.pid, '/t', '/f'], { shell: true });
-    } else {
-      electronProcess.kill('SIGTERM');
-    }
-    electronProcess = null;
-  }
-
-  // Give processes time to clean up before exiting
-  setTimeout(() => {
-    console.log('Development environment stopped.');
-    process.exit(0);
-  }, 1000);
 }
 
-// Handle cleanup on various exit conditions
+function killChildren() {
+  killTree(viteProcess, 'Vite development server');
+  viteProcess = null;
+  killTree(electronProcess, 'Electron process');
+  electronProcess = null;
+}
+
+function cleanup() {
+  if (cleaningUp) return; // run once — avoids the repeated "Cleaning up..." and re-entrancy
+  cleaningUp = true;
+  console.log('\nCleaning up processes...');
+  killChildren();
+  console.log('Development environment stopped.');
+  process.exit(0);
+}
+
+// Handle cleanup on various exit conditions. taskkill is synchronous, so the 'exit' hook
+// can still tear down children; cleanup() guards against running more than once.
 process.on('SIGINT', cleanup);
 process.on('SIGTERM', cleanup);
-process.on('exit', cleanup);
+process.on('exit', killChildren);
 
 async function startDev() {
   console.log('Starting Vite development server...');
