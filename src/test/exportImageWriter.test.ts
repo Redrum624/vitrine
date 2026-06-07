@@ -13,11 +13,8 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// eslint-disable-next-line @typescript-eslint/no-require-imports
 const { writeImageFile, buildXmpPacket } = require('../../electron/imageWriter.cjs');
-// eslint-disable-next-line @typescript-eslint/no-require-imports
 const sharp = require('sharp');
-// eslint-disable-next-line @typescript-eslint/no-require-imports
 const exifreader = require('exifreader');
 
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'photo-export-test-'));

@@ -154,6 +154,7 @@ function createWindow() {
 }
 
 // Create application menu
+// eslint-disable-next-line no-unused-vars -- retained for non-frameless builds; the app ships a custom in-window MenuBar
 function createMenu() {
   const template = [
     {
@@ -444,7 +445,6 @@ ipcMain.handle('watch-folder', async (event, folderPath) => {
     const watcher = fs.watch(folderPath, { persistent: false }, (eventType, filename) => {
       if (filename && mainWindow && !mainWindow.isDestroyed()) {
         // Debounce rapid changes
-        const key = `${folderPath}:${filename}`;
         if (watcher._debounce) {
           clearTimeout(watcher._debounce);
         }

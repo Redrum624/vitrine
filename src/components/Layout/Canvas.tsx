@@ -359,7 +359,6 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
       // Draw placeholder content
       drawPlaceholder(ctx, canvas);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [processedImageData, displayImage, viewport]);
 
   // Optimized image drawing with caching and requestAnimationFrame
@@ -663,7 +662,6 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
   // Redraw canvas when processed image data changes
   useEffect(() => {
     redrawCanvas();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [processedImageData, displayImage]);
 
 
@@ -681,7 +679,6 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
   // Redraw canvas when viewport changes
   useEffect(() => {
     redrawCanvas();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewport]);
 
   // Get crop module from pipeline

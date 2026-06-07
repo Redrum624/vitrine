@@ -11,11 +11,8 @@ import * as os from 'os';
 import * as path from 'path';
 import { CopyrightService } from '../services/CopyrightService';
 
-// eslint-disable-next-line @typescript-eslint/no-require-imports
 const { buildXmpPacket } = require('../../electron/imageWriter.cjs');
-// eslint-disable-next-line @typescript-eslint/no-require-imports
 const sharp = require('sharp');
-// eslint-disable-next-line @typescript-eslint/no-require-imports
 const ExifReader = require('exifreader');
 
 const service = CopyrightService.getInstance();

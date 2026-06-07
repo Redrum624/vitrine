@@ -745,7 +745,6 @@ function App() {
       window.removeEventListener('electron-edit-reset-all', handleResetAll);
       electronService.cleanup();
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Handle export completion
@@ -864,7 +863,6 @@ function App() {
     return () => {
       keyboardShortcutsService.destroy();
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTool, setSelectedTool, currentImage]);
 
   return (

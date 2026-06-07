@@ -36,7 +36,6 @@ function ToastItem({ notification, onDismiss }: { notification: Notification; on
       timerRef.current = setTimeout(dismiss, notification.duration);
     }
     return () => { if (timerRef.current) clearTimeout(timerRef.current); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const accent = ACCENT[notification.type];

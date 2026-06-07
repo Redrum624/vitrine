@@ -136,6 +136,7 @@ export class LibRawService {
       iframe.src = '/libraw-worker-frame.html';
 
       const TIMEOUT_MS = 60_000;
+      // eslint-disable-next-line prefer-const -- assigned below, after the closures that capture it
       let timer: ReturnType<typeof setTimeout>;
       let resolved = false;
 
