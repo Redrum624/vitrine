@@ -4,6 +4,26 @@ All notable changes to **Photo Editor Pro** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.3.1] - 2026-06-07
+
+### Fixed
+- **Export produced a malformed path on Windows** (`C:\…\Desktop/C:\…\image.jpg` →
+  "unable to open for write", all formats). The basename was split on `/` only, but
+  Windows source paths use backslashes, so the whole absolute path was appended to the
+  chosen folder. Now splits on both separators and joins folder + basename. Large 16-bit
+  TIFFs also use BigTIFF to avoid the classic 4GB / `0xFFFFFFFF` limit.
+- **Image went blurry when using Noise Reduction and then editing something else.** A slow
+  NR pass and a second edit could run two pipeline passes concurrently through the shared
+  GPU processor, corrupting the output. Passes are now serialized (synchronous guard) and
+  a queued edit re-runs when the current pass finishes.
+- **`npm run build:win` failed at the installer step from an elevated shell** — NSIS temp
+  files in `C:\WINDOWS\TEMP` were swept mid-compile. The build now runs through a wrapper
+  that points `TEMP`/`TMP` at the per-user temp.
+
+### Changed
+- **History checkpoints are labelled by the actual change** (e.g. "White Balance —
+  Tint -4.00", "Lens Corrections — Barrel -15") instead of just the module name.
+
 ## [1.3.0] - 2026-06-07
 
 ### Added
