@@ -533,6 +533,19 @@ ipcMain.handle('get-folder-contents', async (event, folderPath) => {
 });
 
 // Read image as data URL for display in renderer (with thumbnail generation for RAW files)
+// Cache decoded RAW preview thumbnails (filePath -> data URL). The filmstrip re-requests
+// visible thumbnails on every scroll, and decoding a multi-MP embedded JPEG each time is
+// expensive — so memoise, bounded to avoid unbounded growth.
+const rawThumbCache = new Map();
+const RAW_THUMB_CACHE_MAX = 2000;
+function cacheRawThumb(key, url) {
+  rawThumbCache.set(key, url);
+  if (rawThumbCache.size > RAW_THUMB_CACHE_MAX) {
+    rawThumbCache.delete(rawThumbCache.keys().next().value); // evict oldest
+  }
+  return url;
+}
+
 ipcMain.handle('read-image-as-data-url', async (event, filePath) => {
   try {
     const ext = path.extname(filePath).toLowerCase();
@@ -540,27 +553,15 @@ ipcMain.handle('read-image-as-data-url', async (event, filePath) => {
 
     // For RAW files, extract an embedded JPEG preview.
     if (rawFormats.includes(ext)) {
+      const cached = rawThumbCache.get(filePath);
+      if (cached) return cached;
+
       const sharp = require('sharp');
 
-      // 1) Sharp directly (works for DNG and a few formats).
-      try {
-        const out = await sharp(filePath, { failOn: 'none' })
-          .resize(300, 200, { fit: 'inside', withoutEnlargement: true })
-          .jpeg({ quality: 80 })
-          .toBuffer();
-        if (out && out.length > 100) {
-          return `data:image/jpeg;base64,${out.toString('base64')}`;
-        }
-      } catch (sharpError) {
-        console.log(`Preview: Sharp failed for ${path.basename(filePath)}: ${sharpError.message}`);
-      }
-
-      // 2) Embedded JPEG preview. Olympus ORF (and most RAWs) keep the preview before
-      //    the raw sensor strip, so we cap the read at the raw-data offset (keeps it
-      //    small — a few MB, not the whole multi-MB file the filmstrip requests in
-      //    bulk). Each embedded JPEG is bounded by PARSING its marker structure, so we
-      //    don't trip over false FF D9 markers inside entropy-coded data (the old
-      //    indexOf scan produced truncated/cross-image JPEGs → "Corrupt JPEG" errors).
+      // 1) Embedded JPEG preview — reliable for ORF/CR2/NEF/ARW/... (the preview sits
+      //    before the raw sensor strip; we cap the read there and bound each JPEG by
+      //    PARSING its marker structure, so we don't trip over false FF D9 markers in
+      //    entropy-coded data). Tried first so proprietary RAW doesn't spam sharp errors.
       try {
         const fd = await fs.promises.open(filePath, 'r');
         try {
@@ -582,22 +583,34 @@ ipcMain.handle('read-image-as-data-url', async (event, filePath) => {
                 .jpeg({ quality: 80 })
                 .toBuffer();
               if (out && out.length > 100) {
-                return `data:image/jpeg;base64,${out.toString('base64')}`;
+                return cacheRawThumb(filePath, `data:image/jpeg;base64,${out.toString('base64')}`);
               }
             } catch (jpegError) {
               void jpegError; // try the next embedded JPEG
             }
           }
-
-          console.warn(`No embedded preview found for RAW ${path.basename(filePath)}`);
-          return null;
         } finally {
           await fd.close();
         }
       } catch (extractError) {
-        console.warn(`Failed to extract preview from RAW ${path.basename(filePath)}: ${extractError.message}`);
-        return null;
+        void extractError; // fall through to the sharp-direct fallback
       }
+
+      // 2) Fallback: sharp directly (DNG and the few RAWs libvips can decode natively).
+      try {
+        const out = await sharp(filePath, { failOn: 'none' })
+          .resize(300, 200, { fit: 'inside', withoutEnlargement: true })
+          .jpeg({ quality: 80 })
+          .toBuffer();
+        if (out && out.length > 100) {
+          return cacheRawThumb(filePath, `data:image/jpeg;base64,${out.toString('base64')}`);
+        }
+      } catch (sharpError) {
+        void sharpError; // proprietary RAW libvips can't decode — expected, no usable preview
+      }
+
+      console.warn(`No embedded preview found for RAW ${path.basename(filePath)}`);
+      return null;
     }
 
     // For standard image formats, read directly
