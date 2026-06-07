@@ -554,42 +554,45 @@ ipcMain.handle('read-image-as-data-url', async (event, filePath) => {
         console.log(`Preview: Sharp failed for ${path.basename(filePath)}: ${sharpError.message}`);
       }
 
-      // 2) Largest embedded JPEG within the first 24MB. A BOUNDED read is
-      //    essential: the filmstrip requests every thumbnail at once, so reading
-      //    whole multi-MB RAWs (and parsing each) floods the main process and
-      //    starves the responses. Embedded previews sit near the start of the
-      //    file anyway. Fast native Buffer.indexOf scan.
+      // 2) Embedded JPEG preview. Olympus ORF (and most RAWs) keep the preview before
+      //    the raw sensor strip, so we cap the read at the raw-data offset (keeps it
+      //    small — a few MB, not the whole multi-MB file the filmstrip requests in
+      //    bulk). Each embedded JPEG is bounded by PARSING its marker structure, so we
+      //    don't trip over false FF D9 markers inside entropy-coded data (the old
+      //    indexOf scan produced truncated/cross-image JPEGs → "Corrupt JPEG" errors).
       try {
         const fd = await fs.promises.open(filePath, 'r');
-        const scanSize = Math.min((await fd.stat()).size, 24 * 1024 * 1024);
-        const fileData = Buffer.allocUnsafe(scanSize);
-        await fd.read(fileData, 0, scanSize, 0);
-        await fd.close();
+        try {
+          const stat = await fd.stat();
+          const headSize = Math.min(stat.size, 256 * 1024);
+          const head = Buffer.allocUnsafe(headSize);
+          await fd.read(head, 0, headSize, 0);
 
-        const SOI = Buffer.from([0xFF, 0xD8, 0xFF]);
-        const EOI = Buffer.from([0xFF, 0xD9]);
-        let largest = { offset: -1, size: 0 };
-        let pos = 0;
-        while (pos < fileData.length) {
-          const start = fileData.indexOf(SOI, pos);
-          if (start < 0) break;
-          const end = fileData.indexOf(EOI, start + 3);
-          if (end < 0) break;
-          const size = end - start + 2;
-          if (size > largest.size) largest = { offset: start, size };
-          pos = end + 2;
+          const { findEmbeddedJpegs, rawDataStart } = require('./embeddedPreview.cjs');
+          const cap = rawDataStart(head) || 8 * 1024 * 1024;
+          const scanSize = Math.min(stat.size, cap, 12 * 1024 * 1024);
+          const buf = Buffer.allocUnsafe(scanSize);
+          await fd.read(buf, 0, scanSize, 0);
+
+          for (const c of findEmbeddedJpegs(buf)) {
+            try {
+              const out = await sharp(buf.subarray(c.offset, c.offset + c.length), { failOn: 'none' })
+                .resize(300, 200, { fit: 'inside', withoutEnlargement: true })
+                .jpeg({ quality: 80 })
+                .toBuffer();
+              if (out && out.length > 100) {
+                return `data:image/jpeg;base64,${out.toString('base64')}`;
+              }
+            } catch (jpegError) {
+              void jpegError; // try the next embedded JPEG
+            }
+          }
+
+          console.warn(`No embedded preview found for RAW ${path.basename(filePath)}`);
+          return null;
+        } finally {
+          await fd.close();
         }
-
-        if (largest.offset >= 0 && largest.size > 1000) {
-          const out = await sharp(fileData.subarray(largest.offset, largest.offset + largest.size))
-            .resize(300, 200, { fit: 'inside', withoutEnlargement: true })
-            .jpeg({ quality: 80 })
-            .toBuffer();
-          return `data:image/jpeg;base64,${out.toString('base64')}`;
-        }
-
-        console.warn(`No embedded preview found for RAW ${path.basename(filePath)}`);
-        return null;
       } catch (extractError) {
         console.warn(`Failed to extract preview from RAW ${path.basename(filePath)}: ${extractError.message}`);
         return null;

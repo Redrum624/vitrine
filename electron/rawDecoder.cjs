@@ -157,31 +157,21 @@ async function decodeEmbeddedJpeg(filePath, log) {
     }
   } catch (_) { /* ignore parse errors */ }
 
-  // 2. Find the largest embedded JPEG (FF D8 ... FF D9)
-  let bestStart = -1, bestSize = 0;
-  for (let i = 0; i < buf.length - 1; i++) {
-    if (buf[i] === 0xFF && buf[i + 1] === 0xD8) {
-      for (let j = i + 2; j < buf.length - 1; j++) {
-        if (buf[j] === 0xFF && buf[j + 1] === 0xD9) {
-          const size = j - i + 2;
-          if (size > bestSize) {
-            bestStart = i;
-            bestSize = size;
-          }
-          break;
-        }
-      }
-    }
-  }
+  // 2. Find the largest embedded JPEG, bounding each by PARSING its marker structure
+  //    (a naive FF D8 .. FF D9 scan grabs false markers inside entropy-coded data).
+  const { findEmbeddedJpegs } = require('./embeddedPreview.cjs');
+  const jpegs = findEmbeddedJpegs(buf);
+  const bestStart = jpegs.length ? jpegs[0].offset : -1;
+  const bestSize = jpegs.length ? jpegs[0].length : 0;
 
   let pixelBuffer, info;
 
   if (bestSize > 50000) {
     const jpeg = buf.slice(bestStart, bestStart + bestSize);
-    let pipeline = sharp(jpeg);
+    let pipeline = sharp(jpeg, { failOn: 'none' });
 
     if (sensorWidth > 0 && sensorHeight > 0) {
-      const meta = await sharp(jpeg).metadata();
+      const meta = await sharp(jpeg, { failOn: 'none' }).metadata();
       if (meta.width < sensorWidth || meta.height < sensorHeight) {
         // Respect orientation: if JPEG is landscape but sensor is portrait (or vice versa), swap
         let targetW = sensorWidth, targetH = sensorHeight;
