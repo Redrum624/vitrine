@@ -25,6 +25,7 @@ function createSplashWindow() {
     center: true,
     alwaysOnTop: true,
     skipTaskbar: true,
+    show: false, // show only once painted (ready-to-show) so it appears fully, not blank-then-fill
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
