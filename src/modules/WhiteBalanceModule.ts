@@ -1,5 +1,6 @@
 import { logger } from '../utils/Logger';
 import { validateInputDimensions, temperatureToRgb, safeDivide } from './utils/ColorUtils';
+import { webGLImageProcessor } from '../services/WebGLImageProcessor';
 
 export interface WhiteBalanceParams {
   temperature: number;    // 2000K to 50000K, default: 6500K (D65 reference, no correction)
@@ -131,6 +132,11 @@ export class WhiteBalanceModule {
     rFactor /= avgFactor;
     gFactor /= avgFactor;
     bFactor /= avgFactor;
+
+    // GPU fast-path: apply the pre-computed channel gains on the GPU (RGBA only).
+    if (channels === 4 && webGLImageProcessor.isAvailable()) {
+      return webGLImageProcessor.applyChannelGains(output, width, height, rFactor, gFactor, bFactor);
+    }
 
     // Apply white balance correction to each pixel
     for (let y = 0; y < height; y++) {

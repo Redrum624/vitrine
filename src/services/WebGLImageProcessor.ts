@@ -41,6 +41,15 @@ in vec2 v_uv;
 out vec4 outColor;
 void main() { vec4 c = texture(u_image, v_uv); outColor = vec4(c.rgb * u_gain, c.a); }`;
 
+// Per-channel gains + clamp (white balance applies pre-computed R/G/B factors).
+const GAINS_FRAG_SRC = `#version 300 es
+precision highp float;
+uniform sampler2D u_image;
+uniform vec3 u_gains;
+in vec2 v_uv;
+out vec4 outColor;
+void main() { vec4 c = texture(u_image, v_uv); outColor = vec4(clamp(c.rgb * u_gains, 0.0, 1.0), c.a); }`;
+
 // Faithful GLSL port of BasicAdjustmentsModule.process (see that file for intent).
 const BASICADJ_FRAG_SRC = `#version 300 es
 precision highp float;
@@ -104,6 +113,7 @@ class WebGLImageProcessor {
   private gl: WebGL2RenderingContext | null = null;
   private exposureProgram: WebGLProgram | null = null;
   private basicAdjProgram: WebGLProgram | null = null;
+  private gainsProgram: WebGLProgram | null = null;
   private vao: WebGLVertexArrayObject | null = null;
   private initTried = false;
 
@@ -120,7 +130,8 @@ class WebGLImageProcessor {
       }
       const exposureProgram = this.buildProgram(gl, VERT_SRC, EXPOSURE_FRAG_SRC);
       const basicAdjProgram = this.buildProgram(gl, VERT_SRC, BASICADJ_FRAG_SRC);
-      if (!exposureProgram || !basicAdjProgram) return (this.gl = null);
+      const gainsProgram = this.buildProgram(gl, VERT_SRC, GAINS_FRAG_SRC);
+      if (!exposureProgram || !basicAdjProgram || !gainsProgram) return (this.gl = null);
 
       const quad = gl.createBuffer();
       gl.bindBuffer(gl.ARRAY_BUFFER, quad);
@@ -135,6 +146,7 @@ class WebGLImageProcessor {
       this.gl = gl;
       this.exposureProgram = exposureProgram;
       this.basicAdjProgram = basicAdjProgram;
+      this.gainsProgram = gainsProgram;
       this.vao = vao;
 
       // Self-check: only trust the GPU basic-adjustments path if it matches the CPU
@@ -232,6 +244,57 @@ class WebGLImageProcessor {
       }
     }
     return this.basicAdjustmentsCPU(data, width, height, p);
+  }
+
+  /** Apply pre-computed per-channel gains + clamp (white balance). GPU or CPU. */
+  applyChannelGains(data: Float32Array, width: number, height: number, gr: number, gg: number, gb: number): Float32Array {
+    const gl = this.ensureContext();
+    if (gl && this.gainsProgram && this.vao) {
+      try {
+        return this.runPass(this.gainsProgram, data, width, height, (g, prog) => {
+          g.uniform3f(g.getUniformLocation(prog, 'u_gains'), gr, gg, gb);
+        });
+      } catch (e) { logger.warn('[GPU] gains failed — CPU:', e instanceof Error ? e.message : String(e)); }
+    }
+    const out = new Float32Array(data.length);
+    for (let i = 0; i < data.length; i += 4) {
+      out[i] = Math.max(0, Math.min(1, data[i] * gr));
+      out[i + 1] = Math.max(0, Math.min(1, data[i + 1] * gg));
+      out[i + 2] = Math.max(0, Math.min(1, data[i + 2] * gb));
+      out[i + 3] = data[i + 3];
+    }
+    return out;
+  }
+
+  /** Generic single-pass shader run: source texture → program → float readback. */
+  private runPass(
+    program: WebGLProgram, data: Float32Array, width: number, height: number,
+    setUniforms: (gl: WebGL2RenderingContext, prog: WebGLProgram) => void
+  ): Float32Array {
+    const gl = this.gl!;
+    const tex = this.makeTexture(gl, width, height, data);
+    const dst = this.makeTexture(gl, width, height, null);
+    const fbo = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, dst, 0);
+    if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
+      gl.deleteFramebuffer(fbo); gl.deleteTexture(tex); gl.deleteTexture(dst);
+      throw new Error('framebuffer incomplete');
+    }
+    gl.viewport(0, 0, width, height);
+    gl.useProgram(program);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.uniform1i(gl.getUniformLocation(program, 'u_image'), 0);
+    setUniforms(gl, program);
+    gl.bindVertexArray(this.vao);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    gl.bindVertexArray(null);
+    const out = new Float32Array(width * height * 4);
+    gl.readPixels(0, 0, width, height, gl.RGBA, gl.FLOAT, out);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.deleteFramebuffer(fbo); gl.deleteTexture(tex); gl.deleteTexture(dst);
+    return out;
   }
 
   // ── dehaze pre-pass (identical to BasicAdjustmentsModule) ───────────────────
