@@ -4,6 +4,34 @@ All notable changes to **Photo Editor Pro** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.3.0] - 2026-06-07
+
+### Added
+- **History module.** A new sidebar tool (under Lens Corrections) showing a per-image
+  checkpoint timeline. Every committed edit is auto-recorded as a labelled checkpoint;
+  the full list is kept and you can click any checkpoint to restore that state (it never
+  truncates later ones). Persisted per image in the durable store — survives sessions and
+  app updates — and seeded with an "Opened" baseline. Separate from the Ctrl+Z undo/redo.
+- **Lens Corrections redesign.** The 4-tab pill selector is now an accordion of clear
+  category sections — Distortion, Vignetting, Chromatic Aberration, Lens Profile — each a
+  collapsible card with its own enable toggle and reset (plus auto-detect for vignetting),
+  so all categories are visible and divided at a glance.
+
+### Fixed
+- **Auto white balance was too green.** The standalone WB "Auto" button now uses the same
+  user-style-profile white balance as Auto All, and the green/magenta tint is computed
+  toward neutral (ratio-based, negative removes green) instead of the previous weak /
+  wrong-signed correction that left images too green.
+- **RAW thumbnails** try the embedded-JPEG extractor first (no misleading "sharp failed"
+  noise for ORF) and are cached in the main process, so scrolling the filmstrip no longer
+  re-decodes the same previews.
+- **Splash screen** now appears fully painted instead of blank-then-fill (it was shown
+  before its content rendered, and had a fade-in entrance).
+- **Dev script** no longer hangs on "Cleaning up processes…" at shutdown (run-once guard
+  + synchronous force-kill of the child process trees).
+- Removed hardcoded placeholder stats (`6000 × 4000 / 24.0 MP / sRGB`) from the toolbar;
+  the real values are in the footer status bar.
+
 ## [1.2.0] - 2026-06-07
 
 ### Added

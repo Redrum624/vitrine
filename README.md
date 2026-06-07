@@ -4,9 +4,9 @@ A **desktop RAW photo editor** built with Electron + React, featuring a WebGL2/C
 processing pipeline, native LibRaw demosaicing, colour-managed export, and
 non-destructive local adjustments.
 
-![Version](https://img.shields.io/badge/Version-1.2.0-blue)
+![Version](https://img.shields.io/badge/Version-1.3.0-blue)
 ![TypeScript](https://img.shields.io/badge/TypeScript-0_errors-blue)
-![Tests](https://img.shields.io/badge/Tests-804_passing-brightgreen)
+![Tests](https://img.shields.io/badge/Tests-807_passing-brightgreen)
 ![Lint](https://img.shields.io/badge/Lint-clean-brightgreen)
 ![GPU](https://img.shields.io/badge/GPU-WebGL2_accelerated-success)
 
@@ -36,6 +36,8 @@ non-destructive local adjustments.
   plus Auto Levels / Contrast / Color.
 - Non-destructive: adjustments are reversible and re-processed live, and **persist per
   image across sessions and app updates** (restored when you reopen a photo).
+- **History** — a per-image checkpoint timeline of everything you've done; click any
+  checkpoint to jump back to that state. Kept between sessions; separate from Ctrl+Z undo.
 
 ### GPU acceleration (WebGL2)
 - The editing pipeline runs on the **GPU** when available: Basic Adjustments, White
@@ -72,7 +74,7 @@ pnpm run electron-dev   # Vite dev server + Electron
 ### Build a Windows release
 ```bash
 npm run build:win       # clean dist + release -> tsc + vite build -> NSIS installer + portable (x64)
-# Output: release/Photo Editor Pro Setup 1.2.0.exe  and  release/Photo Editor Pro 1.2.0.exe
+# Output: release/Photo Editor Pro Setup 1.3.0.exe  and  release/Photo Editor Pro 1.3.0.exe
 npm run build:win:dir   # fast unpacked build (no installer)
 npm run dist            # electron-builder for the current platform
 ```
