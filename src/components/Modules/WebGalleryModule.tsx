@@ -9,17 +9,14 @@ import {
   GallerySettings,
   GalleryOutput
 } from '../../services/WebGalleryService';
+import {
+  webGalleryCollectionStore,
+  ImageCollection
+} from '../../services/WebGalleryCollectionStore';
 
 interface WebGalleryModuleProps {
   isEnabled: boolean;
   onToggle: (enabled: boolean) => void;
-}
-
-interface ImageCollection {
-  id: string;
-  name: string;
-  images: GalleryImage[];
-  createdAt: Date;
 }
 
 export const WebGalleryModule: React.FC<WebGalleryModuleProps> = ({
@@ -62,8 +59,12 @@ export const WebGalleryModule: React.FC<WebGalleryModuleProps> = ({
       setGallerySettings(prev => ({ ...prev, theme: availableThemes[0] }));
     }
 
-    // Load existing collections (would be from storage in production)
-    const demoCollection: ImageCollection = {
+    // Load persisted user collections from disk, then upsert the live
+    // 'Current Session' collection (regenerated from the current image) without
+    // wiping the user's saved collections.
+    const persisted = webGalleryCollectionStore.loadCollections();
+
+    const demoCollection: ImageCollection = persisted.find(c => c.id === 'demo') ?? {
       id: 'demo',
       name: 'Current Session',
       images: [],
@@ -90,8 +91,20 @@ export const WebGalleryModule: React.FC<WebGalleryModuleProps> = ({
       demoCollection.images = [galleryImage];
     }
 
-    setCollections([demoCollection]);
-    setSelectedCollection('demo');
+    // Merge: keep every persisted collection except the old 'demo' (replaced by
+    // the freshly built one above), then prepend the live session collection.
+    const merged: ImageCollection[] = [
+      demoCollection,
+      ...persisted.filter(c => c.id !== 'demo')
+    ];
+
+    webGalleryCollectionStore.saveCollections(merged);
+    setCollections(merged);
+    // Preserve the user's current selection across image/theme changes; only fall
+    // back to the live 'demo' session collection when the prior selection no longer
+    // exists (e.g. first mount). Previously this unconditionally reset to 'demo' on
+    // every dependency change, discarding the user's chosen collection.
+    setSelectedCollection(prev => (merged.some(c => c.id === prev) ? prev : 'demo'));
   }, [currentImage, processedImageData, gallerySettings.theme]);
 
   // Generate gallery

@@ -18,6 +18,11 @@ interface AppStore extends AppState {
   // Processing trigger - increments to signal that reprocessing is needed
   processingVersion: number;
   triggerReprocessing: () => void;
+  // Live processing stats (surfaced in the StatusBar)
+  lastProcessingTimeMs: number;
+  modulesActive: number;
+  modulesTotal: number;
+  setProcessingStats: (s: { timeMs: number; active: number; total: number }) => void;
   // View overlays
   showGrid: boolean;
   showRulers: boolean;
@@ -51,6 +56,9 @@ export const useAppStore = create<AppStore>((set) => ({
   sidebarCollapsed: false,
   isAdjustingRotation: false,
   processingVersion: 0,
+  lastProcessingTimeMs: 0,
+  modulesActive: 0,
+  modulesTotal: 0,
   showGrid: false,
   showRulers: false,
   showOriginal: false,
@@ -68,6 +76,12 @@ export const useAppStore = create<AppStore>((set) => ({
   setIsAdjustingRotation: (adjusting) => set({ isAdjustingRotation: adjusting }),
 
   setProcessedImageData: (data) => set({ processedImageData: data }),
+
+  setProcessingStats: ({ timeMs, active, total }) => set({
+    lastProcessingTimeMs: timeMs,
+    modulesActive: active,
+    modulesTotal: total,
+  }),
 
   setSelectedTool: (toolId) => set({ selectedTool: toolId }),
 

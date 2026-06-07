@@ -180,6 +180,24 @@ describe('appStore', () => {
     });
   });
 
+  describe('processingStats', () => {
+    it('should update processing stats fields', () => {
+      useAppStore.getState().setProcessingStats({ timeMs: 42, active: 7, total: 10 });
+
+      expect(useAppStore.getState().lastProcessingTimeMs).toBe(42);
+      expect(useAppStore.getState().modulesActive).toBe(7);
+      expect(useAppStore.getState().modulesTotal).toBe(10);
+    });
+
+    it('should initialize processing stats to zero', () => {
+      useAppStore.setState({ lastProcessingTimeMs: 0, modulesActive: 0, modulesTotal: 0 });
+
+      expect(useAppStore.getState().lastProcessingTimeMs).toBe(0);
+      expect(useAppStore.getState().modulesActive).toBe(0);
+      expect(useAppStore.getState().modulesTotal).toBe(0);
+    });
+  });
+
   describe('getCurrentPipelineSettings', () => {
     it('should return pipeline settings structure', () => {
       const settings = useAppStore.getState().getCurrentPipelineSettings();

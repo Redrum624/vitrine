@@ -423,49 +423,51 @@ export class ImageService {
     return result;
   }
 
+  /**
+   * Decode a file to full-resolution RGBA Float32 pixels for batch/collection
+   * export WITHOUT touching the live editor singleton. Runs the same RAW /
+   * regular decode as loadImage, but skips every side effect: it does NOT set
+   * `this.currentImage`, snapshot the original, populate the image cache or fire
+   * notifyImageLoaded(). This keeps the user's open image on screen and avoids a
+   * per-image reprocess/remount during a batch export.
+   *
+   * Note: this returns SOURCE pixels (RAW neutral demosaic for RAW, decoded
+   * file pixels otherwise) — the editor's adjustment pipeline is NOT applied
+   * here. See OutputCollectionService.exportCollection for that limitation.
+   */
+  async decodeForExport(filePath: string): Promise<ImageData> {
+    const pathValidation = ValidationService.validateFilePath(filePath);
+    if (!pathValidation.valid) {
+      throw new Error(`Invalid file path: ${pathValidation.error}`);
+    }
+
+    logger.info(`Decoding image for export (no editor side effects): ${filePath}`);
+
+    if (rawImageService.isRawFile(filePath)) {
+      const rawData = await rawImageService.loadRawImage(filePath);
+
+      const dimensionValidation = ValidationService.validateDimensions(rawData.width, rawData.height);
+      if (!dimensionValidation.valid) {
+        throw new Error(`Invalid image dimensions: ${dimensionValidation.error}`);
+      }
+
+      return {
+        width: rawData.width,
+        height: rawData.height,
+        data: rawData.data,
+        fileName: rawData.fileName,
+        filePath: rawData.filePath,
+        isRaw: true,
+        metadata: rawData.metadata
+      };
+    }
+
+    return this.loadRegularImage(filePath);
+  }
+
   clearImage(): void {
     this.currentImage = null;
     logger.info('Image cleared');
-  }
-
-  async exportImage(outputPath: string, quality: number = 0.9): Promise<void> {
-    if (!this.currentImage) {
-      throw new Error('No image loaded');
-    }
-
-    try {
-      // Create canvas for export
-      const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d');
-
-      if (!ctx) {
-        throw new Error('Failed to get canvas context for export');
-      }
-
-      canvas.width = this.currentImage.width;
-      canvas.height = this.currentImage.height;
-
-      // Convert float data back to ImageData
-      const imageData = ctx.createImageData(canvas.width, canvas.height);
-      for (let i = 0; i < this.currentImage.data.length; i++) {
-        imageData.data[i] = Math.round(this.currentImage.data[i] * 255);
-      }
-
-      // Put image data on canvas
-      ctx.putImageData(imageData, 0, 0);
-
-      // Convert to blob and save
-      canvas.toBlob((blob) => {
-        if (blob) {
-          // In Electron, we would use the file system API here
-          logger.info(`Image exported to: ${outputPath}`);
-        }
-      }, 'image/jpeg', quality);
-
-    } catch (error) {
-      logger.error('Failed to export image:', error);
-      throw error;
-    }
   }
 }
 

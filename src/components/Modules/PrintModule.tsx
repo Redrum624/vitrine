@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Printer, Layout, Palette, Eye, EyeOff, Download, Trash2, RefreshCw } from 'lucide-react';
 import { logger } from '../../utils/Logger';
 import { useAppStore } from '../../stores/appStore';
@@ -37,6 +37,11 @@ export const PrintModule: React.FC<PrintModuleProps> = ({
   const [selectedProfile, setSelectedProfile] = useState<string>('');
   const [showSoftProof, setShowSoftProof] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+
+  // Soft-proof preview state: the per-pixel proofed RGBA pixels + their dimensions.
+  const [proofData, setProofData] = useState<Float32Array | null>(null);
+  const [proofDims, setProofDims] = useState<{ w: number; h: number } | null>(null);
+  const proofCanvasRef = useRef<HTMLCanvasElement>(null);
 
   const [printSettings, setPrintSettings] = useState<Partial<PrintSettings>>({
     renderingIntent: 'perceptual',
@@ -120,14 +125,17 @@ export const PrintModule: React.FC<PrintModuleProps> = ({
         ? processedImageData
         : processedImageData.data;
 
-      await printService.generateSoftProof(
+      const proof = await printService.generateSoftProof(
         imageData,
         currentImage.metadata.width,
         currentImage.metadata.height,
         settings
       );
 
-      // Would store proofData for actual soft proof display
+      // Store the proofed pixels + dimensions and reveal the preview canvas.
+      setProofData(proof);
+      setProofDims({ w: currentImage.metadata.width, h: currentImage.metadata.height });
+      setShowSoftProof(true);
       logger.info('Soft proof generated successfully');
 
     } catch (error) {
@@ -136,6 +144,61 @@ export const PrintModule: React.FC<PrintModuleProps> = ({
       setIsProcessing(false);
     }
   }, [processedImageData, currentImage, selectedProfile, selectedLayout, printLayouts, printProfiles, printSettings]);
+
+  // Paint the proofed pixels onto the preview canvas whenever the proof or its
+  // visibility changes. Reuses the exact normalisation/conversion logic from
+  // PrintService.printImage so 0-1 and 0-255 inputs both render correctly.
+  //
+  // The visible canvas is CSS-clamped to max-h-96, so there is no point
+  // allocating a full-resolution canvas + ImageData for what is a thumbnail.
+  // We cap the longest edge to PREVIEW_MAX_EDGE and nearest-neighbour sample the
+  // full-res proof straight into a bounded preview ImageData. This keeps only
+  // ~previewW*previewH*4 bytes alive instead of a second full-res buffer.
+  useEffect(() => {
+    if (!showSoftProof || !proofData || !proofDims || !proofCanvasRef.current) return;
+
+    const canvas = proofCanvasRef.current;
+
+    const PREVIEW_MAX_EDGE = 1024;
+    const scale = Math.min(1, PREVIEW_MAX_EDGE / Math.max(proofDims.w, proofDims.h));
+    const previewW = Math.max(1, Math.round(proofDims.w * scale));
+    const previewH = Math.max(1, Math.round(proofDims.h * scale));
+
+    canvas.width = previewW;
+    canvas.height = previewH;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const imgData = ctx.createImageData(previewW, previewH);
+
+    // Detect normalisation range from a small leading sample.
+    const sampleMax = Math.max(...proofData.slice(0, Math.min(4000, proofData.length)));
+    const isNormalized = sampleMax <= 1.0;
+
+    const srcW = proofDims.w;
+    const srcH = proofDims.h;
+    for (let y = 0; y < previewH; y++) {
+      const srcY = Math.min(srcH - 1, Math.floor(y / scale));
+      for (let x = 0; x < previewW; x++) {
+        const srcX = Math.min(srcW - 1, Math.floor(x / scale));
+        const srcIdx = (srcY * srcW + srcX) * 4;
+        const dstIdx = (y * previewW + x) * 4;
+        for (let c = 0; c < 4; c++) {
+          const v = proofData[srcIdx + c];
+          imgData.data[dstIdx + c] = isNormalized
+            ? Math.round(Math.max(0, Math.min(1, v)) * 255)
+            : Math.round(Math.max(0, Math.min(255, v)));
+        }
+      }
+    }
+    ctx.putImageData(imgData, 0, 0);
+  }, [proofData, proofDims, showSoftProof]);
+
+  // Invalidate a stale proof when any input that affects it changes, so the user
+  // never sees a proof rendered under settings that no longer apply.
+  useEffect(() => {
+    setProofData(null);
+  }, [processedImageData, selectedProfile, selectedLayout, printSettings]);
 
   // Create print job
   const createPrintJob = useCallback(async () => {
@@ -486,6 +549,31 @@ export const PrintModule: React.FC<PrintModuleProps> = ({
               {isProcessing ? 'Creating...' : 'Create Print Job'}
             </button>
           </div>
+
+          {/* Soft Proof Preview */}
+          {showSoftProof && (
+            <div className="space-y-2 pt-2 border-t border-gray-700">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium text-white">Soft Proof Preview</span>
+                {proofData && (
+                  <span className="text-xs text-gray-400">
+                    {selectedProfile} · {printSettings.renderingIntent}
+                  </span>
+                )}
+              </div>
+              {proofData ? (
+                <canvas
+                  ref={proofCanvasRef}
+                  className="w-full h-auto max-h-96 object-contain rounded border border-gray-700"
+                  style={{ imageRendering: 'auto' }}
+                />
+              ) : (
+                <div className="text-xs text-gray-500 italic py-4 text-center">
+                  Click Soft Proof to generate preview
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Print Jobs */}
           {printJobs.length > 0 && (

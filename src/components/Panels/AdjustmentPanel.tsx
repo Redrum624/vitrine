@@ -29,10 +29,9 @@ interface AdjustmentPanelProps {
 }
 
 export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
-  const { setProcessedImageData, processingVersion } = useAppStore();
+  const { setProcessedImageData, processingVersion, setProcessingStats } = useAppStore();
   const [resetCounter, setResetCounter] = useState(0);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [_lastProcessingTime, setLastProcessingTime] = useState(0);
   const processingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastProcessingTimeRef = useRef<number>(0);
   // NOTE: Removed lastProcessedImagePathRef - was blocking param change reprocessing
@@ -232,16 +231,27 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
       });
 
       const processTime = performance.now() - startTime;
-      setLastProcessingTime(processTime);
+      // Surface the real pipeline timing + active-module count in the StatusBar.
+      const pipelineStats = imageProcessingPipeline.getStats();
+      setProcessingStats({
+        timeMs: processTime,
+        active: pipelineStats.enabledModules,
+        total: pipelineStats.moduleCount,
+      });
 
       logger.debug(`Preview processing completed in ${processTime.toFixed(2)}ms, size: ${previewWidth}x${previewHeight}`);
 
     } catch (error) {
       logger.error('Real-time processing failed:', error);
+      // Reset the timing so the StatusBar doesn't keep showing a stale duration
+      // from the last successful render (its display is guarded on timeMs > 0);
+      // keep the still-accurate module counts.
+      const failedStats = imageProcessingPipeline.getStats();
+      setProcessingStats({ timeMs: 0, active: failedStats.enabledModules, total: failedStats.moduleCount });
     } finally {
       setIsProcessing(false);
     }
-  }, [setProcessedImageData, isProcessing]);
+  }, [setProcessedImageData, setProcessingStats, isProcessing]);
 
   // Note: Removed viewport-triggered reprocessing as viewport changes (zoom, pan)
   // should not trigger image reprocessing - only display changes

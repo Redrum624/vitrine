@@ -463,6 +463,58 @@ export function BasicAdjustmentsModuleComponent({
               title="Double-click to reset"
             />
         </div>
+
+        {/* Dehaze */}
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between">
+            <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Dehaze</label>
+            <div className="flex items-center gap-1.5">
+              <DelayedInputControl
+                value={params.dehaze}
+                onChange={(value) => updateParam('dehaze', value)}
+                min={-1}
+                max={1}
+                step={0.01}
+                precision={2}
+              />
+              <button
+                onClick={() => resetParam('dehaze', 0.0)}
+                className="p-1 rounded"
+                style={{
+                  backgroundColor: 'transparent',
+                  color: 'var(--gray-500)',
+                  transition: 'var(--transition-fast)'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = 'var(--gray-800)';
+                  e.currentTarget.style.color = 'var(--white)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = 'transparent';
+                  e.currentTarget.style.color = 'var(--gray-500)';
+                }}
+                title="Reset dehaze"
+              >
+                <RotateCcw className="w-3 h-3" />
+              </button>
+            </div>
+          </div>
+          <input
+              type="range"
+              min="-1"
+              max="1"
+              step="0.05"
+              value={params.dehaze}
+              onInput={(e) => updateParamRealTime('dehaze', parseFloat((e.target as HTMLInputElement).value))}
+              onChange={(e) => updateParam('dehaze', parseFloat(e.target.value))}
+              onDoubleClick={() => updateParam('dehaze', 0.0)}
+              className="slider w-full"
+              style={{
+                background: 'linear-gradient(to right, #94a3b8, #64748b, #334155, #0ea5e9)',
+              }}
+              title="Double-click to reset"
+            />
+        </div>
       </div>
     </div>
   );

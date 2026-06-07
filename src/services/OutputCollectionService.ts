@@ -1,5 +1,6 @@
 import { logger } from '../utils/Logger';
-import { ExportOptions } from './ExportService';
+import { ExportOptions, exportService, ExportResult } from './ExportService';
+import { imageService } from './ImageService';
 import { WatermarkSettings } from './WatermarkService';
 import { IPTCMetadata } from './CopyrightService';
 
@@ -64,6 +65,12 @@ export interface ExportRecord {
   duration: number;
   success: boolean;
   error?: string;
+  /**
+   * Non-fatal disclosures about the export. Collection export currently writes
+   * UNEDITED source pixels (no editor adjustment pipeline is replayed per
+   * image), so a warning is recorded here to keep the success path honest.
+   */
+  warnings?: string[];
 }
 
 export interface CollectionTemplate {
@@ -97,6 +104,9 @@ export class OutputCollectionService {
   private collections: Map<string, OutputCollection> = new Map();
   private templates: CollectionTemplate[] = [];
   private activityLog: CollectionStats['recentActivity'] = [];
+
+  private readonly STORAGE_KEY = 'photo_editor_output_collections';
+  private readonly VERSION = '1.0.0';
 
   private constructor() {
     this.initializeTemplates();
@@ -289,10 +299,86 @@ export class OutputCollectionService {
     ];
   }
 
+  /**
+   * Load persisted collections from localStorage (house convention, see
+   * PresetService.loadPresets). Date fields are revived back into live Date
+   * objects so getCollections()'s `.getTime()` sort does not throw.
+   */
   private loadCollections() {
-    // In a real application, this would load from persistent storage
-    // For now, we'll start with an empty collection set
-    logger.debug('Output collections loaded');
+    try {
+      const stored = localStorage.getItem(this.STORAGE_KEY);
+      if (!stored) {
+        logger.debug('No persisted output collections found');
+        return;
+      }
+
+      const data = JSON.parse(stored);
+      for (const raw of data.collections || []) {
+        const collection = this.reviveCollection(raw);
+        this.collections.set(collection.id, collection);
+      }
+
+      if (Array.isArray(data.activityLog)) {
+        this.activityLog = data.activityLog.map(
+          (entry: CollectionStats['recentActivity'][number]) => ({
+            ...entry,
+            date: new Date(entry.date)
+          })
+        );
+      }
+
+      logger.info(`Loaded ${this.collections.size} output collections from storage`);
+    } catch (error) {
+      logger.error('Failed to load output collections from storage:', error);
+    }
+  }
+
+  /**
+   * Persist collections + activity log to localStorage. Wrapped in try/catch so
+   * a QuotaExceededError degrades gracefully instead of crashing a mutator.
+   */
+  private saveCollections() {
+    try {
+      const data = {
+        version: this.VERSION,
+        collections: Array.from(this.collections.values()),
+        activityLog: this.activityLog
+      };
+      localStorage.setItem(this.STORAGE_KEY, JSON.stringify(data));
+    } catch (error) {
+      logger.error('Failed to save output collections to storage:', error);
+    }
+  }
+
+  /**
+   * Revive a collection parsed from JSON: JSON.parse turns every Date into an
+   * ISO string, so each live-Date field (including nested images, export
+   * history and client deadline) must be wrapped back into `new Date(...)`.
+   */
+  private reviveCollection(raw: OutputCollection): OutputCollection {
+    return {
+      ...raw,
+      createdDate: new Date(raw.createdDate),
+      modifiedDate: new Date(raw.modifiedDate),
+      lastExportDate: raw.lastExportDate ? new Date(raw.lastExportDate) : undefined,
+      images: (raw.images || []).map((image) => ({
+        ...image,
+        addedDate: new Date(image.addedDate),
+        lastExported: image.lastExported ? new Date(image.lastExported) : undefined
+      })),
+      exportHistory: (raw.exportHistory || []).map((record) => ({
+        ...record,
+        date: new Date(record.date)
+      })),
+      clientInfo: raw.clientInfo
+        ? {
+            ...raw.clientInfo,
+            deadline: raw.clientInfo.deadline
+              ? new Date(raw.clientInfo.deadline)
+              : undefined
+          }
+        : undefined
+    };
   }
 
   /**
@@ -358,6 +444,7 @@ export class OutputCollectionService {
 
     this.collections.set(id, collection);
     this.logActivity('created', name, `New ${category} collection created`);
+    this.saveCollections();
 
     logger.info(`Created collection: ${name} (${id})`);
     return id;
@@ -400,6 +487,7 @@ export class OutputCollectionService {
 
     this.collections.set(id, updatedCollection);
     this.logActivity('updated', collection.name, 'Collection settings updated');
+    this.saveCollections();
 
     logger.info(`Updated collection: ${collection.name}`);
     return true;
@@ -414,6 +502,7 @@ export class OutputCollectionService {
 
     this.collections.delete(id);
     this.logActivity('deleted', collection.name, 'Collection deleted');
+    this.saveCollections();
 
     logger.info(`Deleted collection: ${collection.name}`);
     return true;
@@ -441,6 +530,7 @@ export class OutputCollectionService {
     collection.modifiedDate = new Date();
 
     this.logActivity('added_image', collection.name, `Added ${name} to collection`);
+    this.saveCollections();
     logger.info(`Added image to collection: ${name} -> ${collection.name}`);
 
     return imageId;
@@ -461,6 +551,7 @@ export class OutputCollectionService {
     collection.modifiedDate = new Date();
 
     this.logActivity('removed_image', collection.name, `Removed ${image.name} from collection`);
+    this.saveCollections();
     logger.info(`Removed image from collection: ${image.name} <- ${collection.name}`);
 
     return true;
@@ -485,6 +576,7 @@ export class OutputCollectionService {
       ...updates
     };
     collection.modifiedDate = new Date();
+    this.saveCollections();
 
     return true;
   }
@@ -535,18 +627,51 @@ export class OutputCollectionService {
           // Update image status
           this.updateImageInCollection(collectionId, image.id, { status: 'processing' });
 
-          // Simulate export process (in real implementation, would call actual export service)
-          await this.simulateImageExport(image, exportSettings);
+          // Decode the source file to RGBA Float32 pixels (handles RAW via the
+          // main-process decoder). decodeForExport runs the same RAW/regular
+          // decode as loadImage but with NO editor side effects: it does not set
+          // imageService.currentImage, snapshot the original, populate the cache
+          // or fire notifyImageLoaded(). This keeps the user's open image on
+          // screen and avoids a per-image reprocess/remount during batch export.
+          //
+          // LIMITATION (cp-2): these are UNEDITED source pixels — the editor's
+          // adjustment pipeline (WB/exposure/tone-curve/crop) is NOT applied
+          // here because OutputImage carries no per-image pipeline state to
+          // replay. The export below resizes/sharpens/watermarks the source as
+          // decoded. The honest disclosure is surfaced via the ExportRecord
+          // warnings field so a plain "success" does not imply edited output.
+          const loaded = await imageService.decodeForExport(image.originalPath);
 
-          // Update image status and info
+          // Per-image settings: collection defaults, then per-image overrides.
+          // Watermark falls back to the collection default when the image has none.
+          const perImageSettings: ExportOptions = {
+            ...exportSettings,
+            watermark: image.watermarkSettings ?? collection.defaultWatermarkSettings,
+            ...(image.exportSettings ?? {})
+          };
+
+          const result: ExportResult = await exportService.exportImage(
+            loaded.data,
+            loaded.width,
+            loaded.height,
+            perImageSettings,
+            image.originalPath
+          );
+
+          if (!result.success) {
+            throw new Error(result.error || 'Export failed');
+          }
+
+          // Update image status and info from the real export result.
           this.updateImageInCollection(collectionId, image.id, {
             status: 'completed',
             lastExported: new Date(),
-            exportPath: `${destination}/${image.name}`
+            exportPath: result.outputPath,
+            fileSize: result.outputSize
           });
 
           successCount++;
-          totalSize += 2 * 1024 * 1024; // Simulate 2MB per image
+          totalSize += result.outputSize ?? 0;
 
         } catch (error) {
           lastError = error instanceof Error ? error.message : 'Unknown error';
@@ -558,7 +683,10 @@ export class OutputCollectionService {
       const duration = performance.now() - startTime;
       const success = successCount === imagesToExport.length;
 
-      // Create export record
+      // Create export record. Collection export writes source pixels without
+      // replaying the editor's adjustment pipeline (no per-image pipeline state
+      // is persisted on OutputImage), so disclose that on the record rather than
+      // silently implying an edited deliverable.
       const exportRecord: ExportRecord = {
         id: `export-${Date.now()}`,
         date: new Date(),
@@ -568,7 +696,11 @@ export class OutputCollectionService {
         totalSize,
         duration,
         success,
-        error: lastError
+        error: lastError,
+        warnings:
+          successCount > 0
+            ? ['Exported from source — editor adjustments not applied']
+            : undefined
       };
 
       // Update collection
@@ -579,6 +711,7 @@ export class OutputCollectionService {
 
       this.logActivity('exported', collection.name,
         `Exported ${successCount}/${imagesToExport.length} images`);
+      this.saveCollections();
 
       logger.info(`Collection export completed: ${successCount}/${imagesToExport.length} images, ${duration.toFixed(2)}ms`);
 
@@ -587,19 +720,6 @@ export class OutputCollectionService {
     } catch (error) {
       logger.error('Collection export failed:', error);
       throw error;
-    }
-  }
-
-  /**
-   * Simulate image export (replace with actual export service in production)
-   */
-  private async simulateImageExport(_image: OutputImage, _settings: ExportOptions): Promise<void> {
-    // Simulate processing time
-    await new Promise(resolve => setTimeout(resolve, 100 + Math.random() * 200));
-
-    // Simulate occasional failures
-    if (Math.random() < 0.05) {
-      throw new Error('Simulated export failure');
     }
   }
 
@@ -687,6 +807,7 @@ export class OutputCollectionService {
     duplicate.tags = [...original.tags];
 
     this.logActivity('duplicated', duplicate.name, `Duplicated from ${original.name}`);
+    this.saveCollections();
 
     return duplicateId;
   }
