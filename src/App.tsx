@@ -1012,7 +1012,7 @@ function App() {
         <div className="flex flex-1 overflow-hidden relative">
           {/* Column 2: Right Panel - File Explorer, Settings, or Modules (360px) - Overlay panel */}
           <div
-            className="absolute border-l flex-shrink-0 overflow-hidden"
+            className="absolute border-l flex-shrink-0 overflow-hidden flex flex-col"
             style={{
               right: '64px',
               top: 0,
@@ -1027,32 +1027,32 @@ function App() {
               pointerEvents: (selectedTool || histogramVisible) ? 'auto' : 'none'
             }}
           >
-            <div style={{display: selectedTool === 'file-explorer' ? 'block' : 'none', height: '100%'}}>
-              <FileBrowser
-                onImageSelected={handleImageSelected}
-                onFolderSelected={handleFolderSelected}
-              />
-            </div>
-            <div style={{display: selectedTool === 'settings' ? 'block' : 'none', height: '100%'}}>
-              <SettingsPanel />
-            </div>
-            {/* Module panels */}
-            <div style={{display: selectedTool && !['file-explorer', 'settings'].includes(selectedTool) ? 'block' : 'none', height: '100%'}}>
-              <AdjustmentPanel selectedModule={selectedTool} />
+            {/* Panel content (Controls / File / Settings) — fills the space ABOVE the histogram */}
+            <div style={{ flex: selectedTool ? '1 1 0%' : '0 0 0%', minHeight: 0, overflow: 'hidden' }}>
+              <div style={{display: selectedTool === 'file-explorer' ? 'block' : 'none', height: '100%'}}>
+                <FileBrowser
+                  onImageSelected={handleImageSelected}
+                  onFolderSelected={handleFolderSelected}
+                />
+              </div>
+              <div style={{display: selectedTool === 'settings' ? 'block' : 'none', height: '100%'}}>
+                <SettingsPanel />
+              </div>
+              {/* Module panels */}
+              <div style={{display: selectedTool && !['file-explorer', 'settings'].includes(selectedTool) ? 'block' : 'none', height: '100%'}}>
+                <AdjustmentPanel selectedModule={selectedTool} />
+              </div>
             </div>
 
-            {/* Histogram overlay - sits at bottom of panel, on top of module content */}
+            {/* Histogram — stacked BELOW the Controls (its top = the Controls' bottom), never overlapping. */}
             {histogramVisible && (
               <div
                 style={{
-                  position: 'absolute',
-                  bottom: 0,
-                  left: 0,
-                  right: 0,
-                  zIndex: 20,
+                  flex: selectedTool ? '0 0 auto' : '1 1 auto',
+                  minHeight: 0,
+                  overflowY: 'auto',
                   borderTop: '1px solid var(--border)',
                   backgroundColor: 'var(--gray-900)',
-                  boxShadow: '0 -4px 12px rgba(0,0,0,0.4)',
                 }}
               >
                 <HistogramPanel />

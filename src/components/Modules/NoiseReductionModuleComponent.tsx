@@ -4,6 +4,7 @@ import { NoiseReductionModule, NoiseReductionParams } from '../../modules/NoiseR
 import { DenoiseMethod } from '../../services/AdvancedDenoisingService';
 import { logger } from '../../utils/Logger';
 import { DelayedInputControl } from '../Controls/DelayedInputControl';
+import { useAppStore } from '../../stores/appStore';
 
 interface NoiseReductionModuleComponentProps {
   module: NoiseReductionModule;
@@ -47,6 +48,8 @@ export function NoiseReductionModuleComponent({ module, onParamsChange }: NoiseR
 
   // The ONLY action that triggers processing.
   const applyNoiseReduction = useCallback(() => {
+    // Show the canvas spinner immediately — NR is slow; setProcessedImageData clears it.
+    useAppStore.getState().setIsProcessing(true);
     const applied = { ...paramsRef.current, enabled: true, method: 'bm3d' as DenoiseMethod };
     paramsRef.current = applied;
     setParams(applied);
