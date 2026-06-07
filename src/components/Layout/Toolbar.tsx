@@ -187,14 +187,8 @@ export function Toolbar({ onExport, onPrint, onBatchProcess: _onBatchProcess, on
         )}
       </div>
 
-      {/* Right side - Info */}
-      <div className="flex items-center" style={{gap: '16px', fontSize: '11px', color: 'var(--gray-400)', fontVariantNumeric: 'tabular-nums'}}>
-        <span>6000 × 4000</span>
-        <div style={{width: '1px', height: '16px', backgroundColor: 'var(--border)'}} />
-        <span>24.0 MP</span>
-        <div style={{width: '1px', height: '16px', backgroundColor: 'var(--border)'}} />
-        <span>sRGB</span>
-      </div>
+      {/* Right-side info removed: dimensions / MP / colour space were hardcoded
+          placeholders, and the real values live in the footer status bar. */}
     </div>
   );
 }
