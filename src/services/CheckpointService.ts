@@ -28,6 +28,56 @@ const MAX_CHECKPOINTS = 200;
 const RECORD_DEBOUNCE_MS = 900;
 const SAVE_DEBOUNCE_MS = 800;
 
+const MODULE_NAMES: Record<string, string> = {
+  exposure: 'Exposure', temperature: 'White Balance', basicadj: 'Basic Adjustments',
+  tonecurve: 'Tone Curve', colorbalance: 'Color Balance', 'noise-reduction': 'Noise Reduction',
+  shadowshighlights: 'Shadows & Highlights', lenscorrections: 'Lens Corrections',
+  localadjustments: 'Local Adjustments', huecurves: 'Hue Curves', crop: 'Crop & Transform',
+};
+const PARAM_LABELS: Record<string, string> = {
+  temperature: 'Temperature', tint: 'Tint', exposure: 'Exposure', contrast: 'Contrast',
+  brightness: 'Brightness', highlights: 'Highlights', shadows: 'Shadows', blackPoint: 'Black Point',
+  saturation: 'Saturation', vibrance: 'Vibrance', dehaze: 'Dehaze', barrel: 'Barrel', scale: 'Scale',
+  amount: 'Amount', midpoint: 'Midpoint', roundness: 'Roundness', feather: 'Feather', strength: 'Strength',
+  redCyan: 'Red/Cyan', blueMagenta: 'Blue/Magenta', horizontal: 'Horizontal', vertical: 'Vertical', masterBlend: 'Master',
+};
+const labelParam = (k: string) => PARAM_LABELS[k] || k.replace(/([A-Z])/g, ' $1').replace(/^./, (c) => c.toUpperCase());
+const fmtNum = (v: number) => {
+  if (Number.isInteger(v) && Math.abs(v) >= 10) return String(v); // 6500, -45
+  const s = v.toFixed(2);
+  return v > 0 ? `+${s}` : s; // +0.30, -4.00
+};
+
+// Collect changed numeric leaves (one path each) between two param trees.
+function diffLeaves(prev: unknown, next: unknown, path: string[], out: { path: string[]; value: number }[]): void {
+  if (!next || typeof next !== 'object' || Array.isArray(next)) return;
+  const p = (prev && typeof prev === 'object' ? prev : {}) as Record<string, unknown>;
+  for (const [k, nv] of Object.entries(next as Record<string, unknown>)) {
+    if (k === 'enabled' || k === 'auto') continue;
+    const pv = p[k];
+    if (typeof nv === 'number') {
+      if (typeof pv !== 'number' || Math.abs(nv - pv) > 1e-6) out.push({ path: [...path, k], value: nv });
+    } else if (nv && typeof nv === 'object' && !Array.isArray(nv)) {
+      diffLeaves(pv, nv, [...path, k], out);
+    }
+  }
+}
+
+// Describe what changed between two edit states, e.g. "White Balance — Tint -4.00".
+function describeChange(prev: EditState | null, next: EditState): string | null {
+  if (!prev) return null;
+  const out: { path: string[]; value: number }[] = [];
+  for (const mod of Object.keys(next.modules || {})) diffLeaves((prev.modules || {})[mod], next.modules[mod], [mod], out);
+  if (out.length === 0) {
+    return JSON.stringify(prev.localAdjustments) !== JSON.stringify(next.localAdjustments) ? 'Local Adjustments' : null;
+  }
+  if (out.length > 3) return 'Multiple adjustments';
+  const c = out[0];
+  const mod = c.path[0];
+  const leaf = c.path[c.path.length - 1];
+  return `${MODULE_NAMES[mod] || mod} — ${labelParam(leaf)} ${fmtNum(c.value)}`;
+}
+
 /**
  * Per-image edit history. Auto-records a labelled checkpoint after each committed edit
  * (debounced + de-duplicated), keeps the full list, restores any checkpoint, and persists
@@ -40,6 +90,7 @@ class CheckpointService {
   private activeId: number | null = null;
   private seq = 0;
   private lastSnapshot = '';                                   // dedupe identical states
+  private lastState: EditState | null = null;                  // parsed last state, for change labels
   private recordTimer: ReturnType<typeof setTimeout> | null = null;
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
   private listeners = new Set<() => void>();
@@ -55,13 +106,19 @@ class CheckpointService {
   getCheckpoints(): readonly Checkpoint[] { return this.checkpoints; }
   getActiveId(): number | null { return this.activeId; }
 
-  /** Record a checkpoint of the current edit state immediately (de-duplicated). */
-  record(label: string): void {
+  /** Record a checkpoint of the current edit state immediately (de-duplicated). The label
+   *  describes the actual change (e.g. "White Balance — Tint -4.00"); `fallbackLabel` is
+   *  used only when the change can't be summarised (multi-change or first checkpoint). */
+  record(fallbackLabel: string): void {
     if (!imageService.getCurrentImage()) return;
-    const json = JSON.stringify(editPersistenceService.serialize());
+    const state = editPersistenceService.serialize();
+    const json = JSON.stringify(state);
     if (json === this.lastSnapshot) return;                   // nothing changed since last checkpoint
+    const label = describeChange(this.lastState, state) || fallbackLabel;
     this.lastSnapshot = json;
-    const cp: Checkpoint = { id: ++this.seq, label, at: Date.now(), state: JSON.parse(json) };
+    const parsed = JSON.parse(json) as EditState;
+    this.lastState = parsed;
+    const cp: Checkpoint = { id: ++this.seq, label, at: Date.now(), state: parsed };
     this.checkpoints.push(cp);
     while (this.checkpoints.length > MAX_CHECKPOINTS) this.checkpoints.shift();
     this.activeId = cp.id;
@@ -83,6 +140,7 @@ class CheckpointService {
     editPersistenceService.restore(cp.state, img.width, img.height);
     this.activeId = id;
     this.lastSnapshot = JSON.stringify(cp.state);             // restoring is not a new edit
+    this.lastState = cp.state;
     if (this.recordTimer) { clearTimeout(this.recordTimer); this.recordTimer = null; }
     this.emit();
     return true;
@@ -96,6 +154,7 @@ class CheckpointService {
     this.activeId = null;
     this.seq = 0;
     this.lastSnapshot = '';
+    this.lastState = null;
     const api = window.electronAPI;
     if (api?.storeGet) {
       try {
@@ -106,6 +165,7 @@ class CheckpointService {
           const last = this.checkpoints[this.checkpoints.length - 1];
           this.activeId = last ? last.id : null;
           this.lastSnapshot = last ? JSON.stringify(last.state) : '';
+          this.lastState = last ? last.state : null;
         }
       } catch (e) {
         logger.warn('history load failed', e);
@@ -118,6 +178,7 @@ class CheckpointService {
     this.checkpoints = [];
     this.activeId = null;
     this.lastSnapshot = '';
+    this.lastState = null;
     if (this.recordTimer) { clearTimeout(this.recordTimer); this.recordTimer = null; }
     this.scheduleSave();
     this.emit();

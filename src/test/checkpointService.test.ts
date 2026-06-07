@@ -45,6 +45,19 @@ describe('CheckpointService', () => {
     expect(checkpointService.getActiveId()).toBe(firstId);
   });
 
+  it('labels checkpoints by the actual change (e.g. "White Balance — Tint -4.00")', () => {
+    const wb = imageProcessingPipeline.getModule('temperature') as unknown as { setParams: (p: Record<string, unknown>) => void };
+    wb.setParams({ temperature: 6500, tint: 0 });
+    checkpointService.record('Opened'); // baseline
+    wb.setParams({ tint: -4 });
+    checkpointService.record('White Balance'); // fallback only used if change can't be summarised
+    const cps = checkpointService.getCheckpoints();
+    const label = cps[cps.length - 1].label;
+    expect(label).toContain('White Balance');
+    expect(label).toContain('Tint');
+    expect(label).toContain('-4');
+  });
+
   it('record() is a no-op when no image is loaded', () => {
     (imageService.getCurrentImage as jest.Mock).mockReturnValue(null);
     checkpointService.record('X');
