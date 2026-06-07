@@ -120,8 +120,16 @@ export class LensCorrectionsModule {
     try {
       // Apply corrections in optimal order
       if (this.params.distortion.enabled) {
-        const distortionResult = this.correctDistortion(result, width, height);
-        result = new Float32Array(distortionResult);
+        const { barrel, perspective, scale } = this.params.distortion;
+        const identity = barrel === 0 && perspective.horizontal === 0 && perspective.vertical === 0 && scale === 1.0;
+        // GPU distortion (texelFetch bilinear, matches the CPU) when available; else CPU.
+        if (!identity && result.length === width * height * 4 && webGLImageProcessor.isAvailable()) {
+          result = new Float32Array(webGLImageProcessor.applyDistortion(
+            result, width, height, barrel / 100, scale,
+            perspective.horizontal * Math.PI / 180, perspective.vertical * Math.PI / 180));
+        } else {
+          result = new Float32Array(this.correctDistortion(result, width, height));
+        }
       }
 
       if (this.params.chromaticAberration.enabled) {

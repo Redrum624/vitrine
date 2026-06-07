@@ -165,6 +165,25 @@ describe('GPU hue-curves CPU reference matches HueCurvesModule', () => {
   });
 });
 
+describe('GPU distortion CPU reference matches LensCorrectionsModule', () => {
+  const w = 8, h = 6;
+  const src = new Float32Array(w * h * 4);
+  for (let i = 0; i < w * h; i++) {
+    src[i * 4] = (i % 8) / 8; src[i * 4 + 1] = ((i * 3) % 7) / 7;
+    src[i * 4 + 2] = ((i * 5) % 9) / 9; src[i * 4 + 3] = 1;
+  }
+
+  test('parity (barrel distortion + bilinear)', () => {
+    const mod = new LensCorrectionsModule();
+    mod.setParams({ distortion: { enabled: true, barrel: 20, perspective: { horizontal: 0, vertical: 0 }, scale: 1.0 } });
+    const expected = mod.processImage(new Float32Array(src), w, h);
+    const ref = webGLImageProcessor.distortionCPU(new Float32Array(src), w, h, 20 / 100, 1.0, 0, 0);
+    let maxDiff = 0;
+    for (let i = 0; i < expected.length; i++) maxDiff = Math.max(maxDiff, Math.abs(expected[i] - ref[i]));
+    expect(maxDiff).toBeLessThan(1e-5);
+  });
+});
+
 describe('GPU vignette CPU reference matches LensCorrectionsModule', () => {
   const w = 6, h = 5;
   const src = new Float32Array(w * h * 4);

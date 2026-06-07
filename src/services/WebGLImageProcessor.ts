@@ -268,6 +268,53 @@ void main() {
   outColor = vec4(src.rgb + (nrgb - src.rgb) * u_blend, src.a);
 }`;
 
+// Lens distortion: barrel + perspective + scale, sampled with MANUAL bilinear
+// (texelFetch) so the result matches LensCorrectionsModule.correctDistortion exactly
+// (out-of-bounds -> black, alpha preserved).
+const DISTORTION_FRAG_SRC = `#version 300 es
+precision highp float;
+uniform sampler2D u_image;
+uniform vec2 u_res;
+uniform float u_barrel, u_scale, u_perspH, u_perspV;
+in vec2 v_uv;
+out vec4 outColor;
+vec4 bilin(vec2 p) {
+  float x0 = floor(p.x), y0 = floor(p.y);
+  float wx = p.x - x0, wy = p.y - y0;
+  int ix0 = int(x0), iy0 = int(y0);
+  vec4 p00 = texelFetch(u_image, ivec2(ix0, iy0), 0);
+  vec4 p01 = texelFetch(u_image, ivec2(ix0 + 1, iy0), 0);
+  vec4 p10 = texelFetch(u_image, ivec2(ix0, iy0 + 1), 0);
+  vec4 p11 = texelFetch(u_image, ivec2(ix0 + 1, iy0 + 1), 0);
+  return mix(mix(p00, p01, wx), mix(p10, p11, wx), wy);
+}
+void main() {
+  vec4 src = texture(u_image, v_uv);
+  float cx = u_res.x / 2.0, cy = u_res.y / 2.0;
+  float nx = ((gl_FragCoord.x - 0.5) - cx) / cx;
+  float ny = ((gl_FragCoord.y - 0.5) - cy) / cy;
+  if (u_barrel != 0.0) {
+    float r = sqrt(nx * nx + ny * ny);
+    if (r > 0.0) { float f = 1.0 + u_barrel * r * r; nx /= f; ny /= f; }
+  }
+  if (u_perspH != 0.0 || u_perspV != 0.0) {
+    float cH = cos(u_perspH), sH = sin(u_perspH), cV = cos(u_perspV), sV = sin(u_perspV);
+    float xr = nx * cH - sH;
+    float zr = nx * sH + cH;
+    float yr = ny * cV - zr * sV;
+    float zf = ny * sV + zr * cV;
+    if (zf > 0.1) { nx = xr / zf; ny = yr / zf; }
+  }
+  nx /= u_scale; ny /= u_scale;
+  float srcX = nx * cx + cx;
+  float srcY = ny * cy + cy;
+  if (srcX >= 0.0 && srcX < u_res.x - 1.0 && srcY >= 0.0 && srcY < u_res.y - 1.0) {
+    outColor = bilin(vec2(srcX, srcY));
+  } else {
+    outColor = vec4(0.0, 0.0, 0.0, src.a);
+  }
+}`;
+
 // Faithful GLSL port of BasicAdjustmentsModule.process (see that file for intent).
 const BASICADJ_FRAG_SRC = `#version 300 es
 precision highp float;
@@ -373,6 +420,8 @@ class WebGLImageProcessor {
   private vignetteVerified: boolean | null = null;
   private hueCurvesProgram: WebGLProgram | null = null;
   private hueCurvesVerified: boolean | null = null;
+  private distortionProgram: WebGLProgram | null = null;
+  private distortionVerified: boolean | null = null;
   private vao: WebGLVertexArrayObject | null = null;
   private initTried = false;
 
@@ -394,7 +443,8 @@ class WebGLImageProcessor {
       const colorBalanceProgram = this.buildProgram(gl, VERT_SRC, COLORBALANCE_FRAG_SRC);
       const toneCurveProgram = this.buildProgram(gl, VERT_SRC, TONECURVE_FRAG_SRC);
       const vignetteProgram = this.buildProgram(gl, VERT_SRC, VIGNETTE_FRAG_SRC);
-      if (!exposureProgram || !basicAdjProgram || !gainsProgram || !denoiseProgram || !colorBalanceProgram || !toneCurveProgram || !vignetteProgram) return (this.gl = null);
+      const distortionProgram = this.buildProgram(gl, VERT_SRC, DISTORTION_FRAG_SRC);
+      if (!exposureProgram || !basicAdjProgram || !gainsProgram || !denoiseProgram || !colorBalanceProgram || !toneCurveProgram || !vignetteProgram || !distortionProgram) return (this.gl = null);
 
       const quad = gl.createBuffer();
       gl.bindBuffer(gl.ARRAY_BUFFER, quad);
@@ -414,6 +464,7 @@ class WebGLImageProcessor {
       this.colorBalanceProgram = colorBalanceProgram;
       this.toneCurveProgram = toneCurveProgram;
       this.vignetteProgram = vignetteProgram;
+      this.distortionProgram = distortionProgram;
       // Optional program: the hue-curves shader uses array uniforms some drivers may
       // reject. A compile failure must NOT disable the other (required) GPU ops, so
       // build it here without gating the context on it.
@@ -871,6 +922,90 @@ class WebGLImageProcessor {
       out[i + 2] = b + (nb - b) * blend;
     }
     return out;
+  }
+
+  /** Apply lens distortion (barrel + perspective + scale). GPU when verified, else CPU. */
+  applyDistortion(
+    data: Float32Array, width: number, height: number,
+    barrelAmount: number, scale: number, perspH: number, perspV: number
+  ): Float32Array {
+    const gl = this.ensureContext();
+    if (gl && this.distortionProgram && this.vao && this.verifyDistortion()) {
+      try {
+        return this.runPass(this.distortionProgram, data, width, height, (g, prog) => {
+          g.uniform2f(g.getUniformLocation(prog, 'u_res'), width, height);
+          g.uniform1f(g.getUniformLocation(prog, 'u_barrel'), barrelAmount);
+          g.uniform1f(g.getUniformLocation(prog, 'u_scale'), scale);
+          g.uniform1f(g.getUniformLocation(prog, 'u_perspH'), perspH);
+          g.uniform1f(g.getUniformLocation(prog, 'u_perspV'), perspV);
+        });
+      } catch (e) { logger.warn('[GPU] distortion failed — CPU:', e instanceof Error ? e.message : String(e)); }
+    }
+    return this.distortionCPU(data, width, height, barrelAmount, scale, perspH, perspV);
+  }
+
+  private verifyDistortion(): boolean {
+    if (this.distortionVerified !== null) return this.distortionVerified;
+    let ok = false;
+    try {
+      const { data, w, h } = CB_SELFTEST;
+      // Mild barrel only → all samples interior (no out-of-bounds discontinuity),
+      // and the manual bilinear is continuous so GPU/CPU agree to ~float precision.
+      const a = this.runPass(this.distortionProgram!, data, w, h, (g, prog) => {
+        g.uniform2f(g.getUniformLocation(prog, 'u_res'), w, h);
+        g.uniform1f(g.getUniformLocation(prog, 'u_barrel'), 0.1);
+        g.uniform1f(g.getUniformLocation(prog, 'u_scale'), 1.0);
+        g.uniform1f(g.getUniformLocation(prog, 'u_perspH'), 0.0);
+        g.uniform1f(g.getUniformLocation(prog, 'u_perspV'), 0.0);
+      });
+      const c = this.distortionCPU(data, w, h, 0.1, 1.0, 0.0, 0.0);
+      let maxDiff = 0;
+      for (let i = 0; i < c.length; i++) maxDiff = Math.max(maxDiff, Math.abs(a[i] - c[i]));
+      ok = maxDiff < 0.02;
+      logger.info(`[GPU] distortion self-check maxDiff=${maxDiff.toExponential(2)} -> ${ok ? 'GPU' : 'CPU fallback'}`);
+    } catch (e) { logger.warn('[GPU] distortion self-check error:', e instanceof Error ? e.message : String(e)); }
+    this.distortionVerified = ok;
+    return ok;
+  }
+
+  /** CPU reference — a replica of LensCorrectionsModule.correctDistortion (non-identity). */
+  distortionCPU(
+    data: Float32Array, width: number, height: number,
+    barrelAmount: number, scale: number, perspH: number, perspV: number
+  ): Float32Array {
+    const result = new Float32Array(data.length);
+    const cx = width / 2, cy = height / 2;
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const dst = (y * width + x) * 4;
+        let nx = (x - cx) / cx, ny = (y - cy) / cy;
+        if (barrelAmount !== 0) {
+          const r = Math.sqrt(nx * nx + ny * ny);
+          if (r > 0) { const f = 1 + barrelAmount * r * r; nx /= f; ny /= f; }
+        }
+        if (perspH !== 0 || perspV !== 0) {
+          const cH = Math.cos(perspH), sH = Math.sin(perspH), cV = Math.cos(perspV), sV = Math.sin(perspV);
+          const xr = nx * cH - sH, zr = nx * sH + cH;
+          const yr = ny * cV - zr * sV, zf = ny * sV + zr * cV;
+          if (zf > 0.1) { nx = xr / zf; ny = yr / zf; }
+        }
+        nx /= scale; ny /= scale;
+        const srcX = nx * cx + cx, srcY = ny * cy + cy;
+        if (srcX >= 0 && srcX < width - 1 && srcY >= 0 && srcY < height - 1) {
+          const x0 = Math.floor(srcX), y0 = Math.floor(srcY), x1 = x0 + 1, y1 = y0 + 1;
+          const wx = srcX - x0, wy = srcY - y0;
+          const i00 = (y0 * width + x0) * 4, i01 = (y0 * width + x1) * 4, i10 = (y1 * width + x0) * 4, i11 = (y1 * width + x1) * 4;
+          for (let c = 0; c < 4; c++) {
+            const p0 = data[i00 + c] * (1 - wx) + data[i01 + c] * wx;
+            const p1 = data[i10 + c] * (1 - wx) + data[i11 + c] * wx;
+            result[dst + c] = p0 * (1 - wy) + p1 * wy;
+          }
+        } else {
+          result[dst] = 0; result[dst + 1] = 0; result[dst + 2] = 0; result[dst + 3] = data[dst + 3];
+        }
+      }
+    }
+    return result;
   }
 
   /** Generic single-pass shader run: source texture → program → float readback. */
