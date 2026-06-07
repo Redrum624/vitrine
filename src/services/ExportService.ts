@@ -75,13 +75,13 @@ export interface ExportPreset {
 
 export class ExportService {
   private readonly defaultOptions: ExportOptions = {
-    format: 'jpeg',
+    format: 'png',
     quality: 95,
     compression: 'none',
     resizeMode: 'fit',
     maintainAspectRatio: true,
     colorSpace: 'srgb',
-    bitDepth: 8,
+    bitDepth: 16,
     preserveMetadata: true,
     includeProcessingHistory: false,
     customMetadata: {},
