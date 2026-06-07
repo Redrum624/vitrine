@@ -45,6 +45,12 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
   // guarded on it so a stale/overlapping run can never leave the canvas spinner (and its
   // backdrop-blur overlay) stuck on — which read as a permanently "blurry/soft" image.
   const processingGenRef = useRef<number>(0);
+  // Synchronous in-flight guard (React state is stale inside the async closure). Without
+  // it a slow run (noise reduction) + a second edit ran two pipeline passes concurrently
+  // through the shared WebGL processor, corrupting the output (blurry). A skipped run sets
+  // `pending` so it re-runs once the current one finishes (no lost edits).
+  const isProcessingRef = useRef<boolean>(false);
+  const pendingReprocessRef = useRef<boolean>(false);
   // NOTE: Removed lastProcessedImagePathRef - was blocking param change reprocessing
 
   // Connect the processing pipeline to image service for auto-adjustments
@@ -75,9 +81,11 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
     // navigation optimization but incorrectly blocked rotation/crop adjustments.
     // The debouncing and isProcessing checks provide sufficient protection.
 
-    // Skip processing if already processing
-    if (isProcessing) {
-      logger.debug('Skipping processing - already in progress');
+    // Skip if a pipeline pass is already in flight (synchronous ref — React state is
+    // stale here). Mark it pending so the latest state is reprocessed when this finishes.
+    if (isProcessingRef.current) {
+      pendingReprocessRef.current = true;
+      logger.debug('Skipping processing - already in progress (queued)');
       return;
     }
 
@@ -92,6 +100,7 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
 
     // Track this processing attempt
     lastProcessingTimeRef.current = now;
+    isProcessingRef.current = true;
 
     // Clear any pending timeout
     if (processingTimeoutRef.current) {
@@ -272,6 +281,12 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
       // wipe a newer run's spinner (and the newest run's finally always clears it).
       if (processingGenRef.current === gen) useAppStore.getState().setIsProcessing(false);
       setIsProcessing(false);
+      isProcessingRef.current = false;
+      // An edit arrived while we were busy — reprocess the latest state now.
+      if (pendingReprocessRef.current) {
+        pendingReprocessRef.current = false;
+        useAppStore.getState().triggerReprocessing();
+      }
     }
   }, [setProcessedImageData, setProcessingStats, isProcessing]);
 
