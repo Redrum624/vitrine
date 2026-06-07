@@ -1,5 +1,5 @@
-import React, { useState, useCallback, useRef } from 'react';
-import { RotateCcw, Sparkles } from 'lucide-react';
+import { useState, useCallback, useRef } from 'react';
+import { RotateCcw, Sparkles, Play, X } from 'lucide-react';
 import { NoiseReductionModule, NoiseReductionParams } from '../../modules/NoiseReductionModule';
 import { DenoiseMethod } from '../../services/AdvancedDenoisingService';
 import { logger } from '../../utils/Logger';
@@ -10,405 +10,135 @@ interface NoiseReductionModuleComponentProps {
   onParamsChange?: (params: Partial<NoiseReductionParams>) => void;
 }
 
-// Extended type to include 'none'
-type ExtendedDenoiseMethod = DenoiseMethod | 'none';
+type NRKey = 'strength' | 'preserveDetail' | 'lumaStrength' | 'chromaStrength';
 
-export function NoiseReductionModuleComponent({
-  module,
-  onParamsChange
-}: NoiseReductionModuleComponentProps) {
+const SLIDERS: { key: NRKey; label: string; def: number; gradient: string; hint?: string }[] = [
+  { key: 'strength', label: 'Strength', def: 50, gradient: 'linear-gradient(to right, #1f2937, #3b82f6, #8b5cf6)' },
+  { key: 'preserveDetail', label: 'Preserve Detail', def: 70, gradient: 'linear-gradient(to right, #6b7280, #10b981)', hint: 'Higher values preserve more detail but remove less noise' },
+  { key: 'lumaStrength', label: 'Luminance', def: 50, gradient: 'linear-gradient(to right, #000000, #6b7280, #ffffff)' },
+  { key: 'chromaStrength', label: 'Color (Chroma)', def: 50, gradient: 'linear-gradient(to right, #9ca3af, #ef4444, #f97316, #eab308, #10b981, #3b82f6, #8b5cf6)', hint: 'Reduces color noise (common in high-ISO images)' },
+];
+
+/**
+ * Noise Reduction panel. A single algorithm (BM3D / GPU NLM engine) — no algorithm
+ * dropdown. The sliders only stage the settings; noise reduction is expensive, so it
+ * runs ONLY when the user presses "Apply" (never on slider change).
+ */
+export function NoiseReductionModuleComponent({ module, onParamsChange }: NoiseReductionModuleComponentProps) {
   const [params, setParams] = useState<NoiseReductionParams>(module.getParams());
-  const [selectedMethod, setSelectedMethod] = useState<ExtendedDenoiseMethod>(params.enabled ? params.method : 'none');
   const paramsRef = useRef<NoiseReductionParams>(params);
-  const updateTimeoutRef = useRef<Record<string, NodeJS.Timeout>>({});
 
-  // Keep ref in sync
-  React.useEffect(() => {
-    paramsRef.current = params;
-  }, [params]);
-
-  // Immediate UI update for smooth slider movement
-  const updateParamImmediate = useCallback((key: keyof NoiseReductionParams, value: number | boolean | DenoiseMethod) => {
+  // Local-only update: keep the module + UI in sync, but DON'T reprocess.
+  const setParamLocal = useCallback((key: NRKey, value: number) => {
     const newParams = { ...paramsRef.current, [key]: value };
     paramsRef.current = newParams;
     setParams(newParams);
-  }, []);
-
-  // Throttled module update for performance
-  const updateParam = useCallback((key: keyof NoiseReductionParams, value: number | boolean | DenoiseMethod) => {
-    // Clear any existing timeout for this parameter
-    if (updateTimeoutRef.current[key]) {
-      clearTimeout(updateTimeoutRef.current[key]);
-    }
-
-    // Update UI immediately for smooth feedback
-    updateParamImmediate(key, value);
-
-    // Throttle the actual module and processing updates
-    updateTimeoutRef.current[key] = setTimeout(() => {
-      const newParams = { ...paramsRef.current, [key]: value };
-      module.setParams({ [key]: value });
-      onParamsChange?.(newParams);
-      logger.debug(`NoiseReduction ${key} updated:`, value);
-      delete updateTimeoutRef.current[key];
-    }, 16); // ~60fps for smooth updates
-  }, [module, onParamsChange, updateParamImmediate]);
-
-  // Real-time update for slider dragging
-  const updateParamRealTime = useCallback((key: keyof NoiseReductionParams, value: number) => {
-    // Update ref and UI immediately without blocking
-    const newParams = { ...paramsRef.current, [key]: value };
-    paramsRef.current = newParams;
-    setParams(newParams);
-
-    // Trigger module update and processing
     module.setParams({ [key]: value });
-    onParamsChange?.(newParams);
-  }, [module, onParamsChange]);
-
-  const resetParam = useCallback((key: keyof NoiseReductionParams, defaultValue: number) => {
-    updateParam(key, defaultValue);
-  }, [updateParam]);
+  }, [module]);
 
   const resetAll = useCallback(() => {
     module.resetParams();
-    const resetParams = module.getParams();
-    setParams(resetParams);
-    setSelectedMethod(resetParams.enabled ? resetParams.method : 'none');
-    onParamsChange?.(resetParams);
-    logger.info('NoiseReduction: All parameters reset to defaults');
+    const reset = module.getParams();
+    paramsRef.current = reset;
+    setParams(reset);
+    onParamsChange?.(reset); // clearing NR should reprocess
+    logger.info('NoiseReduction: reset to defaults');
   }, [module, onParamsChange]);
 
-  const handleMethodChange = useCallback((method: ExtendedDenoiseMethod) => {
-    setSelectedMethod(method);
+  // The ONLY action that triggers processing.
+  const applyNoiseReduction = useCallback(() => {
+    const applied = { ...paramsRef.current, enabled: true, method: 'bm3d' as DenoiseMethod };
+    paramsRef.current = applied;
+    setParams(applied);
+    module.setParams({ enabled: true, method: 'bm3d' });
+    onParamsChange?.(applied);
+    logger.info('NoiseReduction applied (BM3D)');
+  }, [module, onParamsChange]);
 
-    if (method === 'none') {
-      // Disable noise reduction
-      updateParam('enabled', false);
-      logger.info('NoiseReduction disabled');
-    } else {
-      // Enable and set the method
-      updateParam('enabled', true);
-      updateParam('method', method as DenoiseMethod);
-      logger.info(`NoiseReduction enabled with method: ${method}`);
-    }
-  }, [updateParam]);
+  const removeNoiseReduction = useCallback(() => {
+    const off = { ...paramsRef.current, enabled: false };
+    paramsRef.current = off;
+    setParams(off);
+    module.setParams({ enabled: false });
+    onParamsChange?.(off);
+    logger.info('NoiseReduction removed');
+  }, [module, onParamsChange]);
 
-  const isDisabled = selectedMethod === 'none';
+  const isApplied = params.enabled;
 
   return (
     <div className="space-y-3">
       {/* Header */}
-      <div className="flex items-center justify-between pb-2" style={{borderBottom: '1px solid var(--border)'}}>
+      <div className="flex items-center justify-between pb-2" style={{ borderBottom: '1px solid var(--border)' }}>
         <div className="flex items-center gap-2">
-          <div className="w-1 h-3 rounded-sm" style={{backgroundColor: 'var(--gray-600)'}} />
-          <span className="text-xs font-medium uppercase tracking-wider" style={{color: 'var(--gray-500)', letterSpacing: '0.5px'}}>Controls</span>
+          <Sparkles className="w-3 h-3" style={{ color: isApplied ? 'var(--primary-400)' : 'var(--gray-600)' }} />
+          <span className="text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--gray-500)', letterSpacing: '0.5px' }}>Noise Reduction</span>
         </div>
-        <div className="flex items-center gap-1.5">
-          <button
-            onClick={resetAll}
-            className="p-1.5 rounded border"
-            style={{
-              backgroundColor: 'transparent',
-              borderColor: 'var(--border)',
-              color: 'var(--gray-400)',
-              transition: 'var(--transition-fast)'
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = 'var(--gray-800)';
-              e.currentTarget.style.borderColor = 'var(--border-light)';
-              e.currentTarget.style.color = 'var(--white)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = 'transparent';
-              e.currentTarget.style.borderColor = 'var(--border)';
-              e.currentTarget.style.color = 'var(--gray-400)';
-            }}
-            title="Reset all"
-          >
-            <RotateCcw className="w-3.5 h-3.5" />
-          </button>
-        </div>
+        <button
+          onClick={resetAll}
+          className="p-1.5 rounded border"
+          style={{ backgroundColor: 'transparent', borderColor: 'var(--border)', color: 'var(--gray-400)' }}
+          title="Reset all"
+        >
+          <RotateCcw className="w-3.5 h-3.5" />
+        </button>
       </div>
 
+      {/* Sliders — adjust freely; nothing runs until Apply is pressed */}
       <div className="space-y-3">
-        {/* Method Selection */}
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between">
-            <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Algorithm</label>
-            <div className="flex items-center gap-1.5">
-              <Sparkles className="w-3 h-3" style={{color: selectedMethod !== 'none' ? 'var(--primary-400)' : 'var(--gray-600)'}} />
+        {SLIDERS.map((s) => (
+          <div key={s.key} className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-medium" style={{ color: 'var(--gray-300)' }}>{s.label}</label>
+              <div className="flex items-center gap-1.5">
+                <DelayedInputControl value={params[s.key]} onChange={(v) => setParamLocal(s.key, v)} min={0} max={100} step={1} precision={0} />
+                <span className="text-xs font-mono" style={{ color: 'var(--gray-500)', width: '20px' }}>%</span>
+                <button onClick={() => setParamLocal(s.key, s.def)} className="p-1 rounded" style={{ backgroundColor: 'transparent', color: 'var(--gray-500)' }} title="Reset">
+                  <RotateCcw className="w-3 h-3" />
+                </button>
+              </div>
             </div>
+            <input
+              type="range"
+              min="0"
+              max="100"
+              step="1"
+              value={params[s.key]}
+              onInput={(e) => setParamLocal(s.key, parseFloat((e.target as HTMLInputElement).value))}
+              onDoubleClick={() => setParamLocal(s.key, s.def)}
+              className="slider w-full"
+              style={{ background: s.gradient, cursor: 'pointer' }}
+              title={`Double-click to reset to ${s.def}`}
+            />
+            {s.hint && <p className="text-xs" style={{ color: 'var(--gray-400)' }}>{s.hint}</p>}
           </div>
-          <select
-            value={selectedMethod}
-            onChange={(e) => handleMethodChange(e.target.value as ExtendedDenoiseMethod)}
-            className="w-full px-3 py-2 rounded text-sm border"
-            style={{
-              backgroundColor: 'var(--gray-800)',
-              borderColor: 'var(--border)',
-              color: 'var(--gray-100)'
-            }}
-          >
-            <option value="none">None</option>
-            <option value="auto">Auto - Intelligent Selection</option>
-            <option value="bm3d">BM3D - Best Quality (Slow)</option>
-            <option value="nlmeans">Non-Local Means - Texture Preservation</option>
-            <option value="wavelet">Wavelet - Edge Preservation</option>
-            <option value="hybrid">Hybrid - Balanced Approach</option>
-          </select>
-          <p className="text-xs" style={{color: 'var(--gray-400)'}}>
-            {selectedMethod === 'none' && 'Noise reduction disabled'}
-            {selectedMethod === 'auto' && 'Automatically selects best algorithm based on image analysis'}
-            {selectedMethod === 'bm3d' && 'State-of-the-art quality, rivals DxO PRIME and Topaz DeNoise'}
-            {selectedMethod === 'nlmeans' && 'Excellent for preserving fine textures and details'}
-            {selectedMethod === 'wavelet' && 'Multi-scale denoising, preserves edges well'}
-            {selectedMethod === 'hybrid' && 'Combines BM3D, NLMeans, and Wavelet for best results'}
-          </p>
-        </div>
-
-        {/* Strength */}
-        <div className="space-y-1.5" style={{opacity: isDisabled ? 0.5 : 1}}>
-          <div className="flex items-center justify-between">
-            <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Strength</label>
-            <div className="flex items-center gap-1.5">
-              <DelayedInputControl
-                value={params.strength}
-                onChange={(value) => updateParam('strength', value)}
-                min={0}
-                max={100}
-                step={1}
-                precision={0}
-                disabled={isDisabled}
-              />
-              <span className="text-xs font-mono" style={{color: 'var(--gray-500)', width: '20px'}}>%</span>
-              <button
-                onClick={() => resetParam('strength', 50)}
-                className="p-1 rounded"
-                style={{
-                  backgroundColor: 'transparent',
-                  color: 'var(--gray-500)',
-                  transition: 'var(--transition-fast)'
-                }}
-                onMouseEnter={(e) => {
-                  if (!isDisabled) {
-                    e.currentTarget.style.backgroundColor = 'var(--gray-800)';
-                    e.currentTarget.style.color = 'var(--white)';
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = 'transparent';
-                  e.currentTarget.style.color = 'var(--gray-500)';
-                }}
-                disabled={isDisabled}
-                title="Reset"
-              >
-                <RotateCcw className="w-3 h-3" />
-              </button>
-            </div>
-          </div>
-          <input
-            type="range"
-            min="0"
-            max="100"
-            step="1"
-            value={params.strength}
-            onInput={(e) => !isDisabled && updateParamRealTime('strength', parseFloat((e.target as HTMLInputElement).value))}
-            onChange={(e) => !isDisabled && updateParam('strength', parseFloat(e.target.value))}
-            onDoubleClick={() => !isDisabled && updateParam('strength', 50)}
-            className="slider w-full"
-            style={{
-              background: 'linear-gradient(to right, #1f2937, #3b82f6, #8b5cf6)',
-              cursor: isDisabled ? 'not-allowed' : 'pointer'
-            }}
-            disabled={isDisabled}
-            title="Double-click to reset to 50"
-          />
-        </div>
-
-        {/* Detail Preservation */}
-        <div className="space-y-1.5" style={{opacity: isDisabled ? 0.5 : 1}}>
-          <div className="flex items-center justify-between">
-            <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Preserve Detail</label>
-            <div className="flex items-center gap-1.5">
-              <DelayedInputControl
-                value={params.preserveDetail}
-                onChange={(value) => updateParam('preserveDetail', value)}
-                min={0}
-                max={100}
-                step={1}
-                precision={0}
-                disabled={isDisabled}
-              />
-              <span className="text-xs font-mono" style={{color: 'var(--gray-500)', width: '20px'}}>%</span>
-              <button
-                onClick={() => resetParam('preserveDetail', 70)}
-                className="p-1 rounded"
-                style={{
-                  backgroundColor: 'transparent',
-                  color: 'var(--gray-500)',
-                  transition: 'var(--transition-fast)'
-                }}
-                onMouseEnter={(e) => {
-                  if (!isDisabled) {
-                    e.currentTarget.style.backgroundColor = 'var(--gray-800)';
-                    e.currentTarget.style.color = 'var(--white)';
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = 'transparent';
-                  e.currentTarget.style.color = 'var(--gray-500)';
-                }}
-                disabled={isDisabled}
-                title="Reset"
-              >
-                <RotateCcw className="w-3 h-3" />
-              </button>
-            </div>
-          </div>
-          <input
-            type="range"
-            min="0"
-            max="100"
-            step="1"
-            value={params.preserveDetail}
-            onInput={(e) => !isDisabled && updateParamRealTime('preserveDetail', parseFloat((e.target as HTMLInputElement).value))}
-            onChange={(e) => !isDisabled && updateParam('preserveDetail', parseFloat(e.target.value))}
-            onDoubleClick={() => !isDisabled && updateParam('preserveDetail', 70)}
-            className="slider w-full"
-            style={{
-              background: 'linear-gradient(to right, #6b7280, #10b981)',
-              cursor: isDisabled ? 'not-allowed' : 'pointer'
-            }}
-            disabled={isDisabled}
-            title="Double-click to reset to 70"
-          />
-          <p className="text-xs" style={{color: 'var(--gray-400)'}}>
-            Higher values preserve more detail but remove less noise
-          </p>
-        </div>
-
-        {/* Luminance Noise Reduction */}
-        <div className="space-y-1.5" style={{opacity: isDisabled ? 0.5 : 1}}>
-          <div className="flex items-center justify-between">
-            <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Luminance</label>
-            <div className="flex items-center gap-1.5">
-              <DelayedInputControl
-                value={params.lumaStrength}
-                onChange={(value) => updateParam('lumaStrength', value)}
-                min={0}
-                max={100}
-                step={1}
-                precision={0}
-                disabled={isDisabled}
-              />
-              <span className="text-xs font-mono" style={{color: 'var(--gray-500)', width: '20px'}}>%</span>
-              <button
-                onClick={() => resetParam('lumaStrength', 50)}
-                className="p-1 rounded"
-                style={{
-                  backgroundColor: 'transparent',
-                  color: 'var(--gray-500)',
-                  transition: 'var(--transition-fast)'
-                }}
-                onMouseEnter={(e) => {
-                  if (!isDisabled) {
-                    e.currentTarget.style.backgroundColor = 'var(--gray-800)';
-                    e.currentTarget.style.color = 'var(--white)';
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = 'transparent';
-                  e.currentTarget.style.color = 'var(--gray-500)';
-                }}
-                disabled={isDisabled}
-                title="Reset"
-              >
-                <RotateCcw className="w-3 h-3" />
-              </button>
-            </div>
-          </div>
-          <input
-            type="range"
-            min="0"
-            max="100"
-            step="1"
-            value={params.lumaStrength}
-            onInput={(e) => !isDisabled && updateParamRealTime('lumaStrength', parseFloat((e.target as HTMLInputElement).value))}
-            onChange={(e) => !isDisabled && updateParam('lumaStrength', parseFloat(e.target.value))}
-            onDoubleClick={() => !isDisabled && updateParam('lumaStrength', 50)}
-            className="slider w-full"
-            style={{
-              background: 'linear-gradient(to right, #000000, #6b7280, #ffffff)',
-              cursor: isDisabled ? 'not-allowed' : 'pointer'
-            }}
-            disabled={isDisabled}
-            title="Double-click to reset to 50"
-          />
-        </div>
-
-        {/* Chroma Noise Reduction */}
-        <div className="space-y-1.5" style={{opacity: isDisabled ? 0.5 : 1}}>
-          <div className="flex items-center justify-between">
-            <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Color (Chroma)</label>
-            <div className="flex items-center gap-1.5">
-              <DelayedInputControl
-                value={params.chromaStrength}
-                onChange={(value) => updateParam('chromaStrength', value)}
-                min={0}
-                max={100}
-                step={1}
-                precision={0}
-                disabled={isDisabled}
-              />
-              <span className="text-xs font-mono" style={{color: 'var(--gray-500)', width: '20px'}}>%</span>
-              <button
-                onClick={() => resetParam('chromaStrength', 50)}
-                className="p-1 rounded"
-                style={{
-                  backgroundColor: 'transparent',
-                  color: 'var(--gray-500)',
-                  transition: 'var(--transition-fast)'
-                }}
-                onMouseEnter={(e) => {
-                  if (!isDisabled) {
-                    e.currentTarget.style.backgroundColor = 'var(--gray-800)';
-                    e.currentTarget.style.color = 'var(--white)';
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = 'transparent';
-                  e.currentTarget.style.color = 'var(--gray-500)';
-                }}
-                disabled={isDisabled}
-                title="Reset"
-              >
-                <RotateCcw className="w-3 h-3" />
-              </button>
-            </div>
-          </div>
-          <input
-            type="range"
-            min="0"
-            max="100"
-            step="1"
-            value={params.chromaStrength}
-            onInput={(e) => !isDisabled && updateParamRealTime('chromaStrength', parseFloat((e.target as HTMLInputElement).value))}
-            onChange={(e) => !isDisabled && updateParam('chromaStrength', parseFloat(e.target.value))}
-            onDoubleClick={() => !isDisabled && updateParam('chromaStrength', 50)}
-            className="slider w-full"
-            style={{
-              background: 'linear-gradient(to right, #9ca3af, #ef4444, #f97316, #eab308, #10b981, #3b82f6, #8b5cf6)',
-              cursor: isDisabled ? 'not-allowed' : 'pointer'
-            }}
-            disabled={isDisabled}
-            title="Double-click to reset to 50"
-          />
-          <p className="text-xs" style={{color: 'var(--gray-400)'}}>
-            Reduces color noise (common in high-ISO images)
-          </p>
-        </div>
+        ))}
       </div>
+
+      {/* Apply / Remove — the only triggers for (re)processing */}
+      <div className="flex items-center gap-2 pt-1">
+        <button
+          onClick={applyNoiseReduction}
+          className="flex items-center justify-center gap-1.5 flex-1 px-3 py-2 rounded border text-xs font-medium"
+          style={{ backgroundColor: 'var(--primary-600, #2563eb)', borderColor: 'var(--primary-500, #3b82f6)', color: '#fff' }}
+          title="Run noise reduction with the current settings"
+        >
+          <Play className="w-3.5 h-3.5" /> {isApplied ? 'Re-apply Noise Reduction' : 'Apply Noise Reduction'}
+        </button>
+        {isApplied && (
+          <button
+            onClick={removeNoiseReduction}
+            className="flex items-center justify-center gap-1 px-3 py-2 rounded border text-xs"
+            style={{ backgroundColor: 'transparent', borderColor: 'var(--border)', color: 'var(--gray-300)' }}
+            title="Remove noise reduction"
+          >
+            <X className="w-3.5 h-3.5" /> Remove
+          </button>
+        )}
+      </div>
+      <p className="text-xs" style={{ color: 'var(--gray-500)' }}>
+        Adjust the sliders, then press Apply. Noise reduction is GPU-accelerated; large RAW files may take a moment.
+      </p>
     </div>
   );
 }
