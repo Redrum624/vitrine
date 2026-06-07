@@ -14,7 +14,7 @@
     "dev-managed": "node scripts/dev.cjs",
     "electron-build": "npm run build && electron-builder",
     "dist": "npm run build && electron-builder --publish=never",
-    "clean:dist": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
+    "clean:dist": "node -e \"const fs=require('fs');fs.rmSync('dist',{recursive:true,force:true});fs.rmSync('release',{recursive:true,force:true})\"",
     "build:win": "npm run clean:dist && npm run build && electron-builder --win --publish=never",
     "build:win:dir": "npm run clean:dist && npm run build && electron-builder --win --dir --publish=never",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
