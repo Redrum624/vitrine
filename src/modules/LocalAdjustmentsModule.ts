@@ -137,7 +137,7 @@ export class LocalAdjustmentsModule {
     } else if (type === 'linear_gradient') {
       this.setLayerGeometry(layer.id, {
         type: 'linear', centerX: 0.5, centerY: 0.5, radiusX: 0.3, radiusY: 0.3,
-        startX: 0.5, startY: 0.15, endX: 0.5, endY: 0.85, feather: 0, invert: false,
+        startX: 0.5, startY: 0.15, endX: 0.5, endY: 0.85, feather: 1, invert: false,
       }, imageWidth, imageHeight);
     }
 
@@ -178,10 +178,14 @@ export class LocalAdjustmentsModule {
       const x2 = geom.endX * width, y2 = geom.endY * height;
       const dxl = x2 - x1, dyl = y2 - y1;
       const len2 = dxl * dxl + dyl * dyl || 1;
+      // Feather controls the transition band width around the line's midpoint:
+      // 1 = full smooth ramp, →0 = hard edge at the midpoint.
+      const f = Math.max(0.001, Math.min(1, geom.feather));
+      const lo = 0.5 - f / 2, hi = 0.5 + f / 2;
       for (let y = 0; y < height; y++) {
         for (let x = 0; x < width; x++) {
           const t = ((x - x1) * dxl + (y - y1) * dyl) / len2;
-          let m = Math.max(0, Math.min(1, t));
+          let m = smoothStep(lo, hi, t);
           if (geom.invert) m = 1 - m;
           mask[y * width + x] = m;
         }

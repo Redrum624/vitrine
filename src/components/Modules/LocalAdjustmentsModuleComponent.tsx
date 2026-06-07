@@ -182,6 +182,7 @@ export const LocalAdjustmentsModuleComponent: React.FC<LocalAdjustmentsModuleCom
             {geomRow('Start Y', localGeom.startY, 0, 1, 0.01, (v) => updateGeom({ startY: v }))}
             {geomRow('End X', localGeom.endX, 0, 1, 0.01, (v) => updateGeom({ endX: v }))}
             {geomRow('End Y', localGeom.endY, 0, 1, 0.01, (v) => updateGeom({ endY: v }))}
+            {geomRow('Feather', localGeom.feather, 0.01, 1, 0.01, (v) => updateGeom({ feather: v }))}
           </>
         )}
         <label className="flex items-center gap-2 text-xs cursor-pointer" style={{ color: 'var(--gray-300)' }}>
@@ -612,6 +613,14 @@ export const LocalAdjustmentsModuleComponent: React.FC<LocalAdjustmentsModuleCom
         </div>
       ) : (
         <div className="space-y-3">
+          {/* Mask feather (also editable in the Tools > Shape section) */}
+          {(activeLayer.type === 'radial_gradient' || activeLayer.type === 'linear_gradient') && (
+            <div className="space-y-1.5 pb-2" style={{ borderBottom: '1px solid var(--border)' }}>
+              <label className="text-xs font-medium" style={{ color: 'var(--gray-300)' }}>Mask Feather</label>
+              {geomRow('Feather', localGeom.feather, 0.01, 1, 0.01, (v) => updateGeom({ feather: v }))}
+            </div>
+          )}
+
           {/* Exposure Section */}
           <div className="space-y-1.5">
             <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Exposure</label>

@@ -8,6 +8,8 @@ import { CropTransformOverlay } from '../Canvas/CropTransformOverlay';
 import { InteractiveCropHandles } from '../Canvas/InteractiveCropHandles';
 import { imageProcessingPipeline } from '../../services/ImageProcessingPipeline';
 import { CropPipelineModule } from '../../modules/CropPipelineModule';
+import { LocalAdjustmentsPipelineModule } from '../../modules/LocalAdjustmentsPipelineModule';
+import { LocalAdjustmentMaskOverlay } from '../Canvas/LocalAdjustmentMaskOverlay';
 import { notificationService } from '../../services/NotificationService';
 
 // Debug mode for canvas rendering - set to false for production
@@ -989,6 +991,30 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
                   canvasRef={canvasRef}
                 />
               </>
+              );
+            })()}
+
+            {/* Local Adjustments: drag-to-place mask overlay */}
+            {selectedTool === 'localadjustments' && (() => {
+              const la = imageProcessingPipeline.getModule<LocalAdjustmentsPipelineModule>('localadjustments');
+              if (!la) return null;
+              const p = la.getParameters();
+              const layer = p.layers.find(l => l.id === p.activeLayerId);
+              if (!layer || (layer.type !== 'radial_gradient' && layer.type !== 'linear_gradient') || !layer.geometry) {
+                return null;
+              }
+              return (
+                <LocalAdjustmentMaskOverlay
+                  canvasRef={canvasRef}
+                  viewport={viewport}
+                  layerType={layer.type}
+                  geometry={layer.geometry}
+                  onGeometryChange={(geom) => {
+                    const img = imageService.getCurrentImage();
+                    if (img) la.setLayerGeometry(layer.id, geom, img.width, img.height);
+                    triggerReprocessing();
+                  }}
+                />
               );
             })()}
           </div>
