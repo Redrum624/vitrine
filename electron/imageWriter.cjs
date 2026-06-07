@@ -304,7 +304,10 @@ async function writeImageFile(filePath, imageData, format, options = {}) {
     case 'tiff':
       img = img.tiff({
         compression: options.compression || 'lzw',
-        quality: options.quality ?? 90
+        quality: options.quality ?? 90,
+        // BigTIFF avoids the classic-TIFF 4GB / 0xFFFFFFFF offset limit on large
+        // (e.g. 16-bit, high-MP) exports — "Maximum TIFF file size exceeded".
+        bigtiff: true
       });
       break;
     case 'webp':

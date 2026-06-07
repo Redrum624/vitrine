@@ -746,25 +746,30 @@ export class ExportService {
     }
   }
 
-  // Generate output file path
+  // Generate output file path. NOTE: basenames are split on BOTH "/" and "\\" —
+  // Windows source paths use backslashes, so splitting on "/" only left the whole
+  // absolute path as the "filename" and produced e.g. "C:\\...\\Desktop/C:\\...\\img.jpg".
   private generateOutputPath(originalPath: string | undefined, options: ExportOptions): string {
+    const baseNameOf = (p: string) => p.split(/[/\\]/).pop() || p;
+    const join = (dir: string, name: string) => `${dir.replace(/[/\\]+$/, '')}/${name}`;
+
     if (options.filename) {
-      return options.outputDirectory
-        ? `${options.outputDirectory}/${options.filename}`
-        : options.filename;
+      return options.outputDirectory ? join(options.outputDirectory, baseNameOf(options.filename)) : options.filename;
     }
 
-    const baseName = originalPath ?
-      originalPath.replace(/\.[^/.]+$/, '') :
-      'exported_image';
-
+    const stem = (originalPath ? baseNameOf(originalPath) : 'exported_image').replace(/\.[^/.]+$/, '');
     const suffix = options.suffix || '_exported';
     const extension = options.format === 'jpeg' ? 'jpg' : options.format;
-    const filename = `${baseName}${suffix}.${extension}`;
+    const filename = `${stem}${suffix}.${extension}`;
 
-    return options.outputDirectory
-      ? `${options.outputDirectory}/${filename.split('/').pop()}`
-      : filename;
+    if (options.outputDirectory) return join(options.outputDirectory, filename);
+
+    // No output directory chosen → write next to the original (keep its folder).
+    if (originalPath) {
+      const dir = originalPath.slice(0, originalPath.length - baseNameOf(originalPath).length).replace(/[/\\]+$/, '');
+      return dir ? join(dir, filename) : filename;
+    }
+    return filename;
   }
 
   // Create image file (simplified - would use actual image libraries in production)
