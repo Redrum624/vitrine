@@ -178,6 +178,20 @@ export function BasicAdjustmentsModuleComponent({
 
   const selectedMask = masks.find(m => m.id === selectedMaskId) ?? null;
 
+  // Press Delete/Backspace to delete the selected mask (unless typing in a field).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+      if (!selectedMaskId) return;
+      const el = document.activeElement as HTMLElement | null;
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
+      e.preventDefault();
+      deleteMask(selectedMaskId);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selectedMaskId, deleteMask]);
+
   const renderMaskSlider = (cfg: SliderCfg, value: number, onChange: (v: number) => void) => {
     const rangeStep = cfg.rangeStep ?? cfg.step ?? 0.01;
     return (
@@ -349,27 +363,24 @@ export function BasicAdjustmentsModuleComponent({
         )}
       </div>
 
-      {/* Global Basic Adjustments */}
-      <div className="space-y-3">
-        {BASIC_ADJ_SLIDERS.map(renderSlider)}
-      </div>
-
-      {/* Per-mask "second Basic Adjustments" */}
+      {/* Per-mask Local Adjustments sliders — directly under the mask buttons, only
+          when a mask is selected; in a lighter-grey card to distinguish it from the
+          global Basic Adjustments below. */}
       {selectedMask && (
-        <div className="space-y-3 pt-3" style={{ borderTop: '2px solid var(--gray-700)' }}>
+        <div className="space-y-3 rounded-lg" style={{ backgroundColor: 'var(--gray-700)', border: '1px solid var(--border)', padding: '10px' }}>
           <div className="flex items-center justify-between">
             <label className="text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--primary-400)' }}>
               {selectedMask.type === 'radial_gradient' ? '◯' : '▤'} {selectedMask.name}
             </label>
-            <button onClick={() => deleteMask(selectedMask.id)} className="p-1 rounded" style={{ color: 'var(--red-400)' }} title="Delete mask">
+            <button onClick={() => deleteMask(selectedMask.id)} className="p-1 rounded" style={{ color: 'var(--red-400)' }} title="Delete mask (Del)">
               <Trash2 className="w-3.5 h-3.5" />
             </button>
           </div>
-          <div className="text-xs" style={{ color: 'var(--gray-500)' }}>Drag on the image to place / move this mask.</div>
+          <div className="text-xs" style={{ color: 'var(--gray-300)' }}>Drag on the image to place / move / resize / rotate this mask. Press Del to delete.</div>
           <div className="space-y-1">
             <div className="flex items-center justify-between">
-              <span className="text-xs" style={{ color: 'var(--gray-300)' }}>Feather</span>
-              <span className="text-xs font-mono" style={{ color: 'var(--gray-500)' }}>{maskFeather.toFixed(2)}</span>
+              <span className="text-xs" style={{ color: 'var(--gray-200)' }}>Feather</span>
+              <span className="text-xs font-mono" style={{ color: 'var(--gray-400)' }}>{maskFeather.toFixed(2)}</span>
             </div>
             <input type="range" min={0.01} max={1} step={0.01} value={maskFeather} className="slider w-full"
               onInput={(e) => updateMaskFeather(parseFloat((e.target as HTMLInputElement).value))}
@@ -380,6 +391,11 @@ export function BasicAdjustmentsModuleComponent({
           </div>
         </div>
       )}
+
+      {/* Global Basic Adjustments */}
+      <div className="space-y-3">
+        {BASIC_ADJ_SLIDERS.map(renderSlider)}
+      </div>
     </div>
   );
 }

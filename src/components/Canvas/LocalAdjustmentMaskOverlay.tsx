@@ -11,8 +11,6 @@ interface Props {
   onDragEnd?: () => void;
 }
 
-const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
-
 /** Distance from point P to segment AB, in the same units as the inputs. */
 function distToSeg(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
   const dx = bx - ax, dy = by - ay;
@@ -22,7 +20,7 @@ function distToSeg(px: number, py: number, ax: number, ay: number, bx: number, b
   return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
 }
 
-type RadialMode = 'create' | 'move' | 'resize';
+type RadialMode = 'create' | 'move' | 'resize' | 'rotate';
 type LinearMode = 'create' | 'move' | 'moveStart' | 'moveEnd';
 
 /**
@@ -71,10 +69,17 @@ export function LocalAdjustmentMaskOverlay({
     const TOL = 14;
     if (layerType === 'radial_gradient') {
       const cxp = sx(g.centerX), cyp = sy(g.centerY);
+      const rot = g.rotation || 0;
+      const cosR = Math.cos(rot), sinR = Math.sin(rot);
+      // Rotation handle sits above the ellipse's local top.
+      const ryGap = g.radiusY * m.scaledH + 18;
+      if (Math.hypot(px - (cxp + ryGap * sinR), py - (cyp - ryGap * cosR)) <= TOL) return 'rotate';
       if (Math.hypot(px - cxp, py - cyp) <= TOL) return 'move';
-      const dx = (px - cxp) / (g.radiusX * m.scaledW || 1);
-      const dy = (py - cyp) / (g.radiusY * m.scaledH || 1);
-      const d = Math.hypot(dx, dy);
+      // Rotate the offset into the ellipse's local frame for the resize-ring test.
+      const ox = px - cxp, oy = py - cyp;
+      const lx = (ox * cosR + oy * sinR) / (g.radiusX * m.scaledW || 1);
+      const ly = (-ox * sinR + oy * cosR) / (g.radiusY * m.scaledH || 1);
+      const d = Math.hypot(lx, ly);
       if (d >= 0.82 && d <= 1.2) return 'resize';
       if (d < 0.82) return 'move';
       return 'create';
@@ -92,22 +97,37 @@ export function LocalAdjustmentMaskOverlay({
     e.preventDefault();
     e.stopPropagation();
     const mode = hitTest(l.px, l.py, m);
-    const start = { nx: clamp01(p.nx), ny: clamp01(p.ny) };
+    // No clamping: masks may extend outside the image (still within the canvas).
+    const start = { nx: p.nx, ny: p.ny };
     const startGeom = { ...liveGeom };
     draggingRef.current = true;
     onDragStart?.();
+    let latest = startGeom;
 
     const move = (ev: MouseEvent) => {
       const cur = toNorm(ev.clientX, ev.clientY);
       if (!cur) return;
-      const cx = clamp01(cur.nx), cy = clamp01(cur.ny);
+      const cx = cur.nx, cy = cur.ny;
       const dnx = cur.nx - start.nx, dny = cur.ny - start.ny;
       let next: MaskGeometry;
       if (layerType === 'radial_gradient') {
         if (mode === 'move') {
-          next = { ...startGeom, centerX: clamp01(startGeom.centerX + dnx), centerY: clamp01(startGeom.centerY + dny) };
-        } else if (mode === 'resize') {
-          next = { ...startGeom, radiusX: Math.max(0.04, Math.abs(cx - startGeom.centerX)), radiusY: Math.max(0.04, Math.abs(cy - startGeom.centerY)) };
+          next = { ...startGeom, centerX: startGeom.centerX + dnx, centerY: startGeom.centerY + dny };
+        } else if (mode === 'rotate' || mode === 'resize') {
+          // Rotate/resize need pixel-space maths (aspect-correct).
+          const mm = metrics(); const ll = toLocal(ev.clientX, ev.clientY);
+          if (mm && ll) {
+            const cxp = mm.imgX + startGeom.centerX * mm.scaledW;
+            const cyp = mm.imgY + startGeom.centerY * mm.scaledH;
+            if (mode === 'rotate') {
+              next = { ...startGeom, rotation: Math.atan2(ll.px - cxp, -(ll.py - cyp)) };
+            } else {
+              const rot = startGeom.rotation || 0, ox = ll.px - cxp, oy = ll.py - cyp;
+              const rxp = Math.abs(ox * Math.cos(rot) + oy * Math.sin(rot));
+              const ryp = Math.abs(-ox * Math.sin(rot) + oy * Math.cos(rot));
+              next = { ...startGeom, radiusX: Math.max(0.04, rxp / mm.scaledW), radiusY: Math.max(0.04, ryp / mm.scaledH) };
+            }
+          } else next = startGeom;
         } else {
           next = { ...startGeom, type: 'radial', centerX: start.nx, centerY: start.ny, radiusX: Math.max(0.04, Math.abs(cx - start.nx)), radiusY: Math.max(0.04, Math.abs(cy - start.ny)) };
         }
@@ -117,18 +137,19 @@ export function LocalAdjustmentMaskOverlay({
         } else if (mode === 'moveEnd') {
           next = { ...startGeom, endX: cx, endY: cy };
         } else if (mode === 'move') {
-          next = { ...startGeom, startX: clamp01(startGeom.startX + dnx), startY: clamp01(startGeom.startY + dny), endX: clamp01(startGeom.endX + dnx), endY: clamp01(startGeom.endY + dny) };
+          next = { ...startGeom, startX: startGeom.startX + dnx, startY: startGeom.startY + dny, endX: startGeom.endX + dnx, endY: startGeom.endY + dny };
         } else {
           next = { ...startGeom, type: 'linear', startX: start.nx, startY: start.ny, endX: cx, endY: cy };
         }
       }
-      setLiveGeom(next);
-      onGeometryChange(next);
+      latest = next;
+      setLiveGeom(next); // instant outline; the (heavier) mask reprocess is deferred to mouseup
     };
     const up = () => {
       draggingRef.current = false;
       window.removeEventListener('mousemove', move);
       window.removeEventListener('mouseup', up);
+      onGeometryChange(latest); // commit + reprocess once, so dragging stays smooth
       onDragEnd?.();
     };
     window.addEventListener('mousemove', move);
@@ -141,7 +162,7 @@ export function LocalAdjustmentMaskOverlay({
     const m = metrics(); const l = toLocal(e.clientX, e.clientY);
     if (!m || !l) return;
     const mode = hitTest(l.px, l.py, m);
-    setCursor(mode === 'create' ? 'crosshair' : mode === 'resize' ? 'nwse-resize' : 'move');
+    setCursor(mode === 'create' ? 'crosshair' : mode === 'rotate' ? 'grab' : mode === 'resize' ? 'nwse-resize' : 'move');
   };
 
   const m = metrics();
@@ -153,13 +174,18 @@ export function LocalAdjustmentMaskOverlay({
       const cx = sx(liveGeom.centerX), cy = sy(liveGeom.centerY);
       const rx = liveGeom.radiusX * m.scaledW, ry = liveGeom.radiusY * m.scaledH;
       const inner = 1 - Math.min(0.95, liveGeom.feather);
+      const rotDeg = ((liveGeom.rotation || 0) * 180) / Math.PI;
       outline = (
-        <>
+        // Everything in the ellipse's local frame, rotated as a group about the centre.
+        <g transform={`rotate(${rotDeg} ${cx} ${cy})`}>
           <ellipse cx={cx} cy={cy} rx={rx} ry={ry} fill="none" stroke="rgba(255,255,255,0.9)" strokeWidth={1.5} />
           <ellipse cx={cx} cy={cy} rx={rx * inner} ry={ry * inner} fill="none" stroke="rgba(255,255,255,0.35)" strokeWidth={1} strokeDasharray="4 3" />
           <circle cx={cx} cy={cy} r={4} fill="rgba(255,255,255,0.9)" />
           <circle cx={cx + rx} cy={cy} r={4} fill="rgba(255,255,255,0.8)" />
-        </>
+          {/* rotation handle (above the local top) */}
+          <line x1={cx} y1={cy - ry} x2={cx} y2={cy - ry - 18} stroke="rgba(255,255,255,0.6)" strokeWidth={1} />
+          <circle cx={cx} cy={cy - ry - 18} r={4} fill="rgba(120,200,255,0.95)" />
+        </g>
       );
     } else {
       const x1 = sx(liveGeom.startX), y1 = sy(liveGeom.startY);

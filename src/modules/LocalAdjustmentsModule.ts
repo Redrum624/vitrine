@@ -24,6 +24,7 @@ export interface MaskGeometry {
   endX: number; endY: number;       // linear end
   feather: number;                  // 0..1 edge softness
   invert: boolean;                  // swap inside/outside
+  rotation?: number;                // radial ellipse rotation, radians (default 0)
 }
 
 export interface LocalAdjustmentParams {
@@ -175,10 +176,14 @@ export class LocalAdjustmentsModule {
       const rx = Math.max(1e-3, geom.radiusX) * width;
       const ry = Math.max(1e-3, geom.radiusY) * height;
       const feather = Math.max(0.001, Math.min(0.999, geom.feather));
+      const rot = geom.rotation || 0;
+      const cosR = Math.cos(rot), sinR = Math.sin(rot);
       for (let y = 0; y < height; y++) {
         for (let x = 0; x < width; x++) {
-          const dx = (x - cx) / rx;
-          const dy = (y - cy) / ry;
+          // Rotate the offset into the ellipse's local frame before normalising.
+          const ox = x - cx, oy = y - cy;
+          const dx = (ox * cosR + oy * sinR) / rx;
+          const dy = (-ox * sinR + oy * cosR) / ry;
           const d = Math.sqrt(dx * dx + dy * dy);
           // 1 inside, smoothly fading to 0 across the feather band at the edge.
           let m = 1 - smoothStep(1 - feather, 1, d);

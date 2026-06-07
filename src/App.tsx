@@ -891,6 +891,30 @@ function App() {
     );
   }, []);
 
+  // Global: mouse-wheel over any range slider adjusts it one step per tick. Sets the
+  // value via the native setter + dispatches input/change so React's onChange fires.
+  useEffect(() => {
+    const onWheel = (e: WheelEvent) => {
+      const input = e.target as HTMLInputElement | null;
+      if (!input || input.tagName !== 'INPUT' || input.type !== 'range' || input.disabled) return;
+      e.preventDefault();
+      const step = parseFloat(input.step) || 1;
+      const min = parseFloat(input.min);
+      const max = parseFloat(input.max);
+      const decimals = (input.step.split('.')[1] || '').length;
+      let val = (parseFloat(input.value) || 0) + (e.deltaY < 0 ? step : -step);
+      if (!Number.isNaN(min)) val = Math.max(min, val);
+      if (!Number.isNaN(max)) val = Math.min(max, val);
+      const next = decimals ? val.toFixed(decimals) : String(val);
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      setter?.call(input, next);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+    window.addEventListener('wheel', onWheel, { passive: false });
+    return () => window.removeEventListener('wheel', onWheel);
+  }, []);
+
   return (
     <ErrorBoundary>
       <div className="h-screen flex flex-col bg-dark-900 text-dark-300">

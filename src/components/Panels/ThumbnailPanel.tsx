@@ -125,13 +125,31 @@ export function ThumbnailPanel({
     }
   }, []); // Empty dependencies - function is stable
 
-  // Load visible thumbnails
+  // Load only the thumbnails currently visible (+ a one-viewport-width margin so a
+  // bit is preloaded ahead). The rest load as they scroll into view. Loading every
+  // thumbnail at once floods the main process (RAW decode is slow) and many never
+  // render — which is exactly the "plenty not loading" symptom.
+  const loadVisibleThumbnails = useCallback(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    const cRect = container.getBoundingClientRect();
+    const margin = cRect.width;
+    container.querySelectorAll('[data-image-id]').forEach((el) => {
+      const r = el.getBoundingClientRect();
+      if (r.left < cRect.right + margin && r.right > cRect.left - margin) {
+        const id = el.getAttribute('data-image-id');
+        const image = images.find(img => img.id === id);
+        if (image) loadThumbnail(image);
+      }
+    });
+  }, [images, loadThumbnail]);
+
+  // Lazy-load the visible thumbnails on mount / when the image list changes.
   useEffect(() => {
     if (!visible || images.length === 0) return;
-
-    // Load all thumbnails — they're small (300x200 JPEG) and load via IPC
-    images.forEach(loadThumbnail);
-  }, [images, visible, loadThumbnail]);
+    const raf = requestAnimationFrame(() => loadVisibleThumbnails());
+    return () => cancelAnimationFrame(raf);
+  }, [images, visible, loadVisibleThumbnails]);
 
   // Scroll to selected image
   useEffect(() => {
@@ -220,28 +238,7 @@ export function ThumbnailPanel({
     loadThumbnail(image);
   };
 
-  const handleScroll = () => {
-    if (!scrollContainerRef.current) return;
-
-    // Load thumbnails for visible images
-    const container = scrollContainerRef.current;
-    const thumbnailElements = container.querySelectorAll('[data-image-id]');
-
-    thumbnailElements.forEach((element) => {
-      const rect = element.getBoundingClientRect();
-      const containerRect = container.getBoundingClientRect();
-
-      // Check if thumbnail is visible
-      if (rect.left < containerRect.right && rect.right > containerRect.left) {
-        const imageId = element.getAttribute('data-image-id');
-        const image = images.find(img => img.id === imageId);
-        if (image) {
-          // Trigger thumbnail load (will be a no-op if already loaded/loading)
-          loadThumbnail(image);
-        }
-      }
-    });
-  };
+  const handleScroll = () => loadVisibleThumbnails();
 
   if (!visible || images.length === 0) {
     return null;
