@@ -13,6 +13,7 @@
 
 import { logger } from '../utils/Logger';
 import { rgbToHsl, hslToRgb } from './utils/ColorUtils';
+import { webGLImageProcessor } from '../services/WebGLImageProcessor';
 
 /**
  * A single control point on a curve
@@ -321,6 +322,11 @@ export class HueCurvesModule {
     // Rebuild LUTs if needed
     this.buildLUTs();
 
+    // GPU fast-path (RGBA) when available + verified; else the CPU loop below.
+    if (channels === 4 && input.length === width * height * 4 && webGLImageProcessor.isAvailable()) {
+      return webGLImageProcessor.applyHueCurves(input, width, height, this.luts, this.params.masterBlend);
+    }
+
     const pixelCount = width * height;
     const output = new Float32Array(input.length);
     const blend = this.params.masterBlend;
@@ -332,8 +338,12 @@ export class HueCurvesModule {
       const b = input[offset + 2];
       const a = channels === 4 ? input[offset + 3] : 1;
 
-      // Convert to HSL
+      // Convert to HSL and normalize to [0,1]. rgbToHsl returns h in 0-360 and
+      // s/l in 0-100, but the curves + sampleLUT all operate in [0,1] — feeding the
+      // raw 0-360 hue in indexed the LUT out of bounds (NaN). Scale back before
+      // hslToRgb below.
       let [h, s, l] = rgbToHsl(r, g, b);
+      h /= 360; s /= 100; l /= 100;
 
       // Apply curves
 
@@ -366,8 +376,8 @@ export class HueCurvesModule {
         s = Math.min(1, s * (satMult * 2));
       }
 
-      // Convert back to RGB
-      const [newR, newG, newB] = hslToRgb(h, s, l);
+      // Convert back to RGB (hslToRgb expects h 0-360, s/l 0-100).
+      const [newR, newG, newB] = hslToRgb(h * 360, s * 100, l * 100);
 
       // Blend with original
       output[offset] = r + (newR - r) * blend;

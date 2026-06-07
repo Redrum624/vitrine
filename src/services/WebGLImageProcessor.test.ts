@@ -11,6 +11,7 @@ import { BasicAdjustmentsModule } from '../modules/BasicAdjustmentsModule';
 import { ColorBalanceModule } from '../modules/ColorBalanceModule';
 import { ToneCurveModule } from '../modules/ToneCurveModule';
 import { LensCorrectionsModule } from '../modules/LensCorrectionsModule';
+import { HueCurvesModule } from '../modules/HueCurvesModule';
 
 function img(pixels: number[][]): Float32Array {
   const a = new Float32Array(pixels.length * 4);
@@ -130,6 +131,34 @@ describe('GPU tone-curve CPU reference matches ToneCurveModule', () => {
       m.lookupTable, m.rgbLookupTables.red, m.rgbLookupTables.green, m.rgbLookupTables.blue,
       mod.getParams().preserveColors,
     );
+    let maxDiff = 0;
+    for (let i = 0; i < expected.length; i++) maxDiff = Math.max(maxDiff, Math.abs(expected[i] - ref[i]));
+    expect(maxDiff).toBeLessThan(1e-5);
+  });
+});
+
+describe('GPU hue-curves CPU reference matches HueCurvesModule', () => {
+  const w = 5, h = 4;
+  const src = new Float32Array(w * h * 4);
+  for (let i = 0; i < w * h; i++) {
+    src[i * 4] = (i % 5) / 5; src[i * 4 + 1] = ((i * 3) % 7) / 7;
+    src[i * 4 + 2] = ((i * 2) % 4) / 4; src[i * 4 + 3] = 1;
+  }
+
+  test('parity (curves enabled, post HSL-scale fix)', () => {
+    const mod = new HueCurvesModule();
+    const p0 = mod.getParams();
+    mod.setParams({
+      hueVsSat: { ...p0.hueVsSat, enabled: true },
+      hueVsLum: { ...p0.hueVsLum, enabled: true },
+      satVsSat: { ...p0.satVsSat, enabled: true },
+      masterBlend: 0.8,
+    });
+    const expected = mod.process(new Float32Array(src), { width: w, height: h, channels: 4 });
+    const m = mod as unknown as {
+      luts: { hueVsHue: Float32Array | null; hueVsSat: Float32Array | null; hueVsLum: Float32Array | null; satVsSat: Float32Array | null; lumVsSat: Float32Array | null };
+    };
+    const ref = webGLImageProcessor.hueCurvesCPU(new Float32Array(src), w, h, m.luts, mod.getParams().masterBlend);
     let maxDiff = 0;
     for (let i = 0; i < expected.length; i++) maxDiff = Math.max(maxDiff, Math.abs(expected[i] - ref[i]));
     expect(maxDiff).toBeLessThan(1e-5);

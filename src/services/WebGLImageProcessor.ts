@@ -29,6 +29,11 @@ export interface BasicAdjustmentsParams {
   shadows: number;
 }
 
+type HueCurveLuts = {
+  hueVsHue: Float32Array | null; hueVsSat: Float32Array | null; hueVsLum: Float32Array | null;
+  satVsSat: Float32Array | null; lumVsSat: Float32Array | null;
+};
+
 const VERT_SRC = `#version 300 es
 in vec2 a_pos;
 out vec2 v_uv;
@@ -212,6 +217,57 @@ void main() {
   outColor = vec4(src.rgb * factor, src.a);
 }`;
 
+// Hue Curves: 5 curves (hue->hue/sat/lum, sat->sat, lum->sat) as 256-entry uniform
+// LUTs with linear interpolation. Mirrors HueCurvesModule (post HSL-scale fix).
+const HUECURVES_FRAG_SRC = `#version 300 es
+precision highp float;
+uniform sampler2D u_image;
+uniform float u_hh[256], u_hs[256], u_hl[256], u_ss[256], u_ls[256];
+uniform float u_onHH, u_onHS, u_onHL, u_onSS, u_onLS, u_blend;
+in vec2 v_uv;
+out vec4 outColor;
+vec3 rgb2hsl(vec3 c) {
+  float mx = max(c.r, max(c.g, c.b)), mn = min(c.r, min(c.g, c.b));
+  float diff = mx - mn, sum = mx + mn, h = 0.0, l = sum / 2.0, s = 0.0;
+  if (diff != 0.0) {
+    s = l > 0.5 ? diff / (2.0 - sum) : diff / sum;
+    if (mx == c.r) h = (c.g - c.b) / diff + (c.g < c.b ? 6.0 : 0.0);
+    else if (mx == c.g) h = (c.b - c.r) / diff + 2.0;
+    else h = (c.r - c.g) / diff + 4.0;
+    h /= 6.0;
+  }
+  return vec3(h * 360.0, s * 100.0, l * 100.0);
+}
+vec3 hsl2rgb(float h, float s, float l) {
+  h = mod(mod(h, 360.0) + 360.0, 360.0);
+  s = clamp(s, 0.0, 100.0) / 100.0;
+  l = clamp(l, 0.0, 100.0) / 100.0;
+  float c = (1.0 - abs(2.0 * l - 1.0)) * s;
+  float x = c * (1.0 - abs(mod(h / 60.0, 2.0) - 1.0));
+  float m = l - c / 2.0;
+  vec3 rgb = h < 60.0 ? vec3(c, x, 0.0) : h < 120.0 ? vec3(x, c, 0.0) : h < 180.0 ? vec3(0.0, c, x)
+           : h < 240.0 ? vec3(0.0, x, c) : h < 300.0 ? vec3(x, 0.0, c) : vec3(c, 0.0, x);
+  return rgb + m;
+}
+float samp(float arr[256], float x) {
+  float idx = clamp(x, 0.0, 1.0) * 255.0;
+  int lo = int(floor(idx));
+  int hi = min(lo + 1, 255);
+  return mix(arr[lo], arr[hi], idx - float(lo));
+}
+void main() {
+  vec4 src = texture(u_image, v_uv);
+  vec3 hsl = rgb2hsl(src.rgb);
+  float h = hsl.x / 360.0, s = hsl.y / 100.0, l = hsl.z / 100.0;
+  if (u_onHH > 0.5) { float sh = samp(u_hh, h) - 0.5; h = mod(h + sh + 1.0, 1.0); }
+  if (u_onHS > 0.5) s = min(1.0, s * (samp(u_hs, h) * 2.0));
+  if (u_onHL > 0.5) l = min(1.0, l * (samp(u_hl, h) * 2.0));
+  if (u_onSS > 0.5) s = samp(u_ss, s);
+  if (u_onLS > 0.5) s = min(1.0, s * (samp(u_ls, l) * 2.0));
+  vec3 nrgb = hsl2rgb(h * 360.0, s * 100.0, l * 100.0);
+  outColor = vec4(src.rgb + (nrgb - src.rgb) * u_blend, src.a);
+}`;
+
 // Faithful GLSL port of BasicAdjustmentsModule.process (see that file for intent).
 const BASICADJ_FRAG_SRC = `#version 300 es
 precision highp float;
@@ -315,6 +371,8 @@ class WebGLImageProcessor {
   private toneCurveVerified: boolean | null = null;
   private vignetteProgram: WebGLProgram | null = null;
   private vignetteVerified: boolean | null = null;
+  private hueCurvesProgram: WebGLProgram | null = null;
+  private hueCurvesVerified: boolean | null = null;
   private vao: WebGLVertexArrayObject | null = null;
   private initTried = false;
 
@@ -356,6 +414,10 @@ class WebGLImageProcessor {
       this.colorBalanceProgram = colorBalanceProgram;
       this.toneCurveProgram = toneCurveProgram;
       this.vignetteProgram = vignetteProgram;
+      // Optional program: the hue-curves shader uses array uniforms some drivers may
+      // reject. A compile failure must NOT disable the other (required) GPU ops, so
+      // build it here without gating the context on it.
+      this.hueCurvesProgram = this.buildProgram(gl, VERT_SRC, HUECURVES_FRAG_SRC);
       this.vao = vao;
 
       // Self-check: only trust the GPU basic-adjustments path if it matches the CPU
@@ -731,6 +793,84 @@ class WebGLImageProcessor {
       }
     }
     return result;
+  }
+
+  /** Apply Hue Curves (5 curves via 256-entry LUTs). GPU when verified, else CPU. */
+  applyHueCurves(data: Float32Array, width: number, height: number, luts: HueCurveLuts, blend: number): Float32Array {
+    const gl = this.ensureContext();
+    if (gl && this.hueCurvesProgram && this.vao && this.verifyHueCurves()) {
+      try { return this.runHueCurvesGPU(gl, data, width, height, luts, blend); }
+      catch (e) { logger.warn('[GPU] hue-curves failed — CPU:', e instanceof Error ? e.message : String(e)); }
+    }
+    return this.hueCurvesCPU(data, width, height, luts, blend);
+  }
+
+  private runHueCurvesGPU(
+    gl: WebGL2RenderingContext, data: Float32Array, width: number, height: number, luts: HueCurveLuts, blend: number
+  ): Float32Array {
+    void gl;
+    return this.runPass(this.hueCurvesProgram!, data, width, height, (g, p) => {
+      const set = (arr: Float32Array | null, name: string, flag: string) => {
+        g.uniform1f(g.getUniformLocation(p, flag), arr ? 1 : 0);
+        if (arr) g.uniform1fv(g.getUniformLocation(p, name), arr);
+      };
+      set(luts.hueVsHue, 'u_hh', 'u_onHH');
+      set(luts.hueVsSat, 'u_hs', 'u_onHS');
+      set(luts.hueVsLum, 'u_hl', 'u_onHL');
+      set(luts.satVsSat, 'u_ss', 'u_onSS');
+      set(luts.lumVsSat, 'u_ls', 'u_onLS');
+      g.uniform1f(g.getUniformLocation(p, 'u_blend'), blend);
+    });
+  }
+
+  private verifyHueCurves(): boolean {
+    if (this.hueCurvesVerified !== null) return this.hueCurvesVerified;
+    let ok = false;
+    try {
+      const mk = (fn: (x: number) => number) => { const a = new Float32Array(256); for (let i = 0; i < 256; i++) a[i] = fn(i / 255); return a; };
+      const luts: HueCurveLuts = {
+        hueVsHue: mk(x => Math.min(1, Math.max(0, 0.5 + 0.1 * Math.sin(x * 6.2831)))),
+        hueVsSat: mk(x => 0.5 + 0.2 * x),
+        hueVsLum: null,
+        satVsSat: mk(x => x * x),
+        lumVsSat: null,
+      };
+      const { data, w, h } = CB_SELFTEST;
+      const a = this.runHueCurvesGPU(this.gl!, data, w, h, luts, 0.8);
+      const c = this.hueCurvesCPU(data, w, h, luts, 0.8);
+      let maxDiff = 0;
+      for (let i = 0; i < c.length; i++) maxDiff = Math.max(maxDiff, Math.abs(a[i] - c[i]));
+      ok = maxDiff < 0.02;
+      logger.info(`[GPU] hue-curves self-check maxDiff=${maxDiff.toExponential(2)} -> ${ok ? 'GPU' : 'CPU fallback'}`);
+    } catch (e) { logger.warn('[GPU] hue-curves self-check error:', e instanceof Error ? e.message : String(e)); }
+    this.hueCurvesVerified = ok;
+    return ok;
+  }
+
+  /** CPU reference — a replica of HueCurvesModule.process (post HSL-scale fix). */
+  hueCurvesCPU(data: Float32Array, _width: number, _height: number, luts: HueCurveLuts, blend: number): Float32Array {
+    const out = new Float32Array(data);
+    const samp = (lut: Float32Array, x: number) => {
+      const idx = Math.max(0, Math.min(1, x)) * 255;
+      const lo = Math.floor(idx), hi = Math.min(lo + 1, 255);
+      const t = idx - lo;
+      return lut[lo] * (1 - t) + lut[hi] * t;
+    };
+    for (let i = 0; i < out.length; i += 4) {
+      const r = out[i], g = out[i + 1], b = out[i + 2];
+      const hsl = rgbToHsl(r, g, b);
+      let h = hsl[0] / 360, s = hsl[1] / 100, l = hsl[2] / 100;
+      if (luts.hueVsHue) { const sh = samp(luts.hueVsHue, h) - 0.5; h = (h + sh + 1) % 1; }
+      if (luts.hueVsSat) s = Math.min(1, s * (samp(luts.hueVsSat, h) * 2));
+      if (luts.hueVsLum) l = Math.min(1, l * (samp(luts.hueVsLum, h) * 2));
+      if (luts.satVsSat) s = samp(luts.satVsSat, s);
+      if (luts.lumVsSat) s = Math.min(1, s * (samp(luts.lumVsSat, l) * 2));
+      const [nr, ng, nb] = hslToRgb(h * 360, s * 100, l * 100);
+      out[i] = r + (nr - r) * blend;
+      out[i + 1] = g + (ng - g) * blend;
+      out[i + 2] = b + (nb - b) * blend;
+    }
+    return out;
   }
 
   /** Generic single-pass shader run: source texture → program → float readback. */
