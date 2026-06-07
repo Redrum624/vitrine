@@ -188,34 +188,38 @@ The application processes images through 10 modules in this order:
 - Complementary colors (teal/orange, blue/yellow) create depth
 - Match color temperatures between shadow/highlight for natural look
 
-### 8. Shadows & Highlights
+### 8. Highlights & Shadows (in Basic Adjustments)
 **Purpose:** Selective tonal recovery
 **When to use:** For high-dynamic-range scenes
 
-**Controls:**
-- **Shadow Recovery:** 0-100% (lift shadows)
-- **Highlight Recovery:** 0-100% (compress highlights)
-- **Radius:** How far the effect extends
-- **Amount:** Strength of the effect
+These now live as the **Highlights** and **Shadows** sliders inside **Basic
+Adjustments** (the old standalone Shadows & Highlights module was removed). Both
+are centred at 0 and luminance-masked, so they target the right tones:
+- **Highlights:** negative recovers/compresses bright areas, positive brightens them
+- **Shadows:** positive lifts shadows, negative deepens them
 
 **Tips:**
-- Use for backlit subjects (silhouettes)
-- Recover detail in bright skies
-- Don't overdo it - looks unnatural above 70%
+- Pull Highlights negative to recover detail in bright skies
+- Push Shadows positive for backlit subjects (silhouettes)
+- Keep them subtle for a natural look
 
-### 9. Local Adjustments
+### 9. Local Adjustments (in Basic Adjustments)
 **Purpose:** Selective edits to specific areas
 **When to use:** For targeted corrections
 
-**Tools:**
-- **Graduated Filter:** Linear gradient for skies/foregrounds
-- **Radial Filter:** Circular vignettes and spotlights
-- **Adjustment Brush:** Paint adjustments onto specific areas
+At the top of **Basic Adjustments**, click **Circle** or **Gradient** to add a mask:
+- **Circle (radial):** an ellipse for vignettes, spotlights, or subject isolation
+- **Gradient (linear):** a graduated filter for skies/foregrounds
+
+**Drag on the image** to place the mask; drag its centre to move it or its edge to
+resize (drag an endpoint to move a gradient). Each mask gets its **own Basic
+Adjustments** panel plus a **Feather** slider, so you can apply a different look to
+that area only. Switch masks with the chips, and remove one with the trash icon.
 
 **Tips:**
-- Use graduated filter for dramatic skies
-- Radial filter for subject isolation
-- Brush for precise dodging and burning
+- Gradient masks for dramatic skies
+- Circle masks for subject isolation / local dodging & burning
+- Raise Feather for a softer, more natural transition
 
 ### 10. Noise Reduction
 **Purpose:** Remove digital noise from high-ISO images
@@ -248,7 +252,7 @@ The application processes images through 10 modules in this order:
 
 Every **Auto** button — the per-module ones and the **Auto All** button in the toolbar — now uses *your personal style profile*, extracted from 200 of your graded photos at `~\Pictures\Portfolio-Sep 22, 2019 – Feb 6, 2025`. Instead of aiming at generic "neutral" targets, the Auto functions aim at the way *you* actually grade: darker, warmer, with more contrast and less saturation than a textbook neutral.
 
-The profile is split into 5 **buckets** — `low_light`, `high_key`, `warm`, `cool`, and `standard`. **Auto All** automatically picks the right bucket for the current image based on its brightness and white balance, then adjusts Exposure, White Balance, Basic Adjustments, Tone Curve, Color Balance, and Shadows/Highlights in one click. The bucket it chose is written to the log (e.g. `AutoExposure[warm]: …`) so you can tell which profile fired.
+The profile is split into 5 **buckets** — `low_light`, `high_key`, `warm`, `cool`, and `standard`. **Auto All** automatically picks the right bucket for the current image based on its brightness and white balance, then adjusts Exposure, White Balance, Basic Adjustments (including Highlights/Shadows), Tone Curve, and Color Balance in one click. The bucket it chose is written to the log (e.g. `AutoExposure[warm]: …`) so you can tell which profile fired.
 
 **To regenerate the profile after grading more photos**, re-run the extractor:
 
@@ -403,9 +407,10 @@ python scripts/extract_style_profile.py \
 
 **Problem:** Detail lost in bright or dark areas
 **Solutions:**
-- Use Shadows/Highlights module
-- Reduce Highlights slider (negative)
-- Increase Shadows slider (positive)
+- Use the Highlights / Shadows sliders in Basic Adjustments
+- Reduce Highlights slider (negative) to recover bright areas
+- Increase Shadows slider (positive) to lift dark areas
+- Add a Local Adjustment mask (Circle/Gradient) to target one area
 - Check histogram for clipping
 - Use bracketed exposure if available
 

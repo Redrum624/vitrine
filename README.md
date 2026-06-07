@@ -1,202 +1,123 @@
 # Photo Editor Pro 🎨
 
-A **professional-grade RAW photo editing application** built with modern web technologies, featuring advanced processing capabilities, GPU acceleration, and AI-powered enhancements.
+A **desktop RAW photo editor** built with Electron + React, featuring a WebGL2/CPU
+processing pipeline, native LibRaw demosaicing, colour-managed export, and
+non-destructive local adjustments.
 
-![Status](https://img.shields.io/badge/Status-85%25_Complete-yellow)
-![TypeScript](https://img.shields.io/badge/TypeScript-0_Errors-blue)
-![Modules](https://img.shields.io/badge/Modules-9_Operational-success)
-![Build](https://img.shields.io/badge/Build-Passing-brightgreen)
+![Version](https://img.shields.io/badge/Version-1.0.0-blue)
+![TypeScript](https://img.shields.io/badge/TypeScript-0_errors-blue)
+![Tests](https://img.shields.io/badge/Tests-777_passing-brightgreen)
+![Lint](https://img.shields.io/badge/Lint-clean-brightgreen)
 
-> **📌 Current Status:** 85% Complete - Ready for beta testing. All features implemented, documentation complete. Needs functional testing.
+## 🌟 Features
 
-## 🌟 **Key Features**
+### RAW processing
+- **15+ RAW formats** — Canon CR2/CR3, Nikon NEF, Sony ARW, Olympus ORF, Adobe DNG,
+  Panasonic RW2, Pentax PEF, and more.
+- **True Bayer demosaic** in the Electron main process via native LibRaw
+  (`dcraw_emu`), with `libraw-wasm` and embedded-JPEG fallbacks.
 
-### **Professional RAW Processing**
-- **15+ RAW Formats**: Canon CR2/CR3, Nikon NEF, Sony ARW, Olympus ORF, Adobe DNG, and more
-- **Advanced Demosaicing**: VNG, AHD, LMMSE algorithms for superior image quality
-- **Camera Profiles**: ICC profiles for Canon, Nikon, Sony, Fujifilm, Olympus
-- **Auto-Adjustment**: Intelligent parameter detection based on camera and shooting conditions
+### Editing modules
+- **Crop & Transform** — aspect ratios, rotation/straighten, flip.
+- **Basic Adjustments** — exposure, contrast, highlights, brightness, black point,
+  shadows, dehaze, saturation, vibrance. *(The old standalone Shadows & Highlights
+  module was folded into Highlights/Shadows sliders here.)*
+- **Local Adjustments** — radial (circle/oval) and linear gradient masks created
+  from the top of Basic Adjustments. **Drag on the canvas to place / move / resize**
+  a mask; each mask gets its own Basic-Adjustments panel plus a feather control.
+- **White Balance**, **Tone Curve** (with auto-levels), **Noise Reduction**,
+  **Color Balance**, **Lens Corrections**.
+- **Copy / Paste Style** — transfer a colour grade between images via per-channel
+  histogram matching.
+- **Auto adjustments** — one-click *Auto All* driven by a per-image style profile,
+  plus Auto Levels / Contrast / Color.
+- Non-destructive: adjustments are reversible and re-processed live.
 
-### **GPU-Accelerated Performance**
-- **RTX 3080 Optimized**: Dedicated 12GB VRAM utilization with CUDA acceleration
-- **WebGL2 Processing**: High-performance compute shaders for real-time editing
-- **Tensor Core AI**: Advanced noise reduction and intelligent enhancement
-- **Multi-threaded Pipeline**: Parallel processing for maximum throughput
+### Export & workflow
+- **Export** to JPEG / PNG / TIFF / WebP, 8- and 16-bit, in **sRGB or wide-gamut**
+  (Adobe RGB / ProPhoto / Rec.2020) using generated ICC profiles, with **EXIF/XMP**
+  metadata embedding.
+- Filmstrip with star ratings and filtering, **batch processing**, presets,
+  watermarking, web-gallery generation, and print soft-proofing.
 
-### **Advanced Editing Capabilities**
-- **9 Professional Modules**: Crop, Transform, Lens Corrections, White Balance, Basic Adjustments, Tone Curves, Color Balance, Shadows & Highlights, Local Adjustments
-- **Auto-Enhancement**: Auto-straighten, auto-levels, auto-detect vignetting
-- **Local Adjustments**: Brush tool, gradients, parametric masks, layer system
-- **Non-Destructive Editing**: All adjustments reversible with smart caching
+## 🚀 Quick Start
 
-### **Professional Workflow**
-- **Print Module**: Color-managed printing with soft proofing
-- **Web Gallery**: Automated gallery generation with professional layouts
-- **Batch Processing**: Queue-based processing for entire photo shoots
-- **Preset System**: Built-in and custom presets with import/export
+### Prerequisites
+- Node.js 18+ and a package manager (the repo is set up for **pnpm**; npm also works)
+- Windows, macOS, or Linux · 8 GB+ RAM (16 GB+ recommended for large RAW files)
 
-## 🚀 **Quick Start**
-
-### **Prerequisites**
-- Node.js 16+ and npm
-- Windows, macOS, or Linux
-- 8GB+ RAM (16GB+ recommended for large RAW files)
-- Modern GPU (RTX 3080 recommended for maximum performance)
-
-### **Installation**
+### Install & run (development)
 ```bash
-# Clone the repository
-git clone https://github.com/your-username/photo_app.git
+git clone https://github.com/Redrum624/photo_app.git
 cd photo_app
-
-# Install dependencies
-npm install
-
-# Start development server
-npm run dev
-
-# Launch Electron app
-npm run electron-dev
+pnpm install            # or: npm install
+pnpm run electron-dev   # Vite dev server + Electron
 ```
 
-### **Building for Production**
+### Build a Windows release
 ```bash
-# Build web application
-npm run build
-
-# Build Electron app
-npm run electron-build
-
-# Build for all platforms
-npm run electron-dist
+npm run build:win       # clean dist -> tsc + vite build -> NSIS installer + portable (x64)
+# Output: release/Photo Editor Pro Setup 1.0.0.exe  and  release/Photo Editor Pro 1.0.0.exe
+npm run build:win:dir   # fast unpacked build (no installer)
+npm run dist            # electron-builder for the current platform
 ```
 
-## 🏗️ **Architecture Overview**
+## 🏗️ Architecture
 
-### **Technology Stack**
-- **Frontend**: React 18 + TypeScript + Vite
-- **Desktop**: Electron with Node.js integration
-- **Processing**: WebAssembly (LibRaw) + WebGL2 + Web Workers
-- **UI**: Tailwind CSS with custom components
-- **Build**: Vite + ESLint + TypeScript compiler
+### Technology stack
+- **Desktop**: Electron 39
+- **Frontend**: React 19 + TypeScript 5.9 + Vite 7 + Zustand 5
+- **Styling**: Tailwind CSS 4
+- **Processing**: WebGL2 GPU shaders + CPU pipeline + Web Workers; native LibRaw
+  (`dcraw_emu`) and `libraw-wasm` for RAW; **sharp** for export encode/ICC/metadata
+- **Build**: Vite + `tsc` + ESLint; packaging via electron-builder
 
-### **Core Services**
-```typescript
-├── ImageProcessingPipeline      // Main processing orchestration
-├── LibRawService               // Professional RAW processing
-├── GPUAccelerationService      // WebGL2/CUDA optimization
-├── AutoRawAdjustmentService    // Intelligent parameter detection
-├── ExportService              // Multi-format export with quality settings
-├── PresetService              // Preset management and sharing
-└── BatchProcessingService     // Queue-based batch operations
+### Core services
+```
+ImageProcessingPipeline   // module orchestration
+rawDecoder.cjs            // main-process RAW demosaic (native -> wasm -> embedded JPEG)
+imageWriter.cjs           // export encode (8/16-bit, ICC, EXIF/XMP) via sharp
+ExportService             // format/quality/colour-space + wide-gamut conversion
+StyleAnalysisService      // Copy/Paste Style (histogram matching)
+AutoAdjustService         // Auto All driven by a user-style profile
+LocalAdjustmentsModule    // radial/linear masks + per-mask adjustments
 ```
 
-### **Performance Specifications**
-| Image Size | Processing Time | GPU Utilization |
-|------------|----------------|----------------|
-| 12MP RAW   | < 200ms        | 90-95%         |
-| 24MP RAW   | < 400ms        | 90-95%         |
-| 48MP RAW   | < 800ms        | 90-95%         |
-| 60MP RAW   | < 1000ms       | 90-95%         |
-| 80MP RAW   | < 1300ms       | 90-95%         |
+## 🧪 Development
 
-## 🎯 **Current Status: Integration Complete**
-
-### **✅ Latest Updates (2025-09-30)**
-- **9 Modules Integrated**: All modules operational with 0 TypeScript errors
-- **Critical Bug Fixed**: Module processing bug resolved (commit bc652cc)
-- **Auto-Enhancement**: Auto-straighten, auto-levels, auto-detect vignetting
-- **Ready for Testing**: Comprehensive testing phase ready to begin
-
-### **📊 Technical Metrics**
-- **TypeScript Errors**: 0
-- **Runtime Errors**: 0
-- **Modules**: 9 UI modules (10 in pipeline)
-- **Lines Added**: ~2,800 in this session
-- **Documentation**: 4 core files + 5 archived
-- **Git Commits**: 18 detailed commits
-
-### **🎨 Module Status**
-All 9 modules fully operational:
-1. ✅ Crop (9 aspect ratios, uncrop, auto-crop)
-2. ✅ Transform (rotation, auto-straighten, flip)
-3. ✅ Lens Corrections (vignetting auto-detect, distortion, CA)
-4. ✅ Basic Adjustments (exposure, contrast, brightness, saturation)
-5. ✅ White Balance (temperature, tint, presets)
-6. ✅ Tone Curve (custom curves, auto-levels button)
-7. ✅ Color Balance (3-range, 8-color HSL)
-8. ✅ Shadows & Highlights (tonal recovery)
-9. ✅ Local Adjustments (layers, brush, gradients)
-
-### **📋 Next Steps**
-- **Testing Phase**: Comprehensive testing with real images (see [TODO.md](TODO.md))
-- **Bug Fixes**: Address any issues found during testing
-- **Documentation**: Create user guides and tutorials
-- **Performance**: Optimize if needed based on benchmarks
-
-## 📚 **Documentation**
-
-### **📌 Essential Documents**
-- **[MASTER_STATUS.md](MASTER_STATUS.md)** - Current project status and consolidated information
-- **[TODO.md](TODO.md)** - Comprehensive task list with priorities (150+ tasks)
-- **[TESTING_CHECKLIST.md](TESTING_CHECKLIST.md)** - Systematic testing guide (200+ test items)
-- **[BUGFIX_SUMMARY.md](BUGFIX_SUMMARY.md)** - Critical bug analysis and resolution
-
-### **📖 Additional Documentation**
-- [Technical Architecture](docs/TECHNICAL_ARCHITECTURE.md) - System design and architecture
-- [Performance Optimization](docs/PERFORMANCE_OPTIMIZATION.md) - GPU optimization guide
-- [RAW Processing](docs/RAW_PROCESSING.md) - LibRaw integration details
-- [Archived Docs](docs/archive/) - Historical documentation from development
-
-## 🧪 **Testing & Development**
-
-### **Development Commands**
 ```bash
-npm run dev              # Start development server
-npm run electron-dev     # Launch Electron app in development
-npm run build           # Build for production
-npm run lint            # Run ESLint
-npm run typecheck       # TypeScript compilation check
-npm run test            # Run test suite
+npm run dev          # dev server (vite) + Electron via scripts/dev.cjs
+npm run build        # tsc + vite build
+npm run typecheck    # tsc --noEmit
+npm run lint         # eslint (0 problems)
+npm run test         # jest (777 tests)
+npm run test:e2e     # Playwright end-to-end tests
 ```
 
-### **Performance Monitoring**
-- Press `Ctrl+Shift+P` in development for real-time performance metrics
-- GPU utilization monitoring for RTX 3080 optimization
-- Memory usage tracking for large RAW file processing
-- Processing time benchmarks for quality assurance
+## 📚 Documentation
 
-## 🤝 **Contributing**
+- **[CHANGELOG.md](CHANGELOG.md)** — release notes
+- **[docs/USER_GUIDE.md](docs/USER_GUIDE.md)** — using the app
+- **[docs/TECHNICAL_ARCHITECTURE.md](docs/TECHNICAL_ARCHITECTURE.md)** — system design
+- **[docs/RAW_PROCESSING.md](docs/RAW_PROCESSING.md)** — LibRaw integration
+- **[docs/DEVELOPMENT_GUIDE.md](docs/DEVELOPMENT_GUIDE.md)** — contributing
 
-We welcome contributions! Please see our [Development Guide](docs/DEVELOPMENT_GUIDE.md) for:
-- Code style guidelines
-- Contribution workflow
-- Testing requirements
-- Performance standards
+## 🤝 Contributing
 
-### **Development Setup**
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Make your changes with proper TypeScript types
-4. Ensure 0 ESLint errors (`npm run lint`)
-5. Test your changes thoroughly
-6. Commit with conventional commits
-7. Push and create a Pull Request
+1. Create a feature branch (`git checkout -b feat/your-feature`)
+2. Make changes with proper TypeScript types
+3. Keep `npm run typecheck`, `npm run lint`, and `npm run test` green
+4. Commit with conventional commits and open a Pull Request
 
-## 📄 **License**
+## 📄 License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+MIT.
 
-## 🙏 **Acknowledgments**
+## 🙏 Acknowledgments
 
-- **LibRaw**: Professional RAW processing capabilities
-- **Emscripten**: WebAssembly compilation and optimization
-- **React**: Modern UI framework and ecosystem
-- **Electron**: Cross-platform desktop application framework
-- **Vite**: Fast build tool and development server
+- **LibRaw** — RAW decoding · **sharp / libvips** — image encode & colour management
+- **Electron**, **React**, **Vite**, **Tailwind CSS**
 
 ---
 
-**Photo Editor Pro** - Professional photo editing, reimagined for the modern web. 🎨✨
-
-*Built with ❤️ using React, TypeScript, and cutting-edge web technologies.*
+**Photo Editor Pro** — a RAW photo editor for the desktop. 🎨
