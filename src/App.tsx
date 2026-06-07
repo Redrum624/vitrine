@@ -22,6 +22,7 @@ import { PluginManagerDialog } from './components/Dialogs/PluginManagerDialog';
 import { WelcomeScreen } from './components/Welcome/WelcomeScreen';
 import { PerformanceMonitor } from './components/Debug/PerformanceMonitor';
 import { keyboardShortcutsService, createDefaultShortcuts } from './services/KeyboardShortcutsService';
+import { webGLImageProcessor } from './services/WebGLImageProcessor';
 import { electronService } from './services/ElectronService';
 import { imageService } from './services/ImageService';
 import { ImageFileInfo, fileSystemService } from './services/FileSystemService';
@@ -878,6 +879,16 @@ function App() {
       const t = setTimeout(() => setIsWelcomeVisible(true), 1000);
       return () => clearTimeout(t);
     }
+  }, []);
+
+  // [GPU POC] On startup, report WebGL2 availability + an exposure GPU-vs-CPU
+  // benchmark so the GPU-acceleration path can be validated in the real app.
+  useEffect(() => {
+    const r = webGLImageProcessor.benchmark(2048, 2048, 1);
+    logger.info(
+      `[GPU POC] WebGL2 ${r.available ? 'AVAILABLE' : 'unavailable'} — exposure ${r.width}x${r.height}: ` +
+      `GPU=${r.gpuMs != null ? r.gpuMs.toFixed(1) + 'ms' : 'n/a'} CPU=${r.cpuMs.toFixed(1)}ms maxDiff=${r.maxDiff.toExponential(1)}`
+    );
   }, []);
 
   return (
