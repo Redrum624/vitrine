@@ -39,6 +39,10 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
   const [isProcessing, setIsProcessing] = useState(false);
   const processingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastProcessingTimeRef = useRef<number>(0);
+  // Monotonic id per processing run. The 800ms spinner timer and the finally clear are
+  // guarded on it so a stale/overlapping run can never leave the canvas spinner (and its
+  // backdrop-blur overlay) stuck on — which read as a permanently "blurry/soft" image.
+  const processingGenRef = useRef<number>(0);
   // NOTE: Removed lastProcessedImagePathRef - was blocking param change reprocessing
 
   // Connect the processing pipeline to image service for auto-adjustments
@@ -94,8 +98,12 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
     }
 
     // Show the canvas spinner only if processing is slow (noise reduction, large
-    // images, etc.) so fast slider drags don't flicker it on/off.
-    const slowSpinnerTimer = setTimeout(() => useAppStore.getState().setIsProcessing(true), 800);
+    // images, etc.) so fast slider drags don't flicker it on/off. Guard on a per-run
+    // id so only the LATEST run can toggle it (no orphaned/stuck spinner).
+    const gen = ++processingGenRef.current;
+    const slowSpinnerTimer = setTimeout(() => {
+      if (processingGenRef.current === gen) useAppStore.getState().setIsProcessing(true);
+    }, 800);
     try {
       setIsProcessing(true);
       const startTime = performance.now();
@@ -258,7 +266,9 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
       setProcessingStats({ timeMs: 0, active: failedStats.enabledModules, total: failedStats.moduleCount });
     } finally {
       clearTimeout(slowSpinnerTimer);
-      useAppStore.getState().setIsProcessing(false);
+      // Only the latest run clears the store spinner, so an older run completing can't
+      // wipe a newer run's spinner (and the newest run's finally always clears it).
+      if (processingGenRef.current === gen) useAppStore.getState().setIsProcessing(false);
       setIsProcessing(false);
     }
   }, [setProcessedImageData, setProcessingStats, isProcessing]);

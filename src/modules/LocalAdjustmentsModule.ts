@@ -253,6 +253,10 @@ export class LocalAdjustmentsModule {
     return true;
   }
 
+  clearActiveLayer(): void {
+    this.activeLayerId = null;
+  }
+
   // Update layer parameters
   updateLayerParameters(layerId: string, params: Partial<LocalAdjustmentParams>): boolean {
     const layer = this.getLayer(layerId);
@@ -482,8 +486,13 @@ export class LocalAdjustmentsModule {
     height: number
   ): void {
     if (!layer.basicAdj) return;
+    const adj = layer.basicAdj;
+    // A neutral mask (no sliders moved) is an identity transform — skip the expensive
+    // full-image BasicAdjustments pass + blend, so merely HAVING a mask doesn't slow
+    // every reprocess (which tripped the 800ms canvas spinner) or perturb the result.
+    if (!Object.values(adj).some((v) => typeof v === 'number' && Math.abs(v) > 1e-6)) return;
     const ba = new BasicAdjustmentsModule();
-    ba.setParams(layer.basicAdj);
+    ba.setParams(adj);
     const processed = ba.process(imageData, { width, height, channels: 4 });
     const mask = layer.mask;
     const op = layer.opacity;

@@ -9,6 +9,7 @@ interface Props {
   onGeometryChange: (geom: MaskGeometry) => void;
   onDragStart?: () => void;
   onDragEnd?: () => void;
+  onDeselect?: () => void;
 }
 
 type RadialMode = 'create' | 'move' | 'resize' | 'rotate';
@@ -22,7 +23,7 @@ type LinearMode = 'create' | 'move' | 'rotate';
  * inside the canvas at offsetWidth*zoom, centred + panned).
  */
 export function LocalAdjustmentMaskOverlay({
-  canvasRef, viewport, layerType, geometry, onGeometryChange, onDragStart, onDragEnd,
+  canvasRef, viewport, layerType, geometry, onGeometryChange, onDragStart, onDragEnd, onDeselect,
 }: Props) {
   const draggingRef = useRef(false);
   const [liveGeom, setLiveGeom] = useState<MaskGeometry>(geometry);
@@ -93,6 +94,8 @@ export function LocalAdjustmentMaskOverlay({
     e.preventDefault();
     e.stopPropagation();
     const mode = hitTest(l.px, l.py, m);
+    // Clicking off the mask (not on a handle) deselects + hides it.
+    if (mode === 'create') { onDeselect?.(); return; }
     // No clamping: masks may extend outside the image (still within the canvas).
     const start = { nx: p.nx, ny: p.ny };
     const startGeom = { ...liveGeom };
@@ -162,7 +165,7 @@ export function LocalAdjustmentMaskOverlay({
     };
     window.addEventListener('mousemove', move);
     window.addEventListener('mouseup', up);
-  }, [liveGeom, layerType, onGeometryChange, onDragStart, onDragEnd, viewport]);
+  }, [liveGeom, layerType, onGeometryChange, onDragStart, onDragEnd, onDeselect, viewport]);
 
   // Cursor hint on hover (move vs resize vs crosshair).
   const handleHover = (e: React.MouseEvent) => {

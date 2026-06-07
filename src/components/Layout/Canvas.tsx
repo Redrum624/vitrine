@@ -1026,6 +1026,13 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
                     imageProcessingPipeline.invalidateModuleCache('localadjustments');
                     triggerReprocessing();
                   }}
+                  onDeselect={() => {
+                    // Clicking off the mask hides it: clear the active layer + signal the
+                    // panel (externalParamsVersion) to drop its selection. Both this
+                    // overlay and the panel re-read on that signal.
+                    la.clearActiveLayer();
+                    useAppStore.getState().notifyExternalParamsChange();
+                  }}
                 />
               );
             })()}

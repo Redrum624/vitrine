@@ -107,6 +107,14 @@ describe('LocalAdjustmentsModule', () => {
       expect(cornerR).toBeCloseTo(0.4, 1);    // corner ~unchanged
     });
 
+    it('a neutral mask (no slider moved) leaves the image pixel-for-pixel unchanged', () => {
+      const id = module.createLayer('radial_gradient', 'Neutral', width, height);
+      module.updateLayerBasicAdj(id, {}); // mark as a Basic-Adjustments mask, all-neutral
+      const input = createTestImage(width, height, 0.4, 0.55, 0.7);
+      const out = module.processImage(new Float32Array(input), width, height);
+      for (let i = 0; i < out.length; i++) expect(out[i]).toBeCloseTo(input[i], 6);
+    });
+
     it('a masked adjustment applies when processed at a different resolution than the mask', () => {
       // Mask built at 40x40, but processed at a 16x16 "preview" — the mask must be
       // rebuilt at the processing resolution or it indexes the wrong pixels.

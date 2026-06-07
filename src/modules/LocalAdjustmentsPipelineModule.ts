@@ -200,6 +200,11 @@ export class LocalAdjustmentsPipelineModule implements PipelineModule {
     return success;
   }
 
+  clearActiveLayer(): void {
+    localAdjustmentsModule.clearActiveLayer();
+    this.params.activeLayerId = null;
+  }
+
   updateLayerOpacity(layerId: string, opacity: number): boolean {
     const layer = localAdjustmentsModule.getLayer(layerId);
     if (!layer) return false;
