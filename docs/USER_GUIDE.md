@@ -50,9 +50,19 @@ Welcome to the Professional Photo Editing Application - a powerful, privacy-focu
 
 ### Opening an Image
 
-1. Click **"Open Image"** or drag-and-drop a file onto the application
-2. Supported formats: JPG, PNG, TIFF, RAW (CR2, NEF, ARW, DNG)
+1. Use **File → Open…**, or **File → New…** to bring up the welcome / open-folder
+   screen, or drag-and-drop a file onto the application
+2. Supported formats: JPG, PNG, TIFF, RAW (CR2, CR3, NEF, ARW, ORF, DNG, RW2, PEF, …)
 3. Wait for the image to load and process
+
+### The Filmstrip
+
+The thumbnail strip along the bottom lists every image in the current folder:
+
+- **Scroll** left/right with the mouse wheel
+- **Navigate** with ← / → or by clicking a thumbnail
+- **Rate** images with the inline stars and **filter** by minimum rating
+- **Collapse / expand** the strip with the chevron (▼ / ▲) button in its header
 
 ### Basic Workflow
 
