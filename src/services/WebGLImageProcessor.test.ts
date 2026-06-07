@@ -10,6 +10,7 @@ import { webGLImageProcessor } from './WebGLImageProcessor';
 import { BasicAdjustmentsModule } from '../modules/BasicAdjustmentsModule';
 import { ColorBalanceModule } from '../modules/ColorBalanceModule';
 import { ToneCurveModule } from '../modules/ToneCurveModule';
+import { LensCorrectionsModule } from '../modules/LensCorrectionsModule';
 
 function img(pixels: number[][]): Float32Array {
   const a = new Float32Array(pixels.length * 4);
@@ -129,6 +130,22 @@ describe('GPU tone-curve CPU reference matches ToneCurveModule', () => {
       m.lookupTable, m.rgbLookupTables.red, m.rgbLookupTables.green, m.rgbLookupTables.blue,
       mod.getParams().preserveColors,
     );
+    let maxDiff = 0;
+    for (let i = 0; i < expected.length; i++) maxDiff = Math.max(maxDiff, Math.abs(expected[i] - ref[i]));
+    expect(maxDiff).toBeLessThan(1e-5);
+  });
+});
+
+describe('GPU vignette CPU reference matches LensCorrectionsModule', () => {
+  const w = 6, h = 5;
+  const src = new Float32Array(w * h * 4);
+  for (let i = 0; i < w * h; i++) { src[i * 4] = 0.6; src[i * 4 + 1] = 0.55; src[i * 4 + 2] = 0.5; src[i * 4 + 3] = 1; }
+
+  test('parity (vignetting only)', () => {
+    const mod = new LensCorrectionsModule();
+    mod.setParams({ vignetting: { enabled: true, amount: 60, midpoint: 1.0, roundness: 20, feather: 60 } });
+    const expected = mod.processImage(new Float32Array(src), w, h);
+    const ref = webGLImageProcessor.vignettingCPU(new Float32Array(src), w, h, 60 / 100, 1.0, 20 / 100, 60 / 100);
     let maxDiff = 0;
     for (let i = 0; i < expected.length; i++) maxDiff = Math.max(maxDiff, Math.abs(expected[i] - ref[i]));
     expect(maxDiff).toBeLessThan(1e-5);

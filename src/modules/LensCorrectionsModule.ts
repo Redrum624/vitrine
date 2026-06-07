@@ -1,5 +1,6 @@
 import { logger } from '../utils/Logger';
 import { smoothStep, rgbToHsl, hslToRgb } from './utils/ColorUtils';
+import { webGLImageProcessor } from '../services/WebGLImageProcessor';
 
 export interface LensCorrectionsParams {
   // Vignetting correction
@@ -129,8 +130,13 @@ export class LensCorrectionsModule {
       }
 
       if (this.params.vignetting.enabled) {
-        const vignettingResult = this.correctVignetting(result, width, height);
-        result = new Float32Array(vignettingResult);
+        const { amount, midpoint, roundness, feather } = this.params.vignetting;
+        // GPU vignetting (RGBA) when available + verified; else the CPU pass.
+        if (amount !== 0 && result.length === width * height * 4 && webGLImageProcessor.isAvailable()) {
+          result = new Float32Array(webGLImageProcessor.applyVignetting(result, width, height, amount / 100, midpoint, roundness / 100, feather / 100));
+        } else {
+          result = new Float32Array(this.correctVignetting(result, width, height));
+        }
       }
 
       const processingTime = performance.now() - startTime;

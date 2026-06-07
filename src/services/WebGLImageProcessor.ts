@@ -15,7 +15,7 @@
  * only ever used when it matches the CPU result — no possibility of a regression.
  */
 import { logger } from '../utils/Logger';
-import { rgbToHsl, hslToRgb } from '../modules/utils/ColorUtils';
+import { rgbToHsl, hslToRgb, smoothStep } from '../modules/utils/ColorUtils';
 
 export interface BasicAdjustmentsParams {
   black_point: number;
@@ -182,6 +182,36 @@ void main() {
   outColor = vec4(rgb, src.a);
 }`;
 
+// Lens vignetting: radial correction factor (position-dependent). gl_FragCoord-0.5
+// is the array pixel index (the texture round-trip preserves row order).
+const VIGNETTE_FRAG_SRC = `#version 300 es
+precision highp float;
+uniform sampler2D u_image;
+uniform vec2 u_res;
+uniform float u_strength, u_midpoint, u_roundness, u_feather;
+in vec2 v_uv;
+out vec4 outColor;
+void main() {
+  vec4 src = texture(u_image, v_uv);
+  float cx = u_res.x / 2.0, cy = u_res.y / 2.0;
+  float dx = ((gl_FragCoord.x - 0.5) - cx) / cx;
+  float dy = (((gl_FragCoord.y - 0.5) - cy) / cy) * (1.0 + u_roundness);
+  float nd = sqrt(dx * dx + dy * dy) / sqrt(2.0);
+  float mask = 1.0;
+  if (nd > 0.0) {
+    float fs = u_midpoint * 0.5, fe = u_midpoint * 1.5;
+    if (nd > fs) {
+      float fp = min(1.0, (nd - fs) / (fe - fs));
+      float t = clamp(fp, 0.0, 1.0);
+      float sf = t * t * (3.0 - 2.0 * t);
+      float ff = fp * (1.0 - u_feather) + sf * u_feather;
+      mask = 1.0 - ff;
+    }
+  }
+  float factor = 1.0 + u_strength * (1.0 / max(0.1, mask) - 1.0);
+  outColor = vec4(src.rgb * factor, src.a);
+}`;
+
 // Faithful GLSL port of BasicAdjustmentsModule.process (see that file for intent).
 const BASICADJ_FRAG_SRC = `#version 300 es
 precision highp float;
@@ -283,6 +313,8 @@ class WebGLImageProcessor {
   private colorBalanceVerified: boolean | null = null;
   private toneCurveProgram: WebGLProgram | null = null;
   private toneCurveVerified: boolean | null = null;
+  private vignetteProgram: WebGLProgram | null = null;
+  private vignetteVerified: boolean | null = null;
   private vao: WebGLVertexArrayObject | null = null;
   private initTried = false;
 
@@ -303,7 +335,8 @@ class WebGLImageProcessor {
       const denoiseProgram = this.buildProgram(gl, VERT_SRC, NLMEANS_FRAG_SRC);
       const colorBalanceProgram = this.buildProgram(gl, VERT_SRC, COLORBALANCE_FRAG_SRC);
       const toneCurveProgram = this.buildProgram(gl, VERT_SRC, TONECURVE_FRAG_SRC);
-      if (!exposureProgram || !basicAdjProgram || !gainsProgram || !denoiseProgram || !colorBalanceProgram || !toneCurveProgram) return (this.gl = null);
+      const vignetteProgram = this.buildProgram(gl, VERT_SRC, VIGNETTE_FRAG_SRC);
+      if (!exposureProgram || !basicAdjProgram || !gainsProgram || !denoiseProgram || !colorBalanceProgram || !toneCurveProgram || !vignetteProgram) return (this.gl = null);
 
       const quad = gl.createBuffer();
       gl.bindBuffer(gl.ARRAY_BUFFER, quad);
@@ -322,6 +355,7 @@ class WebGLImageProcessor {
       this.denoiseProgram = denoiseProgram;
       this.colorBalanceProgram = colorBalanceProgram;
       this.toneCurveProgram = toneCurveProgram;
+      this.vignetteProgram = vignetteProgram;
       this.vao = vao;
 
       // Self-check: only trust the GPU basic-adjustments path if it matches the CPU
@@ -625,6 +659,78 @@ class WebGLImageProcessor {
       out[i] = red[idx(r)]; out[i + 1] = green[idx(g)]; out[i + 2] = blue[idx(b)];
     }
     return out;
+  }
+
+  /** Apply lens vignetting correction (radial). GPU when verified, else CPU. */
+  applyVignetting(
+    data: Float32Array, width: number, height: number,
+    strength: number, midpoint: number, roundnessNorm: number, featherNorm: number
+  ): Float32Array {
+    const gl = this.ensureContext();
+    if (gl && this.vignetteProgram && this.vao && this.verifyVignette()) {
+      try {
+        return this.runPass(this.vignetteProgram, data, width, height, (g, prog) => {
+          g.uniform2f(g.getUniformLocation(prog, 'u_res'), width, height);
+          g.uniform1f(g.getUniformLocation(prog, 'u_strength'), strength);
+          g.uniform1f(g.getUniformLocation(prog, 'u_midpoint'), midpoint);
+          g.uniform1f(g.getUniformLocation(prog, 'u_roundness'), roundnessNorm);
+          g.uniform1f(g.getUniformLocation(prog, 'u_feather'), featherNorm);
+        });
+      } catch (e) { logger.warn('[GPU] vignette failed — CPU:', e instanceof Error ? e.message : String(e)); }
+    }
+    return this.vignettingCPU(data, width, height, strength, midpoint, roundnessNorm, featherNorm);
+  }
+
+  private verifyVignette(): boolean {
+    if (this.vignetteVerified !== null) return this.vignetteVerified;
+    let ok = false;
+    try {
+      const { data, w, h } = CB_SELFTEST;
+      const a = this.runPass(this.vignetteProgram!, data, w, h, (g, prog) => {
+        g.uniform2f(g.getUniformLocation(prog, 'u_res'), w, h);
+        g.uniform1f(g.getUniformLocation(prog, 'u_strength'), 0.5);
+        g.uniform1f(g.getUniformLocation(prog, 'u_midpoint'), 0.5);
+        g.uniform1f(g.getUniformLocation(prog, 'u_roundness'), 0.2);
+        g.uniform1f(g.getUniformLocation(prog, 'u_feather'), 0.6);
+      });
+      const c = this.vignettingCPU(data, w, h, 0.5, 0.5, 0.2, 0.6);
+      let maxDiff = 0;
+      for (let i = 0; i < c.length; i++) maxDiff = Math.max(maxDiff, Math.abs(a[i] - c[i]));
+      ok = maxDiff < 0.02;
+      logger.info(`[GPU] vignette self-check maxDiff=${maxDiff.toExponential(2)} -> ${ok ? 'GPU' : 'CPU fallback'}`);
+    } catch (e) { logger.warn('[GPU] vignette self-check error:', e instanceof Error ? e.message : String(e)); }
+    this.vignetteVerified = ok;
+    return ok;
+  }
+
+  /** CPU reference — a replica of LensCorrectionsModule.correctVignetting. */
+  vignettingCPU(
+    data: Float32Array, width: number, height: number,
+    strength: number, midpoint: number, roundnessNorm: number, featherNorm: number
+  ): Float32Array {
+    const result = new Float32Array(data);
+    const cx = width / 2, cy = height / 2;
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const i = (y * width + x) * 4;
+        const dx = (x - cx) / cx;
+        const dy = ((y - cy) / cy) * (1 + roundnessNorm);
+        const nd = Math.sqrt(dx * dx + dy * dy) / Math.sqrt(2);
+        let mask = 1;
+        if (nd > 0) {
+          const fs = midpoint * 0.5, fe = midpoint * 1.5;
+          if (nd > fs) {
+            const fp = Math.min(1, (nd - fs) / (fe - fs));
+            const sf = smoothStep(0, 1, fp);
+            const ff = fp * (1 - featherNorm) + sf * featherNorm;
+            mask = 1 - ff;
+          }
+        }
+        const factor = 1 + strength * (1 / Math.max(0.1, mask) - 1);
+        result[i] *= factor; result[i + 1] *= factor; result[i + 2] *= factor;
+      }
+    }
+    return result;
   }
 
   /** Generic single-pass shader run: source texture → program → float readback. */
