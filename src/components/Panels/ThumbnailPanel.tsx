@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { ChevronLeft, ChevronRight, X, Star } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Star } from 'lucide-react';
 import { ImageFileInfo } from '../../services/FileSystemService';
 import { useAppStore } from '../../stores/appStore';
 import { logger } from '../../utils/Logger';
@@ -22,6 +22,7 @@ export function ThumbnailPanel({
   const [thumbnails, setThumbnails] = useState<Map<string, string>>(new Map());
   const [loadingThumbnails, setLoadingThumbnails] = useState<Set<string>>(new Set());
   const [ratingFilter, setRatingFilter] = useState<number>(0); // 0 = show all
+  const [collapsed, setCollapsed] = useState(false); // filmstrip hidden/shown via the arrow toggle
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const selectedImageRef = useRef<HTMLDivElement>(null);
   const { imageRatings, setImageRating } = useAppStore();
@@ -247,7 +248,7 @@ export function ThumbnailPanel({
   const canGoNext = currentIndex < filteredImages.length - 1;
 
   return (
-    <div className="border-t flex flex-col" style={{backgroundColor: 'var(--gray-900)', borderTopColor: 'var(--border)', height: '140px'}}>
+    <div className="border-t flex flex-col" style={{backgroundColor: 'var(--gray-900)', borderTopColor: 'var(--border)', height: collapsed ? 'auto' : '140px'}}>
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-1 border-b" style={{borderBottomColor: 'var(--border)'}}>
         <div className="flex items-center gap-4">
@@ -336,7 +337,7 @@ export function ThumbnailPanel({
           <div style={{width: '1px', height: '20px', backgroundColor: 'var(--border)', margin: '0 4px'}} />
 
           <button
-            onClick={onClose}
+            onClick={() => setCollapsed(c => !c)}
             className="p-1.5 rounded border transition-all"
             style={{
               backgroundColor: 'transparent',
@@ -354,9 +355,9 @@ export function ThumbnailPanel({
               e.currentTarget.style.color = 'var(--gray-400)';
               e.currentTarget.style.cursor = 'pointer';
             }}
-            title="Close thumbnail panel (Esc)"
+            title={collapsed ? 'Show thumbnails' : 'Hide thumbnails'}
           >
-            <X className="w-3.5 h-3.5" />
+            {collapsed ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
           </button>
         </div>
       </div>
@@ -368,7 +369,8 @@ export function ThumbnailPanel({
         onScroll={handleScroll}
         style={{
           scrollbarWidth: 'thin',
-          scrollbarColor: 'var(--gray-700) transparent'
+          scrollbarColor: 'var(--gray-700) transparent',
+          display: collapsed ? 'none' : undefined
         }}
       >
         <div className="flex gap-2 h-full">

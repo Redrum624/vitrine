@@ -197,6 +197,13 @@ export function MenuBar({
           <div className="absolute top-full left-0 mt-0.5 border min-w-[180px] py-1 z-50" style={{backgroundColor: 'var(--gray-800)', borderColor: 'var(--border)', boxShadow: 'var(--shadow-lg)', borderRadius: '0'}}>
             <button
               className="w-full text-left px-4 py-1.5 text-xs text-dark-200 hover:bg-dark-700 bg-transparent border-0 cursor-pointer"
+              onClick={() => handleMenuItemClick(onWindowWelcome)}
+            >
+              New...
+            </button>
+            <div className="h-px bg-dark-700 my-1"></div>
+            <button
+              className="w-full text-left px-4 py-1.5 text-xs text-dark-200 hover:bg-dark-700 bg-transparent border-0 cursor-pointer"
               onClick={() => handleMenuItemClick(onFileOpen)}
             >
               Open... <span className="float-right text-dark-400">Ctrl+O</span>

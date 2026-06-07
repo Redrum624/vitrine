@@ -863,17 +863,22 @@ function App() {
       // Additional cleanup for image service if needed
     });
 
-    // Show welcome screen for first-time users
-    const welcomeDismissed = localStorage.getItem('photo-editor-welcome-dismissed');
-    if (!welcomeDismissed && !currentImage) {
-      setTimeout(() => setIsWelcomeVisible(true), 1000); // Slight delay for better UX
-    }
-
     // Cleanup on unmount
     return () => {
       keyboardShortcutsService.destroy();
     };
   }, [selectedTool, setSelectedTool, currentImage]);
+
+  // Show the welcome screen once for first-time users — on mount only. The effect
+  // above re-runs whenever selectedTool changes, which previously re-armed this
+  // timer on every right-sidebar icon click, making the modal pop up repeatedly.
+  useEffect(() => {
+    const welcomeDismissed = localStorage.getItem('photo-editor-welcome-dismissed');
+    if (!welcomeDismissed && !imageService.getCurrentImage()) {
+      const t = setTimeout(() => setIsWelcomeVisible(true), 1000);
+      return () => clearTimeout(t);
+    }
+  }, []);
 
   return (
     <ErrorBoundary>
