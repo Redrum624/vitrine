@@ -29,10 +29,14 @@ interface AdjustmentPanelProps {
 }
 
 export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
-  const { setProcessedImageData, processingVersion } = useAppStore();
+  const { setProcessedImageData, processingVersion, externalParamsVersion, setProcessingStats } = useAppStore();
   const [resetCounter, setResetCounter] = useState(0);
+  // Remount the module panels (so each re-reads module.getParams() into its
+  // sliders) on a manual Reset OR when params are set in bulk from outside the
+  // panels (Paste Style / Auto All / presets). External bulk-setters bump
+  // externalParamsVersion; normal slider drags do not, so editing isn't disrupted.
+  const paramSync = `${resetCounter}-${externalParamsVersion}`;
   const [isProcessing, setIsProcessing] = useState(false);
-  const [_lastProcessingTime, setLastProcessingTime] = useState(0);
   const processingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastProcessingTimeRef = useRef<number>(0);
   // NOTE: Removed lastProcessedImagePathRef - was blocking param change reprocessing
@@ -232,16 +236,27 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
       });
 
       const processTime = performance.now() - startTime;
-      setLastProcessingTime(processTime);
+      // Surface the real pipeline timing + active-module count in the StatusBar.
+      const pipelineStats = imageProcessingPipeline.getStats();
+      setProcessingStats({
+        timeMs: processTime,
+        active: pipelineStats.enabledModules,
+        total: pipelineStats.moduleCount,
+      });
 
       logger.debug(`Preview processing completed in ${processTime.toFixed(2)}ms, size: ${previewWidth}x${previewHeight}`);
 
     } catch (error) {
       logger.error('Real-time processing failed:', error);
+      // Reset the timing so the StatusBar doesn't keep showing a stale duration
+      // from the last successful render (its display is guarded on timeMs > 0);
+      // keep the still-accurate module counts.
+      const failedStats = imageProcessingPipeline.getStats();
+      setProcessingStats({ timeMs: 0, active: failedStats.enabledModules, total: failedStats.moduleCount });
     } finally {
       setIsProcessing(false);
     }
-  }, [setProcessedImageData, isProcessing]);
+  }, [setProcessedImageData, setProcessingStats, isProcessing]);
 
   // Note: Removed viewport-triggered reprocessing as viewport changes (zoom, pan)
   // should not trigger image reprocessing - only display changes
@@ -482,7 +497,7 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
           return (
             <div className="px-5 pt-4">
               <CropModuleComponent
-                key={`crop-${resetCounter}`}
+                key={`crop-${paramSync}`}
                 module={cropModule.getCropModule()}
                 onParamsChange={(params) => handleModuleParamsChange('crop', params)}
                 imageData={img?.data}
@@ -497,7 +512,7 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
         {basicAdjModule && selectedModule === 'basicadj' && (
           <div className="px-5 pt-4">
             <BasicAdjustmentsModuleComponent
-              key={`basicadj-${resetCounter}`}
+              key={`basicadj-${paramSync}`}
               module={basicAdjModule}
               onParamsChange={(params) => handleModuleParamsChange('basicadj', params)}
             />
@@ -508,7 +523,7 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
         {whiteBalanceModule && selectedModule === 'whitebalance' && (
           <div className="px-5 pt-4">
             <WhiteBalanceModuleComponent
-              key={`whitebalance-${resetCounter}`}
+              key={`whitebalance-${paramSync}`}
               module={whiteBalanceModule}
               onParamsChange={(params) => handleModuleParamsChange('temperature', params)}
               onAutoDetect={handleAutoWhiteBalance}
@@ -520,7 +535,7 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
         {toneCurveModule && selectedModule === 'tonecurve' && (
           <div className="px-5 pt-4">
             <ToneCurveModuleComponent
-              key={`tonecurve-${resetCounter}`}
+              key={`tonecurve-${paramSync}`}
               module={toneCurveModule.getToneCurveModule()}
               onParamsChange={(params) => handleModuleParamsChange('tonecurve', params)}
             />
@@ -531,7 +546,7 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
         {noiseReductionModule && selectedModule === 'noisereduction' && (
           <div className="px-5 pt-4">
             <NoiseReductionModuleComponent
-              key={`noisereduction-${resetCounter}`}
+              key={`noisereduction-${paramSync}`}
               module={noiseReductionModule}
               onParamsChange={(params) => handleModuleParamsChange('noisereduction', params)}
             />
@@ -542,7 +557,7 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
         {shadowsHighlightsModule && selectedModule === 'shadowshighlights' && (
           <div className="px-5 pt-4">
             <ShadowsHighlightsModuleComponent
-              key={`shadowshighlights-${resetCounter}`}
+              key={`shadowshighlights-${paramSync}`}
               module={shadowsHighlightsModule.getShadowsHighlightsModule()}
               onParamsChange={(params) => handleModuleParamsChange('shadowshighlights', params)}
             />
@@ -553,7 +568,7 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
         {colorBalanceModule && selectedModule === 'colorbalance' && (
           <div className="px-5 pt-4">
             <ColorBalanceModuleComponent
-              key={`colorbalance-${resetCounter}`}
+              key={`colorbalance-${paramSync}`}
               module={colorBalanceModule.getColorBalanceModule()}
               onParamsChange={(params) => handleModuleParamsChange('colorbalance', params)}
             />
@@ -565,36 +580,54 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
           const img = imageService.getCurrentImage();
           if (!img) return null;
 
+          const la = localAdjustmentsModule.getParameters();
+          const active = la.layers.find(l => l.id === la.activeLayerId);
+          // Adjustments/geometry edits only need a reprocess; create/select also
+          // remount the panel (refresh) so it re-reads the active layer's values.
+          const reprocess = () => useAppStore.getState().triggerReprocessing();
+          const refresh = () => useAppStore.getState().notifyExternalParamsChange();
+
           return (
             <div className="px-5 pt-4">
               <LocalAdjustmentsModuleComponent
-                key={`localadjustments-${resetCounter}`}
-                parameters={localAdjustmentsModule.getParameters().defaultParams}
-                brushParams={localAdjustmentsModule.getParameters().brushParams}
-                layers={localAdjustmentsModule.getParameters().layers}
-                activeLayerId={localAdjustmentsModule.getParameters().activeLayerId}
-                onParametersChange={(params) => handleModuleParamsChange('localadjustments', params)}
+                key={`localadjustments-${paramSync}`}
+                parameters={active ? active.parameters : la.defaultParams}
+                brushParams={la.brushParams}
+                layers={la.layers}
+                activeLayerId={la.activeLayerId}
+                geometry={active?.geometry}
+                onParametersChange={(params) => {
+                  if (la.activeLayerId) localAdjustmentsModule.updateLayerParameters(la.activeLayerId, params);
+                  reprocess();
+                }}
                 onBrushParamsChange={(params) => {
                   localAdjustmentsModule.updateBrushParameters(params);
                 }}
                 onCreateLayer={(type, name) => {
                   localAdjustmentsModule.createLayer(type, name, img.width, img.height);
-                  handleModuleParamsChange('localadjustments', localAdjustmentsModule.getParameters().defaultParams);
+                  refresh();
+                  reprocess();
                 }}
                 onRemoveLayer={(layerId) => {
                   localAdjustmentsModule.removeLayer(layerId);
-                  handleModuleParamsChange('localadjustments', localAdjustmentsModule.getParameters().defaultParams);
+                  refresh();
+                  reprocess();
                 }}
                 onToggleLayer={(layerId, enabled) => {
                   localAdjustmentsModule.toggleLayer(layerId, enabled);
-                  handleModuleParamsChange('localadjustments', localAdjustmentsModule.getParameters().defaultParams);
+                  reprocess();
                 }}
                 onSetActiveLayer={(layerId) => {
                   localAdjustmentsModule.setActiveLayer(layerId);
+                  refresh();
                 }}
                 onUpdateLayerOpacity={(layerId, opacity) => {
                   localAdjustmentsModule.updateLayerOpacity(layerId, opacity);
-                  handleModuleParamsChange('localadjustments', localAdjustmentsModule.getParameters().defaultParams);
+                  reprocess();
+                }}
+                onUpdateGeometry={(geom) => {
+                  if (la.activeLayerId) localAdjustmentsModule.setLayerGeometry(la.activeLayerId, geom, img.width, img.height);
+                  reprocess();
                 }}
               />
             </div>
@@ -605,7 +638,7 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
         {lensCorrectionsModule && selectedModule === 'lenscorrections' && (
           <div className="px-5 pt-4">
             <LensCorrectionsModuleComponent
-              key={`lenscorrections-${resetCounter}`}
+              key={`lenscorrections-${paramSync}`}
               parameters={lensCorrectionsModule.getParameters().lensCorrectionsParams}
               onParametersChange={(params) => handleModuleParamsChange('lenscorrections', params)}
               onAutoDetectVignetting={() => {

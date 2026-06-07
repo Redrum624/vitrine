@@ -128,10 +128,14 @@ export class RawImageService {
         logger.info(`Decoding RAW file via Electron main process: ${extension.toUpperCase()}`);
         const result = await window.electronAPI.decodeRawFile(filePath);
 
-        const uint8 = new Uint8Array(result.data);
-        const floatData = this.convertUint8ToFloat32Array(uint8, result.width, result.height);
+        // Native LibRaw demosaic returns 16-bit pixels; the embedded-JPEG
+        // fallback returns 8-bit. Convert from whichever depth we got.
+        const channels = result.channels ?? 4;
+        const floatData = result.bitDepth === 16
+          ? this.convertUint16ToFloat32Array(new Uint16Array(result.data), result.width, result.height, channels)
+          : this.convertUint8ToFloat32Array(new Uint8Array(result.data), result.width, result.height);
 
-        logger.info(`RAW decoded via main process: ${result.width}x${result.height}, ${uint8.length} bytes, ${result.channels}ch`);
+        logger.info(`RAW decoded via main process: ${result.width}x${result.height}, ${result.bitDepth ?? 8}-bit, ${channels}ch`);
 
         const rawData: RawImageData = {
           width: result.width,
@@ -508,6 +512,37 @@ export class RawImageService {
         rgbaData[idx + 1] = uint8Data[idx + 1] / 255.0;
         rgbaData[idx + 2] = uint8Data[idx + 2] / 255.0;
         rgbaData[idx + 3] = uint8Data[idx + 3] / 255.0;
+      }
+    }
+
+    return rgbaData;
+  }
+
+  /**
+   * Convert 16-bit LibRaw output (host-endian uint16) to Float32Array RGBA (0-1).
+   * Native dcraw_emu emits 3-channel RGB; the 4-channel branch is defensive.
+   */
+  private convertUint16ToFloat32Array(uint16Data: Uint16Array, width: number, height: number, channels: number): Float32Array {
+    const totalPixels = width * height;
+    const rgbaData = new Float32Array(totalPixels * 4);
+    const inv = 1 / 65535;
+
+    if (channels === 4) {
+      for (let i = 0; i < totalPixels; i++) {
+        const idx = i * 4;
+        rgbaData[idx]     = uint16Data[idx] * inv;
+        rgbaData[idx + 1] = uint16Data[idx + 1] * inv;
+        rgbaData[idx + 2] = uint16Data[idx + 2] * inv;
+        rgbaData[idx + 3] = uint16Data[idx + 3] * inv;
+      }
+    } else {
+      for (let i = 0; i < totalPixels; i++) {
+        const srcIdx = i * 3;
+        const dstIdx = i * 4;
+        rgbaData[dstIdx]     = uint16Data[srcIdx] * inv;
+        rgbaData[dstIdx + 1] = uint16Data[srcIdx + 1] * inv;
+        rgbaData[dstIdx + 2] = uint16Data[srcIdx + 2] * inv;
+        rgbaData[dstIdx + 3] = 1.0;
       }
     }
 

@@ -1,5 +1,6 @@
 import { logger } from '../utils/Logger';
 import { smoothStep, rgbToHS } from './utils/ColorUtils';
+import { BasicAdjustmentsModule, BasicAdjParams } from './BasicAdjustmentsModule';
 
 export interface LocalAdjustmentLayer {
   id: string;
@@ -10,6 +11,19 @@ export interface LocalAdjustmentLayer {
   blendMode: 'normal' | 'multiply' | 'screen' | 'overlay' | 'soft_light';
   mask: Float32Array; // Grayscale mask (0=no effect, 1=full effect)
   parameters: LocalAdjustmentParams;
+  geometry?: MaskGeometry;   // for radial/linear gradient layers (drives the mask)
+  basicAdj?: BasicAdjParams; // when set, the mask applies Basic Adjustments to the masked region
+}
+
+/** Normalised (0..1) geometry for a radial (circle/oval) or linear gradient mask. */
+export interface MaskGeometry {
+  type: 'radial' | 'linear';
+  centerX: number; centerY: number; // radial centre
+  radiusX: number; radiusY: number; // radial radii (oval when unequal)
+  startX: number; startY: number;   // linear start
+  endX: number; endY: number;       // linear end
+  feather: number;                  // 0..1 edge softness
+  invert: boolean;                  // swap inside/outside
 }
 
 export interface LocalAdjustmentParams {
@@ -115,8 +129,82 @@ export class LocalAdjustmentsModule {
     this.layers.push(layer);
     this.activeLayerId = layer.id;
 
+    // Give gradient layers a default centred mask so adjustments are visible
+    // immediately (an all-zero mask would have no effect).
+    if (type === 'radial_gradient') {
+      this.setLayerGeometry(layer.id, {
+        type: 'radial', centerX: 0.5, centerY: 0.5, radiusX: 0.3, radiusY: 0.3,
+        startX: 0.5, startY: 0.15, endX: 0.5, endY: 0.85, feather: 0.5, invert: false,
+      }, imageWidth, imageHeight);
+    } else if (type === 'linear_gradient') {
+      this.setLayerGeometry(layer.id, {
+        type: 'linear', centerX: 0.5, centerY: 0.5, radiusX: 0.3, radiusY: 0.3,
+        startX: 0.5, startY: 0.15, endX: 0.5, endY: 0.85, feather: 1, invert: false,
+      }, imageWidth, imageHeight);
+    }
+
     logger.info(`Created local adjustment layer: ${name} (${type})`);
     return layer.id;
+  }
+
+  /** Update a mask's Basic Adjustments params (the per-mask "second Basic Adjustments"). */
+  updateLayerBasicAdj(layerId: string, params: Partial<BasicAdjParams>): boolean {
+    const layer = this.getLayer(layerId);
+    if (!layer) return false;
+    layer.basicAdj = { ...(layer.basicAdj ?? {
+      black_point: 0, exposure: 0, contrast: 0, brightness: 0,
+      saturation: 0, vibrance: 0, dehaze: 0, highlights: 0, shadows: 0,
+    }), ...params };
+    return true;
+  }
+
+  /**
+   * Set a radial/linear gradient layer's geometry and (re)generate its mask.
+   * All coordinates are normalised (0..1).
+   */
+  setLayerGeometry(layerId: string, geom: MaskGeometry, width: number, height: number): boolean {
+    const layer = this.getLayer(layerId);
+    if (!layer) return false;
+
+    layer.geometry = { ...geom };
+    const mask = layer.mask;
+
+    if (geom.type === 'radial') {
+      const cx = geom.centerX * width;
+      const cy = geom.centerY * height;
+      const rx = Math.max(1e-3, geom.radiusX) * width;
+      const ry = Math.max(1e-3, geom.radiusY) * height;
+      const feather = Math.max(0.001, Math.min(0.999, geom.feather));
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const dx = (x - cx) / rx;
+          const dy = (y - cy) / ry;
+          const d = Math.sqrt(dx * dx + dy * dy);
+          // 1 inside, smoothly fading to 0 across the feather band at the edge.
+          let m = 1 - smoothStep(1 - feather, 1, d);
+          if (geom.invert) m = 1 - m;
+          mask[y * width + x] = m;
+        }
+      }
+    } else {
+      const x1 = geom.startX * width, y1 = geom.startY * height;
+      const x2 = geom.endX * width, y2 = geom.endY * height;
+      const dxl = x2 - x1, dyl = y2 - y1;
+      const len2 = dxl * dxl + dyl * dyl || 1;
+      // Feather controls the transition band width around the line's midpoint:
+      // 1 = full smooth ramp, →0 = hard edge at the midpoint.
+      const f = Math.max(0.001, Math.min(1, geom.feather));
+      const lo = 0.5 - f / 2, hi = 0.5 + f / 2;
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const t = ((x - x1) * dxl + (y - y1) * dyl) / len2;
+          let m = smoothStep(lo, hi, t);
+          if (geom.invert) m = 1 - m;
+          mask[y * width + x] = m;
+        }
+      }
+    }
+    return true;
   }
 
   // Remove a layer
@@ -353,10 +441,38 @@ export class LocalAdjustmentsModule {
     for (const layer of this.layers) {
       if (!layer.enabled || layer.opacity === 0) continue;
 
-      this.applyLayerToImage(result, layer, width, height);
+      if (layer.basicAdj) {
+        this.applyBasicAdjLayer(result, layer, width, height);
+      } else {
+        this.applyLayerToImage(result, layer, width, height);
+      }
     }
 
     return result;
+  }
+
+  // Apply a mask's Basic Adjustments to the masked region (per-mask "second Basic
+  // Adjustments"): run BasicAdjustmentsModule on the full image, then blend the
+  // result back in weighted by mask * opacity.
+  private applyBasicAdjLayer(
+    imageData: Float32Array,
+    layer: LocalAdjustmentLayer,
+    width: number,
+    height: number
+  ): void {
+    if (!layer.basicAdj) return;
+    const ba = new BasicAdjustmentsModule();
+    ba.setParams(layer.basicAdj);
+    const processed = ba.process(imageData, { width, height, channels: 4 });
+    const mask = layer.mask;
+    const op = layer.opacity;
+    for (let i = 0; i < imageData.length; i += 4) {
+      const w = mask[i >> 2] * op;
+      if (w === 0) continue;
+      imageData[i] = imageData[i] + w * (processed[i] - imageData[i]);
+      imageData[i + 1] = imageData[i + 1] + w * (processed[i + 1] - imageData[i + 1]);
+      imageData[i + 2] = imageData[i + 2] + w * (processed[i + 2] - imageData[i + 2]);
+    }
   }
 
   // Apply a single layer to the image

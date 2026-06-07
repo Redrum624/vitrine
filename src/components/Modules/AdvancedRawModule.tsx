@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Settings, Cpu, Palette, Image, Zap, Camera } from 'lucide-react';
 import { logger } from '../../utils/Logger';
 import { useAppStore } from '../../stores/appStore';
 import { advancedRawProcessor, AdvancedRawProcessingOptions, CameraProfile } from '../../services/AdvancedRawProcessor';
-import { rawImageService } from '../../services/RawImageService';
+import { rawImageService, RawImageData } from '../../services/RawImageService';
 import { CameraProfile as CameraProfileType } from '../../services/CameraProfileService';
+import { cameraMetadataService } from '../../services/CameraMetadataService';
 
 interface AdvancedRawModuleProps {
   isEnabled: boolean;
@@ -16,6 +17,7 @@ export const AdvancedRawModule: React.FC<AdvancedRawModuleProps> = ({
   onToggle
 }) => {
   const currentImage = useAppStore((state) => state.currentImage);
+  const setProcessedImageData = useAppStore((state) => state.setProcessedImageData);
   const currentImagePath = currentImage?.path || null;
 
   // Processing options state
@@ -46,26 +48,42 @@ export const AdvancedRawModule: React.FC<AdvancedRawModuleProps> = ({
   const [bayerPattern, setBayerPattern] = useState<'RGGB' | 'BGGR' | 'GRBG' | 'GBRG'>('RGGB');
   const [professionalMode, setProfessionalMode] = useState(false);
 
+  // Standard-mode decode cache: the native decoder ignores per-call options, so
+  // the demosaiced pixels are identical for a given file regardless of slider
+  // positions. Cache the base decode per path to avoid re-decoding identical
+  // bytes on every option change.
+  const baseRawCacheRef = useRef<{ path: string; result: RawImageData } | null>(null);
+  // Monotonic token so only the latest in-flight apply commits its result, and
+  // an in-flight guard so an option burst cannot launch overlapping decodes.
+  const applyTokenRef = useRef(0);
+  // Last Float32 buffer pushed to the store, so standard mode can skip a no-op
+  // redraw when the cached decode is unchanged.
+  const lastPushedDataRef = useRef<Float32Array | null>(null);
+
   // Initialize advanced processor and load camera profile
   useEffect(() => {
+    let ignore = false;
+
     const initializeProcessor = async () => {
       try {
         const formats = await advancedRawProcessor.getSupportedFormats();
-        setSupportedFormats(formats);
+        if (!ignore) setSupportedFormats(formats);
 
         // Load available camera profiles
         const profiles = rawImageService.getAvailableCameraProfiles();
-        setAvailableProfiles(profiles);
+        if (!ignore) setAvailableProfiles(profiles);
 
-        // Load camera profile if image is available
-        if (currentImagePath) {
-          // For now, use mock metadata - in real implementation this would come from app state
-          const metadata = { make: 'Olympus', model: 'OM-D E-M1 Mark III' };
+        // Load the camera profile from the file's real EXIF make/model. Returns
+        // null for RAW (exifreader can't parse ORF/CR2/...) -> hide the card
+        // rather than show a fabricated camera.
+        const info = await cameraMetadataService.getCameraInfo(currentImage);
+        if (ignore) return;
 
-          if (metadata?.make && metadata.model) {
-            const profile = advancedRawProcessor.getCameraProfile(metadata.make, metadata.model);
-            setCameraProfile(profile);
-          }
+        if (info?.make && info.model) {
+          const profile = advancedRawProcessor.getCameraProfile(info.make, info.model);
+          setCameraProfile(profile);
+        } else {
+          setCameraProfile(null);
         }
       } catch (error) {
         logger.error('Failed to initialize advanced RAW processor:', error);
@@ -73,10 +91,20 @@ export const AdvancedRawModule: React.FC<AdvancedRawModuleProps> = ({
     };
 
     initializeProcessor();
-  }, [currentImagePath]);
+
+    return () => {
+      ignore = true;
+    };
+  }, [currentImage, currentImagePath]);
 
   const applyProcessing = useCallback(async () => {
     if (!currentImagePath || !isEnabled) return;
+
+    // Take a token for this run; only the latest run is allowed to commit, so a
+    // burst of slider changes that overlaps an in-flight decode cannot push a
+    // stale frame after the newest one.
+    const token = ++applyTokenRef.current;
+    const path = currentImagePath;
 
     try {
       setIsProcessing(true);
@@ -86,42 +114,102 @@ export const AdvancedRawModule: React.FC<AdvancedRawModuleProps> = ({
         // Use professional quality processing with advanced algorithms
         logger.info(`Using professional mode with ${demosaicAlgorithm} demosaicing`);
 
-        await rawImageService.processRawWithProfessionalQuality(
+        const result = await rawImageService.processRawWithProfessionalQuality(
           currentImagePath,
           {
             demosaicAlgorithm,
             bayerPattern,
             applyNoiseProfiling: options.denoiseThreshold > 0,
+            applyNoiseReduction: options.denoiseThreshold > 0,
+            noiseReductionOptions: {
+              chromaStrength: options.chromaDenoiseThreshold * 100,
+              luminanceStrength: options.denoiseThreshold * 100
+            },
             applyLensCorrection: options.applyLensCorrections,
             whiteBalanceMode: options.whiteBalanceMode === 'camera' ? 'camera' : 'daylight'
           }
         );
 
-        // Update the image store with processed data
-        // This would be implemented based on your app store structure
+        if (token !== applyTokenRef.current) return; // superseded by a newer run
+
+        // Push the reprocessed RAW into the store so the canvas redraws.
+        setProcessedImageData({
+          data: result.data,
+          width: result.width,
+          height: result.height,
+          isPreview: true
+        });
+        lastPushedDataRef.current = result.data;
         logger.info('Professional RAW processing completed');
       } else {
-        // Standard processing using the existing pipeline
+        // Standard processing routes through the real main-process decoder
+        // (window.electronAPI.decodeRawFile -> native dcraw_emu). Do NOT use
+        // advancedRawProcessor.processRawFile here: it depends on the browser
+        // LibRaw WASM which 404s and returns a mock buffer.
+        //
+        // The native decoder honors NONE of the standard-mode per-call options
+        // (decodeRawFile receives only the path), so the demosaiced pixels are
+        // identical for a given file regardless of slider positions. We decode
+        // once per path and reuse the cached buffer instead of re-decoding the
+        // same bytes on every option change. The standard controls do not alter
+        // this output today; threading them into dcraw_emu flags would be a
+        // separate feature, so we deliberately avoid a fragile half-application.
         logger.debug('Advanced RAW processing parameters:', options);
 
-        // In a real implementation, this would:
-        // 1. Call advancedRawProcessor.processRawFile() with new options
-        // 2. Update the image store with the new processed data
-        // 3. Trigger canvas refresh
+        let result = baseRawCacheRef.current?.path === path
+          ? baseRawCacheRef.current.result
+          : null;
+
+        if (!result) {
+          const decoded = await rawImageService.loadRawImage(currentImagePath, options);
+          if (token !== applyTokenRef.current) return; // superseded by a newer run
+          baseRawCacheRef.current = { path, result: decoded };
+          result = decoded;
+        }
+
+        // Skip a no-op canvas redraw when the cached decode is unchanged (the
+        // standard options can't alter the native output, so re-pushing the same
+        // buffer would only cost a redraw).
+        if (lastPushedDataRef.current === result.data) {
+          logger.debug('Standard RAW decode unchanged; skipping redundant redraw');
+          return;
+        }
+
+        // Push the decoded RAW into the store so the canvas redraws.
+        setProcessedImageData({
+          data: result.data,
+          width: result.width,
+          height: result.height,
+          isPreview: true
+        });
+        lastPushedDataRef.current = result.data;
+        logger.info('Standard RAW processing completed');
       }
 
     } catch (error) {
       logger.error('Advanced RAW processing failed:', error);
     } finally {
-      setIsProcessing(false);
+      if (token === applyTokenRef.current) setIsProcessing(false);
     }
-  }, [currentImagePath, isEnabled, options, professionalMode, demosaicAlgorithm, bayerPattern]);
+  }, [currentImagePath, isEnabled, options, professionalMode, demosaicAlgorithm, bayerPattern, setProcessedImageData]);
 
-  // Apply processing when options change
+  // Drop the cached base decode when the open file changes so a new path always
+  // triggers a fresh decode.
   useEffect(() => {
-    if (isEnabled && currentImagePath) {
+    baseRawCacheRef.current = null;
+    lastPushedDataRef.current = null;
+  }, [currentImagePath]);
+
+  // Apply processing when options change, debounced (~300ms trailing) so a
+  // slider drag produces a single apply after the user settles instead of one
+  // decode per tick. The latest-token guard in applyProcessing handles any
+  // remaining overlap.
+  useEffect(() => {
+    if (!isEnabled || !currentImagePath) return;
+    const handle = setTimeout(() => {
       applyProcessing();
-    }
+    }, 300);
+    return () => clearTimeout(handle);
   }, [options, isEnabled, currentImagePath, applyProcessing]);
 
   const updateOption = <K extends keyof AdvancedRawProcessingOptions>(

@@ -51,7 +51,6 @@ export const LuminosityMaskModule: React.FC<LuminosityMaskModuleProps> = ({
     if (previewMask && currentImage) {
       generateMaskPreview(previewMask);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [previewMask, currentImage, maskSettings.previewColor, maskSettings.previewOpacity]);
 
   // Generate single luminosity mask

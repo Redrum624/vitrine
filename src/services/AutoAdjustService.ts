@@ -9,6 +9,7 @@
  */
 
 import { logger } from '../utils/Logger';
+import { userStyleProfile, selectBucket, type StyleProfile, type BucketName } from './UserStyleProfile';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -132,11 +133,20 @@ class AutoAdjustService {
     };
   }
 
+  // ── Profile selection ──────────────────────────────────────────────────────
+
+  /** Pick the user-style bucket + profile that best matches the current image. */
+  private pickProfile(stats: ImageStats): { name: BucketName; profile: StyleProfile } {
+    const name = selectBucket({ mean_lum: stats.meanLum, rb_ratio: stats.meanR / Math.max(0.001, stats.meanB) });
+    return { name, profile: userStyleProfile[name] };
+  }
+
   // ── Exposure ─────────────────────────────────────────────────────────────
 
   autoExposure(stats: ImageStats): { exposure: number; black: number; mode: 'manual' | 'automatic' } {
-    // Target: median luminance around 0.45 (slightly below middle-grey)
-    const targetMedian = 0.45;
+    const { name, profile } = this.pickProfile(stats);
+    // Target: the user's median luminance for this bucket (was a hardcoded 0.45)
+    const targetMedian = profile.targetMedianLum;
     const medianDelta = targetMedian - stats.p50;
 
     // Only correct if clearly off — dead zone around target to avoid touching well-exposed images
@@ -149,7 +159,7 @@ class AutoAdjustService {
     // Black level: lift only if deepest shadows are severely clipped
     const black = clamp(stats.p1 < 0.005 ? 0.003 : 0, 0, 0.01);
 
-    logger.info(`AutoExposure: median=${stats.p50.toFixed(3)}, delta=${medianDelta.toFixed(3)} → exposure=${exposure.toFixed(3)}, black=${black.toFixed(4)}`);
+    logger.info(`AutoExposure[${name}]: median=${stats.p50.toFixed(3)}, target=${targetMedian.toFixed(3)}, delta=${medianDelta.toFixed(3)} → exposure=${exposure.toFixed(3)}, black=${black.toFixed(4)}`);
     return { exposure, black, mode: 'manual' };
   }
 
@@ -159,19 +169,19 @@ class AutoAdjustService {
     black_point: number; exposure: number; contrast: number;
     brightness: number; saturation: number; vibrance: number;
   } {
+    const { name, profile } = this.pickProfile(stats);
+
     // Exposure: zero — ExposureModule already handles it, avoid double-dipping
     const exposure = 0;
 
-    // Contrast: gentle boost for flat images only
-    const idealStd = 0.18;
-    const contrast = clamp((idealStd - stats.stdLum) * 1.5, -0.2, 0.3);
+    // Contrast: pull toward the user's contrast (std luminance) for this bucket
+    const contrast = clamp((profile.targetStdLum - stats.stdLum) * 1.5, -0.2, 0.3);
 
-    // Brightness: very gentle fine-tune
-    const brightness = clamp((0.48 - stats.meanLum) * 0.15, -0.1, 0.1);
+    // Brightness: very gentle fine-tune toward the user's mean luminance
+    const brightness = clamp((profile.targetMeanLum - stats.meanLum) * 0.15, -0.1, 0.1);
 
-    // Saturation: conservative boost
-    const idealSat = 0.35;
-    const saturation = clamp((idealSat - stats.meanSat) * 0.5, -0.2, 0.2);
+    // Saturation: pull toward the user's saturation for this bucket
+    const saturation = clamp((profile.targetMeanSat - stats.meanSat) * 0.5, -0.2, 0.2);
 
     // Vibrance: proportional to saturation correction
     const vibrance = clamp(saturation * 0.4, -0.1, 0.15);
@@ -179,27 +189,31 @@ class AutoAdjustService {
     // Black point: minimal
     const black_point = 0;
 
-    logger.info(`AutoBasicAdj: lum=${stats.meanLum.toFixed(3)}, std=${stats.stdLum.toFixed(3)}, sat=${stats.meanSat.toFixed(3)} → exp=${exposure.toFixed(2)}, cont=${contrast.toFixed(2)}, sat=${saturation.toFixed(2)}`);
+    logger.info(`AutoBasicAdj[${name}]: lum=${stats.meanLum.toFixed(3)}, std=${stats.stdLum.toFixed(3)}, sat=${stats.meanSat.toFixed(3)} → exp=${exposure.toFixed(2)}, cont=${contrast.toFixed(2)}, sat=${saturation.toFixed(2)}`);
     return { black_point, exposure, contrast, brightness, saturation, vibrance };
   }
 
   // ── Shadows & Highlights ─────────────────────────────────────────────────
 
   autoShadowsHighlights(stats: ImageStats): Record<string, unknown> {
-    // Shadow adjustment: 50 = neutral, >50 = lift shadows
-    // Only lift if shadows are severely crushed (meanLum < 0.06)
-    const shadowDeficit = 0.06 - stats.shadowMeanLum;
+    const { name, profile } = this.pickProfile(stats);
+
+    // Shadow adjustment: 50 = neutral, >50 = lift shadows. Trigger from the
+    // user's acceptable shadow level for this bucket (was hardcoded 0.06).
+    const shadowTrigger = profile.acceptableShadowMeanLum;
+    const shadowDeficit = shadowTrigger - stats.shadowMeanLum;
     const shadowDelta = clamp(shadowDeficit > 0 ? shadowDeficit * 80 * stats.shadowPixelRatio : 0, 0, 10);
     const shadows = 50 + shadowDelta;
 
-    // Highlight adjustment: 50 = neutral, >50 = recover highlights
-    // Only recover if highlights are severely clipped (meanLum > 0.92)
-    const highlightExcess = stats.highlightMeanLum - 0.92;
+    // Highlight adjustment: 50 = neutral, >50 = recover highlights. Trigger from
+    // the user's acceptable highlight level for this bucket (was hardcoded 0.92).
+    const highlightTrigger = profile.acceptableHighlightMeanLum;
+    const highlightExcess = stats.highlightMeanLum - highlightTrigger;
     const highlightDelta = clamp(highlightExcess > 0 ? highlightExcess * 80 * stats.highlightPixelRatio : 0, 0, 10);
     const highlights = 50 + highlightDelta;
 
     // Only set Shadows/Highlights amounts — leave Advanced Settings untouched
-    logger.info(`AutoSH: shadow=${shadows.toFixed(1)}, highlight=${highlights.toFixed(1)}`);
+    logger.info(`AutoSH[${name}]: shadow=${shadows.toFixed(1)}, highlight=${highlights.toFixed(1)}`);
     return {
       shadows,
       highlights,
@@ -210,11 +224,12 @@ class AutoAdjustService {
   // ── Tone Curve ───────────────────────────────────────────────────────────
 
   autoToneCurve(stats: ImageStats): Record<string, unknown> {
+    const { name, profile } = this.pickProfile(stats);
     const tonalSpan = stats.p95 - stats.p5;
 
     // For narrow-range images (uniform dark/bright), return identity curve — no modification.
     if (tonalSpan < 0.15) {
-      logger.info(`AutoToneCurve: narrow span=${tonalSpan.toFixed(3)}, returning identity`);
+      logger.info(`AutoToneCurve[${name}]: narrow span=${tonalSpan.toFixed(3)}, returning identity`);
       return {
         baseCurve: [{ x: 0, y: 0 }, { x: 1, y: 1 }],
         baseCurveNodes: 2,
@@ -224,37 +239,14 @@ class AutoAdjustService {
       };
     }
 
-    // Gentle midtone-lift curve: keep blacks black, gently brighten lower midtones,
-    // leave highlights mostly untouched. Like a subtle upward bow in the lower half.
-    // The lift amount is proportional to how dark the image is.
-    const midLum = stats.p50;
-    // Dark images (p50~0.2) get more lift, well-exposed (p50~0.45) get almost none
-    const liftAmount = clamp((0.45 - midLum) * 0.3, 0, 0.12);
-
-    if (liftAmount < 0.01) {
-      logger.info(`AutoToneCurve: p50=${midLum.toFixed(3)}, well-exposed → identity`);
-      return {
-        baseCurve: [{ x: 0, y: 0 }, { x: 1, y: 1 }],
-        baseCurveNodes: 2,
-        baseCurveType: 0,
-        autoLevels: false,
-        autoContrast: false,
-      };
-    }
-
-    const baseCurve = [
-      { x: 0, y: 0 },
-      { x: 0.25, y: 0.25 + liftAmount },       // gentle shadow lift
-      { x: 0.50, y: 0.50 + liftAmount * 0.6 },  // midtone lift (less than shadows)
-      { x: 0.75, y: 0.75 + liftAmount * 0.2 },  // minimal highlight change
-      { x: 1, y: 1 },
-    ];
-
-    logger.info(`AutoToneCurve: p50=${midLum.toFixed(3)}, lift=${liftAmount.toFixed(3)}`);
+    // Apply the user's bucket tone-curve shape directly (clone the points so the
+    // profile constant is never mutated downstream).
+    const baseCurve = profile.toneCurveShape.map(pt => ({ ...pt }));
+    logger.info(`AutoToneCurve[${name}]: applied profile curve (${baseCurve.length} nodes)`);
     return {
       baseCurve,
       baseCurveNodes: baseCurve.length,
-      baseCurveType: 0, // linear — safe, predictable
+      baseCurveType: 0,
       autoLevels: false,
       autoContrast: false,
     };
@@ -263,22 +255,16 @@ class AutoAdjustService {
   // ── Color Balance ────────────────────────────────────────────────────────
 
   autoColorBalance(stats: ImageStats): Record<string, unknown> {
-    // Goal: neutralise colour casts per tonal zone.
-    // A perfectly neutral image has avgR ≈ avgG ≈ avgB within each zone.
-    // We compute correction as the opposite of the cast.
+    // Goal: bias colour balance toward the user's TARGET RGB balance for this
+    // bucket (not absolute neutral). A "cast" is now the deviation from that
+    // target, so e.g. the warm bucket's intentional warmth is preserved.
+    const { name, profile } = this.pickProfile(stats);
 
-    const avgLum = stats.meanLum;
-
-    // Global cast correction
     const avgAll = (stats.meanR + stats.meanG + stats.meanB) / 3;
-    const castR = stats.meanR - avgAll;
-    const castG = stats.meanG - avgAll;
-    const castB = stats.meanB - avgAll;
-
-    // Map into the colour balance axes:
-    //   cyan_red     ← → R excess → push cyan (negative)
-    //   magenta_green← → G excess → push magenta (negative)
-    //   yellow_blue  ← → B excess → push yellow (negative)
+    const { r: tgtR, g: tgtG, b: tgtB } = profile.rgbBalance;
+    const castR = (stats.meanR - avgAll) - (tgtR - 1) * avgAll;
+    const castG = (stats.meanG - avgAll) - (tgtG - 1) * avgAll;
+    const castB = (stats.meanB - avgAll) - (tgtB - 1) * avgAll;
 
     // Apply stronger correction to midtones, lighter to shadows/highlights
     const midStrength = 0.8;
@@ -300,29 +286,59 @@ class AutoAdjustService {
       yellow_blue: clamp(-castB * sideStrength * 2, -0.5, 0.5),
     };
 
-    logger.info(`AutoColorBalance: cast R=${castR.toFixed(3)}, G=${castG.toFixed(3)}, B=${castB.toFixed(3)}, avgLum=${avgLum.toFixed(3)}`);
+    logger.info(`AutoColorBalance[${name}]: bias R=${castR.toFixed(3)}, G=${castG.toFixed(3)}, B=${castB.toFixed(3)}`);
     return { shadows, midtones, highlights };
   }
 
   // ── White Balance ────────────────────────────────────────────────────────
 
   autoWhiteBalance(stats: ImageStats): { temperature: number; tint: number } {
-    // Grey-world assumption: average colour should be neutral grey.
-    // R/B ratio maps to colour temperature, G deviation maps to tint.
+    const { name, profile } = this.pickProfile(stats);
     const rb = stats.meanB > 0.001 ? stats.meanR / stats.meanB : 1;
+    const targetRb = profile.rbRatio;   // the user's R/B for this bucket (was implicitly 1.0)
 
-    // Map R/B ratio to Kelvin.  rb=1 → 6500K (D65 reference, identity in WB process)
-    // rb > 1 (warm image, excess red) → we need to cool it → lower K
-    // rb < 1 (cool image, excess blue) → we need to warm it → higher K
-    // Power of 0.3: gentle correction that preserves natural warmth
-    const temperature = clamp(Math.round(6500 * Math.pow(1 / rb, 0.3)), 2000, 12000);
+    // Map R/B toward the user's target ratio (not neutral). Power 0.3 keeps it
+    // gentle; if the image already matches targetRb, temperature stays at 6500K.
+    const temperature = clamp(Math.round(6500 * Math.pow(targetRb / rb, 0.3)), 2000, 12000);
 
     // Tint: green/magenta. Keep very conservative (multiplier -80 instead of -200)
     const expectedG = (stats.meanR + stats.meanB) / 2;
     const tint = clamp(Math.round((stats.meanG - expectedG) * -80), -50, 50);
 
-    logger.info(`AutoWB: R/B=${rb.toFixed(3)} → temp=${temperature}K, G-deviation=${(stats.meanG - expectedG).toFixed(4)} → tint=${tint}`);
+    logger.info(`AutoWB[${name}]: R/B=${rb.toFixed(3)}, targetR/B=${targetRb.toFixed(3)} → temp=${temperature}K, tint=${tint}`);
     return { temperature, tint };
+  }
+
+  // ── Auto All (coordinator) ─────────────────────────────────────────────────
+
+  /**
+   * Run every auto adjustment in pipeline order and return the bundle of params
+   * the UI should dispatch into each module. Caller decides whether to apply
+   * them as a single transaction (preferred) or piecewise.
+   */
+  autoAll(data: Float32Array, width: number, height: number): {
+    bucket: BucketName;
+    stats: ImageStats;
+    exposure: ReturnType<AutoAdjustService['autoExposure']>;
+    basicAdj: ReturnType<AutoAdjustService['autoBasicAdj']>;
+    shadowsHighlights: ReturnType<AutoAdjustService['autoShadowsHighlights']>;
+    toneCurve: ReturnType<AutoAdjustService['autoToneCurve']>;
+    colorBalance: ReturnType<AutoAdjustService['autoColorBalance']>;
+    whiteBalance: ReturnType<AutoAdjustService['autoWhiteBalance']>;
+  } {
+    const stats = this.analyse(data, width, height);
+    const { name: bucket } = this.pickProfile(stats);
+    logger.info(`AutoAll: bucket=${bucket}, samples=${userStyleProfile[bucket].sampleCount}`);
+    return {
+      bucket,
+      stats,
+      exposure: this.autoExposure(stats),
+      basicAdj: this.autoBasicAdj(stats),
+      shadowsHighlights: this.autoShadowsHighlights(stats),
+      toneCurve: this.autoToneCurve(stats),
+      colorBalance: this.autoColorBalance(stats),
+      whiteBalance: this.autoWhiteBalance(stats),
+    };
   }
 }
 

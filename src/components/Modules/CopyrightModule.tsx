@@ -9,6 +9,7 @@ import {
   CopyrightTemplate,
   CopyrightPreset
 } from '../../services/CopyrightService';
+import { rawImageService } from '../../services/RawImageService';
 
 interface CopyrightModuleProps {
   isEnabled: boolean;
@@ -26,7 +27,12 @@ export const CopyrightModule: React.FC<CopyrightModuleProps> = ({
   const [selectedTemplate, setSelectedTemplate] = useState<string>('');
   const [selectedPreset, setSelectedPreset] = useState<string>('');
   const [isEmbedding, setIsEmbedding] = useState(false);
+  const [embedStatus, setEmbedStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [validationResult, setValidationResult] = useState<{ valid: boolean; warnings: string[]; errors: string[] } | null>(null);
+
+  // Proprietary camera RAW (ORF/CR2/NEF/ARW/DNG…) cannot be re-encoded by sharp,
+  // so in-place metadata embedding is unsafe; route the user to Export instead.
+  const isRawImage = currentImage ? rawImageService.isRawFile(currentImage.path) : false;
 
   const [templateVariables, setTemplateVariables] = useState({
     'Your Name': 'Your Name',
@@ -139,8 +145,19 @@ export const CopyrightModule: React.FC<CopyrightModuleProps> = ({
       return;
     }
 
+    // RAW files cannot be tagged in place (sharp can't re-encode camera RAW);
+    // tell the user to export a JPEG/TIFF instead rather than failing silently.
+    if (rawImageService.isRawFile(currentImage.path)) {
+      setEmbedStatus({
+        type: 'error',
+        message: 'RAW files can’t be tagged in place. Use Export to write a JPEG/TIFF with this metadata.'
+      });
+      return;
+    }
+
     try {
       setIsEmbedding(true);
+      setEmbedStatus(null);
       logger.info('Embedding copyright metadata...');
 
       const success = await copyrightService.embedMetadata(
@@ -151,16 +168,34 @@ export const CopyrightModule: React.FC<CopyrightModuleProps> = ({
 
       if (success) {
         logger.info('Copyright metadata embedded successfully');
+        // In-place embed re-encodes the file; for lossy formats (JPEG/WebP) the
+        // pixels are recompressed (at high quality) rather than preserved
+        // byte-for-byte. Surface that so archival masters aren't degraded silently.
+        const isLossy = /\.(jpe?g|webp)$/i.test(currentImage.path);
+        const message = isLossy
+          ? `Metadata embedded into ${currentImage.name} (re-saved at high quality)`
+          : `Metadata embedded into ${currentImage.name}`;
+        setEmbedStatus({ type: 'success', message });
       } else {
         logger.error('Failed to embed copyright metadata');
+        setEmbedStatus({ type: 'error', message: 'Failed to embed metadata. The desktop app is required and the file must be a JPEG/PNG/TIFF/WebP.' });
       }
 
     } catch (error) {
       logger.error('Error embedding metadata:', error);
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      setEmbedStatus({ type: 'error', message: `Error embedding metadata: ${message}` });
     } finally {
       setIsEmbedding(false);
     }
   }, [currentImage, iptcMetadata, xmpMetadata]);
+
+  // Auto-clear the embed status banner a few seconds after it appears.
+  useEffect(() => {
+    if (!embedStatus) return;
+    const timer = setTimeout(() => setEmbedStatus(null), 5000);
+    return () => clearTimeout(timer);
+  }, [embedStatus]);
 
   // Export metadata
   const exportMetadata = useCallback(() => {
@@ -620,11 +655,41 @@ export const CopyrightModule: React.FC<CopyrightModuleProps> = ({
             </div>
           )}
 
+          {/* Embed status banner */}
+          {embedStatus && (
+            <div
+              className={`flex items-center gap-2 p-2 rounded border ${
+                embedStatus.type === 'success'
+                  ? 'bg-green-900/30 border-green-700'
+                  : 'bg-red-900/30 border-red-700'
+              }`}
+            >
+              {embedStatus.type === 'success' ? (
+                <CheckCircle className="w-4 h-4 text-green-400 flex-shrink-0" />
+              ) : (
+                <AlertTriangle className="w-4 h-4 text-red-400 flex-shrink-0" />
+              )}
+              <span className={`text-sm ${embedStatus.type === 'success' ? 'text-green-300' : 'text-red-300'}`}>
+                {embedStatus.message}
+              </span>
+            </div>
+          )}
+
+          {/* RAW guidance: in-place tagging is unsupported for camera RAW. */}
+          {isRawImage && (
+            <div className="flex items-center gap-2 p-2 rounded border bg-yellow-900/30 border-yellow-700">
+              <AlertTriangle className="w-4 h-4 text-yellow-400 flex-shrink-0" />
+              <span className="text-sm text-yellow-300">
+                RAW files can’t be tagged in place. Use Export to write a JPEG/TIFF with this metadata.
+              </span>
+            </div>
+          )}
+
           {/* Actions */}
           <div className="flex gap-2 pt-2 border-t border-gray-700">
             <button
               onClick={embedMetadata}
-              disabled={isEmbedding || !currentImage || !validationResult?.valid}
+              disabled={isEmbedding || !currentImage || !validationResult?.valid || isRawImage}
               className="flex-1 bg-gray-800 hover:bg-gray-800 disabled:bg-gray-600 disabled:cursor-not-allowed text-white text-sm font-medium py-2 px-4 rounded transition-colors flex items-center justify-center gap-2"
             >
               <Copyright className="w-4 h-4" />

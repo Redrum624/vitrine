@@ -61,7 +61,6 @@ export const WatermarkModule: React.FC<WatermarkModuleProps> = ({
     if (isEnabled && processedImageData && watermarkSettings.enabled) {
       generatePreview();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isEnabled, processedImageData, currentImage, watermarkSettings]);
 
   // Generate watermark preview

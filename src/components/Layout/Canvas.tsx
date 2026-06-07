@@ -8,6 +8,8 @@ import { CropTransformOverlay } from '../Canvas/CropTransformOverlay';
 import { InteractiveCropHandles } from '../Canvas/InteractiveCropHandles';
 import { imageProcessingPipeline } from '../../services/ImageProcessingPipeline';
 import { CropPipelineModule } from '../../modules/CropPipelineModule';
+import { LocalAdjustmentsPipelineModule } from '../../modules/LocalAdjustmentsPipelineModule';
+import { LocalAdjustmentMaskOverlay } from '../Canvas/LocalAdjustmentMaskOverlay';
 import { notificationService } from '../../services/NotificationService';
 
 // Debug mode for canvas rendering - set to false for production
@@ -26,7 +28,7 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasWrapperRef = useRef<HTMLDivElement>(null);
-  const { viewport, setViewport, processedImageData, isAdjustingRotation, selectedTool, triggerReprocessing, showGrid, showRulers } = useAppStore();
+  const { viewport, setViewport, processedImageData, isAdjustingRotation, selectedTool, triggerReprocessing, showGrid, showRulers, showOriginal, referenceMode, isProcessing } = useAppStore();
   const [isDragging, setIsDragging] = useState(false);
   const [lastPan, setLastPan] = useState({ x: 0, y: 0 });
   const [displayImage, setDisplayImage] = useState<ImageFileInfo | null>(null);
@@ -359,7 +361,6 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
       // Draw placeholder content
       drawPlaceholder(ctx, canvas);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [processedImageData, displayImage, viewport]);
 
   // Optimized image drawing with caching and requestAnimationFrame
@@ -663,7 +664,6 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
   // Redraw canvas when processed image data changes
   useEffect(() => {
     redrawCanvas();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [processedImageData, displayImage]);
 
 
@@ -681,7 +681,6 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
   // Redraw canvas when viewport changes
   useEffect(() => {
     redrawCanvas();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewport]);
 
   // Get crop module from pipeline
@@ -994,6 +993,30 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
               </>
               );
             })()}
+
+            {/* Local Adjustments: drag-to-place mask overlay (masks live in Basic Adjustments) */}
+            {(selectedTool === 'basicadj' || selectedTool === 'localadjustments') && (() => {
+              const la = imageProcessingPipeline.getModule<LocalAdjustmentsPipelineModule>('localadjustments');
+              if (!la) return null;
+              const p = la.getParameters();
+              const layer = p.layers.find(l => l.id === p.activeLayerId);
+              if (!layer || (layer.type !== 'radial_gradient' && layer.type !== 'linear_gradient') || !layer.geometry) {
+                return null;
+              }
+              return (
+                <LocalAdjustmentMaskOverlay
+                  canvasRef={canvasRef}
+                  viewport={viewport}
+                  layerType={layer.type}
+                  geometry={layer.geometry}
+                  onGeometryChange={(geom) => {
+                    const img = imageService.getCurrentImage();
+                    if (img) la.setLayerGeometry(layer.id, geom, img.width, img.height);
+                    triggerReprocessing();
+                  }}
+                />
+              );
+            })()}
           </div>
         </div>
 
@@ -1005,8 +1028,8 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
           </div>
         )}
 
-        {/* Image Navigation Arrows */}
-        {displayImage && (
+        {/* Image Navigation Arrows (hidden in Before/After + Reference comparison) */}
+        {displayImage && !showOriginal && !referenceMode && (
           <>
             <button
               onClick={() => navigateImage('prev')}
@@ -1037,12 +1060,14 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
           </div>
         )}
 
-        {/* Loading Indicator */}
-        {imageLoading && (
+        {/* Loading / Applying Indicator */}
+        {(imageLoading || isProcessing) && (
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-dark-900/80 backdrop-blur-sm">
             <div className="animate-spin rounded-full h-12 w-12 border-2 border-gray-600 border-t-white mb-4" />
             <div className="text-white text-sm font-medium">
-              {currentImage?.format.toLowerCase() === 'orf' ||
+              {isProcessing && !imageLoading ? (
+                'Applying…'
+              ) : currentImage?.format.toLowerCase() === 'orf' ||
                currentImage?.format.toLowerCase() === 'cr2' ||
                currentImage?.format.toLowerCase() === 'cr3' ||
                currentImage?.format.toLowerCase() === 'nef' ||

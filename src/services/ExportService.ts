@@ -1,6 +1,7 @@
 import { logger } from '../utils/Logger';
-import { isElectron } from '../types/electron';
+import { isElectron, EmbeddableMetadata } from '../types/electron';
 import { watermarkService, WatermarkSettings } from './WatermarkService';
+import { COLOR_SPACE_CONVERSIONS } from './colorSpaceMatrices';
 
 export interface ExportOptions {
   // Output format
@@ -32,6 +33,10 @@ export interface ExportOptions {
   preserveMetadata: boolean;
   includeProcessingHistory: boolean;
   customMetadata: Record<string, string>;
+  // EXIF copyright/artist + IPTC-as-XMP fields to embed into the exported file.
+  // Built by CopyrightService.toEmbeddableMetadata; forwarded straight to the
+  // main-process writer, which embeds it during the encode.
+  metadata?: EmbeddableMetadata;
 
   // Sharpening
   outputSharpening: {
@@ -183,19 +188,29 @@ export class ExportService {
       logger.info(`Expected data length: ${expectedDataLength}, Actual: ${actualDataLength}`);
 
       if (expectedDataLength !== actualDataLength) {
-        // Calculate actual dimensions from data length
+        // Try to recover dimensions assuming the same aspect ratio (e.g. a
+        // downscaled preview buffer). Only adopt the candidate if it factors
+        // EXACTLY into the pixel count — otherwise deriving width/height from a
+        // single scalar would fabricate a sheared/mis-strided grid and corrupt
+        // the output.
         const actualPixelCount = actualDataLength / 4;
         const aspectRatio = originalWidth / originalHeight;
-        const actualHeight = Math.sqrt(actualPixelCount / aspectRatio);
-        const actualWidth = actualPixelCount / actualHeight;
+        const candidateHeight = Math.round(Math.sqrt(actualPixelCount / aspectRatio));
+        const candidateWidth = candidateHeight > 0 ? Math.round(actualPixelCount / candidateHeight) : 0;
 
-        logger.warn(`Dimension mismatch detected! Actual image data is ${Math.round(actualWidth)}x${Math.round(actualHeight)}`);
-
-        // Override original dimensions with actual data dimensions
-        originalWidth = Math.round(actualWidth);
-        originalHeight = Math.round(actualHeight);
-
-        logger.info(`Using corrected dimensions: ${originalWidth}x${originalHeight}`);
+        if (candidateWidth > 0 && candidateHeight > 0 && candidateWidth * candidateHeight === actualPixelCount) {
+          logger.warn(`Export dimension mismatch; using data-derived ${candidateWidth}x${candidateHeight}`);
+          originalWidth = candidateWidth;
+          originalHeight = candidateHeight;
+        } else {
+          // Cannot safely recover exact dimensions; keep the caller's values. The
+          // main-process writer validates the byte size and throws if they are
+          // wrong, surfacing the error instead of writing a sheared image.
+          logger.error(
+            `Export dimension mismatch: expected ${expectedDataLength} samples for ` +
+            `${originalWidth}x${originalHeight}, got ${actualDataLength}. Refusing to fabricate dimensions.`
+          );
+        }
       }
 
       // Calculate output dimensions
@@ -247,7 +262,10 @@ export class ExportService {
           'srgb',
           exportOptions.colorSpace
         );
-        warnings.push(`Color space conversion to ${exportOptions.colorSpace} is approximated`);
+        warnings.push(`Converted to ${exportOptions.colorSpace} with an embedded ICC profile`);
+        if (exportOptions.bitDepth === 16) {
+          warnings.push('16-bit + wide-gamut is exported at 8-bit (encoder limitation)');
+        }
       }
 
       // Convert to the appropriate bit depth
@@ -549,41 +567,70 @@ export class ExportService {
     height: number,
     radius: number
   ): Float32Array {
-    // Simple box blur approximation for performance
-    const blurred = new Float32Array(imageData);
+    // Separable box-blur approximation: a horizontal pass followed by a vertical
+    // pass. BOTH passes are required for an isotropic blur — running only the
+    // horizontal pass produced directionally-biased sharpening (only vertical
+    // edges) on every export, since output sharpening is enabled by default.
     const kernelSize = Math.max(3, Math.round(radius * 2) * 2 + 1);
     const halfKernel = Math.floor(kernelSize / 2);
 
-    // Horizontal pass
+    // Horizontal pass: imageData -> horizontal
+    const horizontal = new Float32Array(imageData);
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
         const destIndex = (y * width + x) * 4;
-        const rgba: [number, number, number, number] = [0, 0, 0, 0];
-        let weightSum = 0;
+        let r = 0, g = 0, b = 0, a = 0, weightSum = 0;
 
         for (let kx = -halfKernel; kx <= halfKernel; kx++) {
           const sx = Math.max(0, Math.min(width - 1, x + kx));
           const srcIndex = (y * width + sx) * 4;
-          const weight = 1; // Uniform weight for box blur
-
-          rgba[0] += imageData[srcIndex] * weight;
-          rgba[1] += imageData[srcIndex + 1] * weight;
-          rgba[2] += imageData[srcIndex + 2] * weight;
-          rgba[3] += imageData[srcIndex + 3] * weight;
-          weightSum += weight;
+          r += imageData[srcIndex];
+          g += imageData[srcIndex + 1];
+          b += imageData[srcIndex + 2];
+          a += imageData[srcIndex + 3];
+          weightSum += 1;
         }
 
-        blurred[destIndex] = rgba[0] / weightSum;
-        blurred[destIndex + 1] = rgba[1] / weightSum;
-        blurred[destIndex + 2] = rgba[2] / weightSum;
-        blurred[destIndex + 3] = rgba[3] / weightSum;
+        horizontal[destIndex] = r / weightSum;
+        horizontal[destIndex + 1] = g / weightSum;
+        horizontal[destIndex + 2] = b / weightSum;
+        horizontal[destIndex + 3] = a / weightSum;
+      }
+    }
+
+    // Vertical pass: horizontal -> blurred
+    const blurred = new Float32Array(horizontal);
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const destIndex = (y * width + x) * 4;
+        let r = 0, g = 0, b = 0, a = 0, weightSum = 0;
+
+        for (let ky = -halfKernel; ky <= halfKernel; ky++) {
+          const sy = Math.max(0, Math.min(height - 1, y + ky));
+          const srcIndex = (sy * width + x) * 4;
+          r += horizontal[srcIndex];
+          g += horizontal[srcIndex + 1];
+          b += horizontal[srcIndex + 2];
+          a += horizontal[srcIndex + 3];
+          weightSum += 1;
+        }
+
+        blurred[destIndex] = r / weightSum;
+        blurred[destIndex + 1] = g / weightSum;
+        blurred[destIndex + 2] = b / weightSum;
+        blurred[destIndex + 3] = a / weightSum;
       }
     }
 
     return blurred;
   }
 
-  // Convert color space (simplified implementation)
+  // Convert from sRGB to a wide-gamut output space (Adobe RGB / ProPhoto /
+  // Rec.2020) using the linear-light matrices generated alongside the embedded
+  // ICC profiles (scripts/gen-icc-profiles.cjs). Decodes the sRGB gamma, applies
+  // the sRGB->target 3x3 matrix in linear light, then re-encodes with the target
+  // profile's TRC gamma so the pixel values match the ICC profile the writer
+  // attaches. Returns the input unchanged when no conversion is defined.
   private convertColorSpace(
     imageData: Float32Array,
     _width: number,
@@ -593,37 +640,33 @@ export class ExportService {
   ): Float32Array {
     if (fromSpace === toSpace) return imageData;
 
+    const conv = COLOR_SPACE_CONVERSIONS[toSpace];
+    if (fromSpace !== 'srgb' || !conv) {
+      logger.warn(`No color-space conversion for ${fromSpace} -> ${toSpace}; exporting sRGB values`);
+      return imageData;
+    }
+
     logger.debug(`Converting color space: ${fromSpace} → ${toSpace}`);
 
+    const m = conv.srgbToLinearTarget;
+    const encodeGamma = 1 / conv.gamma;
+    const srgbToLinear = (c: number): number =>
+      c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+
     const converted = new Float32Array(imageData);
+    for (let i = 0; i < imageData.length; i += 4) {
+      const r = srgbToLinear(imageData[i]);
+      const g = srgbToLinear(imageData[i + 1]);
+      const b = srgbToLinear(imageData[i + 2]);
 
-    // Simplified color space conversion matrices
-    const matrices = {
-      'srgb_to_adobergb': [
-        0.7151, 0.2849, 0.0000,
-        0.0000, 1.0000, 0.0000,
-        0.0000, 0.0411, 0.9589
-      ],
-      'srgb_to_prophoto': [
-        0.7976, 0.1352, 0.0313,
-        0.2880, 0.7118, 0.0001,
-        0.0000, 0.0000, 0.8252
-      ]
-    };
+      const lr = Math.max(0, m[0][0] * r + m[0][1] * g + m[0][2] * b);
+      const lg = Math.max(0, m[1][0] * r + m[1][1] * g + m[1][2] * b);
+      const lb = Math.max(0, m[2][0] * r + m[2][1] * g + m[2][2] * b);
 
-    const matrixKey = `${fromSpace}_to_${toSpace}` as keyof typeof matrices;
-    const matrix = matrices[matrixKey];
-
-    if (matrix) {
-      for (let i = 0; i < imageData.length; i += 4) {
-        const r = imageData[i];
-        const g = imageData[i + 1];
-        const b = imageData[i + 2];
-
-        converted[i] = Math.max(0, Math.min(1, matrix[0] * r + matrix[1] * g + matrix[2] * b));
-        converted[i + 1] = Math.max(0, Math.min(1, matrix[3] * r + matrix[4] * g + matrix[5] * b));
-        converted[i + 2] = Math.max(0, Math.min(1, matrix[6] * r + matrix[7] * g + matrix[8] * b));
-      }
+      converted[i] = Math.min(1, Math.pow(lr, encodeGamma));
+      converted[i + 1] = Math.min(1, Math.pow(lg, encodeGamma));
+      converted[i + 2] = Math.min(1, Math.pow(lb, encodeGamma));
+      // alpha (i + 3) left unchanged
     }
 
     return converted;
@@ -740,6 +783,8 @@ export class ExportService {
         width,
         height,
         channels: 4, // RGBA
+        bitDepth: options.bitDepth,     // tells the writer to use 16-bit (ushort) raw input
+        colorSpace: options.colorSpace, // drives ICC tagging (sRGB embedded by the writer)
         quality: options.quality,
         progressive: options.progressive,
         compressionLevel: options.compressionLevel,
@@ -756,6 +801,11 @@ export class ExportService {
         };
       }
 
+      // Embed copyright/IPTC metadata when the caller supplied an EXIF/XMP block.
+      if (options.metadata && (options.metadata.exif || options.metadata.xmp)) {
+        exportOptions.metadata = options.metadata;
+      }
+
       await window.electronAPI.writeImageFile(
         outputPath,
         imageData.buffer as ArrayBuffer, // Type assertion for ArrayBuffer
@@ -764,6 +814,8 @@ export class ExportService {
           width: number;
           height: number;
           channels?: number;
+          bitDepth?: number;
+          colorSpace?: string;
           quality?: number;
           progressive?: boolean;
           compressionLevel?: number;
@@ -774,53 +826,14 @@ export class ExportService {
             height?: number;
             fit?: string;
           };
+          metadata?: EmbeddableMetadata;
         }
       );
     } else {
-      // Fallback for browser environment using Canvas API
-      await this.createImageFileCanvas(imageData, width, height, options, outputPath);
+      // No browser export path: the only real writer is the Electron/Sharp
+      // pipeline above. Fail loudly instead of fabricating a successful save.
+      throw new Error('Image export is only supported in the Electron app');
     }
-  }
-
-  // Fallback Canvas-based image creation for browser environment
-  private async createImageFileCanvas(
-    imageData: Uint8Array | Uint16Array,
-    width: number,
-    height: number,
-    options: ExportOptions,
-    outputPath: string
-  ): Promise<void> {
-    const canvas = new OffscreenCanvas(width, height);
-    const ctx = canvas.getContext('2d');
-
-    if (!ctx) {
-      throw new Error('Failed to get canvas context');
-    }
-
-    // Convert data to ImageData
-    let uint8Data: Uint8ClampedArray;
-    if (imageData instanceof Uint16Array) {
-      // Convert 16-bit to 8-bit
-      uint8Data = new Uint8ClampedArray(imageData.length);
-      for (let i = 0; i < imageData.length; i++) {
-        uint8Data[i] = Math.round((imageData[i] / 65535) * 255);
-      }
-    } else {
-      uint8Data = new Uint8ClampedArray(imageData);
-    }
-
-    const imageDataObj = new ImageData(new Uint8ClampedArray(uint8Data), width, height);
-    ctx.putImageData(imageDataObj, 0, 0);
-
-    // Convert to blob
-    const blob = await canvas.convertToBlob({
-      type: `image/${options.format}`,
-      quality: options.quality ? options.quality / 100 : 0.9
-    });
-
-    // For browser, we can't directly write files, so we'll simulate
-    logger.warn('Browser mode: File would be downloaded as:', outputPath);
-    logger.info(`Created ${options.format.toUpperCase()} blob: ${blob.size} bytes`);
   }
 
   // Get file size
@@ -834,9 +847,10 @@ export class ExportService {
         return 0;
       }
     } else {
-      // Browser fallback - estimate based on image dimensions and format
-      logger.warn('Browser mode: Cannot get actual file size, using estimate');
-      return Math.floor(Math.random() * 5000000) + 1000000; // 1-6MB estimate
+      // Browser fallback: no filesystem access, so the real size is unknown.
+      // Never fabricate a size; report 0 rather than an invented value.
+      logger.warn('Browser mode: Cannot get actual file size');
+      return 0;
     }
   }
 

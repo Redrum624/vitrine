@@ -156,11 +156,18 @@ export const OutputCollectionModule: React.FC<OutputCollectionModuleProps> = ({
     const collection = collections.find(c => c.id === collectionId);
     if (!collection) return;
 
+    // Pick a real destination folder before exporting anything.
+    const dir = await window.electronAPI?.showOpenDialog({
+      properties: ['openDirectory']
+    });
+    if (!dir || dir.canceled || !dir.filePaths?.length) {
+      return; // user cancelled — no export started
+    }
+    const destination = dir.filePaths[0];
+
     try {
       setIsExporting(true);
       setExportProgress(0);
-
-      const destination = '/tmp/exports'; // In production, would use file picker
 
       const exportRecord = await outputCollectionService.exportCollection(
         collectionId,
@@ -179,8 +186,29 @@ export const OutputCollectionModule: React.FC<OutputCollectionModuleProps> = ({
       const updatedCollections = outputCollectionService.getCollections();
       setCollections(updatedCollections);
 
+      // Surface the result to the user.
+      const total = collection.images.length;
+      if (!exportRecord.success || exportRecord.imageCount < total) {
+        await window.electronAPI?.showMessageBox({
+          type: 'warning',
+          message: 'Export completed with errors',
+          detail: `${exportRecord.imageCount}/${total} exported to ${destination}.${exportRecord.error ? ` ${exportRecord.error}` : ''}`
+        });
+      } else {
+        await window.electronAPI?.showMessageBox({
+          type: 'info',
+          message: 'Export complete',
+          detail: `${exportRecord.imageCount}/${total} exported to ${destination}.`
+        });
+      }
+
     } catch (error) {
       logger.error('Export failed:', error);
+      await window.electronAPI?.showMessageBox({
+        type: 'error',
+        message: 'Export failed',
+        detail: error instanceof Error ? error.message : 'Unknown error'
+      });
     } finally {
       setIsExporting(false);
       setExportProgress(0);

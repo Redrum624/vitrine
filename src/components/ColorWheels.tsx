@@ -9,7 +9,6 @@
  * Each wheel includes a luminance slider and reset button.
  */
 
-/* eslint-disable react-refresh/only-export-components */
 // Intentionally exports both component and processing functions for API convenience
 
 import React, { useRef, useEffect, useState, useCallback } from 'react';

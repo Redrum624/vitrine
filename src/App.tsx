@@ -24,7 +24,7 @@ import { PerformanceMonitor } from './components/Debug/PerformanceMonitor';
 import { keyboardShortcutsService, createDefaultShortcuts } from './services/KeyboardShortcutsService';
 import { electronService } from './services/ElectronService';
 import { imageService } from './services/ImageService';
-import { ImageFileInfo } from './services/FileSystemService';
+import { ImageFileInfo, fileSystemService } from './services/FileSystemService';
 import { useAppStore } from './stores/appStore';
 import { logger } from './utils/Logger';
 import { historyService } from './services/HistoryService';
@@ -98,8 +98,63 @@ function OriginalPane() {
   );
 }
 
+/**
+ * Dependencies for {@link openFolderFromDialog}. Injected so the folder-open
+ * flow can be unit-tested without rendering the whole App component graph.
+ */
+export interface OpenFolderDeps {
+  /** Whether we are running inside the Electron desktop app. */
+  isElectron: () => boolean;
+  /** Opens the native directory picker. */
+  showOpenDialog: (
+    options: { properties: Array<'openFile' | 'openDirectory' | 'multiSelections' | 'showHiddenFiles'> }
+  ) => Promise<{ canceled: boolean; filePaths: string[] }>;
+  /** Enumerates a folder's images via the existing FileSystemService mapping. */
+  getFolderContents: (folderPath: string) => Promise<{ images: ImageFileInfo[] }>;
+  /** The working folder-load path (filmstrip + open-first). */
+  onFolderSelected: (images: ImageFileInfo[]) => void;
+  /** Shows/hides the Welcome overlay. */
+  setWelcomeVisible: (visible: boolean) => void;
+  showSuccess: (title: string, message: string) => void;
+  showError: (title: string, message: string) => void;
+}
+
+/**
+ * Welcome screen "Open Folder" action: pick a directory, enumerate its images
+ * and load them into the workspace via the existing folder-load path. Leaves the
+ * Welcome overlay open on cancel, empty folder, or error.
+ */
+export async function openFolderFromDialog(deps: OpenFolderDeps): Promise<void> {
+  if (!deps.isElectron()) {
+    deps.showError('Open Folder', 'Folder browsing requires the desktop app');
+    return;
+  }
+
+  try {
+    const result = await deps.showOpenDialog({ properties: ['openDirectory'] });
+    if (result.canceled || !result.filePaths || result.filePaths.length === 0) {
+      return;
+    }
+
+    const folderPath = result.filePaths[0];
+    const { images } = await deps.getFolderContents(folderPath);
+
+    if (images.length === 0) {
+      deps.showError('No Images', 'No supported images found in this folder');
+      return;
+    }
+
+    deps.onFolderSelected(images);
+    deps.setWelcomeVisible(false);
+    deps.showSuccess('Folder Opened', `${images.length} image(s)`);
+  } catch (error) {
+    logger.error('Failed to open folder from welcome screen:', error);
+    deps.showError('Open Folder', 'Could not read folder');
+  }
+}
+
 function App() {
-  const { setViewport, resetZoom, viewport, processedImageData, setSelectedTool: storeSetSelectedTool, showGrid, showRulers, showOriginal, toggleGrid, toggleRulers, toggleOriginal, referenceMode, referenceImageUrl, referenceImageName, toggleReferenceMode, setReferenceImage } = useAppStore();
+  const { setViewport, resetZoom, viewport, processedImageData, setSelectedTool: storeSetSelectedTool, showGrid, showRulers, showOriginal, toggleGrid, toggleRulers, toggleOriginal, referenceMode, referenceImageUrl, referenceImageName, toggleReferenceMode, setReferenceImage, lastProcessingTimeMs, modulesActive, modulesTotal } = useAppStore();
   const [selectedTool, setSelectedToolLocal] = useState<string | null>('file-explorer'); // Default to file explorer
 
   // Wrapper to update both local state and store
@@ -162,6 +217,7 @@ function App() {
   const [isPluginManagerOpen, setIsPluginManagerOpen] = useState(false);
   const [isWelcomeVisible, setIsWelcomeVisible] = useState(false);
   const [availableImages, setAvailableImages] = useState<ImageFileInfo[]>([]);
+  const [batchSelectedImages, setBatchSelectedImages] = useState<ImageFileInfo[]>([]);
   const [showThumbnailPanel, setShowThumbnailPanel] = useState(false);
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
@@ -284,6 +340,7 @@ function App() {
       if (inner) inner.setParams(p);
       imageProcessingPipeline.invalidateModuleCache('tonecurve');
     }
+    useAppStore.getState().notifyExternalParamsChange();
     useAppStore.getState().triggerReprocessing();
     showSuccess('Auto Levels', 'Applied via tone curve');
   }, [showSuccess]);
@@ -299,6 +356,7 @@ function App() {
       (baMod as unknown as { setParams: (p: Record<string, unknown>) => void }).setParams(p);
       imageProcessingPipeline.invalidateModuleCache('basicadj');
     }
+    useAppStore.getState().notifyExternalParamsChange();
     useAppStore.getState().triggerReprocessing();
     showSuccess('Auto Contrast', 'Applied via basic adjustments');
   }, [showSuccess]);
@@ -321,6 +379,7 @@ function App() {
       if (inner) inner.setParams(p);
       imageProcessingPipeline.invalidateModuleCache('colorbalance');
     }
+    useAppStore.getState().notifyExternalParamsChange();
     useAppStore.getState().triggerReprocessing();
     showSuccess('Auto Color', 'Applied via white balance + color balance');
   }, [showSuccess]);
@@ -368,64 +427,65 @@ function App() {
     const img = imageService.getCurrentImage();
     if (!img) { showError('Auto All', 'No image loaded'); return; }
 
-    const stats = autoAdjustService.analyse(img.data, img.width, img.height);
+    useAppStore.getState().setIsProcessing(true); // canvas spinner while applying
+
+    // Single coordinator call: analyses once, picks the user-style bucket, and
+    // returns the bundled params for every module.
+    const result = autoAdjustService.autoAll(img.data, img.width, img.height);
+    logger.info(`Auto All: bucket=${result.bucket} (${result.stats.meanLum.toFixed(3)} lum)`);
 
     // Exposure
     const exposureMod = imageProcessingPipeline.getModule('exposure');
     if (exposureMod) {
-      const p = autoAdjustService.autoExposure(stats);
-      (exposureMod as unknown as { setCurrentParams: (p: Record<string, unknown>) => void }).setCurrentParams(p);
+      (exposureMod as unknown as { setCurrentParams: (p: Record<string, unknown>) => void }).setCurrentParams(result.exposure);
       imageProcessingPipeline.invalidateModuleCache('exposure');
     }
 
     // White Balance
     const wbMod = imageProcessingPipeline.getModule('temperature');
     if (wbMod) {
-      const p = autoAdjustService.autoWhiteBalance(stats);
-      (wbMod as unknown as { setParams: (p: Record<string, unknown>) => void }).setParams(p);
+      (wbMod as unknown as { setParams: (p: Record<string, unknown>) => void }).setParams(result.whiteBalance);
       imageProcessingPipeline.invalidateModuleCache('temperature');
     }
 
-    // Basic Adjustments (zero out exposure — ExposureModule already handles it)
+    // Basic Adjustments (autoBasicAdj already returns exposure: 0). Fold the auto
+    // shadows/highlights into the new Basic Adjustments sliders, since the
+    // standalone Shadows & Highlights module was replaced by them.
     const baMod = imageProcessingPipeline.getModule('basicadj');
     if (baMod) {
-      const p = autoAdjustService.autoBasicAdj(stats);
-      p.exposure = 0;
-      (baMod as unknown as { setParams: (p: Record<string, unknown>) => void }).setParams(p);
+      const sh = result.shadowsHighlights as { shadows?: number; highlights?: number } | undefined;
+      const baParams: Record<string, unknown> = { ...result.basicAdj };
+      if (sh) {
+        baParams.shadows = (((sh.shadows ?? 50) - 50) / 50) * 0.6;        // +lift shadows
+        baParams.highlights = -(((sh.highlights ?? 50) - 50) / 50) * 0.6; // -recover highlights
+      }
+      (baMod as unknown as { setParams: (p: Record<string, unknown>) => void }).setParams(baParams);
       imageProcessingPipeline.invalidateModuleCache('basicadj');
     }
 
     // Tone Curve
     const tcPipeMod = imageProcessingPipeline.getModule('tonecurve');
     if (tcPipeMod) {
-      const p = autoAdjustService.autoToneCurve(stats);
       const inner = (tcPipeMod as unknown as { getToneCurveModule?: () => { setParams: (p: Record<string, unknown>) => void } }).getToneCurveModule?.();
-      if (inner) inner.setParams(p);
+      if (inner) inner.setParams(result.toneCurve);
       imageProcessingPipeline.invalidateModuleCache('tonecurve');
     }
 
     // Color Balance
     const cbPipeMod = imageProcessingPipeline.getModule('colorbalance');
     if (cbPipeMod) {
-      const p = autoAdjustService.autoColorBalance(stats);
       const inner = (cbPipeMod as unknown as { getColorBalanceModule?: () => { setParams: (p: Record<string, unknown>) => void } }).getColorBalanceModule?.();
-      if (inner) inner.setParams(p);
+      if (inner) inner.setParams(result.colorBalance);
       imageProcessingPipeline.invalidateModuleCache('colorbalance');
     }
 
-    // Shadows / Highlights
-    const shPipeMod = imageProcessingPipeline.getModule('shadowshighlights');
-    if (shPipeMod) {
-      const p = autoAdjustService.autoShadowsHighlights(stats);
-      const inner = (shPipeMod as unknown as { getShadowsHighlightsModule?: () => { setParams: (p: Record<string, unknown>) => void } }).getShadowsHighlightsModule?.();
-      if (inner) inner.setParams(p);
-      imageProcessingPipeline.invalidateModuleCache('shadowshighlights');
-    }
+    // (Shadows / Highlights are now applied via Basic Adjustments above.)
 
-    // Trigger reprocessing
+    // Refresh the open module panel's sliders, then reprocess.
+    useAppStore.getState().notifyExternalParamsChange();
     useAppStore.getState().triggerReprocessing();
-    showSuccess('Auto All', 'All modules auto-adjusted from image analysis');
-    logger.info('Auto All: all modules adjusted based on image statistics');
+    showSuccess('Auto All', `Applied "${result.bucket}" style profile`);
+    logger.info(`Auto All: all modules adjusted from user style profile (bucket=${result.bucket})`);
   }, [showSuccess, showError]);
 
   // ─── Print ─────────────────────────────────────────────────────────────
@@ -450,10 +510,12 @@ function App() {
       showError('Paste Style', 'No style copied yet');
       return;
     }
+    useAppStore.getState().setIsProcessing(true); // canvas spinner while applying
     const ok = styleAnalysisService.pasteStyle();
     if (ok) {
       showSuccess('Style Pasted', 'Adaptive adjustments applied');
     } else {
+      useAppStore.getState().setIsProcessing(false);
       showError('Paste Style', 'No target image loaded');
     }
   }, [showSuccess, showError]);
@@ -498,6 +560,55 @@ function App() {
       setCurrentImage(images[0]);
     }
   }, [currentImage]);
+
+  // Convert raw file paths (from showOpenDialog) into ImageFileInfo[] by
+  // statting each file. Mirrors the shape handleFolderSelected receives so the
+  // batch queue can consume them. getFileStats fans out per file via Promise.all.
+  const filePathsToImageFileInfo = useCallback(async (paths: string[]): Promise<ImageFileInfo[]> => {
+    return Promise.all(
+      paths.map(async (path): Promise<ImageFileInfo> => {
+        const name = path.split(/[\\/]/).pop() || path;
+        const ext = (name.split('.').pop() || '').toLowerCase();
+        let size = 0;
+        let modified = Date.now();
+        try {
+          const stats = await window.electronAPI?.getFileStats(path);
+          if (stats) {
+            size = stats.size;
+            modified = stats.modified;
+          }
+        } catch (error) {
+          logger.error(`Failed to stat file for batch queue: ${path}`, error);
+        }
+        return {
+          id: path,
+          name,
+          path,
+          size,
+          // Match the casing produced by the main-process get-folder-contents
+          // handler (uppercase extension) so ImageFileInfo.format is consistent
+          // regardless of which producer created the entry.
+          format: ext.toUpperCase(),
+          type: ext,
+          lastModified: modified,
+          dateModified: new Date(modified)
+        };
+      })
+    );
+  }, []);
+
+  // Dedupe ImageFileInfo lists by file path.
+  const mergeUniqueImages = useCallback((existing: ImageFileInfo[], incoming: ImageFileInfo[]): ImageFileInfo[] => {
+    const seen = new Set(existing.map((img) => img.path));
+    const merged = [...existing];
+    for (const img of incoming) {
+      if (!seen.has(img.path)) {
+        seen.add(img.path);
+        merged.push(img);
+      }
+    }
+    return merged;
+  }, []);
 
   useEffect(() => {
     // Set up Electron event listeners
@@ -644,7 +755,6 @@ function App() {
       window.removeEventListener('electron-edit-reset-all', handleResetAll);
       electronService.cleanup();
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Handle export completion
@@ -763,7 +873,6 @@ function App() {
     return () => {
       keyboardShortcutsService.destroy();
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTool, setSelectedTool, currentImage]);
 
   return (
@@ -1028,9 +1137,9 @@ function App() {
           type: currentImage.type
         } : null}
         processingStats={{
-          processingTime: 145, // Would be updated from processing pipeline
-          modulesActive: 8,  // Would be calculated from enabled modules
-          totalModules: 8
+          processingTime: lastProcessingTimeMs,
+          modulesActive: modulesActive,
+          totalModules: modulesTotal
         }}
       />
 
@@ -1057,8 +1166,13 @@ function App() {
       {isBatchDialogOpen && (
         <BatchProcessingDialog
           isOpen={isBatchDialogOpen}
-          onClose={() => setIsBatchDialogOpen(false)}
+          onClose={() => {
+            setBatchSelectedImages([]);
+            setIsBatchDialogOpen(false);
+          }}
           availableImages={availableImages}
+          selectedImages={batchSelectedImages}
+          onSelectedImagesChange={setBatchSelectedImages}
           onSelectImages={async () => {
             try {
               const result = await window.electronAPI?.showOpenDialog({
@@ -1072,8 +1186,9 @@ function App() {
 
               if (result && !result.canceled && result.filePaths?.length > 0) {
                 logger.info(`Selected ${result.filePaths.length} images for batch processing`);
+                const imgs = await filePathsToImageFileInfo(result.filePaths);
+                setBatchSelectedImages((prev) => mergeUniqueImages(prev, imgs));
                 showSuccess('Images Selected', `${result.filePaths.length} images selected for batch processing`);
-                // TODO: Add selected images to batch processing queue
               }
             } catch (error) {
               logger.error('Failed to select images:', error);
@@ -1164,8 +1279,20 @@ function App() {
         onClose={() => setIsWelcomeVisible(false)}
         onOpenFile={() => electronService.isElectron() && electronService.openFile()}
         onOpenFolder={() => {
-          // Would open folder browser dialog
-          logger.info('Open folder requested from welcome screen');
+          void openFolderFromDialog({
+            isElectron: () => electronService.isElectron(),
+            showOpenDialog: (options) => {
+              if (!window.electronAPI?.showOpenDialog) {
+                return Promise.resolve({ canceled: true, filePaths: [] });
+              }
+              return window.electronAPI.showOpenDialog(options);
+            },
+            getFolderContents: (folderPath) => fileSystemService.getFolderContents(folderPath),
+            onFolderSelected: handleFolderSelected,
+            setWelcomeVisible: setIsWelcomeVisible,
+            showSuccess,
+            showError,
+          });
         }}
         onOpenPresets={() => setIsPresetDialogOpen(true)}
         onOpenPlugins={() => setIsPluginManagerOpen(true)}

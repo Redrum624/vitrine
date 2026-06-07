@@ -14,6 +14,32 @@ interface SaveDialogOptions {
   filters?: DialogFilter[];
 }
 
+/**
+ * Metadata payload accepted by the image writer (export embed) and the
+ * standalone write-image-metadata IPC. This is the WRITE shape (a small set of
+ * EXIF copyright/artist tags + IPTC-as-XMP fields), distinct from the richer
+ * ImageMetadata READ shape returned by read-image-metadata.
+ */
+export interface EmbeddableMetadata {
+  exif?: {
+    Copyright?: string;
+    Artist?: string;
+    ImageDescription?: string;
+    DateTimeOriginal?: string; // EXIF colon format: 'YYYY:MM:DD HH:MM:SS'
+  };
+  xmp?: {
+    rights?: string;
+    creator?: string[];
+    title?: string;
+    description?: string;
+    subject?: string[];
+    credit?: string;
+    source?: string;
+    webStatement?: string;
+    usageTerms?: string;
+  };
+}
+
 interface MessageBoxOptions {
   type?: 'none' | 'info' | 'error' | 'question' | 'warning';
   title?: string;
@@ -44,7 +70,7 @@ export interface ElectronAPI {
   // File system
   readFile: (filePath: string) => Promise<Buffer>;
   readFileBuffer: (filePath: string) => Promise<ArrayBuffer>;
-  decodeRawFile: (filePath: string) => Promise<{ data: ArrayBuffer; width: number; height: number; channels: number }>;
+  decodeRawFile: (filePath: string) => Promise<{ data: ArrayBuffer; width: number; height: number; channels: number; bitDepth?: number }>;
   readImageAsDataURL: (filePath: string) => Promise<string>;
   writeFile: (filePath: string, data: Buffer | string) => Promise<boolean>;
   writeLog: (logEntry: Record<string, unknown>) => Promise<boolean>;
@@ -86,6 +112,8 @@ export interface ElectronAPI {
     width: number;
     height: number;
     channels?: number;
+    bitDepth?: number;
+    colorSpace?: string;
     quality?: number;
     progressive?: boolean;
     compressionLevel?: number;
@@ -96,6 +124,7 @@ export interface ElectronAPI {
       height?: number;
       fit?: string;
     };
+    metadata?: EmbeddableMetadata;
   }) => Promise<boolean>;
   getFileStats: (filePath: string) => Promise<{
     size: number;
@@ -113,7 +142,7 @@ export interface ElectronAPI {
     icc: import('./index').IccProfile;
     thumbnail: import('./index').ThumbnailData;
   }>;
-  writeImageMetadata: (filePath: string, metadata: import('./index').ImageMetadata) => Promise<boolean>;
+  writeImageMetadata: (filePath: string, metadata: EmbeddableMetadata) => Promise<boolean>;
 
   // Menu event listeners
   onFileOpen: (callback: (filePath: string) => void) => void;

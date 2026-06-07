@@ -1,10 +1,47 @@
-import React, { useState, useCallback, useRef } from 'react';
-import { RotateCcw, Zap } from 'lucide-react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
+import { RotateCcw, Zap, Circle, Trash2 } from 'lucide-react';
 import { BasicAdjustmentsModule, BasicAdjParams } from '../../modules/BasicAdjustmentsModule';
 import { logger } from '../../utils/Logger';
 import { DelayedInputControl } from '../Controls/DelayedInputControl';
 import { autoAdjustService } from '../../services/AutoAdjustService';
 import { imageService } from '../../services/ImageService';
+import { imageProcessingPipeline } from '../../services/ImageProcessingPipeline';
+import { useAppStore } from '../../stores/appStore';
+import type { LocalAdjustmentsPipelineModule } from '../../modules/LocalAdjustmentsPipelineModule';
+import type { LocalAdjustmentLayer } from '../../modules/LocalAdjustmentsModule';
+
+const NEUTRAL_BA: BasicAdjParams = {
+  black_point: 0, exposure: 0, contrast: 0, brightness: 0,
+  saturation: 0, vibrance: 0, dehaze: 0, highlights: 0, shadows: 0,
+};
+
+type SliderKey = 'exposure' | 'contrast' | 'highlights' | 'brightness' | 'black_point' | 'shadows' | 'dehaze' | 'saturation' | 'vibrance';
+
+interface SliderCfg {
+  key: SliderKey;
+  label: string;
+  min: number;
+  max: number;
+  step?: number;       // DelayedInput + default range step
+  rangeStep?: number;  // slider step override
+  gradient: string;    // CSS gradient stops (without the linear-gradient wrapper)
+  unit?: string;
+}
+
+// Slider order: Exposure, Contrast, Highlights, Brightness, Black Point, Shadows,
+// Dehaze, Saturation, Vibrance. Highlights/Shadows replace the old standalone
+// Shadows & Highlights module.
+const BASIC_ADJ_SLIDERS: SliderCfg[] = [
+  { key: 'exposure', label: 'Exposure', min: -1, max: 1, step: 0.01, gradient: '#000000, #6b7280, #ffffff', unit: 'EV' },
+  { key: 'contrast', label: 'Contrast', min: -2.5, max: 2.5, step: 0.01, gradient: '#6b7280, #000000' },
+  { key: 'highlights', label: 'Highlights', min: -1, max: 1, step: 0.01, gradient: '#6b7280, #ffffff' },
+  { key: 'brightness', label: 'Brightness', min: -2, max: 2, step: 0.01, gradient: '#000000, #6b7280, #ffffff' },
+  { key: 'black_point', label: 'Black Point', min: -1, max: 1, step: 0.01, gradient: '#ffffff, #000000' },
+  { key: 'shadows', label: 'Shadows', min: -1, max: 1, step: 0.01, gradient: '#000000, #6b7280' },
+  { key: 'dehaze', label: 'Dehaze', min: -1, max: 1, step: 0.01, rangeStep: 0.05, gradient: '#94a3b8, #64748b, #334155, #0ea5e9' },
+  { key: 'saturation', label: 'Saturation', min: -1, max: 1, step: 0.01, rangeStep: 0.05, gradient: '#6b7280, #3b82f6, #10b981, #eab308, #f97316, #ef4444' },
+  { key: 'vibrance', label: 'Vibrance', min: -1, max: 1, step: 0.01, rangeStep: 0.05, gradient: '#64748b, #a855f7, #ec4899, #f43f5e, #f97316' },
+];
 
 interface BasicAdjustmentsModuleComponentProps {
   module: BasicAdjustmentsModule;
@@ -75,12 +112,149 @@ export function BasicAdjustmentsModuleComponent({
     logger.info('BasicAdj: All parameters reset to defaults');
   }, [module, onParamsChange]);
 
+  // ── Local Adjustments: mask tools + per-mask "second Basic Adjustments" ─────
+  const [masks, setMasks] = useState<LocalAdjustmentLayer[]>([]);
+  const [selectedMaskId, setSelectedMaskId] = useState<string | null>(null);
+  const [maskBA, setMaskBA] = useState<BasicAdjParams>(NEUTRAL_BA);
+  const [maskFeather, setMaskFeather] = useState(0.5);
+
+  const getLA = useCallback(
+    () => imageProcessingPipeline.getModule<LocalAdjustmentsPipelineModule>('localadjustments') ?? null,
+    []
+  );
+  const reprocess = () => useAppStore.getState().triggerReprocessing();
+
+  const refreshMasks = useCallback(() => {
+    const la = getLA();
+    setMasks(la ? la.getParameters().layers.filter(l => l.type === 'radial_gradient' || l.type === 'linear_gradient') : []);
+  }, [getLA]);
+
+  useEffect(() => { refreshMasks(); }, [refreshMasks]);
+
+  const selectMask = useCallback((id: string) => {
+    const la = getLA(); if (!la) return;
+    la.setActiveLayer(id);
+    setSelectedMaskId(id);
+    const layer = la.getParameters().layers.find(l => l.id === id);
+    setMaskBA({ ...NEUTRAL_BA, ...(layer?.basicAdj ?? {}) });
+    setMaskFeather(layer?.geometry?.feather ?? 0.5);
+    reprocess();
+  }, [getLA]);
+
+  const createMask = useCallback((type: 'radial_gradient' | 'linear_gradient') => {
+    const la = getLA(); const img = imageService.getCurrentImage();
+    if (!la || !img) { logger.warn('Local Adjustments: no image/module'); return; }
+    const base = type === 'radial_gradient' ? 'Circle' : 'Gradient';
+    const n = la.getParameters().layers.filter(l => l.name.startsWith(base)).length;
+    const id = la.createLayer(type, n > 0 ? `${base} ${n + 1}` : base, img.width, img.height);
+    la.updateLayerBasicAdj(id, {}); // mark it as a Basic-Adjustments mask
+    refreshMasks();
+    selectMask(id);
+  }, [getLA, refreshMasks, selectMask]);
+
+  const deleteMask = useCallback((id: string) => {
+    const la = getLA(); if (!la) return;
+    la.removeLayer(id);
+    if (selectedMaskId === id) setSelectedMaskId(null);
+    refreshMasks();
+    reprocess();
+  }, [getLA, refreshMasks, selectedMaskId]);
+
+  const updateMaskBA = useCallback((key: keyof BasicAdjParams, value: number) => {
+    if (!selectedMaskId) return;
+    setMaskBA(prev => ({ ...prev, [key]: value }));
+    getLA()?.updateLayerBasicAdj(selectedMaskId, { [key]: value });
+    reprocess();
+  }, [getLA, selectedMaskId]);
+
+  const updateMaskFeather = useCallback((value: number) => {
+    const la = getLA(); const img = imageService.getCurrentImage();
+    if (!la || !img || !selectedMaskId) return;
+    setMaskFeather(value);
+    const layer = la.getParameters().layers.find(l => l.id === selectedMaskId);
+    if (layer?.geometry) la.setLayerGeometry(selectedMaskId, { ...layer.geometry, feather: value }, img.width, img.height);
+    reprocess();
+  }, [getLA, selectedMaskId]);
+
+  const selectedMask = masks.find(m => m.id === selectedMaskId) ?? null;
+
+  const renderMaskSlider = (cfg: SliderCfg, value: number, onChange: (v: number) => void) => {
+    const rangeStep = cfg.rangeStep ?? cfg.step ?? 0.01;
+    return (
+      <div key={cfg.key} className="space-y-1.5">
+        <div className="flex items-center justify-between">
+          <label className="text-xs font-medium" style={{ color: 'var(--gray-300)' }}>{cfg.label}</label>
+          <div className="flex items-center gap-1.5">
+            <DelayedInputControl value={value} onChange={onChange} min={cfg.min} max={cfg.max} step={cfg.step ?? 0.01} precision={2} />
+            {cfg.unit && <span className="text-xs font-mono" style={{ color: 'var(--gray-500)', width: '20px' }}>{cfg.unit}</span>}
+            <button onClick={() => onChange(0)} className="p-1 rounded" style={{ backgroundColor: 'transparent', color: 'var(--gray-500)' }} title="Reset"><RotateCcw className="w-3 h-3" /></button>
+          </div>
+        </div>
+        <input
+          type="range" min={cfg.min} max={cfg.max} step={rangeStep} value={value}
+          onInput={(e) => onChange(parseFloat((e.target as HTMLInputElement).value))}
+          onChange={(e) => onChange(parseFloat(e.target.value))}
+          onDoubleClick={() => onChange(0)}
+          className="slider w-full"
+          style={{ background: `linear-gradient(to right, ${cfg.gradient})` }}
+          title="Double-click to reset"
+        />
+      </div>
+    );
+  };
+
   const formatValue = (value: number, precision: number = 2): string => {
     return value.toFixed(precision);
   };
 
   // Use formatValue to prevent unused variable warning
   console.debug('formatValue available:', formatValue);
+
+  const renderSlider = (cfg: SliderCfg) => {
+    const value = params[cfg.key] as number;
+    const rangeStep = cfg.rangeStep ?? cfg.step ?? 0.01;
+    return (
+      <div key={cfg.key} className="space-y-1.5">
+        <div className="flex items-center justify-between">
+          <label className="text-xs font-medium" style={{ color: 'var(--gray-300)' }}>{cfg.label}</label>
+          <div className="flex items-center gap-1.5">
+            <DelayedInputControl
+              value={value}
+              onChange={(v) => updateParam(cfg.key, v)}
+              min={cfg.min}
+              max={cfg.max}
+              step={cfg.step ?? 0.01}
+              precision={2}
+            />
+            {cfg.unit && <span className="text-xs font-mono" style={{ color: 'var(--gray-500)', width: '20px' }}>{cfg.unit}</span>}
+            <button
+              onClick={() => resetParam(cfg.key, 0.0)}
+              className="p-1 rounded"
+              style={{ backgroundColor: 'transparent', color: 'var(--gray-500)', transition: 'var(--transition-fast)' }}
+              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--gray-800)'; e.currentTarget.style.color = 'var(--white)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.color = 'var(--gray-500)'; }}
+              title={`Reset ${cfg.label.toLowerCase()}`}
+            >
+              <RotateCcw className="w-3 h-3" />
+            </button>
+          </div>
+        </div>
+        <input
+          type="range"
+          min={cfg.min}
+          max={cfg.max}
+          step={rangeStep}
+          value={value}
+          onInput={(e) => updateParamRealTime(cfg.key, parseFloat((e.target as HTMLInputElement).value))}
+          onChange={(e) => updateParam(cfg.key, parseFloat(e.target.value))}
+          onDoubleClick={() => updateParam(cfg.key, 0.0)}
+          className="slider w-full"
+          style={{ background: `linear-gradient(to right, ${cfg.gradient})` }}
+          title="Double-click to reset"
+        />
+      </div>
+    );
+  };
 
   return (
     <div className="space-y-3">
@@ -150,320 +324,62 @@ export function BasicAdjustmentsModuleComponent({
         </div>
       </div>
 
-      <div className="space-y-3">
-        {/* Exposure */}
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between">
-            <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Exposure</label>
-            <div className="flex items-center gap-1.5">
-              <DelayedInputControl
-                value={params.exposure}
-                onChange={(value) => updateParam('exposure', value)}
-                min={-1}
-                max={1}
-                step={0.01}
-                precision={2}
-              />
-              <span className="text-xs font-mono" style={{color: 'var(--gray-500)', width: '20px'}}>EV</span>
-              <button
-                onClick={() => resetParam('exposure', 0.0)}
-                className="p-1 rounded"
-                style={{
-                  backgroundColor: 'transparent',
-                  color: 'var(--gray-500)',
-                  transition: 'var(--transition-fast)'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = 'var(--gray-800)';
-                  e.currentTarget.style.color = 'var(--white)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = 'transparent';
-                  e.currentTarget.style.color = 'var(--gray-500)';
-                }}
-                title="Reset"
-              >
-                <RotateCcw className="w-3 h-3" />
-              </button>
-            </div>
-          </div>
-          <input
-            type="range"
-            min="-1"
-            max="1"
-            step="0.01"
-            value={params.exposure}
-            onInput={(e) => updateParamRealTime('exposure', parseFloat((e.target as HTMLInputElement).value))}
-            onChange={(e) => updateParam('exposure', parseFloat(e.target.value))}
-            onDoubleClick={() => updateParam('exposure', 0.0)}
-            className="slider w-full"
-            style={{
-              background: 'linear-gradient(to right, #000000, #6b7280, #ffffff)',
-            }}
-            title="Double-click to reset"
-          />
+      {/* Local Adjustments mask tools */}
+      <div className="space-y-2 pb-2" style={{ borderBottom: '1px solid var(--border)' }}>
+        <label className="text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--gray-500)', letterSpacing: '0.5px' }}>Local Adjustments</label>
+        <div className="flex gap-1.5">
+          <button onClick={() => createMask('radial_gradient')} className="flex items-center justify-center gap-1.5 flex-1 px-3 py-1.5 rounded border text-xs"
+            style={{ backgroundColor: 'transparent', borderColor: 'var(--border)', color: 'var(--gray-300)' }} title="Add a circle / oval mask">
+            <Circle className="w-3.5 h-3.5" /> Circle
+          </button>
+          <button onClick={() => createMask('linear_gradient')} className="flex items-center justify-center gap-1.5 flex-1 px-3 py-1.5 rounded border text-xs"
+            style={{ backgroundColor: 'transparent', borderColor: 'var(--border)', color: 'var(--gray-300)' }} title="Add a linear gradient mask">
+            <span style={{ fontSize: '13px', lineHeight: 1 }}>▤</span> Gradient
+          </button>
         </div>
-
-        {/* Black Point */}
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between">
-            <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Black Point</label>
-            <div className="flex items-center gap-1.5">
-              <DelayedInputControl
-                value={params.black_point}
-                onChange={(value) => updateParam('black_point', value)}
-                min={-1}
-                max={1}
-                step={0.01}
-                precision={2}
-              />
-              <button
-                onClick={() => resetParam('black_point', 0.0)}
-                className="p-1 rounded"
-                style={{
-                  backgroundColor: 'transparent',
-                  color: 'var(--gray-500)',
-                  transition: 'var(--transition-fast)'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = 'var(--gray-800)';
-                  e.currentTarget.style.color = 'var(--white)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = 'transparent';
-                  e.currentTarget.style.color = 'var(--gray-500)';
-                }}
-                title="Reset black point"
-              >
-                <RotateCcw className="w-3 h-3" />
+        {masks.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {masks.map(mk => (
+              <button key={mk.id} onClick={() => selectMask(mk.id)} className="px-2 py-1 rounded border text-xs"
+                style={{ backgroundColor: mk.id === selectedMaskId ? 'var(--gray-700)' : 'transparent', borderColor: mk.id === selectedMaskId ? 'var(--primary-500)' : 'var(--border)', color: 'var(--gray-200)' }}>
+                {mk.type === 'radial_gradient' ? '◯' : '▤'} {mk.name}
               </button>
-            </div>
+            ))}
           </div>
-          <input
-              type="range"
-              min="-1"
-              max="1"
-              step="0.01"
-              value={params.black_point}
-              onInput={(e) => updateParamRealTime('black_point', parseFloat((e.target as HTMLInputElement).value))}
-              onChange={(e) => updateParam('black_point', parseFloat(e.target.value))}
-              onDoubleClick={() => updateParam('black_point', 0.0)}
-              className="slider w-full"
-              style={{
-                background: 'linear-gradient(to right, #ffffff, #000000)',
-              }}
-              title="Double-click to reset"
-            />
-        </div>
-
-        {/* Contrast */}
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between">
-            <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Contrast</label>
-            <div className="flex items-center gap-1.5">
-              <DelayedInputControl
-                value={params.contrast}
-                onChange={(value) => updateParam('contrast', value)}
-                min={-2.5}
-                max={2.5}
-                step={0.01}
-                precision={2}
-              />
-              <button
-                onClick={() => resetParam('contrast', 0.0)}
-                className="p-1 rounded"
-                style={{
-                  backgroundColor: 'transparent',
-                  color: 'var(--gray-500)',
-                  transition: 'var(--transition-fast)'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = 'var(--gray-800)';
-                  e.currentTarget.style.color = 'var(--white)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = 'transparent';
-                  e.currentTarget.style.color = 'var(--gray-500)';
-                }}
-                title="Reset contrast"
-              >
-                <RotateCcw className="w-3 h-3" />
-              </button>
-            </div>
-          </div>
-          <input
-              type="range"
-              min="-2.5"
-              max="2.5"
-              step="0.01"
-              value={params.contrast}
-              onInput={(e) => updateParamRealTime('contrast', parseFloat((e.target as HTMLInputElement).value))}
-              onChange={(e) => updateParam('contrast', parseFloat(e.target.value))}
-              onDoubleClick={() => updateParam('contrast', 0.0)}
-              className="slider w-full"
-              style={{
-                background: 'linear-gradient(to right, #6b7280, #000000)',
-              }}
-              title="Double-click to reset"
-            />
-        </div>
-
-        {/* Brightness */}
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between">
-            <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Brightness</label>
-            <div className="flex items-center gap-1.5">
-              <DelayedInputControl
-                value={params.brightness}
-                onChange={(value) => updateParam('brightness', value)}
-                min={-2}
-                max={2}
-                step={0.01}
-                precision={2}
-              />
-              <button
-                onClick={() => resetParam('brightness', 0.0)}
-                className="p-1 rounded"
-                style={{
-                  backgroundColor: 'transparent',
-                  color: 'var(--gray-500)',
-                  transition: 'var(--transition-fast)'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = 'var(--gray-800)';
-                  e.currentTarget.style.color = 'var(--white)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = 'transparent';
-                  e.currentTarget.style.color = 'var(--gray-500)';
-                }}
-                title="Reset brightness"
-              >
-                <RotateCcw className="w-3 h-3" />
-              </button>
-            </div>
-          </div>
-          <input
-              type="range"
-              min="-2"
-              max="2"
-              step="0.01"
-              value={params.brightness}
-              onInput={(e) => updateParamRealTime('brightness', parseFloat((e.target as HTMLInputElement).value))}
-              onChange={(e) => updateParam('brightness', parseFloat(e.target.value))}
-              onDoubleClick={() => updateParam('brightness', 0.0)}
-              className="slider w-full"
-              style={{
-                background: 'linear-gradient(to right, #000000, #6b7280, #ffffff)',
-              }}
-              title="Double-click to reset"
-            />
-        </div>
-
-        {/* Saturation */}
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between">
-            <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Saturation</label>
-            <div className="flex items-center gap-1.5">
-              <DelayedInputControl
-                value={params.saturation}
-                onChange={(value) => updateParam('saturation', value)}
-                min={-1}
-                max={1}
-                step={0.01}
-                precision={2}
-              />
-              <button
-                onClick={() => resetParam('saturation', 0.0)}
-                className="p-1 rounded"
-                style={{
-                  backgroundColor: 'transparent',
-                  color: 'var(--gray-500)',
-                  transition: 'var(--transition-fast)'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = 'var(--gray-800)';
-                  e.currentTarget.style.color = 'var(--white)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = 'transparent';
-                  e.currentTarget.style.color = 'var(--gray-500)';
-                }}
-                title="Reset saturation"
-              >
-                <RotateCcw className="w-3 h-3" />
-              </button>
-            </div>
-          </div>
-          <input
-              type="range"
-              min="-1"
-              max="1"
-              step="0.05"
-              value={params.saturation}
-              onInput={(e) => updateParamRealTime('saturation', parseFloat((e.target as HTMLInputElement).value))}
-              onChange={(e) => updateParam('saturation', parseFloat(e.target.value))}
-              onDoubleClick={() => updateParam('saturation', 0.0)}
-              className="slider w-full"
-              style={{
-                background: 'linear-gradient(to right, #6b7280, #3b82f6, #10b981, #eab308, #f97316, #ef4444)',
-              }}
-              title="Double-click to reset"
-            />
-        </div>
-
-        {/* Vibrance */}
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between">
-            <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Vibrance</label>
-            <div className="flex items-center gap-1.5">
-              <DelayedInputControl
-                value={params.vibrance}
-                onChange={(value) => updateParam('vibrance', value)}
-                min={-1}
-                max={1}
-                step={0.01}
-                precision={2}
-              />
-              <button
-                onClick={() => resetParam('vibrance', 0.0)}
-                className="p-1 rounded"
-                style={{
-                  backgroundColor: 'transparent',
-                  color: 'var(--gray-500)',
-                  transition: 'var(--transition-fast)'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = 'var(--gray-800)';
-                  e.currentTarget.style.color = 'var(--white)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = 'transparent';
-                  e.currentTarget.style.color = 'var(--gray-500)';
-                }}
-                title="Reset vibrance"
-              >
-                <RotateCcw className="w-3 h-3" />
-              </button>
-            </div>
-          </div>
-          <input
-              type="range"
-              min="-1"
-              max="1"
-              step="0.05"
-              value={params.vibrance}
-              onInput={(e) => updateParamRealTime('vibrance', parseFloat((e.target as HTMLInputElement).value))}
-              onChange={(e) => updateParam('vibrance', parseFloat(e.target.value))}
-              onDoubleClick={() => updateParam('vibrance', 0.0)}
-              className="slider w-full"
-              style={{
-                background: 'linear-gradient(to right, #64748b, #a855f7, #ec4899, #f43f5e, #f97316)',
-              }}
-              title="Double-click to reset"
-            />
-        </div>
+        )}
       </div>
+
+      {/* Global Basic Adjustments */}
+      <div className="space-y-3">
+        {BASIC_ADJ_SLIDERS.map(renderSlider)}
+      </div>
+
+      {/* Per-mask "second Basic Adjustments" */}
+      {selectedMask && (
+        <div className="space-y-3 pt-3" style={{ borderTop: '2px solid var(--gray-700)' }}>
+          <div className="flex items-center justify-between">
+            <label className="text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--primary-400)' }}>
+              {selectedMask.type === 'radial_gradient' ? '◯' : '▤'} {selectedMask.name}
+            </label>
+            <button onClick={() => deleteMask(selectedMask.id)} className="p-1 rounded" style={{ color: 'var(--red-400)' }} title="Delete mask">
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          </div>
+          <div className="text-xs" style={{ color: 'var(--gray-500)' }}>Drag on the image to place / move this mask.</div>
+          <div className="space-y-1">
+            <div className="flex items-center justify-between">
+              <span className="text-xs" style={{ color: 'var(--gray-300)' }}>Feather</span>
+              <span className="text-xs font-mono" style={{ color: 'var(--gray-500)' }}>{maskFeather.toFixed(2)}</span>
+            </div>
+            <input type="range" min={0.01} max={1} step={0.01} value={maskFeather} className="slider w-full"
+              onInput={(e) => updateMaskFeather(parseFloat((e.target as HTMLInputElement).value))}
+              onChange={(e) => updateMaskFeather(parseFloat(e.target.value))} />
+          </div>
+          <div className="space-y-3">
+            {BASIC_ADJ_SLIDERS.map(cfg => renderMaskSlider(cfg, maskBA[cfg.key] as number, (v) => updateMaskBA(cfg.key, v)))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

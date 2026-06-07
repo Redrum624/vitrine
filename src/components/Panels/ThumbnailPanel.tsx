@@ -143,6 +143,23 @@ export function ThumbnailPanel({
     }
   }, [selectedImage]);
 
+  // Translate vertical mouse-wheel into horizontal filmstrip scrolling.
+  // Uses a native non-passive listener so preventDefault actually works
+  // (React attaches wheel handlers passively).
+  useEffect(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      // Honour real horizontal intent (trackpads) but convert vertical to scrollLeft.
+      const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+      if (delta === 0) return;
+      e.preventDefault();
+      el.scrollLeft += delta;
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [visible]);
+
   // Navigate with arrow keys
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {

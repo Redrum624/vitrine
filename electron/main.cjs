@@ -2,6 +2,7 @@ const { app, BrowserWindow, Menu, dialog, ipcMain, shell } = require('electron')
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const { writeImageFile, writeImageMetadata } = require('./imageWriter.cjs');
 
 // Keep a global reference of the window objects
 let mainWindow;
@@ -153,6 +154,7 @@ function createWindow() {
 }
 
 // Create application menu
+// eslint-disable-next-line no-unused-vars -- retained for non-frameless builds; the app ships a custom in-window MenuBar
 function createMenu() {
   const template = [
     {
@@ -443,7 +445,6 @@ ipcMain.handle('watch-folder', async (event, folderPath) => {
     const watcher = fs.watch(folderPath, { persistent: false }, (eventType, filename) => {
       if (filename && mainWindow && !mainWindow.isDestroyed()) {
         // Debounce rapid changes
-        const key = `${folderPath}:${filename}`;
         if (watcher._debounce) {
           clearTimeout(watcher._debounce);
         }
@@ -536,71 +537,76 @@ ipcMain.handle('read-image-as-data-url', async (event, filePath) => {
     const ext = path.extname(filePath).toLowerCase();
     const rawFormats = ['.cr2', '.cr3', '.nef', '.arw', '.orf', '.dng', '.raf', '.rw2', '.pef', '.srw'];
 
-    // For RAW files, extract embedded JPEG preview
+    // For RAW files, extract an embedded JPEG preview.
     if (rawFormats.includes(ext)) {
-      // Try Sharp first (works for some RAW formats like DNG)
-      try {
-        const sharp = require('sharp');
-        const thumbnailBuffer = await sharp(filePath, { failOn: 'none' })
-          .resize(300, 200, { fit: 'inside', withoutEnlargement: true })
-          .jpeg({ quality: 80 })
-          .toBuffer();
+      const sharp = require('sharp');
+      const toThumb = (buf) => sharp(buf)
+        .resize(300, 200, { fit: 'inside', withoutEnlargement: true })
+        .jpeg({ quality: 80 })
+        .toBuffer();
 
-        if (thumbnailBuffer && thumbnailBuffer.length > 100) {
-          const base64 = thumbnailBuffer.toString('base64');
-          console.log(`Preview: Sharp OK for ${path.basename(filePath)}: ${thumbnailBuffer.length} bytes`);
-          return `data:image/jpeg;base64,${base64}`;
+      // 1) Sharp directly (works for DNG and a few formats).
+      try {
+        const out = await toThumb(filePath);
+        if (out && out.length > 100) {
+          return `data:image/jpeg;base64,${out.toString('base64')}`;
         }
       } catch (sharpError) {
         console.log(`Preview: Sharp failed for ${path.basename(filePath)}: ${sharpError.message}`);
-        // Sharp doesn't support this RAW format, extract embedded JPEG preview
       }
 
-      // Extract the largest embedded JPEG from the first 10MB of the RAW file.
-      // For thumbnails we don't need to scan the entire 40MB+ DNG — the preview
-      // JPEG is typically in the first few MB. The full-file scan is done only
-      // by decode-raw-file when loading the actual image.
-      try {
-        const fd = await fs.promises.open(filePath, 'r');
-        const scanSize = Math.min((await fd.stat()).size, 10 * 1024 * 1024);
-        const fileData = Buffer.alloc(scanSize);
-        await fd.read(fileData, 0, scanSize, 0);
-        await fd.close();
+      // Read the whole file once for the fallbacks — the embedded preview can
+      // live anywhere in the file, not just the first 10MB (the old limit was the
+      // root cause of some RAWs showing no thumbnail).
+      let fileData = null;
+      try { fileData = await fs.promises.readFile(filePath); } catch { /* ignore */ }
 
-        let largest = { offset: -1, size: 0 };
-
-        for (let i = 0; i < fileData.length - 1; i++) {
-          if (fileData[i] === 0xFF && fileData[i + 1] === 0xD8) {
-            for (let j = i + 2; j < fileData.length - 1; j++) {
-              if (fileData[j] === 0xFF && fileData[j + 1] === 0xD9) {
-                const size = j - i + 2;
-                if (size > largest.size) {
-                  largest = { offset: i, size };
-                }
-                break;
-              }
+      // 2) exifreader: format-aware embedded thumbnail. Handles nested EXIF
+      //    thumbnails correctly (a raw byte scan does not).
+      if (fileData) {
+        try {
+          const ExifReader = require('exifreader');
+          const tags = ExifReader.load(fileData, { expanded: true });
+          const thumb = tags && tags.Thumbnail && tags.Thumbnail.image;
+          if (thumb) {
+            const out = await toThumb(Buffer.from(thumb));
+            if (out && out.length > 100) {
+              return `data:image/jpeg;base64,${out.toString('base64')}`;
             }
           }
+        } catch (exifError) {
+          console.log(`Preview: exifreader thumbnail failed for ${path.basename(filePath)}: ${exifError.message}`);
         }
-
-        if (largest.offset >= 0 && largest.size > 1000) {
-          const jpegBuffer = fileData.subarray(largest.offset, largest.offset + largest.size);
-          const sharp = require('sharp');
-          const thumbnailBuffer = await sharp(jpegBuffer)
-            .resize(300, 200, { fit: 'inside', withoutEnlargement: true })
-            .jpeg({ quality: 80 })
-            .toBuffer();
-
-          const base64 = thumbnailBuffer.toString('base64');
-          return `data:image/jpeg;base64,${base64}`;
-        }
-
-        console.warn(`No embedded JPEG preview found in RAW file ${filePath}`);
-        return null;
-      } catch (extractError) {
-        console.warn(`Failed to extract preview from RAW file ${filePath}:`, extractError.message);
-        return null;
       }
+
+      // 3) Brute force: the largest embedded JPEG anywhere in the file (native
+      //    Buffer.indexOf, so scanning the whole file is fast).
+      if (fileData) {
+        try {
+          const SOI = Buffer.from([0xFF, 0xD8, 0xFF]);
+          const EOI = Buffer.from([0xFF, 0xD9]);
+          let largest = { offset: -1, size: 0 };
+          let pos = 0;
+          while (pos < fileData.length) {
+            const start = fileData.indexOf(SOI, pos);
+            if (start < 0) break;
+            const end = fileData.indexOf(EOI, start + 3);
+            if (end < 0) break;
+            const size = end - start + 2;
+            if (size > largest.size) largest = { offset: start, size };
+            pos = end + 2;
+          }
+          if (largest.offset >= 0 && largest.size > 1000) {
+            const out = await toThumb(fileData.subarray(largest.offset, largest.offset + largest.size));
+            return `data:image/jpeg;base64,${out.toString('base64')}`;
+          }
+        } catch (extractError) {
+          console.warn(`Failed to extract preview from RAW ${path.basename(filePath)}: ${extractError.message}`);
+        }
+      }
+
+      console.warn(`No embedded preview found for RAW ${path.basename(filePath)}`);
+      return null;
     }
 
     // For standard image formats, read directly
@@ -650,68 +656,9 @@ ipcMain.handle('write-file', async (event, filePath, data) => {
 // Write image file (for exports)
 ipcMain.handle('write-image-file', async (event, filePath, imageData, format, options) => {
   try {
-    const sharp = require('sharp');
-
-    const rawBuffer = Buffer.from(imageData);
-    const expectedSize = options.width * options.height * (options.channels || 4);
-    if (rawBuffer.length !== expectedSize) {
-      console.warn(`Export buffer size mismatch: got ${rawBuffer.length}, expected ${expectedSize}`);
-    }
-
-    let sharpInstance = sharp(rawBuffer, {
-      raw: {
-        width: options.width,
-        height: options.height,
-        channels: options.channels || 4
-      }
-    })
-
-    // Remove alpha channel for formats that don't support it
-    if (format.toLowerCase() === 'jpeg') {
-      sharpInstance = sharpInstance.removeAlpha();
-    }
-
-    // Apply format-specific options
-    switch (format.toLowerCase()) {
-      case 'jpeg':
-        sharpInstance = sharpInstance.jpeg({
-          quality: options.quality || 90,
-          progressive: options.progressive || false,
-          mozjpeg: true
-        });
-        break;
-      case 'png':
-        sharpInstance = sharpInstance.png({
-          compressionLevel: options.compressionLevel || 6,
-          progressive: options.progressive || false
-        });
-        break;
-      case 'tiff':
-        sharpInstance = sharpInstance.tiff({
-          compression: options.compression || 'lzw',
-          quality: options.quality || 90
-        });
-        break;
-      case 'webp':
-        sharpInstance = sharpInstance.webp({
-          quality: options.quality || 80,
-          lossless: options.lossless || false
-        });
-        break;
-      default:
-        throw new Error(`Unsupported format: ${format}`);
-    }
-
-    // Resize if needed
-    if (options.resize && (options.resize.width || options.resize.height)) {
-      sharpInstance = sharpInstance.resize(options.resize.width, options.resize.height, {
-        fit: options.resize.fit || 'inside',
-        withoutEnlargement: true
-      });
-    }
-
-    await sharpInstance.toFile(filePath);
-    return true;
+    // Delegates to electron/imageWriter.cjs (unit-tested). Correctly handles
+    // 8-bit and 16-bit raw RGBA buffers and embeds an sRGB ICC profile.
+    return await writeImageFile(filePath, imageData, format, options);
   } catch (error) {
     console.error('Failed to write image file:', error);
     throw error;
@@ -760,20 +707,12 @@ ipcMain.handle('read-image-metadata', async (event, filePath) => {
   }
 });
 
-// Write image metadata
+// Write image metadata (EXIF copyright/artist + IPTC-as-XMP) into an existing
+// raster file. Delegates to electron/imageWriter.cjs (unit-tested). Throws on
+// failure so the renderer promise rejects (no silent success).
 ipcMain.handle('write-image-metadata', async (event, filePath, metadata) => {
   try {
-    // For now, we'll use exiftool if available, otherwise log the operation
-    logger.info(`Would write metadata to ${filePath}:`, metadata);
-
-    // In production, you'd use exiftool or similar:
-    // const exiftool = require('node-exiftool');
-    // const ep = new exiftool.ExiftoolProcess();
-    // await ep.open();
-    // await ep.writeMetadata(filePath, metadata);
-    // await ep.close();
-
-    return true;
+    return await writeImageMetadata(filePath, metadata);
   } catch (error) {
     console.error('Failed to write image metadata:', error);
     throw error;
@@ -846,113 +785,9 @@ ipcMain.handle('get-log-file', async () => {
 // This runs in the main process (Node.js) to avoid the browser's
 // SharedArrayBuffer/Emscripten issues with libraw-wasm.
 ipcMain.handle('decode-raw-file', async (event, filePath) => {
-  const sharp = require('sharp');
-
+  const { decodeRawFile } = require('./rawDecoder.cjs');
   try {
-    const buf = await fs.promises.readFile(filePath);
-
-    // 1. Read sensor dimensions from TIFF/IFD header (tag 256=width, 257=height)
-    let sensorWidth = 0, sensorHeight = 0;
-    try {
-      const le = buf[0] === 0x49; // 'II' = little-endian
-      const r16 = le ? (o) => buf[o] | (buf[o+1] << 8) : (o) => (buf[o] << 8) | buf[o+1];
-      const r32 = le
-        ? (o) => (buf[o] | (buf[o+1] << 8) | (buf[o+2] << 16) | (buf[o+3] << 24)) >>> 0
-        : (o) => ((buf[o] << 24) | (buf[o+1] << 16) | (buf[o+2] << 8) | buf[o+3]) >>> 0;
-      const ifd0 = r32(4);
-      const n = r16(ifd0);
-      for (let i = 0; i < Math.min(n, 40); i++) {
-        const off = ifd0 + 2 + i * 12;
-        const tag = r16(off);
-        if (tag === 256) sensorWidth = r32(off + 8);
-        if (tag === 257) sensorHeight = r32(off + 8);
-      }
-    } catch (_) { /* ignore parse errors */ }
-
-    // 2. Find the largest embedded JPEG (FF D8 ... FF D9)
-    let bestStart = -1, bestSize = 0;
-    for (let i = 0; i < buf.length - 1; i++) {
-      if (buf[i] === 0xFF && buf[i + 1] === 0xD8) {
-        for (let j = i + 2; j < buf.length - 1; j++) {
-          if (buf[j] === 0xFF && buf[j + 1] === 0xD9) {
-            const size = j - i + 2;
-            if (size > bestSize) {
-              bestStart = i;
-              bestSize = size;
-            }
-            break;
-          }
-        }
-      }
-    }
-
-    let pixelBuffer, info;
-
-    if (bestSize > 50000) {
-      // Use the embedded JPEG, upscale to sensor dimensions if needed
-      const jpeg = buf.slice(bestStart, bestStart + bestSize);
-      let pipeline = sharp(jpeg);
-
-      // Upscale to full sensor resolution with high-quality Lanczos
-      if (sensorWidth > 0 && sensorHeight > 0) {
-        const meta = await sharp(jpeg).metadata();
-        if (meta.width < sensorWidth || meta.height < sensorHeight) {
-          // Respect orientation: if JPEG is landscape but sensor is portrait (or vice versa), swap
-          let targetW = sensorWidth, targetH = sensorHeight;
-          if ((meta.width > meta.height) !== (sensorWidth > sensorHeight)) {
-            targetW = sensorHeight;
-            targetH = sensorWidth;
-          }
-          pipeline = pipeline.resize(targetW, targetH, {
-            kernel: sharp.kernel.lanczos3,
-            fit: 'fill',
-          });
-          console.log(`RAW decode: upscaling ${meta.width}x${meta.height} → ${targetW}x${targetH}`);
-        }
-      }
-
-      const result = await pipeline.raw().toBuffer({ resolveWithObject: true });
-      pixelBuffer = result.data;
-      info = result.info;
-      console.log(`RAW decode: ${info.width}x${info.height} (${info.channels}ch) from ${filePath}`);
-    } else {
-      // No usable embedded JPEG — try Sharp directly (works for some DNGs)
-      const result = await sharp(filePath, { failOn: 'none' })
-        .raw()
-        .toBuffer({ resolveWithObject: true });
-
-      // If Sharp returns a thumbnail, upscale to sensor dimensions
-      if (sensorWidth > 0 && sensorHeight > 0 && result.info.width < sensorWidth) {
-        let targetW = sensorWidth, targetH = sensorHeight;
-        if ((result.info.width > result.info.height) !== (sensorWidth > sensorHeight)) {
-          targetW = sensorHeight; targetH = sensorWidth;
-        }
-        const upscaled = await sharp(result.data, {
-          raw: { width: result.info.width, height: result.info.height, channels: result.info.channels }
-        }).resize(targetW, targetH, { kernel: sharp.kernel.lanczos3, fit: 'fill' })
-          .raw().toBuffer({ resolveWithObject: true });
-        pixelBuffer = upscaled.data;
-        info = upscaled.info;
-        console.log(`RAW decode: upscaled DNG ${result.info.width}x${result.info.height} → ${info.width}x${info.height}`);
-      } else {
-        pixelBuffer = result.data;
-        info = result.info;
-      }
-      console.log(`RAW decode: Sharp direct ${info.width}x${info.height} from ${filePath}`);
-    }
-
-    // Convert Node Buffer to ArrayBuffer for IPC transfer
-    const ab = pixelBuffer.buffer.slice(
-      pixelBuffer.byteOffset,
-      pixelBuffer.byteOffset + pixelBuffer.byteLength
-    );
-
-    return {
-      data: ab,
-      width: info.width,
-      height: info.height,
-      channels: info.channels,
-    };
+    return await decodeRawFile(filePath, console);
   } catch (error) {
     console.error('RAW decode failed:', error);
     throw new Error(`RAW decode failed: ${error.message}`);

@@ -18,6 +18,22 @@ interface AppStore extends AppState {
   // Processing trigger - increments to signal that reprocessing is needed
   processingVersion: number;
   triggerReprocessing: () => void;
+  // Bumped only when module params are set in BULK from outside the panels
+  // (Paste Style, Auto All, presets) so the open module panel can re-read
+  // module.getParams() and refresh its sliders. NOT bumped on normal slider
+  // edits (that would remount the panel mid-drag).
+  externalParamsVersion: number;
+  notifyExternalParamsChange: () => void;
+  // True while the pipeline is (re)processing after a bulk apply (Auto All /
+  // Paste Style) so the canvas can show its spinner; cleared when the new
+  // processed image lands (setProcessedImageData).
+  isProcessing: boolean;
+  setIsProcessing: (v: boolean) => void;
+  // Live processing stats (surfaced in the StatusBar)
+  lastProcessingTimeMs: number;
+  modulesActive: number;
+  modulesTotal: number;
+  setProcessingStats: (s: { timeMs: number; active: number; total: number }) => void;
   // View overlays
   showGrid: boolean;
   showRulers: boolean;
@@ -51,6 +67,11 @@ export const useAppStore = create<AppStore>((set) => ({
   sidebarCollapsed: false,
   isAdjustingRotation: false,
   processingVersion: 0,
+  externalParamsVersion: 0,
+  isProcessing: false,
+  lastProcessingTimeMs: 0,
+  modulesActive: 0,
+  modulesTotal: 0,
   showGrid: false,
   showRulers: false,
   showOriginal: false,
@@ -63,11 +84,24 @@ export const useAppStore = create<AppStore>((set) => ({
     processingVersion: state.processingVersion + 1
   })),
 
+  notifyExternalParamsChange: () => set((state) => ({
+    externalParamsVersion: state.externalParamsVersion + 1
+  })),
+
+  setIsProcessing: (v) => set({ isProcessing: v }),
+
   setCurrentImage: (image) => set({ currentImage: image }),
 
   setIsAdjustingRotation: (adjusting) => set({ isAdjustingRotation: adjusting }),
 
-  setProcessedImageData: (data) => set({ processedImageData: data }),
+  // Clear the processing spinner whenever fresh processed data lands.
+  setProcessedImageData: (data) => set({ processedImageData: data, isProcessing: false }),
+
+  setProcessingStats: ({ timeMs, active, total }) => set({
+    lastProcessingTimeMs: timeMs,
+    modulesActive: active,
+    modulesTotal: total,
+  }),
 
   setSelectedTool: (toolId) => set({ selectedTool: toolId }),
 

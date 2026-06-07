@@ -8,6 +8,9 @@ export interface BasicAdjParams {
   brightness: number;     // -4.0 to 4.0, default: 0.0
   saturation: number;     // -1.0 to 1.0, default: 0.0
   vibrance: number;       // -1.0 to 1.0, default: 0.0
+  dehaze: number;         // -1.0 to 1.0, default: 0.0
+  highlights: number;     // -1.0 to 1.0, default: 0.0 (negative recovers, positive brightens)
+  shadows: number;        // -1.0 to 1.0, default: 0.0 (positive lifts, negative deepens)
   [key: string]: unknown; // Index signature for Record compatibility
 }
 
@@ -24,7 +27,10 @@ export class BasicAdjustmentsModule {
     contrast: 0.0,      // Neutral starting point
     brightness: 0.0,
     saturation: 0.0,
-    vibrance: 0.0
+    vibrance: 0.0,
+    dehaze: 0.0,
+    highlights: 0.0,
+    shadows: 0.0
   };
 
   getId(): string {
@@ -51,7 +57,10 @@ export class BasicAdjustmentsModule {
       contrast: 0.0,      // Neutral defaults
       brightness: 0.0,
       saturation: 0.0,
-      vibrance: 0.0
+      vibrance: 0.0,
+      dehaze: 0.0,
+      highlights: 0.0,
+      shadows: 0.0
     };
     logger.debug('BasicAdj params reset to neutral defaults');
   }
@@ -65,7 +74,10 @@ export class BasicAdjustmentsModule {
       contrast: 0.2,          // Moderate contrast increase
       brightness: 0.1,        // Slight brightness boost
       saturation: 0.1,        // Slight saturation boost
-      vibrance: 0.15          // Moderate vibrance increase
+      vibrance: 0.15,         // Moderate vibrance increase
+      dehaze: 0.0,            // No haze removal by default
+      highlights: 0.0,
+      shadows: 0.0
     };
 
     this.params = { ...autoParams };
@@ -89,9 +101,51 @@ export class BasicAdjustmentsModule {
 
     logger.debug(`Processing BasicAdj: ${width}x${height}, channels: ${channels}`);
 
+    // Dehaze pre-pass: estimate the atmospheric/haze floor ONCE before the loop.
+    // Hazy images have a lifted black floor (light scattered into the shadows), so
+    // we sample the per-pixel minimum channel (dark-channel proxy) over a strided
+    // grid and take a low percentile as the haze floor to subtract back out.
+    const clampedDehaze = Math.max(-1.0, Math.min(1.0, this.params.dehaze));
+    const dehazeActive = Math.abs(clampedDehaze) > 0.001;
+    let hazeFloor = 0.0;
+    if (dehazeActive) {
+      const totalPixels = width * height;
+      // Stride so we sample roughly a few thousand pixels regardless of size.
+      const step = Math.max(1, Math.floor(totalPixels / 4096));
+      const darkChannelSamples: number[] = [];
+      for (let p = 0; p < totalPixels; p += step) {
+        const idx = p * channels;
+        const minChannel = Math.min(output[idx], output[idx + 1], output[idx + 2]);
+        darkChannelSamples.push(minChannel);
+      }
+      if (darkChannelSamples.length > 0) {
+        darkChannelSamples.sort((a, b) => a - b);
+        // 10th percentile of the dark channel approximates the haze floor.
+        const percentileIndex = Math.floor(darkChannelSamples.length * 0.1);
+        hazeFloor = darkChannelSamples[percentileIndex];
+      }
+    }
+    // Scale the floor by the dehaze amount; cap the strength so we never divide by
+    // a value close to 0 (keeps the transmission divisor safely above 0).
+    const hazeStrength = dehazeActive ? clampedDehaze * 0.5 * hazeFloor : 0.0;
+    const hazeDivisor = 1.0 - hazeStrength;
+
+    // Highlights / Shadows: simple luminance-masked tone shifts (params -1..1).
+    const clampedHighlights = Math.max(-1.0, Math.min(1.0, this.params.highlights));
+    const clampedShadows = Math.max(-1.0, Math.min(1.0, this.params.shadows));
+    const highlightsActive = Math.abs(clampedHighlights) > 0.001;
+    const shadowsActive = Math.abs(clampedShadows) > 0.001;
+
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
         const pixelIndex = (y * width + x) * channels;
+
+        // Luminance masks for highlights/shadows, from the as-yet-unmodified pixel.
+        const lumHS = (highlightsActive || shadowsActive)
+          ? calculateLuminance(output[pixelIndex], output[pixelIndex + 1], output[pixelIndex + 2])
+          : 0;
+        const hMask = highlightsActive ? lumHS * lumHS : 0;
+        const sMask = shadowsActive ? (1 - lumHS) * (1 - lumHS) : 0;
 
         for (let c = 0; c < 3; c++) { // Process RGB channels
           let pixel = output[pixelIndex + c];
@@ -127,6 +181,21 @@ export class BasicAdjustmentsModule {
             pixel = 0.5 + (pixel - 0.5) * contrastFactor;
           }
 
+          // Apply dehaze (globally-approximated haze removal). Subtract the scaled
+          // haze floor then renormalize by the transmission divisor so the tonal
+          // range re-expands toward black — darktable-style global haze removal.
+          // Positive dehaze removes haze (more contrast); negative adds haze back.
+          if (dehazeActive) {
+            pixel = (pixel - hazeStrength) / hazeDivisor;
+            // A small contrast bump around the midpoint reinforces the de-hazed look.
+            const dehazeContrastFactor = 1.0 + clampedDehaze * 0.15;
+            pixel = 0.5 + (pixel - 0.5) * dehazeContrastFactor;
+          }
+
+          // Highlights / Shadows tone shift (luminance-masked).
+          if (highlightsActive) pixel += clampedHighlights * 0.4 * hMask;
+          if (shadowsActive) pixel += clampedShadows * 0.4 * sMask;
+
           // Clamp to valid range and ensure minimum visibility
           pixel = Math.max(0.0, Math.min(1.0, pixel));
 
@@ -138,8 +207,9 @@ export class BasicAdjustmentsModule {
           output[pixelIndex + c] = pixel;
         }
 
-        // Apply saturation and vibrance to RGB as a group
-        if (this.params.saturation !== 0.0 || this.params.vibrance !== 0.0) {
+        // Apply saturation and vibrance to RGB as a group.
+        // Dehaze also nudges saturation (haze desaturates; removing it restores colour).
+        if (this.params.saturation !== 0.0 || this.params.vibrance !== 0.0 || dehazeActive) {
           const r = output[pixelIndex];
           const g = output[pixelIndex + 1];
           const b = output[pixelIndex + 2];
@@ -147,9 +217,13 @@ export class BasicAdjustmentsModule {
           // Convert to perceived luminance using shared utility
           const luminance = calculateLuminance(r, g, b);
 
-          // Apply saturation
-          if (this.params.saturation !== 0.0) {
-            const saturationFactor = 1.0 + this.params.saturation;
+          // Apply saturation (with a mild dehaze-driven boost)
+          const dehazeSaturationBoost = dehazeActive ? clampedDehaze * 0.3 : 0.0;
+          if (this.params.saturation !== 0.0 || dehazeSaturationBoost !== 0.0) {
+            // Floor at 0 so a strong negative saturation combined with the dehaze
+            // boost can't drive the factor negative and INVERT the channels; it caps
+            // at full desaturation (pure luminance / grayscale).
+            const saturationFactor = Math.max(0, 1.0 + this.params.saturation + dehazeSaturationBoost);
             output[pixelIndex] = luminance + (r - luminance) * saturationFactor;
             output[pixelIndex + 1] = luminance + (g - luminance) * saturationFactor;
             output[pixelIndex + 2] = luminance + (b - luminance) * saturationFactor;

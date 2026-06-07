@@ -11,6 +11,7 @@ import { createTestImage, createGradientImage, createNoiseImage, calculateAverag
 // We need to import the AutoAdjustService class, not the singleton, to avoid cross-test state
 // But the module exports a singleton, so we import it and use it (it's stateless anyway)
 import { autoAdjustService } from '../services/AutoAdjustService';
+import { selectBucket, userStyleProfile, type BucketName } from '../services/UserStyleProfile';
 import { WhiteBalanceModule } from '../modules/WhiteBalanceModule';
 import { ExposureModule } from '../modules/ExposureModule';
 import { BasicAdjustmentsModule } from '../modules/BasicAdjustmentsModule';
@@ -19,7 +20,6 @@ import { ColorBalanceModule } from '../modules/ColorBalanceModule';
 import { ShadowsHighlightsModule } from '../modules/ShadowsHighlightsModule';
 import { NoiseReductionModule } from '../modules/NoiseReductionModule';
 import { LensCorrectionsModule } from '../modules/LensCorrectionsModule';
-import { temperatureToRgb } from '../modules/utils/ColorUtils';
 
 // ─── Mocks ──────────────────────────────────────────────────────────────────
 
@@ -136,22 +136,27 @@ describe('AutoAdjustService.analyse()', () => {
 // ─── 2. autoExposure ────────────────────────────────────────────────────────
 
 describe('autoExposure', () => {
-  it('should boost exposure for dark image', () => {
+  it('should pull a low-light image toward its dark profile target (not brighten to 0.45)', () => {
     const stats = autoAdjustService.analyse(createDarkImage(), W, H);
     const result = autoAdjustService.autoExposure(stats);
 
-    expect(result.exposure).toBeGreaterThan(0);
-    expect(result.exposure).toBeLessThanOrEqual(1);
+    // Dark image → low_light bucket (profile median 0.0655, darker than the
+    // synthetic p50 0.15). Auto now nudges DOWN toward the user's dark grade,
+    // where the old hardcoded 0.45 target would have boosted it up.
+    expect(result.exposure).toBeLessThanOrEqual(0);
+    expect(result.exposure).toBeGreaterThanOrEqual(-1);
     expect(result.mode).toBe('manual');
-    logVisual('autoExposure on dark', result as unknown as Record<string, unknown>);
+    logVisual('autoExposure on dark (low_light)', result as unknown as Record<string, unknown>);
   });
 
-  it('should reduce exposure for bright image', () => {
+  it('should keep an already-bright high-key image bright (not pull toward 0.45)', () => {
     const stats = autoAdjustService.analyse(createBrightImage(), W, H);
     const result = autoAdjustService.autoExposure(stats);
 
-    expect(result.exposure).toBeLessThan(0);
-    expect(result.exposure).toBeGreaterThanOrEqual(-1);
+    // Bright image → high_key bucket (profile median 0.9163 ≈ image 0.9), so
+    // Auto leaves it bright. The old 0.45 target pulled it down hard.
+    expect(result.exposure).toBeGreaterThan(-0.1);
+    expect(result.exposure).toBeLessThanOrEqual(1);
   });
 
   it('should return near-zero exposure for neutral image', () => {
@@ -162,7 +167,7 @@ describe('autoExposure', () => {
     logVisual('autoExposure on neutral', result as unknown as Record<string, unknown>);
   });
 
-  it('should process dark image and improve luminance', () => {
+  it('should process a low-light image toward its darker profile target', () => {
     const img = createDarkImage();
     const beforeAvg = calculateAveragePixel(img);
     const stats = autoAdjustService.analyse(img, W, H);
@@ -174,21 +179,25 @@ describe('autoExposure', () => {
 
     expect(isValidImageData(output)).toBe(true);
     const afterAvg = calculateAveragePixel(output);
-    expect(afterAvg[0]).toBeGreaterThan(beforeAvg[0]); // brighter
-    logVisual('autoExposure process dark', result as unknown as Record<string, unknown>, beforeAvg, afterAvg);
+    // low_light grade is darker than the synthetic 0.15 → output must not brighten.
+    expect(afterAvg[0]).toBeLessThanOrEqual(beforeAvg[0] + 1e-3);
+    logVisual('autoExposure process dark (low_light)', result as unknown as Record<string, unknown>, beforeAvg, afterAvg);
   });
 });
 
 // ─── 3. autoWhiteBalance (AutoAdjustService) ───────────────────────────────
 
 describe('autoWhiteBalance (AutoAdjustService)', () => {
-  it('should return ~6500K for neutral image (D65 reference = identity)', () => {
+  it('should nudge a neutral image slightly warm toward the standard profile (R/B 1.0388)', () => {
     const stats = autoAdjustService.analyse(createNeutralImage(), W, H);
     const result = autoAdjustService.autoWhiteBalance(stats);
 
-    expect(result.temperature).toBeCloseTo(6500, -2); // within 100K
+    // Neutral image → standard bucket, whose R/B target is 1.0388 (a slight warm
+    // bias the user grades into). So Auto lands ~6575K, not a flat 6500K.
+    expect(result.temperature).toBeGreaterThan(6500);
+    expect(result.temperature).toBeLessThan(6700);
     expect(Math.abs(result.tint)).toBeLessThan(10);
-    logVisual('autoWB on neutral', result as unknown as Record<string, unknown>);
+    logVisual('autoWB on neutral (standard)', result as unknown as Record<string, unknown>);
   });
 
   it('should cool down warm image (lower temperature)', () => {
@@ -845,7 +854,9 @@ describe('Full Auto simulation', () => {
 
     console.log(`\n  ── Full Auto on dark ──`);
     console.log(`  Before lum: ${beforeLum.toFixed(4)}, After lum: ${afterLum.toFixed(4)}`);
-    expect(afterLum).toBeGreaterThan(beforeLum);
+    // low_light profile grades dark images darker (median 0.0655), so Full Auto
+    // must not brighten a dark image (was: expected brightening toward 0.45).
+    expect(afterLum).toBeLessThanOrEqual(beforeLum + 1e-3);
     logVisual('Full Auto dark', {}, beforeAvg, afterAvg);
   });
 
@@ -941,7 +952,7 @@ describe('Full Auto idempotency', () => {
   }
 
   it('should converge after 2 passes on dark warm image', () => {
-    let img = createWarmImage();
+    const img = createWarmImage();
     // Make it dark-warm
     for (let i = 0; i < img.length; i += 4) {
       img[i] *= 0.3;
@@ -1009,5 +1020,82 @@ describe('Full Auto idempotency', () => {
     console.log(`  Max delta between passes: ${maxDelta.toFixed(6)}`);
 
     expect(isValidImageData(pass2.output)).toBe(true);
+  });
+});
+
+// ─── User style profile: bucket routing + profile-driven targets ─────────────
+
+describe('selectBucket()', () => {
+  it('routes very dark images to low_light', () => {
+    expect(selectBucket({ mean_lum: 0.15, rb_ratio: 1.0 })).toBe('low_light');
+  });
+  it('routes very bright images to high_key', () => {
+    expect(selectBucket({ mean_lum: 0.70, rb_ratio: 1.0 })).toBe('high_key');
+  });
+  it('routes warm mid/low images to warm', () => {
+    expect(selectBucket({ mean_lum: 0.40, rb_ratio: 1.30 })).toBe('warm');
+  });
+  it('routes blue-biased images to cool', () => {
+    expect(selectBucket({ mean_lum: 0.40, rb_ratio: 0.70 })).toBe('cool');
+  });
+  it('falls back to standard for neutral mid images', () => {
+    expect(selectBucket({ mean_lum: 0.40, rb_ratio: 1.00 })).toBe('standard');
+  });
+});
+
+describe('autoExposure uses per-bucket profile targets (not the old 0.45)', () => {
+  const buckets: Array<{ bucket: BucketName; make: () => Float32Array }> = [
+    { bucket: 'low_light', make: createDarkImage },
+    { bucket: 'high_key', make: createBrightImage },
+    { bucket: 'warm', make: createWarmImage },
+    { bucket: 'cool', make: createCoolImage },
+    { bucket: 'standard', make: createNeutralImage },
+  ];
+
+  it.each(buckets)('routes a $bucket synthetic image to the $bucket bucket', ({ bucket, make }) => {
+    const stats = autoAdjustService.analyse(make(), W, H);
+    const picked = selectBucket({ mean_lum: stats.meanLum, rb_ratio: stats.meanR / Math.max(0.001, stats.meanB) });
+    expect(picked).toBe(bucket);
+  });
+
+  it('darkens a low-light image toward its profile (old code brightened it toward 0.45)', () => {
+    const stats = autoAdjustService.analyse(createDarkImage(), W, H);
+    const { exposure } = autoAdjustService.autoExposure(stats);
+    // low_light target median 0.0655 < p50 0.15 → pull DOWN. Old 0.45 target pulled UP.
+    expect(exposure).toBeLessThan(0);
+    expect(userStyleProfile.low_light.targetMedianLum).toBeLessThan(0.45);
+  });
+
+  it('aims a standard image at ~0.4166, not 0.45 (slight negative exposure from p50≈0.5)', () => {
+    const stats = autoAdjustService.analyse(createNeutralImage(), W, H);
+    const { exposure } = autoAdjustService.autoExposure(stats);
+    expect(exposure).toBeLessThan(0); // old code returned 0 (0.45 within deadzone of 0.5)
+  });
+
+  it('does not crush an already-bright high-key image toward 0.45', () => {
+    const stats = autoAdjustService.analyse(createBrightImage(), W, H);
+    const { exposure } = autoAdjustService.autoExposure(stats);
+    // high_key target 0.9163 ≈ image 0.9 → near-zero. Old 0.45 target → strong darken.
+    expect(exposure).toBeGreaterThan(-0.1);
+  });
+});
+
+describe('autoAll()', () => {
+  it('warm scene → warm bucket, negative exposure, full bundle', () => {
+    const result = autoAdjustService.autoAll(createWarmImage(), W, H);
+    expect(result.bucket).toBe('warm');
+    expect(result.exposure.exposure).toBeLessThan(0);
+    expect(result.basicAdj).toBeDefined();
+    expect(result.shadowsHighlights).toBeDefined();
+    expect(result.toneCurve).toBeDefined();
+    expect(result.colorBalance).toBeDefined();
+    expect(result.whiteBalance).toBeDefined();
+    expect(result.stats.meanLum).toBeGreaterThan(0);
+  });
+
+  it('white balance targets the bucket R/B ratio and stays in range', () => {
+    const result = autoAdjustService.autoAll(createWarmImage(), W, H);
+    expect(result.whiteBalance.temperature).toBeGreaterThan(2000);
+    expect(result.whiteBalance.temperature).toBeLessThan(12000);
   });
 });

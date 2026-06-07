@@ -48,6 +48,13 @@ export interface StyleFingerprint {
   p75: number;
   p95: number;
 
+  // Per-channel cumulative distributions (256 bins, normalized 0..1) of the
+  // processed image. These are the basis for exact, general histogram matching
+  // in Paste Style — they let us remap any target raw to wear this image's grade.
+  cdfR: number[];
+  cdfG: number[];
+  cdfB: number[];
+
   // Estimated colour temperature / tint from channel ratios
   estimatedTemp: number;   // Kelvin-ish
   estimatedTint: number;   // green/magenta
@@ -178,13 +185,15 @@ class StyleAnalysisService {
     const target = this.analyseImageData(current.data, current.width, current.height);
     const source = this.clipboard;
 
-    // Compute adaptive parameters
-    const params = this.computeAdaptiveParams(source, target);
+    // Per-channel histogram matching: remap the target's R/G/B distributions to
+    // equal the source's, so the target wears the source's exact colour grade.
+    // This is fully general — it works for any (reference, target) pair.
+    const params = this.computeHistogramMatchParams(source, target);
 
     // Apply to pipeline modules
     this.applyParams(params);
 
-    logger.info('StyleAnalysis: style pasted with adaptive adjustments');
+    logger.info('StyleAnalysis: style pasted via per-channel histogram matching');
     return true;
   }
 
@@ -196,6 +205,12 @@ class StyleAnalysisService {
 
     let sumR = 0, sumG = 0, sumB = 0, sumLum = 0, sumSat = 0;
     const lumValues = new Float32Array(pixelCount);
+
+    // Per-channel 256-bin histograms (for exact histogram matching)
+    const histR = new Float64Array(256);
+    const histG = new Float64Array(256);
+    const histB = new Float64Array(256);
+    const bin = (v: number) => (v <= 0 ? 0 : v >= 1 ? 255 : Math.round(v * 255));
 
     const shadows: ZoneStats = { meanLuminance: 0, meanR: 0, meanG: 0, meanB: 0, pixelCount: 0 };
     const midtones: ZoneStats = { meanLuminance: 0, meanR: 0, meanG: 0, meanB: 0, pixelCount: 0 };
@@ -211,6 +226,7 @@ class StyleAnalysisService {
       sumLum += lum;
       sumSat += sat;
       lumValues[i] = lum;
+      histR[bin(r)]++; histG[bin(g)]++; histB[bin(b)]++;
 
       // Zone classification
       let zone: ZoneStats;
@@ -258,6 +274,14 @@ class StyleAnalysisService {
 
     const { temp, tint } = estimateColorTemp(meanR, meanG, meanB);
 
+    // Normalize histograms into cumulative distributions (0..1).
+    const toCdf = (h: Float64Array): number[] => {
+      const cdf = new Array<number>(256);
+      let acc = 0;
+      for (let v = 0; v < 256; v++) { acc += h[v]; cdf[v] = acc / pixelCount; }
+      return cdf;
+    };
+
     return {
       meanLuminance: meanLum,
       stdLuminance: stdLum,
@@ -265,6 +289,7 @@ class StyleAnalysisService {
       meanR, meanG, meanB,
       shadows, midtones, highlights,
       p5, p25, p50, p75, p95,
+      cdfR: toCdf(histR), cdfG: toCdf(histG), cdfB: toCdf(histB),
       estimatedTemp: temp,
       estimatedTint: tint,
       moduleParams: {},
@@ -273,113 +298,49 @@ class StyleAnalysisService {
     };
   }
 
-  // ── Adaptive parameter computation ───────────────────────────────────────
+  // ── Histogram matching (exact style transfer) ────────────────────────────
 
-  private computeAdaptiveParams(source: StyleFingerprint, target: StyleFingerprint): Record<string, Record<string, unknown>> {
-    const params: Record<string, Record<string, unknown>> = {};
-
-    // Dead-zone: ignore deltas below threshold — natural photo variation, not style.
-    const dz = (val: number, threshold: number) =>
-      Math.abs(val) < threshold ? 0 : val;
-
-    // ── Exposure / Brightness ──────────────────────────────────────────
-    const lumDelta = dz(source.meanLuminance - target.meanLuminance, 0.05);
-    const exposureAdj = Math.max(-0.15, Math.min(0.15, lumDelta * 0.2));
-    const brightnessAdj = Math.max(-0.08, Math.min(0.08, lumDelta * 0.1));
-
-    // ── Contrast ───────────────────────────────────────────────────────
-    const contrastRatio = target.stdLuminance > 0.01
-      ? source.stdLuminance / target.stdLuminance : 1;
-    const contrastAdj = Math.max(-0.15, Math.min(0.15, dz(contrastRatio - 1, 0.08) * 0.2));
-
-    // ── Saturation ─────────────────────────────────────────────────────
-    const satDelta = dz(source.meanSaturation - target.meanSaturation, 0.03);
-    const saturationAdj = Math.max(-0.15, Math.min(0.15, satDelta * 0.25));
-
-    params['basicadj'] = {
-      exposure: exposureAdj,
-      brightness: brightnessAdj,
-      contrast: contrastAdj,
-      saturation: saturationAdj,
-      vibrance: saturationAdj * 0.3,
-      black_point: 0,
-    };
-
-    // ── White Balance ──────────────────────────────────────────────────
-    const tempDelta = dz(source.estimatedTemp - target.estimatedTemp, 200);
-    const targetTemp = Math.max(4000, Math.min(8000, 5500 + tempDelta * 0.03));
-    const tintDelta = dz(source.estimatedTint - target.estimatedTint, 5);
-    const tintAdj = Math.max(-8, Math.min(8, tintDelta * 0.05));
-
-    params['temperature'] = {
-      temperature: Math.round(targetTemp),
-      tint: Math.round(tintAdj * 10) / 10,
-    };
-
-    // ── Shadows / Highlights ───────────────────────────────────────────
-    const shadowLumDelta = dz(source.shadows.meanLuminance - target.shadows.meanLuminance, 0.03);
-    const highlightLumDelta = dz(source.highlights.meanLuminance - target.highlights.meanLuminance, 0.03);
-
-    const shadowRecovery = Math.max(0, Math.min(12, shadowLumDelta * 10));
-    const highlightRecovery = Math.max(0, Math.min(12, -highlightLumDelta * 10));
-
-    const blackPointAdj = Math.max(-0.25, Math.min(0.25, dz(source.p5 - target.p5, 0.03) * 0.4));
-    const whitePointAdj = Math.max(-0.25, Math.min(0.25, dz(source.p95 - target.p95, 0.03) * 0.4));
-
-    params['shadowshighlights'] = {
-      shadows: shadowRecovery,
-      highlights: highlightRecovery,
-      whitePoint: whitePointAdj,
-      blackPoint: blackPointAdj,
-      enabled: shadowRecovery > 2 || highlightRecovery > 2,
-    };
-
-    // ── Tone Curve ─────────────────────────────────────────────────────
-    const curveDivergence = Math.abs(source.p50 - target.p50) + Math.abs(source.p25 - target.p25) + Math.abs(source.p75 - target.p75);
-    const curveBlend = Math.min(1, Math.max(0, (curveDivergence - 0.05) * 1.5));
-
-    const blendPt = (srcVal: number, tgtVal: number) =>
-      tgtVal + (srcVal - tgtVal) * curveBlend * 0.25;
-
-    const curve = [
-      { x: 0, y: 0 },
-      { x: target.p25 || 0.25, y: Math.max(0, Math.min(1, blendPt(source.p25, target.p25 || 0.25))) },
-      { x: target.p50 || 0.50, y: Math.max(0, Math.min(1, blendPt(source.p50, target.p50 || 0.50))) },
-      { x: target.p75 || 0.75, y: Math.max(0, Math.min(1, blendPt(source.p75, target.p75 || 0.75))) },
-      { x: 1, y: 1 },
-    ];
-
-    // Only set curve if it actually deviates from identity
-    if (curveBlend > 0.01) {
-      params['tonecurve'] = {
-        baseCurve: curve,
-        baseCurveType: 1,
-      };
-    }
-
-    // ── Color Balance (very subtle) ────────────────────────────────────
-    const computeZoneCast = (srcZone: ZoneStats, tgtZone: ZoneStats) => {
-      if (srcZone.pixelCount < 100 || tgtZone.pixelCount < 100) {
-        return { cyan_red: 0, magenta_green: 0, yellow_blue: 0 };
+  /**
+   * Build per-channel histogram-match curves that map the target's R/G/B
+   * distribution onto the source's, then express them as ToneCurve RGB curves.
+   * Result: the target renders with the source's exact tonal + colour grade.
+   * General — no per-image tuning, works for any reference/target pair.
+   */
+  private computeHistogramMatchParams(
+    source: StyleFingerprint,
+    target: StyleFingerprint,
+  ): Record<string, Record<string, unknown>> {
+    // For each target level v, find the source level w whose cumulative
+    // probability first reaches the target's — classic CDF histogram matching.
+    const matchCurve = (srcCdf: number[], tgtCdf: number[]): { x: number; y: number }[] => {
+      const lut = new Uint8Array(256);
+      let w = 0;
+      for (let v = 0; v < 256; v++) {
+        while (w < 255 && srcCdf[w] < tgtCdf[v]) w++;
+        lut[v] = w;
       }
-      return {
-        cyan_red: Math.max(-0.05, Math.min(0.05, dz(srcZone.meanR - tgtZone.meanR, 0.015) * 0.15)),
-        magenta_green: Math.max(-0.05, Math.min(0.05, dz(
-          ((srcZone.meanR + srcZone.meanB) / 2 - srcZone.meanG) -
-          ((tgtZone.meanR + tgtZone.meanB) / 2 - tgtZone.meanG), 0.015
-        ) * 0.15)),
-        yellow_blue: Math.max(-0.05, Math.min(0.05, dz(srcZone.meanB - tgtZone.meanB, 0.015) * 0.15)),
-      };
+      // Sample to a dense curve (every 4 levels => 65 nodes). With linear
+      // interpolation (baseCurveType 0) this reproduces the LUT faithfully.
+      const nodes: { x: number; y: number }[] = [];
+      for (let v = 0; v <= 255; v += 4) nodes.push({ x: v / 255, y: lut[v] / 255 });
+      if (nodes[nodes.length - 1].x < 1) nodes.push({ x: 1, y: lut[255] / 255 });
+      return nodes;
     };
 
-    params['colorbalance'] = {
-      shadows: computeZoneCast(source.shadows, target.shadows),
-      midtones: computeZoneCast(source.midtones, target.midtones),
-      highlights: computeZoneCast(source.highlights, target.highlights),
+    return {
+      tonecurve: {
+        rgbCurve: {
+          red: matchCurve(source.cdfR, target.cdfR),
+          green: matchCurve(source.cdfG, target.cdfG),
+          blue: matchCurve(source.cdfB, target.cdfB),
+        },
+        baseCurveType: 0, // linear interpolation between dense nodes
+      },
+      // Clear basic adjustments so the match curves are the sole transform.
+      basicadj: { exposure: 0, brightness: 0, contrast: 0, saturation: 0, vibrance: 0, black_point: 0 },
     };
-
-    return params;
   }
+
 
   // ── Apply computed params to pipeline ────────────────────────────────────
 
@@ -406,8 +367,11 @@ class StyleAnalysisService {
       logger.debug(`StyleAnalysis: set ${moduleId} →`, moduleParams);
     }
 
-    // Trigger reprocessing
-    useAppStore.getState().triggerReprocessing();
+    // Refresh the open module panel's sliders (so they re-read the new
+    // module.getParams()), then reprocess the image.
+    const store = useAppStore.getState();
+    store.notifyExternalParamsChange();
+    store.triggerReprocessing();
   }
 
   /* eslint-disable @typescript-eslint/no-explicit-any */

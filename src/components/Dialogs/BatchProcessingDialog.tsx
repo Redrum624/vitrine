@@ -21,19 +21,36 @@ interface BatchProcessingDialogProps {
   isOpen: boolean;
   onClose: () => void;
   availableImages: ImageFileInfo[];
+  selectedImages: ImageFileInfo[];
+  onSelectedImagesChange: (imgs: ImageFileInfo[]) => void;
   onSelectImages: () => void;
 }
 
 type TabType = 'jobs' | 'create' | 'settings';
 
+// Dedupe two ImageFileInfo lists by their file path.
+const mergeUnique = (existing: ImageFileInfo[], incoming: ImageFileInfo[]): ImageFileInfo[] => {
+  const seen = new Set(existing.map((img) => img.path));
+  const merged = [...existing];
+  for (const img of incoming) {
+    if (!seen.has(img.path)) {
+      seen.add(img.path);
+      merged.push(img);
+    }
+  }
+  return merged;
+};
+
 export const BatchProcessingDialog: React.FC<BatchProcessingDialogProps> = ({
   isOpen,
   onClose,
+  availableImages,
+  selectedImages,
+  onSelectedImagesChange,
   onSelectImages
 }) => {
   const [activeTab, setActiveTab] = useState<TabType>('jobs');
   const [jobs, setJobs] = useState<BatchJob[]>([]);
-  const [selectedImages, setSelectedImages] = useState<ImageFileInfo[]>([]);
   const [selectedPreset, setSelectedPreset] = useState<string>('');
   const [presets, setPresets] = useState<BatchPreset[]>([]);
   const [jobName, setJobName] = useState('');
@@ -87,12 +104,12 @@ export const BatchProcessingDialog: React.FC<BatchProcessingDialogProps> = ({
     if (jobId) {
       batchProcessingService.startBatchJob(jobId);
       setJobName('');
-      setSelectedImages([]);
+      onSelectedImagesChange([]);
       setSelectedPreset('');
       setActiveTab('jobs');
       refreshJobs();
     }
-  }, [selectedPreset, selectedImages, jobName, refreshJobs]);
+  }, [selectedPreset, selectedImages, jobName, refreshJobs, onSelectedImagesChange]);
 
   const handleStartJob = useCallback((jobId: string) => {
     batchProcessingService.startBatchJob(jobId);
@@ -313,14 +330,26 @@ export const BatchProcessingDialog: React.FC<BatchProcessingDialogProps> = ({
       <div className="space-y-2">
         <div className="flex justify-between items-center">
           <label className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--gray-500)' }}>Images to Process</label>
-          <button
-            onClick={onSelectImages}
-            className="flex items-center gap-1 px-3 py-1.5 rounded border text-xs"
-            style={{ backgroundColor: 'var(--gray-800)', borderColor: 'var(--border)', color: 'var(--gray-300)' }}
-          >
-            <FolderOpen size={12} />
-            Select Images
-          </button>
+          <div className="flex gap-2">
+            {availableImages.length > 0 && (
+              <button
+                onClick={() => onSelectedImagesChange(mergeUnique(selectedImages, availableImages))}
+                className="flex items-center gap-1 px-3 py-1.5 rounded border text-xs"
+                style={{ backgroundColor: 'var(--gray-800)', borderColor: 'var(--border)', color: 'var(--gray-300)' }}
+              >
+                <Plus size={12} />
+                Add Open Images
+              </button>
+            )}
+            <button
+              onClick={onSelectImages}
+              className="flex items-center gap-1 px-3 py-1.5 rounded border text-xs"
+              style={{ backgroundColor: 'var(--gray-800)', borderColor: 'var(--border)', color: 'var(--gray-300)' }}
+            >
+              <FolderOpen size={12} />
+              Select Images
+            </button>
+          </div>
         </div>
 
         <div className="p-3 rounded border min-h-[100px]" style={{ backgroundColor: 'var(--gray-800)', borderColor: 'var(--border)' }}>

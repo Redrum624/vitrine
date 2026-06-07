@@ -193,6 +193,7 @@ export interface BasicAdjustmentsParams extends ModuleParameters {
   saturation: number;
   vibrance: number;
   clarity: number;
+  dehaze: number;
 }
 
 export interface ToneCurveParams extends ModuleParameters {

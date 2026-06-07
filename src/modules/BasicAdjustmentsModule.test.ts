@@ -30,6 +30,48 @@ describe('BasicAdjustmentsModule', () => {
     module = new BasicAdjustmentsModule();
   });
 
+  describe('Highlights and Shadows', () => {
+    const width = 4, height = 4;
+    const ctx = () => createProcessingContext(width, height);
+
+    it('defaults to neutral (0) highlights and shadows', () => {
+      const p = module.getParams();
+      expect(p.highlights).toBe(0);
+      expect(p.shadows).toBe(0);
+    });
+
+    it('shadows > 0 lifts dark tones', () => {
+      module.setParams({ shadows: 1.0 });
+      const [r] = getPixel(module.process(createTestImage(width, height, 0.15, 0.15, 0.15), ctx()), width, 0, 0);
+      expect(r).toBeGreaterThan(0.15);
+    });
+
+    it('shadows < 0 deepens dark tones', () => {
+      module.setParams({ shadows: -1.0 });
+      const [r] = getPixel(module.process(createTestImage(width, height, 0.25, 0.25, 0.25), ctx()), width, 0, 0);
+      expect(r).toBeLessThan(0.25);
+    });
+
+    it('highlights < 0 recovers (darkens) bright tones', () => {
+      module.setParams({ highlights: -1.0 });
+      const [r] = getPixel(module.process(createTestImage(width, height, 0.9, 0.9, 0.9), ctx()), width, 0, 0);
+      expect(r).toBeLessThan(0.9);
+    });
+
+    it('highlights > 0 brightens bright tones', () => {
+      module.setParams({ highlights: 1.0 });
+      const [r] = getPixel(module.process(createTestImage(width, height, 0.8, 0.8, 0.8), ctx()), width, 0, 0);
+      expect(r).toBeGreaterThan(0.8);
+    });
+
+    it('shadows affect dark tones more than bright tones (luminance mask)', () => {
+      module.setParams({ shadows: 1.0 });
+      const darkDelta = getPixel(module.process(createTestImage(width, height, 0.1, 0.1, 0.1), ctx()), width, 0, 0)[0] - 0.1;
+      const brightDelta = getPixel(module.process(createTestImage(width, height, 0.9, 0.9, 0.9), ctx()), width, 0, 0)[0] - 0.9;
+      expect(darkDelta).toBeGreaterThan(brightDelta);
+    });
+  });
+
   describe('Module identification', () => {
     it('should return correct id', () => {
       expect(module.getId()).toBe('basicadj');
@@ -49,6 +91,7 @@ describe('BasicAdjustmentsModule', () => {
       expect(params.brightness).toBe(0);
       expect(params.saturation).toBe(0);
       expect(params.vibrance).toBe(0);
+      expect(params.dehaze).toBe(0);
     });
 
     it('should return a copy of parameters (immutability)', () => {
@@ -74,12 +117,13 @@ describe('BasicAdjustmentsModule', () => {
     });
 
     it('should reset parameters to defaults', () => {
-      module.setParams({ exposure: 1.0, contrast: 0.5, saturation: 0.5 });
+      module.setParams({ exposure: 1.0, contrast: 0.5, saturation: 0.5, dehaze: 0.5 });
       module.resetParams();
       const params = module.getParams();
       expect(params.exposure).toBe(0);
       expect(params.contrast).toBe(0);
       expect(params.saturation).toBe(0);
+      expect(params.dehaze).toBe(0);
     });
   });
 
@@ -377,6 +421,97 @@ describe('BasicAdjustmentsModule', () => {
       const currentParams = module.getParams();
       expect(currentParams.exposure).toBe(params.exposure);
       expect(currentParams.contrast).toBe(params.contrast);
+    });
+  });
+
+  describe('Dehaze adjustment', () => {
+    // Build a synthetic low-contrast / "hazy" image: all channels compressed
+    // into the 0.4..0.6 range (lifted black floor, no deep shadows).
+    const createHazyImage = (width: number, height: number): Float32Array => {
+      const channels = 4;
+      const data = new Float32Array(width * height * channels);
+      const count = width * height;
+      for (let p = 0; p < count; p++) {
+        // Ramp brightness across the compressed band so there is some structure.
+        const v = 0.4 + (p / Math.max(1, count - 1)) * 0.2; // 0.4 .. 0.6
+        const idx = p * channels;
+        data[idx] = v;
+        data[idx + 1] = v;
+        data[idx + 2] = v;
+        data[idx + 3] = 1.0;
+      }
+      return data;
+    };
+
+    const spread = (data: Float32Array): number => {
+      let min = Infinity;
+      let max = -Infinity;
+      for (let i = 0; i < data.length; i += 4) {
+        for (let c = 0; c < 3; c++) {
+          const v = data[i + c];
+          if (v < min) min = v;
+          if (v > max) max = v;
+        }
+      }
+      return max - min;
+    };
+
+    it('should default dehaze to 0 and restore it on reset', () => {
+      expect(module.getParams().dehaze).toBe(0);
+      module.setParams({ dehaze: 0.7 });
+      expect(module.getParams().dehaze).toBe(0.7);
+      module.resetParams();
+      expect(module.getParams().dehaze).toBe(0);
+    });
+
+    it('should leave the image unchanged when dehaze is 0 (identity off)', () => {
+      const width = 8;
+      const height = 8;
+      const input = createHazyImage(width, height);
+      const context = createProcessingContext(width, height);
+
+      module.setParams({ dehaze: 0.0 });
+      const output = module.process(input, context);
+
+      for (let i = 0; i < input.length; i++) {
+        expect(Math.abs(output[i] - input[i])).toBeLessThan(1e-6);
+      }
+    });
+
+    it('should increase tonal spread on a hazy image (haze removed)', () => {
+      const width = 8;
+      const height = 8;
+      const baseInput = createHazyImage(width, height);
+      const context = createProcessingContext(width, height);
+
+      // Reference run with dehaze off.
+      const off = module.process(baseInput.slice(), context);
+      const spreadOff = spread(off);
+
+      // Dehaze on.
+      module.setParams({ dehaze: 0.5 });
+      const on = module.process(baseInput.slice(), context);
+      const spreadOn = spread(on);
+
+      expect(isValidImageData(on)).toBe(true);
+      expect(spreadOn).toBeGreaterThan(spreadOff);
+    });
+
+    it('should clamp out-of-range dehaze and never produce NaN or negatives', () => {
+      const width = 4;
+      const height = 4;
+      const input = createHazyImage(width, height);
+      const context = createProcessingContext(width, height);
+
+      module.setParams({ dehaze: 5.0 }); // Outside -1..1
+      const output = module.process(input, context);
+
+      expect(isValidImageData(output)).toBe(true);
+      for (let i = 0; i < output.length; i++) {
+        expect(Number.isNaN(output[i])).toBe(false);
+        expect(output[i]).toBeGreaterThanOrEqual(0.0);
+        expect(output[i]).toBeLessThanOrEqual(1.0);
+      }
     });
   });
 

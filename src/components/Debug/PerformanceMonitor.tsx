@@ -3,6 +3,7 @@ import { Activity, Database, Cpu, HardDrive } from 'lucide-react';
 import { imageCacheService } from '../../services/ImageCacheService';
 import { canvasPoolService } from '../../services/CanvasPoolService';
 import { errorHandlingService } from '../../services/ErrorHandlingService';
+import { computeDropRate } from './computeDropRate';
 
 interface PerformanceMetrics {
   memory: {
@@ -27,6 +28,8 @@ interface PerformanceMetrics {
   };
   fps: number;
   renderTime: number;
+  // Windowed frame-drop rate (%) measured against a 60fps target.
+  frameDrops: number;
 }
 
 export const PerformanceMonitor: React.FC = () => {
@@ -51,6 +54,8 @@ export const PerformanceMonitor: React.FC = () => {
         const deltaTime = now - lastTimeRef.current;
         if (deltaTime >= 1000) {
           const fps = Math.round((frameCountRef.current * 1000) / deltaTime);
+          // Windowed frame-drop rate against a 60fps target, from the same frame data.
+          const frameDrops = computeDropRate(frameCountRef.current, deltaTime);
           frameCountRef.current = 0;
           lastTimeRef.current = now;
 
@@ -89,7 +94,8 @@ export const PerformanceMonitor: React.FC = () => {
               rate: 0 // Would calculate based on time window
             },
             fps,
-            renderTime: performance.now() - now
+            renderTime: performance.now() - now,
+            frameDrops
           };
 
           setMetrics(newMetrics);
@@ -176,6 +182,10 @@ export const PerformanceMonitor: React.FC = () => {
             <div className="flex justify-between">
               <span className="text-dark-300">Render</span>
               <span className="text-dark-400">{metrics.renderTime.toFixed(2)}ms</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-dark-300">Frame Drops</span>
+              <span className="text-dark-400">{metrics.frameDrops.toFixed(1)}%</span>
             </div>
           </div>
         </div>

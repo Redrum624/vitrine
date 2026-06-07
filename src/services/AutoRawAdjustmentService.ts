@@ -274,6 +274,49 @@ export class AutoRawAdjustmentService {
   }
 
   /**
+   * Estimate a conservative dehaze amount (0.0..0.4) from the luminance histogram.
+   *
+   * Haze scatters light into the shadows, lifting the black floor: a hazy image
+   * has almost no pixels in the deepest luminance bins and its tonal range is
+   * compressed. We detect that lifted floor and map it to a gentle dehaze value.
+   * Returns 0.0 when there is no histogram or no haze signal (the safe default),
+   * and never exceeds 0.4 per the Algorithm Tuning rule (stay conservative).
+   */
+  private estimateHazeAmount(rawData: RawImageData): number {
+    const histogram = rawData.histogram;
+    if (!histogram || !histogram.luminance || histogram.luminance.length === 0) {
+      return 0.0;
+    }
+
+    const lum = histogram.luminance;
+    const bins = lum.length;
+    const totalPixels = lum.reduce((a, b) => a + b, 0);
+    if (totalPixels <= 0) {
+      return 0.0;
+    }
+
+    // Deep-shadow bins (lowest ~6% of the range). In a non-hazy image a meaningful
+    // fraction of pixels lands here; haze pushes this fraction toward zero.
+    const shadowCutoff = Math.max(1, Math.floor(bins * 0.06));
+    let deepShadowPixels = 0;
+    for (let i = 0; i < shadowCutoff; i++) {
+      deepShadowPixels += lum[i];
+    }
+    const deepShadowRatio = deepShadowPixels / totalPixels;
+
+    // Only treat as hazy when the deep shadows are nearly empty (lifted floor).
+    // 0.5% threshold avoids triggering on images that simply have no dark content.
+    const hazeSignal = 0.005 - deepShadowRatio;
+    if (hazeSignal <= 0) {
+      return 0.0;
+    }
+
+    // Map the (tiny) signal to a conservative dehaze strength, capped at 0.4.
+    const dehaze = Math.min(0.4, (hazeSignal / 0.005) * 0.4);
+    return dehaze;
+  }
+
+  /**
    * Generate automatic adjustment parameters based on analysis
    * Uses wider parameter ranges to take advantage of RAW's extended dynamic range
    */
@@ -344,7 +387,9 @@ export class AutoRawAdjustmentService {
       vibrance: iso > 800 ? 1.0 : 1.3, // More vibrance for RAW
       // RAW clarity can be pushed much harder (-1.0 to +1.0 range)
       clarity: iso > 1600 ? 0.1 : 0.25, // More clarity for RAW (noise permitting)
-      dehaze: 0.0
+      // Dehaze derived from the histogram's dynamic-range compression (see below).
+      // Conservative per the Algorithm Tuning rule; 0.0 when no haze signal.
+      dehaze: this.estimateHazeAmount(rawData)
     };
 
     // Shadow/highlight recovery - RAW files excel at this with massive range
@@ -425,9 +470,10 @@ export class AutoRawAdjustmentService {
         if (params.basicAdjustments.clarity !== undefined) {
           basicParams.clarity = params.basicAdjustments.clarity;
         }
+        if (params.basicAdjustments.dehaze !== undefined) {
+          basicParams.dehaze = params.basicAdjustments.dehaze;
+        }
         basicModule.setParams(basicParams);
-        // Note: dehaze parameter would need to be added to BasicAdjustmentsParams interface
-        // Skipping dehaze parameter application for now
         pipeline.setModuleEnabled('basicadj', true);
         logger.debug('Applied auto basic adjustment parameters:', params.basicAdjustments);
       }

@@ -7,7 +7,7 @@ import {
   NoiseReductionOptions,
   NoiseProfile
 } from '../../services/NoiseReductionService';
-// import { rawImageService } from '../../services/RawImageService';
+import { cameraMetadataService } from '../../services/CameraMetadataService';
 
 interface NoiseReductionModuleProps {
   isEnabled: boolean;
@@ -41,23 +41,36 @@ export const NoiseReductionModule: React.FC<NoiseReductionModuleProps> = ({
   const [selectedProfile, setSelectedProfile] = useState<NoiseProfile | null>(null);
   const [autoMode, setAutoMode] = useState(true);
 
-  // Load noise profiles and estimate noise on image load
+  // Resolve a camera-specific noise profile from the file's real EXIF
+  // make/model/ISO. getCameraInfo returns null for RAW (exifreader can't parse
+  // ORF/CR2/...) -> hide the profile card rather than show a fabricated camera.
   useEffect(() => {
-    // Try to find noise profile for current image
-    if (currentImage?.metadata) {
-      // Extract camera info from metadata (simplified)
-      const camera = 'Canon'; // Would be extracted from EXIF
-      const model = 'EOS R5'; // Would be extracted from EXIF
-      const iso = 800; // Would be extracted from EXIF
+    let ignore = false;
 
-      const profile = noiseReductionService.getNoiseProfile(camera, model, iso);
-      setSelectedProfile(profile);
+    const loadProfile = async () => {
+      const info = await cameraMetadataService.getCameraInfo(currentImage);
+      if (ignore) return;
 
-      if (profile) {
-        logger.info(`Found noise profile: ${profile.camera} ${profile.model} ISO ${profile.iso}`);
+      if (info?.make && info.model && info.iso) {
+        const profile = noiseReductionService.getNoiseProfile(info.make, info.model, info.iso);
+        setSelectedProfile(profile);
+        if (profile) {
+          logger.info(`Found noise profile: ${profile.camera} ${profile.model} ISO ${profile.iso}`);
+        }
+      } else {
+        setSelectedProfile(null);
       }
-    }
+    };
 
+    loadProfile();
+
+    return () => {
+      ignore = true;
+    };
+  }, [currentImage]);
+
+  // Estimate noise on image load / data change
+  useEffect(() => {
     // Estimate noise in current image
     if (processedImageData && currentImage) {
       try {

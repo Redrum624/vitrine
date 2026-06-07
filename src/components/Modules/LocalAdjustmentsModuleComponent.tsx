@@ -3,7 +3,8 @@ import { Brush, Move, Circle, Layers, Trash2, Eye, EyeOff, Plus, Settings, Rotat
 import {
   LocalAdjustmentLayer,
   LocalAdjustmentParams,
-  BrushParameters
+  BrushParameters,
+  MaskGeometry
 } from '../../modules/LocalAdjustmentsModule';
 import { DelayedInputControl } from '../Controls/DelayedInputControl';
 import { logger } from '../../utils/Logger';
@@ -20,8 +21,15 @@ interface LocalAdjustmentsModuleComponentProps {
   onToggleLayer: (layerId: string, enabled: boolean) => void;
   onSetActiveLayer: (layerId: string) => void;
   onUpdateLayerOpacity: (layerId: string, opacity: number) => void;
+  geometry?: MaskGeometry;
+  onUpdateGeometry?: (geom: MaskGeometry) => void;
   className?: string;
 }
+
+const DEFAULT_GEOMETRY: MaskGeometry = {
+  type: 'radial', centerX: 0.5, centerY: 0.5, radiusX: 0.3, radiusY: 0.3,
+  startX: 0.5, startY: 0.15, endX: 0.5, endY: 0.85, feather: 0.5, invert: false,
+};
 
 type ToolType = 'brush' | 'eraser' | 'linear_gradient' | 'radial_gradient' | 'parametric';
 type TabType = 'tools' | 'layers' | 'adjustments' | 'masking';
@@ -38,9 +46,20 @@ export const LocalAdjustmentsModuleComponent: React.FC<LocalAdjustmentsModuleCom
   onToggleLayer,
   onSetActiveLayer,
   onUpdateLayerOpacity,
+  geometry,
+  onUpdateGeometry,
   className = ''
 }) => {
   const [activeTab, setActiveTab] = useState<TabType>('tools');
+  const [localGeom, setLocalGeom] = useState<MaskGeometry>(geometry ?? DEFAULT_GEOMETRY);
+  useEffect(() => { if (geometry) setLocalGeom(geometry); }, [geometry]);
+  const updateGeom = useCallback((patch: Partial<MaskGeometry>) => {
+    setLocalGeom(prev => {
+      const next = { ...prev, ...patch };
+      onUpdateGeometry?.(next);
+      return next;
+    });
+  }, [onUpdateGeometry]);
   const [activeTool, setActiveTool] = useState<ToolType>('brush');
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showNewLayerDialog, setShowNewLayerDialog] = useState(false);
@@ -119,6 +138,60 @@ export const LocalAdjustmentsModuleComponent: React.FC<LocalAdjustmentsModuleCom
     onCreateLayer(type, name);
     setShowNewLayerDialog(false);
   }, [layers, onCreateLayer]);
+
+  const geomRow = (label: string, val: number, min: number, max: number, step: number, onCh: (v: number) => void) => (
+    <div className="space-y-1" key={label}>
+      <div className="flex items-center justify-between">
+        <span className="text-xs" style={{ color: 'var(--gray-300)' }}>{label}</span>
+        <span className="text-xs font-mono" style={{ color: 'var(--gray-500)' }}>{val.toFixed(2)}</span>
+      </div>
+      <input
+        type="range" min={min} max={max} step={step} value={val}
+        className="slider w-full"
+        onInput={(e) => onCh(parseFloat((e.target as HTMLInputElement).value))}
+        onChange={(e) => onCh(parseFloat(e.target.value))}
+      />
+    </div>
+  );
+
+  const renderGeometry = () => {
+    if (!activeLayer || (activeLayer.type !== 'radial_gradient' && activeLayer.type !== 'linear_gradient')) {
+      return (
+        <div className="text-xs" style={{ color: 'var(--gray-400)' }}>
+          Add a Radial or Linear layer in the <strong>Layers</strong> tab to place a region, then shape it here and adjust its look in the <strong>Adjust</strong> tab.
+        </div>
+      );
+    }
+    const isRadial = activeLayer.type === 'radial_gradient';
+    return (
+      <div className="space-y-2">
+        <label className="text-xs font-medium" style={{ color: 'var(--gray-300)' }}>
+          {isRadial ? 'Radial Shape (circle / oval)' : 'Linear Gradient'}
+        </label>
+        {isRadial ? (
+          <>
+            {geomRow('Center X', localGeom.centerX, 0, 1, 0.01, (v) => updateGeom({ centerX: v }))}
+            {geomRow('Center Y', localGeom.centerY, 0, 1, 0.01, (v) => updateGeom({ centerY: v }))}
+            {geomRow('Radius X', localGeom.radiusX, 0.02, 1, 0.01, (v) => updateGeom({ radiusX: v }))}
+            {geomRow('Radius Y', localGeom.radiusY, 0.02, 1, 0.01, (v) => updateGeom({ radiusY: v }))}
+            {geomRow('Feather', localGeom.feather, 0.01, 1, 0.01, (v) => updateGeom({ feather: v }))}
+          </>
+        ) : (
+          <>
+            {geomRow('Start X', localGeom.startX, 0, 1, 0.01, (v) => updateGeom({ startX: v }))}
+            {geomRow('Start Y', localGeom.startY, 0, 1, 0.01, (v) => updateGeom({ startY: v }))}
+            {geomRow('End X', localGeom.endX, 0, 1, 0.01, (v) => updateGeom({ endX: v }))}
+            {geomRow('End Y', localGeom.endY, 0, 1, 0.01, (v) => updateGeom({ endY: v }))}
+            {geomRow('Feather', localGeom.feather, 0.01, 1, 0.01, (v) => updateGeom({ feather: v }))}
+          </>
+        )}
+        <label className="flex items-center gap-2 text-xs cursor-pointer" style={{ color: 'var(--gray-300)' }}>
+          <input type="checkbox" checked={localGeom.invert} onChange={(e) => updateGeom({ invert: e.target.checked })} />
+          Invert mask
+        </label>
+      </div>
+    );
+  };
 
   const renderToolsTab = () => (
     <div className="space-y-3">
@@ -365,14 +438,10 @@ export const LocalAdjustmentsModuleComponent: React.FC<LocalAdjustmentsModuleCom
         </div>
       )}
 
-      {(activeTool === 'linear_gradient' || activeTool === 'radial_gradient') && (
-        <div className="space-y-1.5">
-          <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Gradient Settings</label>
-          <div className="text-xs" style={{color: 'var(--gray-400)'}}>
-            Click and drag on the image to create a {activeTool.replace('_', ' ')} gradient.
-          </div>
-        </div>
-      )}
+      <div className="space-y-1.5 pt-2" style={{ borderTop: '1px solid var(--border)' }}>
+        <label className="text-xs font-medium" style={{ color: 'var(--gray-300)' }}>Shape &amp; Position</label>
+        {renderGeometry()}
+      </div>
     </div>
   );
 
@@ -544,6 +613,14 @@ export const LocalAdjustmentsModuleComponent: React.FC<LocalAdjustmentsModuleCom
         </div>
       ) : (
         <div className="space-y-3">
+          {/* Mask feather (also editable in the Tools > Shape section) */}
+          {(activeLayer.type === 'radial_gradient' || activeLayer.type === 'linear_gradient') && (
+            <div className="space-y-1.5 pb-2" style={{ borderBottom: '1px solid var(--border)' }}>
+              <label className="text-xs font-medium" style={{ color: 'var(--gray-300)' }}>Mask Feather</label>
+              {geomRow('Feather', localGeom.feather, 0.01, 1, 0.01, (v) => updateGeom({ feather: v }))}
+            </div>
+          )}
+
           {/* Exposure Section */}
           <div className="space-y-1.5">
             <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Exposure</label>

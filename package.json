@@ -14,6 +14,9 @@
     "dev-managed": "node scripts/dev.cjs",
     "electron-build": "npm run build && electron-builder",
     "dist": "npm run build && electron-builder --publish=never",
+    "clean:dist": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
+    "build:win": "npm run clean:dist && npm run build && electron-builder --win --publish=never",
+    "build:win:dir": "npm run clean:dist && npm run build && electron-builder --win --dir --publish=never",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "lint:fix": "eslint . --ext ts,tsx --fix",
     "typecheck": "tsc --noEmit",
@@ -87,8 +90,7 @@
         {
           "target": "nsis",
           "arch": [
-            "x64",
-            "ia32"
+            "x64"
           ]
         },
         {
@@ -115,7 +117,25 @@
         "filter": [
           "**/*"
         ]
+      },
+      {
+        "from": "vendor/libraw",
+        "to": "vendor/libraw",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "public/libraw",
+        "to": "libraw",
+        "filter": [
+          "**/*"
+        ]
       }
+    ],
+    "asarUnpack": [
+      "electron/librawWasmWorker.cjs",
+      "electron/librawWasmNode.cjs"
     ]
   }
 }
