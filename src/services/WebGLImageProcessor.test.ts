@@ -7,6 +7,7 @@
  * in-app via the startup benchmark (real Chromium/GPU in Electron).
  */
 import { webGLImageProcessor } from './WebGLImageProcessor';
+import { BasicAdjustmentsModule } from '../modules/BasicAdjustmentsModule';
 
 function img(pixels: number[][]): Float32Array {
   const a = new Float32Array(pixels.length * 4);
@@ -49,5 +50,38 @@ describe('WebGLImageProcessor (CPU fallback in jsdom)', () => {
     expect(r.gpuMs).toBeNull();
     expect(r.cpuMs).toBeGreaterThanOrEqual(0);
     expect(r.maxDiff).toBe(0);
+  });
+});
+
+/**
+ * The GPU basic-adjustments shader is a port of BasicAdjustmentsModule. We can't
+ * run WebGL in jsdom, so we instead verify the processor's CPU REFERENCE (the same
+ * math the shader implements, and the GPU-vs-reference self-check) is identical to
+ * the real module. Transitively: shader == reference (in-app self-check) and
+ * reference == module (here) ⇒ shader == module.
+ */
+describe('GPU basic-adjustments CPU reference matches BasicAdjustmentsModule', () => {
+  const w = 4, h = 4;
+  const src = new Float32Array(w * h * 4);
+  for (let i = 0; i < w * h; i++) {
+    src[i * 4] = (i % 4) / 4; src[i * 4 + 1] = ((i * 2) % 5) / 5;
+    src[i * 4 + 2] = ((i * 3) % 7) / 7; src[i * 4 + 3] = 1;
+  }
+  const PARAM_SETS = [
+    { exposure: 0.3, contrast: 0.5, brightness: 0.2, black_point: 0.1, saturation: 0.3, vibrance: 0.2, dehaze: 0.2, highlights: 0.4, shadows: -0.3 },
+    { exposure: -0.5, contrast: 2.0, brightness: -0.3, black_point: 0, saturation: -0.5, vibrance: 0, dehaze: 0, highlights: 0, shadows: 0 },
+    { exposure: 0.6, contrast: 0, brightness: 0, black_point: 0, saturation: 0, vibrance: 0.4, dehaze: 0.5, highlights: -0.6, shadows: 0.5 },
+    { exposure: 0, contrast: 0, brightness: 0, black_point: 0, saturation: 0, vibrance: 0, dehaze: 0, highlights: 0, shadows: 0 },
+  ];
+
+  test.each(PARAM_SETS)('parity for %o', (p) => {
+    const mod = new BasicAdjustmentsModule();
+    mod.setParams(p);
+    const params = mod.getParams();
+    const expected = mod.process(new Float32Array(src), { width: w, height: h, channels: 4 });
+    const ref = webGLImageProcessor.basicAdjustmentsCPU(new Float32Array(src), w, h, params);
+    let maxDiff = 0;
+    for (let i = 0; i < expected.length; i++) maxDiff = Math.max(maxDiff, Math.abs(expected[i] - ref[i]));
+    expect(maxDiff).toBeLessThan(1e-5);
   });
 });

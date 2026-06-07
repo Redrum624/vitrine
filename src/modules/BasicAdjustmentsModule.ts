@@ -1,5 +1,6 @@
 import { logger } from '../utils/Logger';
 import { validateInputDimensions, calculateLuminance } from './utils/ColorUtils';
+import { webGLImageProcessor } from '../services/WebGLImageProcessor';
 
 export interface BasicAdjParams {
   black_point: number;    // -1.0 to 1.0, default: 0.0
@@ -95,6 +96,14 @@ export class BasicAdjustmentsModule {
 
     // Copy input to output
     output.set(input);
+
+    // GPU fast-path: when WebGL2 is available and its output has been verified to
+    // match this CPU code (self-check on init), run the whole per-pixel pass on the
+    // GPU. RGBA only (the shader assumes 4 channels); otherwise the CPU loop below
+    // runs. The GPU path itself falls back to an identical CPU reference on error.
+    if (channels === 4 && webGLImageProcessor.isAvailable()) {
+      return webGLImageProcessor.applyBasicAdjustments(output, width, height, this.params);
+    }
 
     // Log key parameters for monitoring (debug level to reduce noise)
     logger.debug(`BasicAdj processing with exposure: ${this.params.exposure}, contrast: ${this.params.contrast}`);
