@@ -340,6 +340,7 @@ function App() {
       if (inner) inner.setParams(p);
       imageProcessingPipeline.invalidateModuleCache('tonecurve');
     }
+    useAppStore.getState().notifyExternalParamsChange();
     useAppStore.getState().triggerReprocessing();
     showSuccess('Auto Levels', 'Applied via tone curve');
   }, [showSuccess]);
@@ -355,6 +356,7 @@ function App() {
       (baMod as unknown as { setParams: (p: Record<string, unknown>) => void }).setParams(p);
       imageProcessingPipeline.invalidateModuleCache('basicadj');
     }
+    useAppStore.getState().notifyExternalParamsChange();
     useAppStore.getState().triggerReprocessing();
     showSuccess('Auto Contrast', 'Applied via basic adjustments');
   }, [showSuccess]);
@@ -377,6 +379,7 @@ function App() {
       if (inner) inner.setParams(p);
       imageProcessingPipeline.invalidateModuleCache('colorbalance');
     }
+    useAppStore.getState().notifyExternalParamsChange();
     useAppStore.getState().triggerReprocessing();
     showSuccess('Auto Color', 'Applied via white balance + color balance');
   }, [showSuccess]);
@@ -474,7 +477,8 @@ function App() {
       imageProcessingPipeline.invalidateModuleCache('shadowshighlights');
     }
 
-    // Trigger reprocessing
+    // Refresh the open module panel's sliders, then reprocess.
+    useAppStore.getState().notifyExternalParamsChange();
     useAppStore.getState().triggerReprocessing();
     showSuccess('Auto All', `Applied "${result.bucket}" style profile`);
     logger.info(`Auto All: all modules adjusted from user style profile (bucket=${result.bucket})`);

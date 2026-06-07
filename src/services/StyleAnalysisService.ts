@@ -367,8 +367,11 @@ class StyleAnalysisService {
       logger.debug(`StyleAnalysis: set ${moduleId} →`, moduleParams);
     }
 
-    // Trigger reprocessing
-    useAppStore.getState().triggerReprocessing();
+    // Refresh the open module panel's sliders (so they re-read the new
+    // module.getParams()), then reprocess the image.
+    const store = useAppStore.getState();
+    store.notifyExternalParamsChange();
+    store.triggerReprocessing();
   }
 
   /* eslint-disable @typescript-eslint/no-explicit-any */

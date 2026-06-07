@@ -18,6 +18,12 @@ interface AppStore extends AppState {
   // Processing trigger - increments to signal that reprocessing is needed
   processingVersion: number;
   triggerReprocessing: () => void;
+  // Bumped only when module params are set in BULK from outside the panels
+  // (Paste Style, Auto All, presets) so the open module panel can re-read
+  // module.getParams() and refresh its sliders. NOT bumped on normal slider
+  // edits (that would remount the panel mid-drag).
+  externalParamsVersion: number;
+  notifyExternalParamsChange: () => void;
   // Live processing stats (surfaced in the StatusBar)
   lastProcessingTimeMs: number;
   modulesActive: number;
@@ -56,6 +62,7 @@ export const useAppStore = create<AppStore>((set) => ({
   sidebarCollapsed: false,
   isAdjustingRotation: false,
   processingVersion: 0,
+  externalParamsVersion: 0,
   lastProcessingTimeMs: 0,
   modulesActive: 0,
   modulesTotal: 0,
@@ -69,6 +76,10 @@ export const useAppStore = create<AppStore>((set) => ({
 
   triggerReprocessing: () => set((state) => ({
     processingVersion: state.processingVersion + 1
+  })),
+
+  notifyExternalParamsChange: () => set((state) => ({
+    externalParamsVersion: state.externalParamsVersion + 1
   })),
 
   setCurrentImage: (image) => set({ currentImage: image }),

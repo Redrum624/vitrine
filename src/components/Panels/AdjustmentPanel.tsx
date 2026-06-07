@@ -29,8 +29,13 @@ interface AdjustmentPanelProps {
 }
 
 export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
-  const { setProcessedImageData, processingVersion, setProcessingStats } = useAppStore();
+  const { setProcessedImageData, processingVersion, externalParamsVersion, setProcessingStats } = useAppStore();
   const [resetCounter, setResetCounter] = useState(0);
+  // Remount the module panels (so each re-reads module.getParams() into its
+  // sliders) on a manual Reset OR when params are set in bulk from outside the
+  // panels (Paste Style / Auto All / presets). External bulk-setters bump
+  // externalParamsVersion; normal slider drags do not, so editing isn't disrupted.
+  const paramSync = `${resetCounter}-${externalParamsVersion}`;
   const [isProcessing, setIsProcessing] = useState(false);
   const processingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastProcessingTimeRef = useRef<number>(0);
@@ -492,7 +497,7 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
           return (
             <div className="px-5 pt-4">
               <CropModuleComponent
-                key={`crop-${resetCounter}`}
+                key={`crop-${paramSync}`}
                 module={cropModule.getCropModule()}
                 onParamsChange={(params) => handleModuleParamsChange('crop', params)}
                 imageData={img?.data}
@@ -507,7 +512,7 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
         {basicAdjModule && selectedModule === 'basicadj' && (
           <div className="px-5 pt-4">
             <BasicAdjustmentsModuleComponent
-              key={`basicadj-${resetCounter}`}
+              key={`basicadj-${paramSync}`}
               module={basicAdjModule}
               onParamsChange={(params) => handleModuleParamsChange('basicadj', params)}
             />
@@ -518,7 +523,7 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
         {whiteBalanceModule && selectedModule === 'whitebalance' && (
           <div className="px-5 pt-4">
             <WhiteBalanceModuleComponent
-              key={`whitebalance-${resetCounter}`}
+              key={`whitebalance-${paramSync}`}
               module={whiteBalanceModule}
               onParamsChange={(params) => handleModuleParamsChange('temperature', params)}
               onAutoDetect={handleAutoWhiteBalance}
@@ -530,7 +535,7 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
         {toneCurveModule && selectedModule === 'tonecurve' && (
           <div className="px-5 pt-4">
             <ToneCurveModuleComponent
-              key={`tonecurve-${resetCounter}`}
+              key={`tonecurve-${paramSync}`}
               module={toneCurveModule.getToneCurveModule()}
               onParamsChange={(params) => handleModuleParamsChange('tonecurve', params)}
             />
@@ -541,7 +546,7 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
         {noiseReductionModule && selectedModule === 'noisereduction' && (
           <div className="px-5 pt-4">
             <NoiseReductionModuleComponent
-              key={`noisereduction-${resetCounter}`}
+              key={`noisereduction-${paramSync}`}
               module={noiseReductionModule}
               onParamsChange={(params) => handleModuleParamsChange('noisereduction', params)}
             />
@@ -552,7 +557,7 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
         {shadowsHighlightsModule && selectedModule === 'shadowshighlights' && (
           <div className="px-5 pt-4">
             <ShadowsHighlightsModuleComponent
-              key={`shadowshighlights-${resetCounter}`}
+              key={`shadowshighlights-${paramSync}`}
               module={shadowsHighlightsModule.getShadowsHighlightsModule()}
               onParamsChange={(params) => handleModuleParamsChange('shadowshighlights', params)}
             />
@@ -563,7 +568,7 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
         {colorBalanceModule && selectedModule === 'colorbalance' && (
           <div className="px-5 pt-4">
             <ColorBalanceModuleComponent
-              key={`colorbalance-${resetCounter}`}
+              key={`colorbalance-${paramSync}`}
               module={colorBalanceModule.getColorBalanceModule()}
               onParamsChange={(params) => handleModuleParamsChange('colorbalance', params)}
             />
@@ -578,7 +583,7 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
           return (
             <div className="px-5 pt-4">
               <LocalAdjustmentsModuleComponent
-                key={`localadjustments-${resetCounter}`}
+                key={`localadjustments-${paramSync}`}
                 parameters={localAdjustmentsModule.getParameters().defaultParams}
                 brushParams={localAdjustmentsModule.getParameters().brushParams}
                 layers={localAdjustmentsModule.getParameters().layers}
@@ -615,7 +620,7 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
         {lensCorrectionsModule && selectedModule === 'lenscorrections' && (
           <div className="px-5 pt-4">
             <LensCorrectionsModuleComponent
-              key={`lenscorrections-${resetCounter}`}
+              key={`lenscorrections-${paramSync}`}
               parameters={lensCorrectionsModule.getParameters().lensCorrectionsParams}
               onParametersChange={(params) => handleModuleParamsChange('lenscorrections', params)}
               onAutoDetectVignetting={() => {
