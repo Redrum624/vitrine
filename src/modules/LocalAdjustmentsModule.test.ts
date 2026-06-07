@@ -30,6 +30,51 @@ describe('LocalAdjustmentsModule', () => {
     module = new LocalAdjustmentsModule();
   });
 
+  describe('Radial/linear masks apply local adjustments', () => {
+    const width = 32, height = 32;
+
+    it('creating a radial layer generates a non-empty centred mask', () => {
+      const id = module.createLayer('radial_gradient', 'Radial', width, height);
+      const layer = module.getLayer(id)!;
+      const center = layer.mask[(height / 2) * width + (width / 2)];
+      const corner = layer.mask[0];
+      expect(center).toBeGreaterThan(0.9); // full effect at the centre
+      expect(corner).toBeLessThan(0.1);    // ~no effect at the corner
+    });
+
+    it('a radial exposure boost brightens the centre but not the corner', () => {
+      const id = module.createLayer('radial_gradient', 'Radial', width, height);
+      module.updateLayerParameters(id, { exposure: 1.0 }); // +1 EV inside the mask
+      const input = createTestImage(width, height, 0.4, 0.4, 0.4);
+      const out = module.processImage(input, width, height);
+
+      const [cr] = getPixel(out, width, width / 2, height / 2);
+      const cornerR = getPixel(out, width, 0, 0)[0];
+      expect(cr).toBeGreaterThan(0.4 + 0.05); // centre brightened
+      expect(cornerR).toBeCloseTo(0.4, 1);    // corner ~unchanged
+    });
+
+    it('setLayerGeometry can move/resize the mask and invert it', () => {
+      const id = module.createLayer('radial_gradient', 'Radial', width, height);
+      module.setLayerGeometry(id, {
+        type: 'radial', centerX: 0.5, centerY: 0.5, radiusX: 0.25, radiusY: 0.25,
+        startX: 0.5, startY: 0.15, endX: 0.5, endY: 0.85, feather: 0.3, invert: true,
+      }, width, height);
+      const layer = module.getLayer(id)!;
+      // Inverted: centre now ~0, corner ~1.
+      expect(layer.mask[(height / 2) * width + (width / 2)]).toBeLessThan(0.1);
+      expect(layer.mask[0]).toBeGreaterThan(0.9);
+    });
+
+    it('a linear gradient layer produces a ramped mask', () => {
+      const id = module.createLayer('linear_gradient', 'Linear', width, height);
+      const layer = module.getLayer(id)!;
+      const top = layer.mask[2 * width + width / 2];               // near top
+      const bottom = layer.mask[(height - 3) * width + width / 2]; // near bottom
+      expect(bottom).toBeGreaterThan(top); // default gradient runs top -> bottom
+    });
+  });
+
   describe('Module identification', () => {
     it('should have correct id', () => {
       expect(module.id).toBe('localadjustments');

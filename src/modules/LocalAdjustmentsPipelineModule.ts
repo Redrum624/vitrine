@@ -3,7 +3,8 @@ import {
   localAdjustmentsModule,
   LocalAdjustmentParams,
   BrushParameters,
-  LocalAdjustmentLayer
+  LocalAdjustmentLayer,
+  MaskGeometry
 } from './LocalAdjustmentsModule';
 import { logger } from '../utils/Logger';
 
@@ -215,6 +216,14 @@ export class LocalAdjustmentsPipelineModule implements PipelineModule {
       this.syncLayersFromModule();
     }
 
+    return success;
+  }
+
+  setLayerGeometry(layerId: string, geom: MaskGeometry, width: number, height: number): boolean {
+    const success = localAdjustmentsModule.setLayerGeometry(layerId, geom, width, height);
+    if (success) {
+      this.syncLayersFromModule();
+    }
     return success;
   }
 

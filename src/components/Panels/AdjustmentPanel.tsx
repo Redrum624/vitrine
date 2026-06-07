@@ -580,36 +580,54 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
           const img = imageService.getCurrentImage();
           if (!img) return null;
 
+          const la = localAdjustmentsModule.getParameters();
+          const active = la.layers.find(l => l.id === la.activeLayerId);
+          // Adjustments/geometry edits only need a reprocess; create/select also
+          // remount the panel (refresh) so it re-reads the active layer's values.
+          const reprocess = () => useAppStore.getState().triggerReprocessing();
+          const refresh = () => useAppStore.getState().notifyExternalParamsChange();
+
           return (
             <div className="px-5 pt-4">
               <LocalAdjustmentsModuleComponent
                 key={`localadjustments-${paramSync}`}
-                parameters={localAdjustmentsModule.getParameters().defaultParams}
-                brushParams={localAdjustmentsModule.getParameters().brushParams}
-                layers={localAdjustmentsModule.getParameters().layers}
-                activeLayerId={localAdjustmentsModule.getParameters().activeLayerId}
-                onParametersChange={(params) => handleModuleParamsChange('localadjustments', params)}
+                parameters={active ? active.parameters : la.defaultParams}
+                brushParams={la.brushParams}
+                layers={la.layers}
+                activeLayerId={la.activeLayerId}
+                geometry={active?.geometry}
+                onParametersChange={(params) => {
+                  if (la.activeLayerId) localAdjustmentsModule.updateLayerParameters(la.activeLayerId, params);
+                  reprocess();
+                }}
                 onBrushParamsChange={(params) => {
                   localAdjustmentsModule.updateBrushParameters(params);
                 }}
                 onCreateLayer={(type, name) => {
                   localAdjustmentsModule.createLayer(type, name, img.width, img.height);
-                  handleModuleParamsChange('localadjustments', localAdjustmentsModule.getParameters().defaultParams);
+                  refresh();
+                  reprocess();
                 }}
                 onRemoveLayer={(layerId) => {
                   localAdjustmentsModule.removeLayer(layerId);
-                  handleModuleParamsChange('localadjustments', localAdjustmentsModule.getParameters().defaultParams);
+                  refresh();
+                  reprocess();
                 }}
                 onToggleLayer={(layerId, enabled) => {
                   localAdjustmentsModule.toggleLayer(layerId, enabled);
-                  handleModuleParamsChange('localadjustments', localAdjustmentsModule.getParameters().defaultParams);
+                  reprocess();
                 }}
                 onSetActiveLayer={(layerId) => {
                   localAdjustmentsModule.setActiveLayer(layerId);
+                  refresh();
                 }}
                 onUpdateLayerOpacity={(layerId, opacity) => {
                   localAdjustmentsModule.updateLayerOpacity(layerId, opacity);
-                  handleModuleParamsChange('localadjustments', localAdjustmentsModule.getParameters().defaultParams);
+                  reprocess();
+                }}
+                onUpdateGeometry={(geom) => {
+                  if (la.activeLayerId) localAdjustmentsModule.setLayerGeometry(la.activeLayerId, geom, img.width, img.height);
+                  reprocess();
                 }}
               />
             </div>
