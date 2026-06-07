@@ -540,14 +540,13 @@ ipcMain.handle('read-image-as-data-url', async (event, filePath) => {
     // For RAW files, extract an embedded JPEG preview.
     if (rawFormats.includes(ext)) {
       const sharp = require('sharp');
-      const toThumb = (buf) => sharp(buf)
-        .resize(300, 200, { fit: 'inside', withoutEnlargement: true })
-        .jpeg({ quality: 80 })
-        .toBuffer();
 
       // 1) Sharp directly (works for DNG and a few formats).
       try {
-        const out = await toThumb(filePath);
+        const out = await sharp(filePath, { failOn: 'none' })
+          .resize(300, 200, { fit: 'inside', withoutEnlargement: true })
+          .jpeg({ quality: 80 })
+          .toBuffer();
         if (out && out.length > 100) {
           return `data:image/jpeg;base64,${out.toString('base64')}`;
         }
@@ -555,58 +554,46 @@ ipcMain.handle('read-image-as-data-url', async (event, filePath) => {
         console.log(`Preview: Sharp failed for ${path.basename(filePath)}: ${sharpError.message}`);
       }
 
-      // Read the whole file once for the fallbacks — the embedded preview can
-      // live anywhere in the file, not just the first 10MB (the old limit was the
-      // root cause of some RAWs showing no thumbnail).
-      let fileData = null;
-      try { fileData = await fs.promises.readFile(filePath); } catch { /* ignore */ }
+      // 2) Largest embedded JPEG within the first 24MB. A BOUNDED read is
+      //    essential: the filmstrip requests every thumbnail at once, so reading
+      //    whole multi-MB RAWs (and parsing each) floods the main process and
+      //    starves the responses. Embedded previews sit near the start of the
+      //    file anyway. Fast native Buffer.indexOf scan.
+      try {
+        const fd = await fs.promises.open(filePath, 'r');
+        const scanSize = Math.min((await fd.stat()).size, 24 * 1024 * 1024);
+        const fileData = Buffer.allocUnsafe(scanSize);
+        await fd.read(fileData, 0, scanSize, 0);
+        await fd.close();
 
-      // 2) exifreader: format-aware embedded thumbnail. Handles nested EXIF
-      //    thumbnails correctly (a raw byte scan does not).
-      if (fileData) {
-        try {
-          const ExifReader = require('exifreader');
-          const tags = ExifReader.load(fileData, { expanded: true });
-          const thumb = tags && tags.Thumbnail && tags.Thumbnail.image;
-          if (thumb) {
-            const out = await toThumb(Buffer.from(thumb));
-            if (out && out.length > 100) {
-              return `data:image/jpeg;base64,${out.toString('base64')}`;
-            }
-          }
-        } catch (exifError) {
-          console.log(`Preview: exifreader thumbnail failed for ${path.basename(filePath)}: ${exifError.message}`);
+        const SOI = Buffer.from([0xFF, 0xD8, 0xFF]);
+        const EOI = Buffer.from([0xFF, 0xD9]);
+        let largest = { offset: -1, size: 0 };
+        let pos = 0;
+        while (pos < fileData.length) {
+          const start = fileData.indexOf(SOI, pos);
+          if (start < 0) break;
+          const end = fileData.indexOf(EOI, start + 3);
+          if (end < 0) break;
+          const size = end - start + 2;
+          if (size > largest.size) largest = { offset: start, size };
+          pos = end + 2;
         }
-      }
 
-      // 3) Brute force: the largest embedded JPEG anywhere in the file (native
-      //    Buffer.indexOf, so scanning the whole file is fast).
-      if (fileData) {
-        try {
-          const SOI = Buffer.from([0xFF, 0xD8, 0xFF]);
-          const EOI = Buffer.from([0xFF, 0xD9]);
-          let largest = { offset: -1, size: 0 };
-          let pos = 0;
-          while (pos < fileData.length) {
-            const start = fileData.indexOf(SOI, pos);
-            if (start < 0) break;
-            const end = fileData.indexOf(EOI, start + 3);
-            if (end < 0) break;
-            const size = end - start + 2;
-            if (size > largest.size) largest = { offset: start, size };
-            pos = end + 2;
-          }
-          if (largest.offset >= 0 && largest.size > 1000) {
-            const out = await toThumb(fileData.subarray(largest.offset, largest.offset + largest.size));
-            return `data:image/jpeg;base64,${out.toString('base64')}`;
-          }
-        } catch (extractError) {
-          console.warn(`Failed to extract preview from RAW ${path.basename(filePath)}: ${extractError.message}`);
+        if (largest.offset >= 0 && largest.size > 1000) {
+          const out = await sharp(fileData.subarray(largest.offset, largest.offset + largest.size))
+            .resize(300, 200, { fit: 'inside', withoutEnlargement: true })
+            .jpeg({ quality: 80 })
+            .toBuffer();
+          return `data:image/jpeg;base64,${out.toString('base64')}`;
         }
-      }
 
-      console.warn(`No embedded preview found for RAW ${path.basename(filePath)}`);
-      return null;
+        console.warn(`No embedded preview found for RAW ${path.basename(filePath)}`);
+        return null;
+      } catch (extractError) {
+        console.warn(`Failed to extract preview from RAW ${path.basename(filePath)}: ${extractError.message}`);
+        return null;
+      }
     }
 
     // For standard image formats, read directly
