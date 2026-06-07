@@ -679,16 +679,17 @@ export const LensCorrectionsModuleComponent: React.FC<LensCorrectionsModuleCompo
           <button
             key={key}
             onClick={() => setActiveTab(key as TabType)}
-            className={`flex-1 flex items-center justify-center gap-1 px-3 py-2 text-xs font-medium rounded-md transition-all ${
+            className={`flex-1 min-w-0 flex items-center justify-center gap-1 px-1.5 py-2 text-xs font-medium rounded-md transition-all ${
               activeTab === key ? 'shadow-sm' : 'bg-transparent'
             }`}
             style={{
               backgroundColor: activeTab === key ? 'var(--gray-600)' : 'transparent',
               color: activeTab === key ? 'var(--white)' : 'var(--gray-300)'
             }}
+            title={label}
           >
-            <Icon className="w-3 h-3" />
-            {label}
+            <Icon className="w-3 h-3 flex-shrink-0" />
+            <span className="truncate">{label}</span>
           </button>
         ))}
       </div>

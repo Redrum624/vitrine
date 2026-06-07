@@ -93,6 +93,9 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
       processingTimeoutRef.current = null;
     }
 
+    // Show the canvas spinner only if processing is slow (noise reduction, large
+    // images, etc.) so fast slider drags don't flicker it on/off.
+    const slowSpinnerTimer = setTimeout(() => useAppStore.getState().setIsProcessing(true), 800);
     try {
       setIsProcessing(true);
       const startTime = performance.now();
@@ -254,6 +257,8 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
       const failedStats = imageProcessingPipeline.getStats();
       setProcessingStats({ timeMs: 0, active: failedStats.enabledModules, total: failedStats.moduleCount });
     } finally {
+      clearTimeout(slowSpinnerTimer);
+      useAppStore.getState().setIsProcessing(false);
       setIsProcessing(false);
     }
   }, [setProcessedImageData, setProcessingStats, isProcessing]);

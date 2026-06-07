@@ -1104,6 +1104,15 @@ export class AdvancedDenoisingService {
     width: number,
     height: number
   ): 'bm3d' | 'nlmeans' | 'wavelet' | 'hybrid' {
+    // Patch-based methods (BM3D / NLMeans / hybrid) are O(n · window² · patch²)
+    // and run synchronously — on a full-resolution image they take minutes and
+    // freeze the UI (the "Auto takes forever / hangs" report). Above ~1MP fall
+    // back to the fast O(n) wavelet method so Auto stays responsive.
+    if (width * height > 1_000_000) {
+      logger.debug('Auto-selection: large image -> wavelet (fast path)');
+      return 'wavelet';
+    }
+
     // Estimate noise level
     const noiseLevel = this.estimateNoiseLevel(imageData, width, height);
 

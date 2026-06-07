@@ -1,6 +1,6 @@
 {
   "name": "photo_app",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Professional photo editor powered by darktable",
   "main": "electron/main.cjs",
   "scripts": {
@@ -135,7 +135,9 @@
     ],
     "asarUnpack": [
       "electron/librawWasmWorker.cjs",
-      "electron/librawWasmNode.cjs"
+      "electron/librawWasmNode.cjs",
+      "**/node_modules/sharp/**",
+      "**/node_modules/@img/**"
     ]
   }
 }

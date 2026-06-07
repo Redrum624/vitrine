@@ -4,6 +4,26 @@ All notable changes to **Photo Editor Pro** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.0.2] - 2026-06-07
+
+### Fixed
+- **Packaged RAW thumbnails (and export) were broken.** Cause: `sharp` is a native
+  module but was not in electron-builder's `asarUnpack`, so its binding could not
+  load from inside `app.asar` — `require('sharp')` failed in the built app, so RAW
+  thumbnails (which need sharp) showed placeholders while JPEGs (no sharp) loaded
+  fine. Fix: add `sharp` + `@img/**` to `asarUnpack`. Affects: `package.json`.
+- **Lens Corrections tab pills** (Vignetting / Distortion / Chromatic / Profile)
+  overflowed the selector on the narrow panel — the 4th spilled out. Fix:
+  shrinkable pills (`min-w-0` + label truncation, tighter padding) so all 4 fit.
+
+### Changed
+- **Processing spinner** now appears for any adjustment that runs longer than
+  ~0.8 s (e.g. noise reduction), not just Auto All / Paste Style — slow operations
+  show feedback instead of looking frozen.
+- **Noise Reduction "Auto"** no longer hangs on large images: above ~1 MP it uses
+  the fast wavelet method instead of the heavy patch-based methods (BM3D / NLMeans
+  / hybrid). A GPU-accelerated denoiser is being evaluated for full speed.
+
 ## [1.0.1] - 2026-06-07
 
 ### Fixed
