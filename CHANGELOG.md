@@ -4,6 +4,23 @@ All notable changes to **Photo Editor Pro** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.0.1] - 2026-06-07
+
+### Fixed
+- **RAW thumbnails not displaying.** Cause: the embedded-preview extractor read the
+  entire RAW file and ran a synchronous `exifreader` parse on the full buffer for
+  every thumbnail; the filmstrip requests all thumbnails at once, so this flooded
+  the main process and starved the responses. Fix: bounded 24 MB read + fast native
+  `Buffer.indexOf` scan, no `exifreader`. Affects: `electron/main.cjs`.
+- **Welcome modal reappeared on every right-sidebar click.** Cause: the show-welcome
+  effect had `selectedTool` in its dependencies, re-arming the 1 s timer on each tool
+  change. Fix: show it once, on mount only. Affects: `src/App.tsx`.
+
+### Changed
+- **Filmstrip toggle.** The thumbnail panel's close (X) button is now a chevron
+  (down/up) that collapses/expands the strip in place instead of closing it.
+- **File → New…** added to reopen the Welcome / open-folder modal on demand.
+
 ## [1.0.0] - 2026-06-07
 
 First release — a desktop RAW photo editor (Electron + React + a WebGL2/CPU
