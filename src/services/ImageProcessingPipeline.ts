@@ -267,6 +267,16 @@ export class ImageProcessingPipeline {
                  (sh.compress === undefined || sh.compress === 0);
         }
 
+        case 'noise-reduction': {
+          // Noise Reduction is opt-in (default enabled:false) and only runs after the
+          // explicit "Apply" button. When not enabled it MUST be skipped — otherwise
+          // it runs on every unedited export, and its full-resolution GPU pass
+          // corrupts (the "export is just noise" bug). Its numeric defaults are
+          // non-zero, so the generic all-zero check below would wrongly run it.
+          return (params as ModuleWithEnabledParams).enabled === false
+            || (params as ModuleWithEnabledParams).enabled === undefined;
+        }
+
         case 'crop':
         case 'transform':
         case 'lenscorrections':

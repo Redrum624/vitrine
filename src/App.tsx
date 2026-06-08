@@ -853,13 +853,30 @@ function App() {
     });
 
     // Star rating: 1-5 set the rating on the current image, 0 clears it.
-    createRatingShortcuts((rating) => {
+    const applyRating = (rating: number) => {
       const img = currentImageRef.current;
       if (!img) return;
       useAppStore.getState().setImageRating(img.id, rating);
       // Persist to the file (xmp:Rating) so it shows in OS file details.
       window.electronAPI?.writeImageRating?.(img.path, rating);
-    }).forEach((shortcut) => keyboardShortcutsService.register(shortcut));
+    };
+    createRatingShortcuts(applyRating).forEach((shortcut) => keyboardShortcutsService.register(shortcut));
+
+    // Numpad rating: match by physical key code (Numpad0-5) so it rates regardless
+    // of NumLock. With NumLock off the numpad emits arrow/nav keys (Numpad4=ArrowLeft
+    // etc.) — capture-phase + stopPropagation rates the photo and blocks the
+    // bubble-phase filmstrip arrow navigation, so the numpad is "just numbers".
+    const onNumpadRating = (e: KeyboardEvent) => {
+      const m = /^Numpad([0-5])$/.exec(e.code);
+      if (!m) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      if (!currentImageRef.current) return;
+      e.preventDefault();
+      e.stopPropagation();
+      applyRating(parseInt(m[1], 10));
+    };
+    document.addEventListener('keydown', onNumpadRating, true);
 
     logger.info(`Initialized ${shortcuts.length + 3} keyboard shortcuts`);
 
@@ -885,6 +902,7 @@ function App() {
 
     // Cleanup on unmount
     return () => {
+      document.removeEventListener('keydown', onNumpadRating, true);
       keyboardShortcutsService.destroy();
     };
   }, [selectedTool, setSelectedTool, currentImage]);

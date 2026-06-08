@@ -1028,7 +1028,17 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
                   geometry={layer.geometry}
                   onGeometryChange={(geom) => {
                     const img = imageService.getCurrentImage();
-                    if (img) la.setLayerGeometry(layer.id, geom, img.width, img.height);
+                    if (img) {
+                      // Bake the mask at PREVIEW resolution (capped long-edge), not the
+                      // full 20MP — the full-res bake stalls the drag for ~1s. The
+                      // pipeline rebuilds the mask at its actual processing size when it
+                      // differs (incl. full-res export), so correctness is preserved.
+                      const cap = 1024;
+                      const s = Math.min(1, cap / Math.max(img.width, img.height));
+                      const bw = Math.max(1, Math.round(img.width * s));
+                      const bh = Math.max(1, Math.round(img.height * s));
+                      la.setLayerGeometry(layer.id, geom, bw, bh);
+                    }
                     imageProcessingPipeline.invalidateModuleCache('localadjustments');
                     triggerReprocessing();
                   }}
