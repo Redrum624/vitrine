@@ -13,6 +13,7 @@ import { CropPipelineModule } from '../../modules/CropPipelineModule';
 import { LocalAdjustmentsPipelineModule } from '../../modules/LocalAdjustmentsPipelineModule';
 import { LocalAdjustmentMaskOverlay } from '../Canvas/LocalAdjustmentMaskOverlay';
 import { notificationService } from '../../services/NotificationService';
+import { StarRating } from '../common/StarRating';
 
 // Debug mode for canvas rendering - set to false for production
 const DEBUG_CANVAS = process.env.NODE_ENV === 'development';
@@ -30,7 +31,7 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasWrapperRef = useRef<HTMLDivElement>(null);
-  const { viewport, setViewport, processedImageData, isAdjustingRotation, selectedTool, triggerReprocessing, showGrid, showRulers, showOriginal, referenceMode, isProcessing } = useAppStore();
+  const { viewport, setViewport, processedImageData, isAdjustingRotation, selectedTool, triggerReprocessing, showGrid, showRulers, showOriginal, referenceMode, isProcessing, imageRatings, setImageRating } = useAppStore();
   const [isDragging, setIsDragging] = useState(false);
   const [lastPan, setLastPan] = useState({ x: 0, y: 0 });
   const [displayImage, setDisplayImage] = useState<ImageFileInfo | null>(null);
@@ -1081,6 +1082,25 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
                 {fileSystemService.getCurrentImageInfo().current} of {fileSystemService.getCurrentImageInfo().total}
               </div>
             </div>
+          </div>
+        )}
+
+        {/* Star Rating Overlay (bottom-right) */}
+        {displayImage && (
+          <div
+            className="absolute bottom-4 right-4 flex items-center bg-dark-850/90 backdrop-blur-sm rounded-professional px-3 py-2"
+            title="Rate this photo — press 1-5 (0 to clear)"
+          >
+            <StarRating
+              size={24}
+              gap={6}
+              rating={imageRatings[displayImage.id] ?? 0}
+              onRate={(r) => {
+                setImageRating(displayImage.id, r);
+                // Persist to the file (xmp:Rating) so it shows in OS file details.
+                window.electronAPI?.writeImageRating?.(displayImage.path, r);
+              }}
+            />
           </div>
         )}
 

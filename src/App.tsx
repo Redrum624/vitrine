@@ -21,7 +21,7 @@ import { StatusBar } from './components/Layout/StatusBar';
 import { PluginManagerDialog } from './components/Dialogs/PluginManagerDialog';
 import { WelcomeScreen } from './components/Welcome/WelcomeScreen';
 import { PerformanceMonitor } from './components/Debug/PerformanceMonitor';
-import { keyboardShortcutsService, createDefaultShortcuts } from './services/KeyboardShortcutsService';
+import { keyboardShortcutsService, createDefaultShortcuts, createRatingShortcuts } from './services/KeyboardShortcutsService';
 import { webGLImageProcessor } from './services/WebGLImageProcessor';
 import { electronService } from './services/ElectronService';
 import { imageService } from './services/ImageService';
@@ -844,6 +844,15 @@ function App() {
       category: 'view' as const,
       action: () => useAppStore.getState().toggleOriginal()
     });
+
+    // Star rating: 1-5 set the rating on the current image, 0 clears it.
+    createRatingShortcuts((rating) => {
+      const img = useAppStore.getState().currentImage;
+      if (!img) return;
+      useAppStore.getState().setImageRating(img.id, rating);
+      // Persist to the file (xmp:Rating) so it shows in OS file details.
+      window.electronAPI?.writeImageRating?.(img.path, rating);
+    }).forEach((shortcut) => keyboardShortcutsService.register(shortcut));
 
     logger.info(`Initialized ${shortcuts.length + 3} keyboard shortcuts`);
 

@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Star } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ChevronDown, ChevronUp } from 'lucide-react';
+import { StarRating } from '../common/StarRating';
 import { ImageFileInfo } from '../../services/FileSystemService';
 import { useAppStore } from '../../stores/appStore';
 import { logger } from '../../utils/Logger';
@@ -454,28 +455,19 @@ export function ThumbnailPanel({
 
                 {/* Star rating overlay */}
                 <div
-                  className="absolute bottom-0 left-0 right-0 flex justify-center gap-0.5 py-0.5"
+                  className="absolute bottom-0 left-0 right-0 flex justify-center py-0.5"
                   style={{ backgroundColor: 'rgba(0,0,0,0.45)' }}
                   onClick={(e) => e.stopPropagation()}
                 >
-                  {[1, 2, 3, 4, 5].map((star) => (
-                    <Star
-                      key={star}
-                      size={10}
-                      className="cursor-pointer"
-                      style={{
-                        color: star <= rating ? '#facc15' : 'rgba(255,255,255,0.75)',
-                        fill: star <= rating ? '#facc15' : 'none',
-                      }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        const newRating = star === rating ? 0 : star;
-                        setImageRating(image.id, newRating);
-                        // Persist to the file (xmp:Rating) so it shows in OS file details.
-                        window.electronAPI?.writeImageRating?.(image.path, newRating);
-                      }}
-                    />
-                  ))}
+                  <StarRating
+                    size={10}
+                    rating={rating}
+                    onRate={(newRating) => {
+                      setImageRating(image.id, newRating);
+                      // Persist to the file (xmp:Rating) so it shows in OS file details.
+                      window.electronAPI?.writeImageRating?.(image.path, newRating);
+                    }}
+                  />
                 </div>
 
                 {/* Selected indicator */}

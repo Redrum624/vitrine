@@ -347,4 +347,18 @@ export const createDefaultShortcuts = (callbacks: {
   return shortcuts;
 };
 
+// Star-rating shortcuts: pressing 1-5 sets that rating on the current image,
+// 0 clears it. (Plain digits — Ctrl+0/Ctrl+1 stay bound to zoom in
+// createDefaultShortcuts since modifier combos map to distinct keys.)
+export const createRatingShortcuts = (
+  onRate: (rating: number) => void
+): KeyboardShortcut[] =>
+  [0, 1, 2, 3, 4, 5].map((n) => ({
+    id: `rate-${n}`,
+    key: String(n),
+    description: n === 0 ? 'Clear star rating' : `Set ${n}-star rating`,
+    category: 'edit' as const,
+    action: () => onRate(n),
+  }));
+
 export const keyboardShortcutsService = new KeyboardShortcutsService();
