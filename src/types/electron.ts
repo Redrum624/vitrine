@@ -63,6 +63,7 @@ interface MessageBoxReturnValue {
 
 export interface ElectronAPI {
   // File operations
+  fileExists: (path: string) => Promise<boolean>;
   showOpenDialog: (options: OpenDialogOptions) => Promise<OpenDialogReturnValue>;
   showSaveDialog: (options: SaveDialogOptions) => Promise<SaveDialogReturnValue>;
   showMessageBox: (options: MessageBoxOptions) => Promise<MessageBoxReturnValue>;

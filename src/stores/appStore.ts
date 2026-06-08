@@ -51,6 +51,18 @@ interface AppStore extends AppState {
   // Star ratings (1-5, 0 = unrated)
   imageRatings: Record<string, number>;
   setImageRating: (imageId: string, rating: number) => void;
+  // Multi-image selection
+  selectedImageIds: string[];
+  selectionAnchorId: string | null;
+  setSelection: (ids: string[], anchorId?: string | null) => void;
+  toggleImageSelection: (id: string) => void;
+  clearSelection: () => void;
+  // Export progress
+  exportProgress: { current: number; total: number; currentName: string; cancelRequested: boolean } | null;
+  startExportProgress: (total: number) => void;
+  updateExportProgress: (current: number, currentName: string) => void;
+  requestExportCancel: () => void;
+  endExportProgress: () => void;
 }
 
 export const useAppStore = create<AppStore>((set) => ({
@@ -79,6 +91,9 @@ export const useAppStore = create<AppStore>((set) => ({
   referenceImageUrl: null,
   referenceImageName: null,
   imageRatings: {},
+  selectedImageIds: [],
+  selectionAnchorId: null,
+  exportProgress: null,
 
   triggerReprocessing: () => set((state) => ({
     processingVersion: state.processingVersion + 1
@@ -140,6 +155,42 @@ export const useAppStore = create<AppStore>((set) => ({
   setImageRating: (imageId, rating) => set((state) => ({
     imageRatings: { ...state.imageRatings, [imageId]: rating }
   })),
+
+  setSelection: (ids, anchorId) => set(() => ({
+    selectedImageIds: ids,
+    selectionAnchorId: anchorId !== undefined ? anchorId : (ids.length > 0 ? ids[ids.length - 1] : null),
+  })),
+
+  toggleImageSelection: (id) => set((state) => {
+    const exists = state.selectedImageIds.includes(id);
+    return {
+      selectedImageIds: exists
+        ? state.selectedImageIds.filter((x) => x !== id)
+        : [...state.selectedImageIds, id],
+      selectionAnchorId: id,
+    };
+  }),
+
+  clearSelection: () => set(() => ({
+    selectedImageIds: [],
+    selectionAnchorId: null,
+  })),
+
+  startExportProgress: (total) => set(() => ({
+    exportProgress: { current: 0, total, currentName: '', cancelRequested: false },
+  })),
+
+  updateExportProgress: (current, currentName) => set((state) => {
+    if (state.exportProgress === null) return {};
+    return { exportProgress: { ...state.exportProgress, current, currentName } };
+  }),
+
+  requestExportCancel: () => set((state) => {
+    if (state.exportProgress === null) return {};
+    return { exportProgress: { ...state.exportProgress, cancelRequested: true } };
+  }),
+
+  endExportProgress: () => set(() => ({ exportProgress: null })),
 
   getCurrentPipelineSettings: () => {
     // This would need to be implemented to collect current settings from all modules

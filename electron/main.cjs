@@ -353,6 +353,8 @@ ipcMain.handle('get-app-version', () => {
   return packageJson.version;
 });
 
+ipcMain.handle('file-exists', (_e, p) => { try { return fs.existsSync(p); } catch { return false; } });
+
 ipcMain.handle('show-open-dialog', async (event, options) => {
   const result = await dialog.showOpenDialog(mainWindow, options);
   return result;
