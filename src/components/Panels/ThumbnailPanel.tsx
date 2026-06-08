@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { ChevronLeft, ChevronRight, ChevronDown, ChevronUp } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Check, Download } from 'lucide-react';
 import { StarRating } from '../common/StarRating';
 import { ImageFileInfo } from '../../services/FileSystemService';
 import { useAppStore } from '../../stores/appStore';
@@ -11,6 +11,8 @@ interface ThumbnailPanelProps {
   onImageSelect: (image: ImageFileInfo) => void;
   onClose: () => void;
   visible: boolean;
+  /** Open the multi-export flow for the currently selected images. */
+  onExportSelected?: () => void;
 }
 
 const RAW_EXTENSIONS = ['cr2', 'cr3', 'nef', 'nrw', 'arw', 'sr2', 'srf', 'orf', 'dng', 'raf', 'rw2', 'pef', 'srw', 'x3f', 'raw'];
@@ -22,7 +24,8 @@ export function ThumbnailPanel({
   selectedImage,
   onImageSelect,
   onClose,
-  visible
+  visible,
+  onExportSelected
 }: ThumbnailPanelProps) {
   const [thumbnails, setThumbnails] = useState<Map<string, string>>(new Map());
   const [loadingThumbnails, setLoadingThumbnails] = useState<Set<string>>(new Set());
@@ -30,7 +33,9 @@ export function ThumbnailPanel({
   const [collapsed, setCollapsed] = useState(false); // filmstrip hidden/shown via the arrow toggle
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const selectedImageRef = useRef<HTMLDivElement>(null);
-  const { imageRatings, setImageRating } = useAppStore();
+  const { imageRatings, setImageRating, selectedImageIds, selectionAnchorId, setSelection, toggleImageSelection } = useAppStore();
+  const selectedSet = new Set(selectedImageIds ?? []);
+  const selectedCount = selectedImageIds?.length ?? 0;
 
   const filteredImages = useMemo(() => {
     if (ratingFilter === 0) return images;
@@ -233,10 +238,30 @@ export function ThumbnailPanel({
     }
   };
 
-  const handleThumbnailClick = (image: ImageFileInfo) => {
+  const handleThumbnailClick = (image: ImageFileInfo, e: React.MouseEvent) => {
+    if (e.shiftKey) {
+      // Contiguous range from the anchor to the clicked thumbnail (display order).
+      const anchorId = selectionAnchorId ?? selectedImage?.id ?? image.id;
+      const aIdx = filteredImages.findIndex(i => i.id === anchorId);
+      const bIdx = filteredImages.findIndex(i => i.id === image.id);
+      if (aIdx === -1 || bIdx === -1) {
+        setSelection([image.id], image.id);
+        return;
+      }
+      const [lo, hi] = aIdx <= bIdx ? [aIdx, bIdx] : [bIdx, aIdx];
+      const rangeIds = filteredImages.slice(lo, hi + 1).map(i => i.id);
+      setSelection(rangeIds, anchorId);
+      return;
+    }
+    if (e.ctrlKey || e.metaKey) {
+      // Toggle membership without disturbing the canvas.
+      toggleImageSelection(image.id);
+      return;
+    }
+    // Plain click: load to canvas and reset the selection to just this image.
     onImageSelect(image);
-    // Trigger thumbnail load (will be a no-op if already loaded/loading)
-    loadThumbnail(image);
+    loadThumbnail(image); // no-op if already loaded/loading
+    setSelection([image.id], image.id);
   };
 
   const handleScroll = () => loadVisibleThumbnails();
@@ -278,6 +303,18 @@ export function ThumbnailPanel({
               </button>
             ))}
           </div>
+          {/* Multi-export action — shown only when 2+ images are selected */}
+          {selectedCount >= 2 && (
+            <button
+              onClick={() => onExportSelected?.()}
+              className="flex items-center gap-1 px-2 py-0.5 text-xs rounded font-medium transition-colors"
+              style={{ backgroundColor: '#2563eb', color: 'white' }}
+              title="Export the selected images with the same settings"
+            >
+              <Download className="w-3 h-3" />
+              Export {selectedCount}
+            </button>
+          )}
         </div>
 
         <div className="flex items-center gap-2">
@@ -378,6 +415,7 @@ export function ThumbnailPanel({
         <div className="flex gap-2 h-full">
           {filteredImages.map((image) => {
             const isSelected = selectedImage?.id === image.id;
+            const inSelection = selectedSet.has(image.id);
             const thumbnail = thumbnails.get(image.id);
             const isLoading = loadingThumbnails.has(image.id);
             const rating = imageRatings[image.id] || 0;
@@ -393,7 +431,9 @@ export function ThumbnailPanel({
                   borderWidth: '2px',
                   borderColor: isSelected ? 'var(--white)' : 'var(--border)',
                   backgroundColor: 'var(--gray-800)',
-                  boxShadow: isSelected ? '0 0 0 1px var(--white)' : 'none'
+                  boxShadow: isSelected
+                    ? '0 0 0 1px var(--white)'
+                    : (inSelection ? '0 0 0 2px #3b82f6' : 'none')
                 }}
                 draggable
                 onDragStart={(e) => {
@@ -402,7 +442,7 @@ export function ThumbnailPanel({
                   e.dataTransfer.setData('application/x-photo-name', image.name);
                   e.dataTransfer.effectAllowed = 'copy';
                 }}
-                onClick={() => handleThumbnailClick(image)}
+                onClick={(e) => handleThumbnailClick(image, e)}
                 onMouseEnter={(e) => {
                   if (!isSelected) {
                     e.currentTarget.style.borderColor = 'var(--border-light)';
@@ -415,6 +455,16 @@ export function ThumbnailPanel({
                 }}
                 title={`${image.name} (${image.format})`}
               >
+                {/* Multi-select check badge (top-left) */}
+                {inSelection && (
+                  <div
+                    className="absolute z-10 flex items-center justify-center rounded-full"
+                    style={{ top: '4px', left: '4px', width: '16px', height: '16px', backgroundColor: '#3b82f6' }}
+                  >
+                    <Check className="w-2.5 h-2.5" style={{ color: 'white' }} strokeWidth={3} />
+                  </div>
+                )}
+
                 {isLoading ? (
                   <div className="w-full h-full rounded flex items-center justify-center" style={{backgroundColor: 'var(--gray-800)'}}>
                     <div className="w-4 h-4 border-2 rounded-full animate-spin" style={{borderColor: 'var(--gray-600)', borderTopColor: 'var(--white)'}} />
