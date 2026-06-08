@@ -30,8 +30,8 @@ Quick reference guide for all keyboard shortcuts in Photo Editor Pro.
 |----------|--------|-------------|
 | `Ctrl++` or `Ctrl+=` | Zoom In | Increase canvas zoom level |
 | `Ctrl+-` | Zoom Out | Decrease canvas zoom level |
-| `Ctrl+0` | Actual Size | Set zoom to 100% (1:1 pixel mapping) |
-| `Ctrl+1` | Fit to Window | Fit image to window size |
+| `Ctrl+1` | Actual Size | Set zoom to 100% (1:1 pixel mapping) |
+| `Ctrl+0` | Fit to Window | Fit image to window size |
 
 ---
 
@@ -43,6 +43,18 @@ Quick reference guide for all keyboard shortcuts in Photo Editor Pro.
 | `M` | Toggle Module Panel | Show/hide adjustment modules panel |
 | `C` | Toggle Crop Overlay | Show/hide crop grid and handles |
 | `B` | Toggle Before/After | Compare original vs edited image |
+
+---
+
+## Rating
+
+| Shortcut | Action | Description |
+|----------|--------|-------------|
+| `1`–`5` | Rate Image | Set a 1–5 star rating on the current image (written to the file as `xmp:Rating`) |
+| `0` | Clear Rating | Remove the rating from the current image |
+
+You can also rate from the star controls on each filmstrip thumbnail or the larger
+star overlay at the bottom-right of the canvas.
 
 ---
 
@@ -163,8 +175,8 @@ To print this reference card:
 
 ---
 
-**Version:** 1.0
-**Last Updated:** 2025-10-05
+**Version:** 1.4.0
+**Last Updated:** 2026-06-08
 **Application:** Photo Editor Pro
 
 For more help, press `F1` in the application or visit the documentation.

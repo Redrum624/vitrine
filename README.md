@@ -53,9 +53,16 @@ non-destructive local adjustments.
   to preserve the 32-bit float pipeline), in **sRGB or wide-gamut**
   (Adobe RGB / ProPhoto / Rec.2020) using generated ICC profiles, with **EXIF/XMP**
   metadata embedding.
-- Filmstrip (mouse-wheel scroll, collapsible) with star ratings and filtering,
-  **batch processing**, presets, watermarking, web-gallery generation, and print
-  soft-proofing.
+- **Multi-export.** Select several photos in the filmstrip (**Ctrl/Cmd+click** to
+  toggle individual ones, **Shift+click** for a contiguous range), then **Export N**
+  writes them all with one set of settings — each with **its own saved edits** — into
+  a chosen folder as `<name>_PEP.<ext>` (auto-suffixed `_PEP_1`, … so nothing is
+  overwritten). A cancellable progress bar at the top-left tracks the run.
+- **Star ratings** on the filmstrip thumbnails and a large bottom-right canvas overlay;
+  press **1–5** to rate the open image (**0** clears), written to the file as
+  `xmp:Rating`, plus rating-based filtering.
+- Filmstrip (mouse-wheel scroll, collapsible, multi-select), **batch processing**,
+  presets, watermarking, web-gallery generation, and print soft-proofing.
 
 ## 🚀 Quick Start
 
@@ -74,7 +81,7 @@ pnpm run electron-dev   # Vite dev server + Electron
 ### Build a Windows release
 ```bash
 npm run build:win       # clean dist + release -> tsc + vite build -> NSIS installer + portable (x64)
-# Output: release/Photo Editor Pro Setup 1.3.1.exe  and  release/Photo Editor Pro 1.3.1.exe
+# Output: release/Photo Editor Pro Setup 1.4.0.exe  and  release/Photo Editor Pro 1.4.0.exe
 npm run build:win:dir   # fast unpacked build (no installer)
 npm run dist            # electron-builder for the current platform
 ```

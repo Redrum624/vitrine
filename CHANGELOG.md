@@ -4,6 +4,39 @@ All notable changes to **Photo Editor Pro** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.4.0] - 2026-06-08
+
+### Added
+- **Star rating on the canvas.** A larger, always-visible 5-star control sits at the
+  bottom-right of the canvas whenever an image is open, mirroring the filmstrip
+  thumbnail stars (click a star to set, click the active star to clear). Pressing
+  **1–5** rates the current image and **0** clears it. The rating is written to the
+  file (`xmp:Rating`) and stays in sync with the thumbnail.
+- **Multi-export.** Select several photos in the filmstrip — **Ctrl/Cmd+click** to
+  toggle individual ones, **Shift+click** to select a contiguous range — then click
+  **Export N** to export them all with the same settings, chosen once in the Export
+  dialog. Each photo is re-decoded at full resolution and exported with **its own**
+  saved edits applied (an unedited photo never inherits another's edits). Files are
+  written into a chosen folder as `<name>_PEP.<ext>` and auto-suffixed (`_PEP_1`,
+  `_PEP_2`, …) so an existing file is never overwritten. A cancellable progress bar at
+  the top-left shows "Exporting X of N", and a summary toast reports how many
+  succeeded / failed.
+
+### Changed
+- **Exported filenames use the `_PEP` suffix** (single and multi export), e.g.
+  `photo_PEP.jpg` instead of `photo_exported.jpg`.
+
+### Fixed
+- **Corrupted RAW exports.** Exporting a RAW file (ORF/CR2/NEF/…) produced a
+  scrambled image — the exporter pulled the small embedded preview (~300×200)
+  through the full-resolution pipeline. RAW files are now decoded at full
+  resolution for export. Affected all output formats.
+- **Masks couldn't be hidden.** Clicking an already-selected mask's button now
+  deselects it, hiding the per-mask sliders and the on-canvas overlay.
+- **Mask dragging now previews live.** Moving / resizing / rotating a mask on the
+  canvas updates the masked adjustment during the drag (throttled), not only on
+  release.
+
 ## [1.3.1] - 2026-06-07
 
 ### Fixed

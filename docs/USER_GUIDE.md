@@ -61,7 +61,12 @@ The thumbnail strip along the bottom lists every image in the current folder:
 
 - **Scroll** left/right with the mouse wheel
 - **Navigate** with ← / → or by clicking a thumbnail
-- **Rate** images with the inline stars and **filter** by minimum rating
+- **Rate** images with the inline stars and **filter** by minimum rating (you can also
+  rate the open image from the bottom-right star overlay on the canvas, or press `1`–`5`)
+- **Select multiple** images for export — **Ctrl/Cmd+click** toggles a thumbnail,
+  **Shift+click** selects a contiguous range — then click the **Export N** button to
+  export them all with the same settings (each keeps **its own** edits). A cancellable
+  progress bar appears at the top-left, and the files are written as `<name>_PEP.<ext>`
 - **Collapse / expand** the strip with the chevron (▼ / ▲) button in its header
 
 ### Basic Workflow
@@ -284,8 +289,9 @@ python scripts/extract_style_profile.py \
 - `Ctrl/Cmd + Y` - Redo
 - `Space` - Toggle before/after preview
 - `F` - Fit to screen
-- `1` - 100% zoom
+- `Ctrl/Cmd + 1` - 100% zoom
 - `Ctrl/Cmd + 0` - Reset zoom
+- `1`–`5` - Rate the current image · `0` - Clear rating
 
 ### Module Controls
 - `Tab` - Next module
