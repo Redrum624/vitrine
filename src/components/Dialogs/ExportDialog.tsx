@@ -12,6 +12,9 @@ import {
 import SliderControl from '../Controls/SliderControl';
 import { ExportOptions, ExportPreset, exportService } from '../../services/ExportService';
 import { imageService } from '../../services/ImageService';
+import { multiExportService } from '../../services/MultiExportService';
+import { useAppStore } from '../../stores/appStore';
+import { notificationService } from '../../services/NotificationService';
 import { logger } from '../../utils/Logger';
 
 interface ExportDialogProps {
@@ -22,6 +25,9 @@ interface ExportDialogProps {
   imageHeight: number;
   originalFilePath?: string;
   onExportComplete: (success: boolean, outputPath?: string) => void;
+  /** When set (≥1 path), the dialog exports all of these images with the
+   *  chosen settings instead of the single current image. */
+  multiPaths?: string[];
 }
 
 type TabType = 'format' | 'dimensions' | 'color' | 'sharpening';
@@ -33,8 +39,10 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
   imageWidth,
   imageHeight,
   originalFilePath,
-  onExportComplete
+  onExportComplete,
+  multiPaths
 }) => {
+  const isMulti = (multiPaths?.length ?? 0) > 0;
   const [activeTab, setActiveTab] = useState<TabType>('format');
   const [selectedPreset, setSelectedPreset] = useState<string>('');
   const [exportOptions, setExportOptions] = useState<ExportOptions>(exportService.getDefaultOptions());
@@ -140,6 +148,56 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
       return;
     }
 
+    // --- Multi-export: apply the same settings to every selected image ---
+    if (multiPaths && multiPaths.length > 0) {
+      // Ensure a destination folder is chosen.
+      let dir = outputDirectory;
+      if (!dir) {
+        const result = await (window as unknown as { electronAPI?: { showOpenDialog: (opts: Record<string, unknown>) => Promise<{ canceled: boolean; filePaths: string[] }> } }).electronAPI?.showOpenDialog({
+          properties: ['openDirectory'],
+          title: 'Choose Export Folder'
+        });
+        if (!result || result.canceled || !result.filePaths?.length) return;
+        dir = result.filePaths[0];
+        setOutputDirectory(dir);
+      }
+
+      setIsExporting(true);
+      useAppStore.getState().startExportProgress(multiPaths.length);
+      try {
+        const summary = await multiExportService.exportMany(multiPaths, exportOptions, {
+          outputDirectory: dir,
+          onProgress: (current, name) => useAppStore.getState().updateExportProgress(current, name),
+          isCancelled: () => !!useAppStore.getState().exportProgress?.cancelRequested,
+        });
+        // The service reset the editor to each image's edits in turn, then restored
+        // the snapshot — reprocess so the canvas reflects the current image again.
+        useAppStore.getState().triggerReprocessing();
+
+        const cancelled = !!useAppStore.getState().exportProgress?.cancelRequested;
+        const ok = summary.exported.length;
+        const failed = summary.failed.length;
+        const tail = cancelled ? ' (cancelled early)' : '';
+        if (ok > 0 && failed === 0) {
+          notificationService.success('Export complete', `Exported ${ok} image${ok !== 1 ? 's' : ''}${tail} to ${dir}`);
+        } else if (ok > 0) {
+          notificationService.warning('Export finished with errors', `${ok} exported, ${failed} failed${tail}`);
+        } else {
+          notificationService.error('Export failed', failed > 0 ? `All ${failed} image${failed !== 1 ? 's' : ''} failed` : 'No images were exported');
+        }
+        onExportComplete(ok > 0);
+      } catch (error) {
+        logger.error('Multi-export failed:', error);
+        notificationService.error('Export failed', String(error));
+        onExportComplete(false);
+      } finally {
+        useAppStore.getState().endExportProgress();
+        setIsExporting(false);
+        onClose();
+      }
+      return;
+    }
+
     setIsExporting(true);
 
     try {
@@ -209,7 +267,7 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
     } finally {
       setIsExporting(false);
     }
-  }, [imageData, imageWidth, imageHeight, exportOptions, originalFilePath, validationErrors, onExportComplete, onClose]);
+  }, [imageData, imageWidth, imageHeight, exportOptions, originalFilePath, validationErrors, onExportComplete, onClose, multiPaths, outputDirectory]);
 
   const formatFileSize = (bytes: number): string => {
     if (bytes < 1024) return `${bytes} B`;
@@ -564,7 +622,9 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
         <div className="flex items-center justify-between px-5 py-4 border-b" style={{ borderBottomColor: 'var(--border)' }}>
           <div className="flex items-center gap-2">
             <Download size={18} style={{ color: 'var(--gray-300)' }} />
-            <h2 className="text-sm font-semibold" style={{ color: 'var(--white)' }}>Export Image</h2>
+            <h2 className="text-sm font-semibold" style={{ color: 'var(--white)' }}>
+              {isMulti ? `Export ${multiPaths!.length} Images` : 'Export Image'}
+            </h2>
           </div>
           <button
             onClick={onClose}
@@ -677,7 +737,7 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
                 ) : (
                   <>
                     <Download size={16} />
-                    Export
+                    {isMulti ? `Export ${multiPaths!.length}` : 'Export'}
                   </>
                 )}
               </button>

@@ -10,6 +10,7 @@ import { ThumbnailPanel } from './components/Panels/ThumbnailPanel';
 import { SettingsPanel } from './components/Panels/SettingsPanel';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ExportDialog } from './components/Dialogs/ExportDialog';
+import { ExportProgressBar } from './components/ExportProgressBar';
 import { BatchProcessingDialog } from './components/Dialogs/BatchProcessingDialog';
 import { PresetDialog } from './components/Dialogs/PresetDialog';
 import { FilterDialog, FilterType } from './components/Dialogs/FilterDialog';
@@ -214,6 +215,8 @@ function App() {
 
   const [currentImage, setCurrentImage] = useState<ImageFileInfo | null>(null);
   const [isExportDialogOpen, setIsExportDialogOpen] = useState(false);
+  // Paths for a multi-export run (≥2 selected images); empty = single-image export.
+  const [multiExportPaths, setMultiExportPaths] = useState<string[]>([]);
   const [isBatchDialogOpen, setIsBatchDialogOpen] = useState(false);
   const [isPresetDialogOpen, setIsPresetDialogOpen] = useState(false);
   const [isShortcutsDialogOpen, setIsShortcutsDialogOpen] = useState(false);
@@ -1031,6 +1034,8 @@ function App() {
       <div className="flex flex-1 flex-col overflow-hidden">
         {/* Main workspace */}
         <div className="flex flex-1 overflow-hidden relative">
+          {/* Multi-export progress (top-left overlay) */}
+          <ExportProgressBar />
           {/* Column 2: Right Panel - File Explorer, Settings, or Modules (360px) - Overlay panel */}
           <div
             className="absolute border-l flex-shrink-0 overflow-hidden flex flex-col"
@@ -1194,6 +1199,16 @@ function App() {
           onImageSelect={setCurrentImage}
           onClose={() => setShowThumbnailPanel(false)}
           visible={showThumbnailPanel}
+          onExportSelected={() => {
+            const ids = useAppStore.getState().selectedImageIds;
+            const paths = ids
+              .map((id) => availableImages.find((img) => img.id === id)?.path)
+              .filter((p): p is string => !!p);
+            if (paths.length >= 2) {
+              setMultiExportPaths(paths);
+              setIsExportDialogOpen(true);
+            }
+          }}
         />
       </div>
 
@@ -1217,7 +1232,7 @@ function App() {
       {isExportDialogOpen && (
         <ExportDialog
           isOpen={isExportDialogOpen}
-          onClose={() => setIsExportDialogOpen(false)}
+          onClose={() => { setIsExportDialogOpen(false); setMultiExportPaths([]); }}
           imageData={
             processedImageData
               ? (processedImageData instanceof Float32Array
@@ -1229,6 +1244,7 @@ function App() {
           imageHeight={imageService.getCurrentImage()?.height || 0}
           originalFilePath={imageService.getCurrentImage()?.filePath}
           onExportComplete={handleExportComplete}
+          multiPaths={multiExportPaths.length ? multiExportPaths : undefined}
         />
       )}
 
