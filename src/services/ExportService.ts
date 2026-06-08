@@ -758,7 +758,7 @@ export class ExportService {
     }
 
     const stem = (originalPath ? baseNameOf(originalPath) : 'exported_image').replace(/\.[^/.]+$/, '');
-    const suffix = options.suffix || '_exported';
+    const suffix = options.suffix || '_PEP';
     const extension = options.format === 'jpeg' ? 'jpg' : options.format;
     const filename = `${stem}${suffix}.${extension}`;
 

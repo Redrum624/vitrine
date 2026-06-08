@@ -148,6 +148,15 @@ export function BasicAdjustmentsModuleComponent({
     reprocess();
   }, [getLA]);
 
+  // Deselect the active mask: hides its per-mask card + sliders and removes the
+  // on-canvas overlay (clears the active layer). Mirrors the "click off the image"
+  // path. Triggered by re-clicking the already-active mask chip.
+  const deselectMask = useCallback(() => {
+    setSelectedMaskId(null);
+    getLA()?.clearActiveLayer();
+    reprocess();
+  }, [getLA]);
+
   const createMask = useCallback((type: 'radial_gradient' | 'linear_gradient') => {
     const la = getLA(); const img = imageService.getCurrentImage();
     if (!la || !img) { logger.warn('Local Adjustments: no image/module'); return; }
@@ -361,8 +370,9 @@ export function BasicAdjustmentsModuleComponent({
         {masks.length > 0 && (
           <div className="flex flex-wrap gap-1.5">
             {masks.map(mk => (
-              <button key={mk.id} onClick={() => selectMask(mk.id)} className="px-2 py-1 rounded border text-xs"
-                style={{ backgroundColor: mk.id === selectedMaskId ? 'var(--gray-700)' : 'transparent', borderColor: mk.id === selectedMaskId ? 'var(--primary-500)' : 'var(--border)', color: 'var(--gray-200)' }}>
+              <button key={mk.id} onClick={() => (mk.id === selectedMaskId ? deselectMask() : selectMask(mk.id))} className="px-2 py-1 rounded border text-xs"
+                style={{ backgroundColor: mk.id === selectedMaskId ? 'var(--gray-700)' : 'transparent', borderColor: mk.id === selectedMaskId ? 'var(--primary-500)' : 'var(--border)', color: 'var(--gray-200)' }}
+                title={mk.id === selectedMaskId ? 'Click again to hide this mask and its sliders' : 'Select this mask'}>
                 {mk.type === 'radial_gradient' ? '◯' : '▤'} {mk.name}
               </button>
             ))}
@@ -383,7 +393,7 @@ export function BasicAdjustmentsModuleComponent({
               <Trash2 className="w-3.5 h-3.5" />
             </button>
           </div>
-          <div className="text-xs" style={{ color: 'var(--gray-300)' }}>Drag on the image to place / move / resize / rotate this mask. Press Del to delete.</div>
+          <div className="text-xs" style={{ color: 'var(--gray-300)' }}>Drag on the image to place / move / resize / rotate this mask. Click its button above again to hide it. Press Del to delete.</div>
           <div className="space-y-1">
             <div className="flex items-center justify-between">
               <span className="text-xs" style={{ color: 'var(--gray-200)' }}>Feather</span>

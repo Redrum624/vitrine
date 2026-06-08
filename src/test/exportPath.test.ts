@@ -8,7 +8,7 @@ const gen = (orig: string | undefined, opts: Record<string, unknown>): string =>
 describe('ExportService output path (Windows-safe)', () => {
   it('joins the output directory with ONLY the basename of a Windows source path', () => {
     const out = gen('C:\\Users\\<user>\\Pictures\\2024\\PA200788.ORF', { outputDirectory: 'C:\\Users\\<user>\\Desktop', format: 'jpeg' });
-    expect(out).toBe('C:\\Users\\<user>\\Desktop/PA200788_exported.jpg');
+    expect(out).toBe('C:\\Users\\<user>\\Desktop/PA200788_PEP.jpg');
   });
 
   it('does not double the path (regression: Desktop/C:\\...\\img.png)', () => {
@@ -21,11 +21,11 @@ describe('ExportService output path (Windows-safe)', () => {
 
   it('writes next to the original when no output directory is set', () => {
     const out = gen('C:\\Users\\<user>\\Pictures\\PA200788.ORF', { format: 'tiff' });
-    expect(out).toBe('C:\\Users\\<user>\\Pictures/PA200788_exported.tiff');
+    expect(out).toBe('C:\\Users\\<user>\\Pictures/PA200788_PEP.tiff');
   });
 
   it('also handles forward-slash (POSIX) source paths', () => {
     const out = gen('/home/u/pics/img.cr2', { outputDirectory: '/tmp/out', format: 'jpeg' });
-    expect(out).toBe('/tmp/out/img_exported.jpg');
+    expect(out).toBe('/tmp/out/img_PEP.jpg');
   });
 });

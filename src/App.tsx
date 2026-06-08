@@ -214,6 +214,10 @@ function App() {
   }, [selectedTool, histogramVisible, setSelectedTool]);
 
   const [currentImage, setCurrentImage] = useState<ImageFileInfo | null>(null);
+  // Always-current ref to the selected image, read by the once-registered keyboard
+  // shortcuts (the Zustand store's currentImage isn't used by this app).
+  const currentImageRef = useRef<ImageFileInfo | null>(null);
+  useEffect(() => { currentImageRef.current = currentImage; }, [currentImage]);
   const [isExportDialogOpen, setIsExportDialogOpen] = useState(false);
   // Paths for a multi-export run (≥2 selected images); empty = single-image export.
   const [multiExportPaths, setMultiExportPaths] = useState<string[]>([]);
@@ -850,7 +854,7 @@ function App() {
 
     // Star rating: 1-5 set the rating on the current image, 0 clears it.
     createRatingShortcuts((rating) => {
-      const img = useAppStore.getState().currentImage;
+      const img = currentImageRef.current;
       if (!img) return;
       useAppStore.getState().setImageRating(img.id, rating);
       // Persist to the file (xmp:Rating) so it shows in OS file details.

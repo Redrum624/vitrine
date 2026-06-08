@@ -348,6 +348,13 @@ export class ImageService {
 
   // Load image at full resolution for export (bypasses performance optimizations)
   async loadImageForExport(filePath: string): Promise<ImageData> {
+    // RAW files: the `read-image-as-data-url` IPC returns only a small embedded
+    // preview (≈300×200), which the full-res pipeline would scramble into garbage.
+    // Decode the RAW at full resolution instead (same path as decodeForExport).
+    if (rawImageService.isRawFile(filePath)) {
+      return this.decodeForExport(filePath);
+    }
+
     const result = await errorHandlingService.withErrorHandling(
       async () => {
         logger.info(`Loading full-resolution image for export: ${filePath}`);

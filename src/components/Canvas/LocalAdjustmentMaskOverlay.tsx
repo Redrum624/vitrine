@@ -31,6 +31,11 @@ export function LocalAdjustmentMaskOverlay({
 
   useEffect(() => { if (!draggingRef.current) setLiveGeom(geometry); }, [geometry]);
 
+  // Always-current geometry for the drag handler, so handleDown can stay stable
+  // (not recreated on every setLiveGeom) and avoid re-render churn mid-drag.
+  const liveGeomRef = useRef(liveGeom);
+  useEffect(() => { liveGeomRef.current = liveGeom; }, [liveGeom]);
+
   const metrics = () => {
     const canvas = canvasRef.current;
     if (!canvas) return null;
@@ -56,7 +61,7 @@ export function LocalAdjustmentMaskOverlay({
 
   // Decide what the press is grabbing.
   const hitTest = (px: number, py: number, m: NonNullable<ReturnType<typeof metrics>>): RadialMode | LinearMode => {
-    const g = liveGeom;
+    const g = liveGeomRef.current;
     const sx = (n: number) => m.imgX + n * m.scaledW;
     const sy = (n: number) => m.imgY + n * m.scaledH;
     const TOL = 14;
@@ -98,10 +103,11 @@ export function LocalAdjustmentMaskOverlay({
     if (mode === 'create') { onDeselect?.(); return; }
     // No clamping: masks may extend outside the image (still within the canvas).
     const start = { nx: p.nx, ny: p.ny };
-    const startGeom = { ...liveGeom };
+    const startGeom = { ...liveGeomRef.current };
     draggingRef.current = true;
     onDragStart?.();
     let latest = startGeom;
+    let lastLive = 0; // throttle live (effect) commits during the drag
 
     const move = (ev: MouseEvent) => {
       const cur = toNorm(ev.clientX, ev.clientY);
@@ -154,7 +160,15 @@ export function LocalAdjustmentMaskOverlay({
         }
       }
       latest = next;
-      setLiveGeom(next); // instant outline; the (heavier) mask reprocess is deferred to mouseup
+      setLiveGeom(next); // instant outline
+      // Live masked-effect preview, throttled (~10/s) so the adjustment follows the
+      // drag without rebuilding the full-res mask on every mousemove. The precise
+      // final commit still happens on mouseup.
+      const t = (typeof performance !== 'undefined' ? performance.now() : 0);
+      if (t - lastLive > 100) {
+        lastLive = t;
+        onGeometryChange(next);
+      }
     };
     const up = () => {
       draggingRef.current = false;
@@ -165,7 +179,7 @@ export function LocalAdjustmentMaskOverlay({
     };
     window.addEventListener('mousemove', move);
     window.addEventListener('mouseup', up);
-  }, [liveGeom, layerType, onGeometryChange, onDragStart, onDragEnd, onDeselect, viewport]);
+  }, [layerType, onGeometryChange, onDragStart, onDragEnd, onDeselect, viewport]);
 
   // Cursor hint on hover (move vs resize vs crosshair).
   const handleHover = (e: React.MouseEvent) => {
