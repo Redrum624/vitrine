@@ -86,7 +86,10 @@ export class ExportService {
     includeProcessingHistory: false,
     customMetadata: {},
     outputSharpening: {
-      enabled: true,
+      // OFF by default: the canvas applies no sharpening, so default-on output
+      // sharpening made exports look noisier/harsher than the preview (especially
+      // full-res RAW, where the unsharp mask amplifies sensor noise). Opt-in only.
+      enabled: false,
       amount: 50,
       radius: 1.0,
       threshold: 4,

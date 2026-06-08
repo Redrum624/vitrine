@@ -54,4 +54,13 @@ describe('rating shortcuts via KeyboardShortcutsService', () => {
     expect(onRate).not.toHaveBeenCalled();
     document.body.removeChild(input);
   });
+
+  it('still fires after destroy() + re-register (listener re-attaches)', () => {
+    // Reproduces the "shortcuts dead after the first image/tool change" bug: the
+    // App effect calls destroy() on cleanup (removing the listener) then re-registers.
+    service.destroy();
+    createRatingShortcuts(onRate).forEach((s) => service.register(s));
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: '4' }));
+    expect(onRate).toHaveBeenCalledWith(4);
+  });
 });

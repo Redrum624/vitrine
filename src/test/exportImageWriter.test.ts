@@ -81,6 +81,23 @@ describe('imageWriter.writeImageFile', () => {
     expect(read(3, 0)).toBeCloseTo(1, 2); // white
   });
 
+  test('16-bit data exported to an 8-bit format (JPEG) keeps tonality — no gamma double-encode (regression RC-2)', async () => {
+    // Default export bitDepth is 16; JPEG must output 8-bit. The writer used to hand
+    // sharp the ushort buffer, which sharp treated as linear and re-gamma'd on the
+    // 8-bit downconvert → dark/desaturated. Mid-grey must round-trip near 0.5, not
+    // ~0.73 (encode) or ~0.21 (decode).
+    const out = path.join(tmpDir, 'gray16.jpg');
+    const mid = Math.round(0.5 * 65535);
+    const gray = [[mid, mid, mid, 65535], [mid, mid, mid, 65535], [mid, mid, mid, 65535], [mid, mid, mid, 65535]];
+    await writeImageFile(out, packRgba(gray, Uint16Array), 'jpeg', { width: 2, height: 2, channels: 4, bitDepth: 16 });
+
+    const { data, info } = await sharp(out).raw().toBuffer({ resolveWithObject: true });
+    const read = makeReader(data, info);
+    expect(read(0, 0)).toBeCloseTo(0.5, 1); // within 0.05
+    expect(read(0, 1)).toBeCloseTo(0.5, 1);
+    expect(read(0, 2)).toBeCloseTo(0.5, 1);
+  });
+
   test('throws on buffer/size mismatch instead of writing a corrupt file', async () => {
     const out = path.join(tmpDir, 'bad.png');
     // Claim 4x4 (16 px) but only supply 4 px worth of bytes.

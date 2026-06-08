@@ -100,16 +100,27 @@ export const LensCorrectionsModuleComponent: React.FC<LensCorrectionsModuleCompo
   parameters, onParametersChange, onAutoDetectVignetting, onResetSection, className = '',
 }) => {
   const [showAdvanced, setShowAdvanced] = useState(false);
-  const { vignetting, distortion, chromaticAberration: ca, profile } = parameters;
+  // Local UI state mirror of the params. The component is keyed by paramSync, so it
+  // remounts (re-initialising from the prop) after external changes (auto-detect /
+  // reset). For in-component edits, we update this local state immediately AND
+  // propagate the partial to the module — otherwise the checkbox/slider would snap
+  // back to the (unchanged) module value because the parent doesn't re-render.
+  const [params, setParams] = useState(parameters);
+  const { vignetting, distortion, chromaticAberration: ca, profile } = params;
+
+  const update = useCallback((partial: Partial<LensCorrectionsParams>) => {
+    setParams(prev => ({ ...prev, ...partial }));
+    onParametersChange(partial);
+  }, [onParametersChange]);
 
   const setVignetting = useCallback((key: string, value: number | boolean) =>
-    onParametersChange({ vignetting: { ...parameters.vignetting, [key]: value } }), [parameters.vignetting, onParametersChange]);
+    update({ vignetting: { ...params.vignetting, [key]: value } }), [params.vignetting, update]);
   const setDistortion = useCallback((key: string, value: number | boolean | object) =>
-    onParametersChange({ distortion: { ...parameters.distortion, [key]: value } }), [parameters.distortion, onParametersChange]);
+    update({ distortion: { ...params.distortion, [key]: value } }), [params.distortion, update]);
   const setCA = useCallback((key: string, value: number | boolean | object) =>
-    onParametersChange({ chromaticAberration: { ...parameters.chromaticAberration, [key]: value } }), [parameters.chromaticAberration, onParametersChange]);
+    update({ chromaticAberration: { ...params.chromaticAberration, [key]: value } }), [params.chromaticAberration, update]);
   const setProfile = useCallback((key: string, value: number | boolean | string) =>
-    onParametersChange({ profile: { ...parameters.profile, [key]: value } }), [parameters.profile, onParametersChange]);
+    update({ profile: { ...params.profile, [key]: value } }), [params.profile, update]);
 
   const activeCount = [vignetting.enabled, distortion.enabled, ca.enabled, profile.enabled].filter(Boolean).length;
 
@@ -129,7 +140,7 @@ export const LensCorrectionsModuleComponent: React.FC<LensCorrectionsModuleCompo
       {/* Distortion */}
       <Section title="Distortion" icon={Zap} enabled={distortion.enabled}
         onToggleEnabled={(v) => setDistortion('enabled', v)} onReset={onResetSection && (() => onResetSection('distortion'))}>
-        <Presets items={DISTORTION_PRESETS} onApply={(i) => onParametersChange({ distortion: { ...parameters.distortion, enabled: true, ...DISTORTION_PRESETS[i], perspective: { horizontal: 0, vertical: 0 } } })} />
+        <Presets items={DISTORTION_PRESETS} onApply={(i) => update({ distortion: { ...params.distortion, enabled: true, ...DISTORTION_PRESETS[i], perspective: { horizontal: 0, vertical: 0 } } })} />
         <Slider label="Barrel / Pincushion" value={distortion.barrel} min={-100} max={100} step={1} onChange={(v) => setDistortion('barrel', v)} desc="Negative = barrel, positive = pincushion" />
         <Slider label="Scale" value={distortion.scale} min={0.5} max={2.0} step={0.01} decimals={2} onChange={(v) => setDistortion('scale', v)} />
         <div className="pt-2 space-y-3" style={{ borderTop: '1px solid var(--border)' }}>
@@ -144,7 +155,7 @@ export const LensCorrectionsModuleComponent: React.FC<LensCorrectionsModuleCompo
       {/* Vignetting */}
       <Section title="Vignetting" icon={Eye} enabled={vignetting.enabled}
         onToggleEnabled={(v) => setVignetting('enabled', v)} onReset={onResetSection && (() => onResetSection('vignetting'))} onAuto={onAutoDetectVignetting}>
-        <Presets items={VIGNETTING_PRESETS} onApply={(i) => onParametersChange({ vignetting: { ...parameters.vignetting, enabled: true, ...VIGNETTING_PRESETS[i] } })} />
+        <Presets items={VIGNETTING_PRESETS} onApply={(i) => update({ vignetting: { ...params.vignetting, enabled: true, ...VIGNETTING_PRESETS[i] } })} />
         <Slider label="Amount" value={vignetting.amount} min={-100} max={100} step={1} onChange={(v) => setVignetting('amount', v)} />
         <Slider label="Midpoint" value={vignetting.midpoint} min={0.1} max={2.0} step={0.01} decimals={2} onChange={(v) => setVignetting('midpoint', v)} />
         <Slider label="Roundness" value={vignetting.roundness} min={-100} max={100} step={1} onChange={(v) => setVignetting('roundness', v)} />

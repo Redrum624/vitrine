@@ -107,7 +107,6 @@ export function LocalAdjustmentMaskOverlay({
     draggingRef.current = true;
     onDragStart?.();
     let latest = startGeom;
-    let lastLive = 0; // throttle live (effect) commits during the drag
 
     const move = (ev: MouseEvent) => {
       const cur = toNorm(ev.clientX, ev.clientY);
@@ -160,15 +159,7 @@ export function LocalAdjustmentMaskOverlay({
         }
       }
       latest = next;
-      setLiveGeom(next); // instant outline
-      // Live masked-effect preview, throttled (~10/s) so the adjustment follows the
-      // drag without rebuilding the full-res mask on every mousemove. The precise
-      // final commit still happens on mouseup.
-      const t = (typeof performance !== 'undefined' ? performance.now() : 0);
-      if (t - lastLive > 100) {
-        lastLive = t;
-        onGeometryChange(next);
-      }
+      setLiveGeom(next); // instant outline; the (heavier) mask reprocess is committed on mouseup
     };
     const up = () => {
       draggingRef.current = false;

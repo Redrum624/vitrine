@@ -16,6 +16,7 @@ export class KeyboardShortcutsService {
   private isEnabled = true;
   // FIXED: Store bound reference for proper cleanup
   private boundHandleKeyDown: (event: KeyboardEvent) => void;
+  private listenerAttached = false;
 
   constructor() {
     // FIXED: Create bound reference once
@@ -25,6 +26,12 @@ export class KeyboardShortcutsService {
 
   // Register a keyboard shortcut
   register(shortcut: KeyboardShortcut): void {
+    // Self-heal: callers (e.g. App's keyboard effect) may call destroy() on
+    // cleanup and then re-register on the next run. destroy() removes the document
+    // listener, so ensure it's re-attached here — otherwise shortcuts would sit in
+    // the map with no listener firing them (the rating/zoom-keys "dead after first
+    // image load" bug).
+    this.setupEventListeners();
     const key = this.getShortcutKey(shortcut);
     this.shortcuts.set(key, shortcut);
     logger.debug(`Registered shortcut: ${this.formatShortcut(shortcut)} - ${shortcut.description}`);
@@ -72,8 +79,11 @@ export class KeyboardShortcutsService {
   }
 
   private setupEventListeners(): void {
-    // FIXED: Use bound reference
+    // Idempotent: only attach once. Re-attaches after a destroy() (the listener is
+    // removed there) when register() is called again.
+    if (this.listenerAttached) return;
     document.addEventListener('keydown', this.boundHandleKeyDown, true);
+    this.listenerAttached = true;
   }
 
   private handleKeyDown(event: KeyboardEvent): void {
@@ -121,6 +131,7 @@ export class KeyboardShortcutsService {
   // FIXED: Use bound reference for proper cleanup
   destroy(): void {
     document.removeEventListener('keydown', this.boundHandleKeyDown, true);
+    this.listenerAttached = false;
     this.shortcuts.clear();
     logger.info('Keyboard shortcuts service destroyed');
   }

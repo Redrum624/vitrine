@@ -673,12 +673,23 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
             <LensCorrectionsModuleComponent
               key={`lenscorrections-${paramSync}`}
               parameters={lensCorrectionsModule.getParameters().lensCorrectionsParams}
-              onParametersChange={(params) => handleModuleParamsChange('lenscorrections', params)}
+              onParametersChange={(params) => {
+                // Actually apply the change to the module (a shallow merge — the
+                // component sends a complete sub-section object), then reprocess.
+                // Without this, toggles/sliders were dropped and the checkboxes
+                // snapped back to the unchanged module value.
+                const cur = lensCorrectionsModule.getParameters().lensCorrectionsParams;
+                lensCorrectionsModule.setParameters({ lensCorrectionsParams: { ...cur, ...params } });
+                handleModuleParamsChange('lenscorrections', params);
+              }}
               onAutoDetectVignetting={() => {
                 const img = imageService.getCurrentImage();
                 if (img?.data) {
                   lensCorrectionsModule.autoDetectVignetting(img.data, img.width, img.height);
                   handleModuleParamsChange('lenscorrections', lensCorrectionsModule.getParameters().lensCorrectionsParams);
+                  // Remount the component so its local UI state re-reads the module
+                  // (auto-detect changes vignetting.enabled/amount under the hood).
+                  useAppStore.getState().notifyExternalParamsChange();
                 }
               }}
               onResetSection={(section) => {
@@ -692,6 +703,7 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
                   lensCorrectionsModule.reset();
                 }
                 handleModuleParamsChange('lenscorrections', lensCorrectionsModule.getParameters().lensCorrectionsParams);
+                useAppStore.getState().notifyExternalParamsChange();
               }}
             />
           </div>
