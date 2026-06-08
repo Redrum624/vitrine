@@ -442,6 +442,7 @@ const CB_T = {
 
 class WebGLImageProcessor {
   private gl: WebGL2RenderingContext | null = null;
+  private maxTextureSize = 0; // GPU MAX_TEXTURE_SIZE; passes above a safe cap fall back to CPU
   private exposureProgram: WebGLProgram | null = null;
   private basicAdjProgram: WebGLProgram | null = null;
   private gainsProgram: WebGLProgram | null = null;
@@ -1114,6 +1115,17 @@ class WebGLImageProcessor {
     setUniforms: (gl: WebGL2RenderingContext, prog: WebGLProgram) => void
   ): Float32Array {
     const gl = this.gl!;
+    // Full-resolution exports (e.g. 5200x3904 RAW) can exceed the GPU's safe float
+    // texture/FBO size: the RGBA32F upload/readback silently corrupts into noise.
+    // The per-shader self-check only validates a tiny image, so it never catches
+    // this. Above a conservative cap, throw so the caller falls back to the
+    // (verified-correct) CPU path. The edit PREVIEW is always <=1024px, so this only
+    // routes large exports through the CPU — editing stays GPU-fast.
+    if (!this.maxTextureSize) this.maxTextureSize = gl.getParameter(gl.MAX_TEXTURE_SIZE) || 4096;
+    const safeDim = Math.min(this.maxTextureSize, 4096);
+    if (width > safeDim || height > safeDim) {
+      throw new Error(`[GPU] ${width}x${height} exceeds safe GPU size ${safeDim} — using CPU`);
+    }
     const tex = this.makeTexture(gl, width, height, data);
     const dst = this.makeTexture(gl, width, height, null);
     const fbo = gl.createFramebuffer();
