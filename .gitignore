@@ -278,3 +278,5 @@ postcss.config.js.map
 # Claude Code files
 .claude/
 *.claude
+# Local RAW/test fixtures (large binaries)
+/test/

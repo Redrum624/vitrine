@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import { Camera, Zap, Palette, Eye, RotateCcw, Target, ChevronDown, ChevronRight } from 'lucide-react';
+import { Zap, Palette, Eye, RotateCcw, Target, ChevronDown, ChevronRight } from 'lucide-react';
 import { LensCorrectionsParams } from '../../modules/LensCorrectionsModule';
 
 interface LensCorrectionsModuleComponentProps {
@@ -106,7 +106,7 @@ export const LensCorrectionsModuleComponent: React.FC<LensCorrectionsModuleCompo
   // propagate the partial to the module — otherwise the checkbox/slider would snap
   // back to the (unchanged) module value because the parent doesn't re-render.
   const [params, setParams] = useState(parameters);
-  const { vignetting, distortion, chromaticAberration: ca, profile } = params;
+  const { vignetting, distortion, chromaticAberration: ca } = params;
 
   const update = useCallback((partial: Partial<LensCorrectionsParams>) => {
     setParams(prev => ({ ...prev, ...partial }));
@@ -119,10 +119,8 @@ export const LensCorrectionsModuleComponent: React.FC<LensCorrectionsModuleCompo
     update({ distortion: { ...params.distortion, [key]: value } }), [params.distortion, update]);
   const setCA = useCallback((key: string, value: number | boolean | object) =>
     update({ chromaticAberration: { ...params.chromaticAberration, [key]: value } }), [params.chromaticAberration, update]);
-  const setProfile = useCallback((key: string, value: number | boolean | string) =>
-    update({ profile: { ...params.profile, [key]: value } }), [params.profile, update]);
 
-  const activeCount = [vignetting.enabled, distortion.enabled, ca.enabled, profile.enabled].filter(Boolean).length;
+  const activeCount = [vignetting.enabled, distortion.enabled, ca.enabled].filter(Boolean).length;
 
   return (
     <div className={`space-y-2 ${className}`}>
@@ -190,28 +188,6 @@ export const LensCorrectionsModuleComponent: React.FC<LensCorrectionsModuleCompo
             {showAdvanced ? 'Hide' : 'Show'} advanced (hue / range)
           </button>
         </div>
-      </Section>
-
-      {/* Lens Profile */}
-      <Section title="Lens Profile" icon={Camera} enabled={profile.enabled} onToggleEnabled={(v) => setProfile('enabled', v)}>
-        <div className="text-xs" style={{ color: 'var(--gray-400)' }}>
-          Uses lens manufacturer data to auto-correct distortion, vignetting and chromatic aberration.
-        </div>
-        <label className="flex items-center gap-2">
-          <input type="checkbox" checked={profile.autoDetect} onChange={(e) => setProfile('autoDetect', e.target.checked)} className="rounded" />
-          <span className="text-xs" style={{ color: 'var(--gray-300)' }}>Auto-detect lens profile</span>
-        </label>
-        {!profile.autoDetect && (
-          <select value={profile.profileName} onChange={(e) => setProfile('profileName', e.target.value)}
-            className="w-full px-3 py-1 text-xs rounded border" style={{ backgroundColor: 'var(--gray-700)', color: 'var(--white)', borderColor: 'var(--border)' }}>
-            <option value="">No profile selected</option>
-            <option value="canon_ef_24-70_f2.8">Canon EF 24-70mm f/2.8L</option>
-            <option value="canon_ef_50_f1.8">Canon EF 50mm f/1.8 STM</option>
-            <option value="nikon_nikkor_24-70_f2.8">Nikkor 24-70mm f/2.8E ED VR</option>
-            <option value="sony_fe_85_f1.4">Sony FE 85mm f/1.4 GM</option>
-          </select>
-        )}
-        <Slider label="Profile Strength" value={profile.strength} min={0} max={100} step={1} suffix="%" onChange={(v) => setProfile('strength', v)} />
       </Section>
 
       {/* Summary */}

@@ -19,7 +19,6 @@ import { NotificationSystem } from './components/UI/NotificationSystem';
 import { useNotifications } from './hooks/useNotifications';
 import { ShortcutsHelpDialog } from './components/Dialogs/ShortcutsHelpDialog';
 import { StatusBar } from './components/Layout/StatusBar';
-import { PluginManagerDialog } from './components/Dialogs/PluginManagerDialog';
 import { WelcomeScreen } from './components/Welcome/WelcomeScreen';
 import { PerformanceMonitor } from './components/Debug/PerformanceMonitor';
 import { keyboardShortcutsService, createDefaultShortcuts, createRatingShortcuts } from './services/KeyboardShortcutsService';
@@ -224,7 +223,6 @@ function App() {
   const [isBatchDialogOpen, setIsBatchDialogOpen] = useState(false);
   const [isPresetDialogOpen, setIsPresetDialogOpen] = useState(false);
   const [isShortcutsDialogOpen, setIsShortcutsDialogOpen] = useState(false);
-  const [isPluginManagerOpen, setIsPluginManagerOpen] = useState(false);
   const [isWelcomeVisible, setIsWelcomeVisible] = useState(false);
   const [availableImages, setAvailableImages] = useState<ImageFileInfo[]>([]);
   const [batchSelectedImages, setBatchSelectedImages] = useState<ImageFileInfo[]>([]);
@@ -818,7 +816,6 @@ function App() {
       onZoomActual: handleActualSize,
       onTogglePresets: () => setIsPresetDialogOpen(true),
       onToggleBatch: () => setIsBatchDialogOpen(true),
-      onTogglePlugins: () => setIsPluginManagerOpen(true),
       onSelectTool: (tool) => setSelectedTool(selectedTool === tool ? null : tool),
     });
 
@@ -990,7 +987,6 @@ function App() {
         onViewToggleOriginal={toggleOriginal}
         onWindowPresets={() => setIsPresetDialogOpen(true)}
         onWindowBatch={() => setIsBatchDialogOpen(true)}
-        onWindowPlugins={() => setIsPluginManagerOpen(true)}
         onWindowHelp={() => setIsShortcutsDialogOpen(true)}
         onWindowWelcome={() => setIsWelcomeVisible(true)}
         // Image menu
@@ -1029,7 +1025,6 @@ function App() {
           onPrint={handlePrint}
           onBatchProcess={() => setIsBatchDialogOpen(true)}
           onOpenPresets={() => setIsPresetDialogOpen(true)}
-          onOpenPlugins={() => setIsPluginManagerOpen(true)}
           onShowHelp={() => setIsShortcutsDialogOpen(true)}
           onUndo={() => historyService.undo() && setCanUndo(historyService.canUndo()) && setCanRedo(historyService.canRedo())}
           onRedo={() => historyService.redo() && setCanUndo(historyService.canUndo()) && setCanRedo(historyService.canRedo())}
@@ -1324,14 +1319,6 @@ function App() {
         />
       )}
 
-      {/* Plugin Manager Dialog */}
-      {isPluginManagerOpen && (
-        <PluginManagerDialog
-          isOpen={isPluginManagerOpen}
-          onClose={() => setIsPluginManagerOpen(false)}
-        />
-      )}
-
       {/* Print Dialog */}
       {isPrintDialogOpen && (() => {
         const store = useAppStore.getState();
@@ -1403,11 +1390,6 @@ function App() {
           });
         }}
         onOpenPresets={() => setIsPresetDialogOpen(true)}
-        onOpenPlugins={() => setIsPluginManagerOpen(true)}
-        onShowTour={() => {
-          setIsWelcomeVisible(false);
-          showSuccess('Welcome!', 'Ready to start editing photos!');
-        }}
       />
 
       {/* Notification System */}

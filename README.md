@@ -81,7 +81,7 @@ pnpm run electron-dev   # Vite dev server + Electron
 ### Build a Windows release
 ```bash
 npm run build:win       # clean dist + release -> tsc + vite build -> NSIS installer + portable (x64)
-# Output: release/Photo Editor Pro Setup 1.4.0.exe  and  release/Photo Editor Pro 1.4.0.exe
+# Output: release/Photo Editor Pro Setup 1.4.1.exe  and  release/Photo Editor Pro 1.4.1.exe
 npm run build:win:dir   # fast unpacked build (no installer)
 npm run dist            # electron-builder for the current platform
 ```

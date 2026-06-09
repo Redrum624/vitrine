@@ -4,6 +4,39 @@ All notable changes to **Photo Editor Pro** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.4.1] - 2026-06-08
+
+### Fixed
+- **Keyboard shortcuts died after the first image / tool change.** The keyboard
+  init effect's cleanup called `destroy()`, removing the document keydown listener
+  that is only added in the service constructor; re-registration never re-added it.
+  `register()` now re-attaches the listener idempotently. This is why the **1–5 / 0
+  rating keys** appeared not to work.
+- **RAW export came out as noise.** Noise Reduction (disabled by default) was not
+  recognised as a no-op, so it ran on every export and its full-resolution GPU pass
+  corrupted the image. Disabled / identity modules are now correctly skipped — which
+  also means **untouched modules are no longer processed** (faster export). In
+  addition, the WebGL pipeline now falls back to the CPU above a safe texture size,
+  and **output sharpening defaults to off** (it amplified RAW noise).
+- **Single-image export** now uses the `_PEP` suffix (matching multi-export) instead
+  of `_exported`.
+- **Lens Corrections checkboxes** desynced after Vignetting **Auto-detect**; toggles
+  and sliders are now applied to the module and the panel stays in sync.
+- **The last-used mask couldn't be hidden** — re-click its chip to deselect it.
+- **Mask dragging** is responsive again: the mask is baked at preview resolution
+  during the drag (full resolution only for export), so handles react immediately.
+
+### Changed
+- **Numpad rating.** The numpad number keys now rate the current photo regardless of
+  Num Lock, and no longer trigger image navigation.
+
+### Removed
+- **Non-functional placeholder features.** Removed the Lens Corrections **Lens
+  Profile** section (it applied no correction and had no lens database), the
+  **Plugin Manager** (a stub that did nothing — its store read "Coming Soon"), and
+  the Welcome screen's fake **Recent Files**, decorative export-presets panel, and
+  no-op tour button.
+
 ## [1.4.0] - 2026-06-08
 
 ### Added

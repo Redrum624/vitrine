@@ -175,7 +175,7 @@ To print this reference card:
 
 ---
 
-**Version:** 1.4.0
+**Version:** 1.4.1
 **Last Updated:** 2026-06-08
 **Application:** Photo Editor Pro
 

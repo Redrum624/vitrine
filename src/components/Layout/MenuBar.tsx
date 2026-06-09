@@ -17,7 +17,6 @@ interface MenuBarProps {
   onViewToggleOriginal?: () => void;
   onWindowPresets?: () => void;
   onWindowBatch?: () => void;
-  onWindowPlugins?: () => void;
   onWindowHelp?: () => void;
   onWindowWelcome?: () => void;
   // Image menu
@@ -65,7 +64,6 @@ export function MenuBar({
   onViewToggleOriginal,
   onWindowPresets,
   onWindowBatch,
-  onWindowPlugins,
   onWindowHelp,
   onWindowWelcome,
   onImageSize,
@@ -508,12 +506,6 @@ export function MenuBar({
               onClick={() => handleMenuItemClick(onWindowBatch)}
             >
               Batch Processing... <span className="float-right text-dark-400">B</span>
-            </button>
-            <button
-              className="w-full text-left px-4 py-1.5 text-xs text-dark-200 hover:bg-dark-700 bg-transparent border-0 cursor-pointer"
-              onClick={() => handleMenuItemClick(onWindowPlugins)}
-            >
-              Plugin Manager...
             </button>
             <div className="h-px bg-dark-700 my-1"></div>
             <button
