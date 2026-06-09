@@ -1,12 +1,12 @@
 import React, { useState, useCallback } from 'react';
-import { Zap, Palette, Eye, RotateCcw, Target, ChevronDown, ChevronRight } from 'lucide-react';
+import { Zap, Palette, Eye, RotateCcw, Target, ChevronDown, ChevronRight, Aperture, Film } from 'lucide-react';
 import { LensCorrectionsParams } from '../../modules/LensCorrectionsModule';
 
 interface LensCorrectionsModuleComponentProps {
   parameters: LensCorrectionsParams;
   onParametersChange: (params: Partial<LensCorrectionsParams>) => void;
   onAutoDetectVignetting?: () => void;
-  onResetSection?: (section: 'vignetting' | 'distortion' | 'chromaticAberration' | 'all') => void;
+  onResetSection?: (section: 'vignetting' | 'distortion' | 'chromaticAberration' | 'blur' | 'filmGrain' | 'all') => void;
   className?: string;
 }
 
@@ -106,7 +106,7 @@ export const LensCorrectionsModuleComponent: React.FC<LensCorrectionsModuleCompo
   // propagate the partial to the module — otherwise the checkbox/slider would snap
   // back to the (unchanged) module value because the parent doesn't re-render.
   const [params, setParams] = useState(parameters);
-  const { vignetting, distortion, chromaticAberration: ca } = params;
+  const { vignetting, distortion, chromaticAberration: ca, blur, filmGrain } = params;
 
   const update = useCallback((partial: Partial<LensCorrectionsParams>) => {
     setParams(prev => ({ ...prev, ...partial }));
@@ -119,8 +119,12 @@ export const LensCorrectionsModuleComponent: React.FC<LensCorrectionsModuleCompo
     update({ distortion: { ...params.distortion, [key]: value } }), [params.distortion, update]);
   const setCA = useCallback((key: string, value: number | boolean | object) =>
     update({ chromaticAberration: { ...params.chromaticAberration, [key]: value } }), [params.chromaticAberration, update]);
+  const setBlur = useCallback((key: string, value: number | boolean) =>
+    update({ blur: { ...params.blur, [key]: value } }), [params.blur, update]);
+  const setFilmGrain = useCallback((key: string, value: number | boolean) =>
+    update({ filmGrain: { ...params.filmGrain, [key]: value } }), [params.filmGrain, update]);
 
-  const activeCount = [vignetting.enabled, distortion.enabled, ca.enabled].filter(Boolean).length;
+  const activeCount = [vignetting.enabled, distortion.enabled, ca.enabled, blur.enabled, filmGrain.enabled].filter(Boolean).length;
 
   return (
     <div className={`space-y-2 ${className}`}>
@@ -188,6 +192,22 @@ export const LensCorrectionsModuleComponent: React.FC<LensCorrectionsModuleCompo
             {showAdvanced ? 'Hide' : 'Show'} advanced (hue / range)
           </button>
         </div>
+      </Section>
+
+      {/* Blur */}
+      <Section title="Blur" icon={Aperture} enabled={blur.enabled}
+        onToggleEnabled={(v) => setBlur('enabled', v)} onReset={onResetSection && (() => onResetSection('blur'))}>
+        <Slider label="Radius" value={blur.radius} min={0} max={20} step={0.5} decimals={1} suffix="px"
+          onChange={(v) => setBlur('radius', v)} desc="Non-destructive Gaussian blur applied to the whole image" />
+      </Section>
+
+      {/* Film Grain */}
+      <Section title="Film Grain" icon={Film} enabled={filmGrain.enabled}
+        onToggleEnabled={(v) => setFilmGrain('enabled', v)} onReset={onResetSection && (() => onResetSection('filmGrain'))}>
+        <Slider label="Amount" value={filmGrain.amount} min={0} max={100} step={1} suffix="%"
+          onChange={(v) => setFilmGrain('amount', v)} desc="Grain intensity (luminance-weighted, strongest in midtones)" />
+        <Slider label="Grain Size" value={filmGrain.size} min={1} max={4} step={1}
+          onChange={(v) => setFilmGrain('size', v)} desc="1 = fine, 4 = coarse" />
       </Section>
 
       {/* Summary */}

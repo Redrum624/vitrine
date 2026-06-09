@@ -66,6 +66,20 @@ it('plain click loads to canvas and single-selects', () => {
   expect(toggleImageSelection).not.toHaveBeenCalled();
 });
 
+it('plain re-click on the sole selected thumbnail clears its checkmark', () => {
+  const { onImageSelect } = setup({ selectedImageIds: ['img2'] });
+  clickThumb('img2');
+  expect(setSelection).toHaveBeenCalledWith([], null);
+  expect(onImageSelect).not.toHaveBeenCalled();
+});
+
+it('clicking the check badge toggles selection off without touching the canvas', () => {
+  const { onImageSelect } = setup({ selectedImageIds: ['img2'] });
+  fireEvent.click(screen.getByTestId('check-img2'));
+  expect(toggleImageSelection).toHaveBeenCalledWith('img2');
+  expect(onImageSelect).not.toHaveBeenCalled();
+});
+
 it('ctrl+click toggles membership without changing the canvas', () => {
   const { onImageSelect } = setup();
   clickThumb('img3', { ctrlKey: true });

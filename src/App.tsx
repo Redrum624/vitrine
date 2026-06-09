@@ -13,7 +13,6 @@ import { ExportDialog } from './components/Dialogs/ExportDialog';
 import { ExportProgressBar } from './components/ExportProgressBar';
 import { BatchProcessingDialog } from './components/Dialogs/BatchProcessingDialog';
 import { PresetDialog } from './components/Dialogs/PresetDialog';
-import { FilterDialog, FilterType } from './components/Dialogs/FilterDialog';
 import { ImageSizeDialog } from './components/Dialogs/ImageSizeDialog';
 import { NotificationSystem } from './components/UI/NotificationSystem';
 import { useNotifications } from './hooks/useNotifications';
@@ -36,7 +35,6 @@ import { errorHandlingService } from './services/ErrorHandlingService';
 import { appLifecycleService } from './services/AppLifecycleService';
 import {
   rotateImage90CW, rotateImage90CCW, flipHorizontal, flipVertical,
-  applySharpen, applyGaussianBlur, applyVignette, applyFilmGrain,
   resizeImage, FilterContext
 } from './utils/ImageFilters';
 import { styleAnalysisService } from './services/StyleAnalysisService';
@@ -54,7 +52,7 @@ if (process.env.NODE_ENV === 'development') {
   });
 }
 
-const MODULE_IDS = new Set(['crop', 'basicadj', 'whitebalance', 'tonecurve', 'noisereduction', 'shadowshighlights', 'colorbalance', 'localadjustments', 'lenscorrections']);
+const MODULE_IDS = new Set(['crop', 'basicadj', 'whitebalance', 'tonecurve', 'noisereduction', 'sharpen', 'shadowshighlights', 'colorbalance', 'localadjustments', 'lenscorrections']);
 const isModuleTool = (tool: string) => MODULE_IDS.has(tool);
 
 /** Renders the cached original image for the Before/After split view. */
@@ -229,7 +227,6 @@ function App() {
   const [showThumbnailPanel, setShowThumbnailPanel] = useState(false);
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
-  const [filterDialogType, setFilterDialogType] = useState<FilterType | null>(null);
   const [imageSizeMode, setImageSizeMode] = useState<'imageSize' | 'canvasSize' | null>(null);
   const [hasStyleClipboard, setHasStyleClipboard] = useState(false);
   const [isPrintDialogOpen, setIsPrintDialogOpen] = useState(false);
@@ -392,34 +389,6 @@ function App() {
     showSuccess('Auto Color', 'Applied via white balance + color balance');
   }, [showSuccess]);
 
-  // ─── Filter application ───────────────────────────────────────────────
-  const handleApplyFilter = useCallback((filterType: FilterType, params: Record<string, number>) => {
-    const img = getImageContext();
-    if (!img) return;
-
-    let result: Float32Array;
-    switch (filterType) {
-      case 'sharpen':
-        result = applySharpen(img.data, img.ctx, params.amount, params.radius);
-        break;
-      case 'blur':
-        result = applyGaussianBlur(img.data, img.ctx, params.radius);
-        break;
-      case 'vignette':
-        result = applyVignette(img.data, img.ctx, params.amount, params.roundness);
-        break;
-      case 'filmGrain':
-        result = applyFilmGrain(img.data, img.ctx, params.amount, params.size);
-        break;
-      default:
-        return;
-    }
-
-    imageService.updateCurrentImageData(result, img.ctx.width, img.ctx.height);
-    useAppStore.getState().triggerReprocessing();
-    showSuccess('Filter Applied', filterType.replace(/([A-Z])/g, ' $1').trim());
-  }, [getImageContext, showSuccess]);
-
   // ─── Image resize ─────────────────────────────────────────────────────
   const handleImageResize = useCallback((newWidth: number, newHeight: number) => {
     const img = getImageContext();
@@ -449,11 +418,14 @@ function App() {
       imageProcessingPipeline.invalidateModuleCache('exposure');
     }
 
-    // White Balance — from the user style profile (style_profile_report.json), same as
-    // every other Auto here. The per-module WB "Auto" button uses this same function.
+    // White Balance — median gray-world neutralization, the SAME engine as the WB
+    // "Auto" button: scan the image's median colour cast and neutralise both warmth
+    // (temperature) and tint, inverting the module's own gain model.
     const wbMod = imageProcessingPipeline.getModule('temperature');
     if (wbMod) {
-      (wbMod as unknown as { setParams: (p: Record<string, unknown>) => void }).setParams(result.whiteBalance);
+      const wbChannels = Math.max(3, Math.round(img.data.length / (img.width * img.height)));
+      (wbMod as unknown as { autoDetectWhiteBalance: (d: Float32Array, ctx: { width: number; height: number; channels: number }) => void })
+        .autoDetectWhiteBalance(img.data, { width: img.width, height: img.height, channels: wbChannels });
       imageProcessingPipeline.invalidateModuleCache('temperature');
     }
 
@@ -1003,12 +975,6 @@ function App() {
         onBrightnessContrast={() => handleToolSelect('basicadj')}
         onLevels={() => handleToolSelect('basicadj')}
         onCurves={() => handleToolSelect('tonecurve')}
-        // Filter menu
-        onSharpen={() => setFilterDialogType('sharpen')}
-        onBlur={() => setFilterDialogType('blur')}
-        onNoiseReduction={() => handleToolSelect('noisereduction')}
-        onVignette={() => setFilterDialogType('vignette')}
-        onFilmGrain={() => setFilterDialogType('filmGrain')}
         // State
         canUndo={canUndo}
         canRedo={canRedo}
@@ -1344,17 +1310,6 @@ function App() {
           />
         );
       })()}
-
-      {/* Filter Dialog */}
-      {filterDialogType && (
-        <FilterDialog
-          isOpen={!!filterDialogType}
-          filterType={filterDialogType}
-          onClose={() => setFilterDialogType(null)}
-          onApply={handleApplyFilter}
-          hasImage={!!imageService.getCurrentImage()}
-        />
-      )}
 
       {/* Image Size / Canvas Size Dialog */}
       {imageSizeMode && (

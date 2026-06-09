@@ -8,6 +8,7 @@ import { CropPipelineModule } from '../../modules/CropPipelineModule';
 import { LocalAdjustmentsPipelineModule } from '../../modules/LocalAdjustmentsPipelineModule';
 import { LensCorrectionsPipelineModule } from '../../modules/LensCorrectionsPipelineModule';
 import { NoiseReductionModule } from '../../modules/NoiseReductionModule';
+import { SharpenModule } from '../../modules/SharpenModule';
 import { BasicAdjustmentsModuleComponent } from '../Modules/BasicAdjustmentsModuleComponent';
 import { WhiteBalanceModuleComponent } from '../Modules/WhiteBalanceModuleComponent';
 import { ToneCurveModuleComponent } from '../Modules/ToneCurveModuleComponent';
@@ -18,11 +19,11 @@ import { LocalAdjustmentsModuleComponent } from '../Modules/LocalAdjustmentsModu
 import { LensCorrectionsModuleComponent } from '../Modules/LensCorrectionsModuleComponent';
 import { HistoryPanel } from './HistoryPanel';
 import { NoiseReductionModuleComponent } from '../Modules/NoiseReductionModuleComponent';
+import { SharpenModuleComponent } from '../Modules/SharpenModuleComponent';
 import { imageProcessingPipeline } from '../../services/ImageProcessingPipeline';
 import { imageService } from '../../services/ImageService';
 import { progressivePreviewService } from '../../services/ProgressivePreviewService';
 import { adaptiveDebounceService } from '../../services/AdaptiveDebounceService';
-import { autoAdjustService } from '../../services/AutoAdjustService';
 import { useAppStore } from '../../stores/appStore';
 import { logger } from '../../utils/Logger';
 
@@ -69,6 +70,7 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
   const shadowsHighlightsModule = imageProcessingPipeline.getModule<ShadowsHighlightsPipelineModule>('shadowshighlights');
   const localAdjustmentsModule = imageProcessingPipeline.getModule<LocalAdjustmentsPipelineModule>('localadjustments');
   const noiseReductionModule = imageProcessingPipeline.getModule<NoiseReductionModule>('noise-reduction');
+  const sharpenModule = imageProcessingPipeline.getModule<SharpenModule>('sharpen');
 
   const processCurrentImageRealTime = useCallback(async () => {
     const currentImage = imageService.getCurrentImage();
@@ -324,11 +326,17 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
     if (!currentImage || !whiteBalanceModule) return;
 
     try {
-      // Use the user style profile (style_profile_report.json) — the SAME WB as Auto All —
-      // so the WB "Auto" button and Auto All agree, with the neutral tint fix applied there.
-      const stats = autoAdjustService.analyse(currentImage.data, currentImage.width, currentImage.height);
-      const wb = autoAdjustService.autoWhiteBalance(stats);
-      whiteBalanceModule.setParams({ temperature: wb.temperature, tint: wb.tint, auto: true });
+      // Median gray-world: scan the image for its overall median colour cast and
+      // neutralise it (both temperature/warmth AND tint). Channel count is detected
+      // from the buffer (RGB or RGBA).
+      const { data, width, height } = currentImage;
+      const channels = Math.max(3, Math.round(data.length / (width * height)));
+      whiteBalanceModule.autoDetectWhiteBalance(data, { width, height, channels });
+
+      // Clear the WB (and downstream) pipeline cache so the new gains take effect,
+      // and refresh the panel sliders to the detected temperature/tint.
+      imageProcessingPipeline.invalidateModuleCache('temperature');
+      useAppStore.getState().notifyExternalParamsChange();
 
       // Trigger immediate update after auto detection
       adaptiveDebounceService.debounce(
@@ -474,6 +482,7 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
       whitebalance: 'White Balance',
       tonecurve: 'Tone Curve',
       noisereduction: 'Noise Reduction',
+      sharpen: 'Sharpen',
       shadowshighlights: 'Shadows & Highlights',
       colorbalance: 'Color Balance',
       localadjustments: 'Local Adjustments',
@@ -582,6 +591,17 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
               key={`noisereduction-${paramSync}`}
               module={noiseReductionModule}
               onParamsChange={(params) => handleModuleParamsChange('noisereduction', params)}
+            />
+          </div>
+        )}
+
+        {/* Sharpen Module */}
+        {sharpenModule && selectedModule === 'sharpen' && (
+          <div className="px-5 pt-4">
+            <SharpenModuleComponent
+              key={`sharpen-${paramSync}`}
+              module={sharpenModule}
+              onParamsChange={(params) => handleModuleParamsChange('sharpen', params)}
             />
           </div>
         )}
@@ -699,6 +719,10 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
                   lensCorrectionsModule.resetDistortion();
                 } else if (section === 'chromaticAberration') {
                   lensCorrectionsModule.resetChromaticAberration();
+                } else if (section === 'blur') {
+                  lensCorrectionsModule.resetBlur();
+                } else if (section === 'filmGrain') {
+                  lensCorrectionsModule.resetFilmGrain();
                 } else if (section === 'all') {
                   lensCorrectionsModule.reset();
                 }

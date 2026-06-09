@@ -149,16 +149,7 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
     );
 
     ctx.restore();
-
-    // Draw image border
-    ctx.strokeStyle = '#525252';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(
-      centerX + viewport.panX - displayWidth / 2,
-      centerY + viewport.panY - displayHeight / 2,
-      displayWidth,
-      displayHeight
-    );
+    // No image border — the picture should sit seamlessly on the dark canvas.
   }, [viewport]);
 
   const drawPlaceholder = useCallback((ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement) => {
@@ -306,8 +297,10 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
     Scale factor: ${(displayWidth / canvas.width).toFixed(2)}x`);
     }
 
-    // Clear canvas
-    ctx.fillStyle = '#1a1a1a';
+    // Clear canvas. Use the SAME colour as the surrounding container (bg-dark-900
+    // = #0d0d0d) so that when the image is zoomed out (drawn smaller than the
+    // canvas) the margin around it is seamless instead of a lighter-grey rectangle.
+    ctx.fillStyle = '#0d0d0d';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     if (currentImageData && displayImage) {

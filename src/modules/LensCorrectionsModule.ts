@@ -1,6 +1,7 @@
 import { logger } from '../utils/Logger';
 import { smoothStep, rgbToHsl, hslToRgb } from './utils/ColorUtils';
 import { webGLImageProcessor } from '../services/WebGLImageProcessor';
+import { applyGaussianBlur, applyFilmGrain } from '../utils/ImageFilters';
 
 export interface LensCorrectionsParams {
   // Vignetting correction
@@ -46,6 +47,19 @@ export interface LensCorrectionsParams {
     autoDetect: boolean;
     profileName: string;   // Lens profile name if available
     strength: number;      // 0 to 100, default: 100
+  };
+
+  // Creative blur (non-destructive Gaussian). Relocated from the old Filter menu.
+  blur: {
+    enabled: boolean;
+    radius: number;        // 0 to 20 px, default: 0
+  };
+
+  // Film grain (non-destructive, deterministic). Relocated from the old Filter menu.
+  filmGrain: {
+    enabled: boolean;
+    amount: number;        // 0 to 100, default: 0
+    size: number;          // 1 to 4 (1 = fine), default: 1
   };
 
   // Index signature for Record compatibility
@@ -107,6 +121,15 @@ export class LensCorrectionsModule {
       autoDetect: true,
       profileName: '',
       strength: 100
+    },
+    blur: {
+      enabled: false,
+      radius: 0
+    },
+    filmGrain: {
+      enabled: false,
+      amount: 0,
+      size: 1
     }
   };
 
@@ -152,6 +175,17 @@ export class LensCorrectionsModule {
         } else {
           result = new Float32Array(this.correctVignetting(result, width, height));
         }
+      }
+
+      // Creative blur (non-destructive Gaussian). Separable CPU pass, alpha-preserving.
+      if (this.params.blur.enabled && this.params.blur.radius > 0) {
+        result = new Float32Array(applyGaussianBlur(result, { width, height, channels: 4 }, this.params.blur.radius));
+      }
+
+      // Film grain (deterministic — a fixed seed keeps the pattern stable across
+      // reprocesses, so the grain doesn't shimmer between preview and export).
+      if (this.params.filmGrain.enabled && this.params.filmGrain.amount > 0) {
+        result = new Float32Array(applyFilmGrain(result, { width, height, channels: 4 }, this.params.filmGrain.amount / 100, this.params.filmGrain.size));
       }
 
       const processingTime = performance.now() - startTime;
@@ -634,10 +668,20 @@ export class LensCorrectionsModule {
     };
   }
 
+  resetBlur(): void {
+    this.params.blur = { enabled: false, radius: 0 };
+  }
+
+  resetFilmGrain(): void {
+    this.params.filmGrain = { enabled: false, amount: 0, size: 1 };
+  }
+
   resetAll(): void {
     this.resetVignetting();
     this.resetDistortion();
     this.resetChromaticAberration();
+    this.resetBlur();
+    this.resetFilmGrain();
     this.params.profile.enabled = false;
     logger.info('All lens corrections reset');
   }
@@ -649,6 +693,8 @@ export class LensCorrectionsModule {
     if (this.params.distortion.enabled) enabledCorrections.push('distortion');
     if (this.params.chromaticAberration.enabled) enabledCorrections.push('chromatic aberration');
     if (this.params.profile.enabled) enabledCorrections.push('profile');
+    if (this.params.blur.enabled) enabledCorrections.push('blur');
+    if (this.params.filmGrain.enabled) enabledCorrections.push('film grain');
 
     return {
       enabledCorrections: enabledCorrections.length,

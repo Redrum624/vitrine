@@ -74,6 +74,28 @@ export class WhiteBalanceModule {
     logger.debug('WhiteBalance params reset to defaults');
   }
 
+  /**
+   * Normalized per-channel gains the module applies for a given temperature (K) +
+   * tint. Shared by process() and autoDetectWhiteBalance so the auto estimator
+   * inverts the exact transform that will be applied. Note: applyTint scales R and
+   * B by the SAME factor, so tint never disturbs the red/blue (warm/cool) balance.
+   */
+  private computeGains(temperature: number, tint: number): { r: number; g: number; b: number } {
+    const tempRGB = temperatureToRgb(temperature);
+    const referenceRGB = temperatureToRgb(6500);
+
+    let r = safeDivide(referenceRGB.r, tempRGB.r, 1);
+    let g = safeDivide(referenceRGB.g, tempRGB.g, 1);
+    let b = safeDivide(referenceRGB.b, tempRGB.b, 1);
+
+    const tinted = this.applyTint(r, g, b, tint);
+    r = tinted.r; g = tinted.g; b = tinted.b;
+
+    // Normalize to prevent an overall brightness change.
+    const avg = (r + g + b) / 3 || 1;
+    return { r: r / avg, g: g / avg, b: b / avg };
+  }
+
   private applyTint(r: number, g: number, b: number, tint: number): { r: number; g: number; b: number } {
     // Apply green/magenta tint adjustment
     // Positive tint = more green, negative tint = more magenta
@@ -110,28 +132,9 @@ export class WhiteBalanceModule {
 
     logger.debug(`Processing WhiteBalance: ${width}x${height}, temp: ${this.params.temperature}K, tint: ${this.params.tint}`);
 
-    // Calculate RGB multipliers from temperature using shared utility
-    const tempRGB = temperatureToRgb(this.params.temperature);
-
-    // Reference white point (6500K)
-    const referenceRGB = temperatureToRgb(6500);
-
-    // Calculate correction factors with safe division
-    let rFactor = safeDivide(referenceRGB.r, tempRGB.r, 1);
-    let gFactor = safeDivide(referenceRGB.g, tempRGB.g, 1);
-    let bFactor = safeDivide(referenceRGB.b, tempRGB.b, 1);
-
-    // Apply tint correction
-    const tintedFactors = this.applyTint(rFactor, gFactor, bFactor, this.params.tint);
-    rFactor = tintedFactors.r;
-    gFactor = tintedFactors.g;
-    bFactor = tintedFactors.b;
-
-    // Normalize factors to prevent overall brightness change
-    const avgFactor = (rFactor + gFactor + bFactor) / 3;
-    rFactor /= avgFactor;
-    gFactor /= avgFactor;
-    bFactor /= avgFactor;
+    // Channel gains for the current temperature + tint (shared with auto-detect so
+    // the auto estimator inverts the EXACT model that gets applied here).
+    const { r: rFactor, g: gFactor, b: bFactor } = this.computeGains(this.params.temperature, this.params.tint);
 
     // GPU fast-path: apply the pre-computed channel gains on the GPU (RGBA only).
     if (channels === 4 && webGLImageProcessor.isAvailable()) {
@@ -158,54 +161,99 @@ export class WhiteBalanceModule {
     return output;
   }
 
+  /**
+   * Auto white balance — median gray-world. Scans the whole image, takes the MEDIAN
+   * of each channel (robust to highlights/shadows that skew a mean), then solves the
+   * temperature AND tint that neutralise that median cast, inverting the module's own
+   * gain model so the resulting correction genuinely makes the median neutral.
+   */
   autoDetectWhiteBalance(input: Float32Array, context: WhiteBalanceProcessingContext): void {
-    // Simple auto white balance using grey world assumption
     const { width, height, channels } = context;
+    const totalPixels = width * height;
+    if (totalPixels === 0) return;
 
-    let rSum = 0, gSum = 0, bSum = 0;
-    let pixelCount = 0;
-
-    // Sample middle portion of image to avoid edges
-    const startX = Math.floor(width * 0.25);
-    const endX = Math.floor(width * 0.75);
-    const startY = Math.floor(height * 0.25);
-    const endY = Math.floor(height * 0.75);
-
-    for (let y = startY; y < endY; y++) {
-      for (let x = startX; x < endX; x++) {
-        const pixelIndex = (y * width + x) * channels;
-        rSum += input[pixelIndex];
-        gSum += input[pixelIndex + 1];
-        bSum += input[pixelIndex + 2];
-        pixelCount++;
+    // Sample across the whole image (stride for speed). Skip clipped pixels
+    // (near-black / near-white) — they carry no reliable colour for gray-world.
+    const targetSamples = 40000;
+    const step = Math.max(1, Math.floor(totalPixels / targetSamples));
+    const rs: number[] = [], gs: number[] = [], bs: number[] = [];
+    for (let p = 0; p < totalPixels; p += step) {
+      const i = p * channels;
+      const r = input[i], g = input[i + 1], b = input[i + 2];
+      const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+      if (lum < 0.04 || lum > 0.96) continue;
+      rs.push(r); gs.push(g); bs.push(b);
+    }
+    // Fallback when almost everything is clipped: use every sampled pixel.
+    if (rs.length < 50) {
+      rs.length = 0; gs.length = 0; bs.length = 0;
+      for (let p = 0; p < totalPixels; p += step) {
+        const i = p * channels;
+        rs.push(input[i]); gs.push(input[i + 1]); bs.push(input[i + 2]);
       }
     }
 
-    if (pixelCount > 0) {
-      const rAvg = rSum / pixelCount;
-      const gAvg = gSum / pixelCount;
-      const bAvg = bSum / pixelCount;
+    const mR = this.median(rs), mG = this.median(gs), mB = this.median(bs);
+    if (mR <= 0 && mG <= 0 && mB <= 0) return; // black image — nothing to balance
 
-      // Estimate temperature based on R/B ratio (with safe division)
-      const rbRatio = safeDivide(rAvg, bAvg, 1);
-      const estimatedTemp = Math.max(2000, Math.min(50000, safeDivide(6500, rbRatio, 6500)));
+    // 1) Temperature neutralises the red/blue (warm/cool) cast.
+    const temperature = this.solveTemperature(mR, mB);
+    // 2) Tint neutralises the residual green/magenta cast (R/B balance is preserved).
+    const tint = this.solveTint(temperature, mR, mG, mB);
 
-      // Estimate tint: green/magenta. Compare green to the NON-green channels (R+B)/2
-      // (using (R+G+B)/3 dilutes the green signal), and pull toward neutral. NEGATIVE
-      // tint removes green — demosaiced RAW usually carries a slight green cast. The
-      // previous code used the WRONG sign (positive tint ADDS green), which is what made
-      // auto white balance come out too green.
-      const expectedG = (rAvg + bAvg) / 2;
-      const gExcess = safeDivide(gAvg - expectedG, expectedG, 0);
-      const estimatedTint = Math.max(-80, Math.min(80, -gExcess * 400));
+    this.setParams({
+      temperature: Math.round(temperature),
+      tint: Math.round(tint * 10) / 10,
+      auto: true
+    });
 
-      this.setParams({
-        temperature: Math.round(estimatedTemp),
-        tint: Math.round(estimatedTint * 10) / 10,
-        auto: true
-      });
+    logger.info(`Auto white balance (median gray-world): median RGB=(${mR.toFixed(3)}, ${mG.toFixed(3)}, ${mB.toFixed(3)}) → ${Math.round(temperature)}K, tint ${Math.round(tint * 10) / 10}`);
+  }
 
-      logger.info(`Auto white balance detected: ${Math.round(estimatedTemp)}K, tint: ${Math.round(estimatedTint * 10) / 10}`);
+  private median(values: number[]): number {
+    if (values.length === 0) return 0;
+    const sorted = values.slice().sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+  }
+
+  /**
+   * Find the temperature whose channel gains make corrected R equal corrected B.
+   * f(T) = gainR·mR − gainB·mB is monotonic increasing in T, so binary-search it.
+   */
+  private solveTemperature(mR: number, mB: number): number {
+    let lo = 2000, hi = 12000;
+    const f = (t: number) => {
+      const g = this.computeGains(t, 0);
+      return g.r * mR - g.b * mB;
+    };
+    const flo = f(lo), fhi = f(hi);
+    if (flo > 0 && fhi > 0) return lo; // even the coolest temp can't remove the warm cast
+    if (flo < 0 && fhi < 0) return hi; // even the warmest can't remove the cool cast
+    for (let iter = 0; iter < 40; iter++) {
+      const mid = (lo + hi) / 2;
+      if (f(mid) > 0) hi = mid; else lo = mid;
     }
+    return (lo + hi) / 2;
+  }
+
+  /**
+   * With temperature fixed, find the tint that makes corrected G equal the average
+   * of corrected R and B. h(tint) is monotonic increasing in tint, so binary-search.
+   */
+  private solveTint(temperature: number, mR: number, mG: number, mB: number): number {
+    let lo = -100, hi = 100;
+    const h = (t: number) => {
+      const g = this.computeGains(temperature, t);
+      return g.g * mG - (g.r * mR + g.b * mB) / 2;
+    };
+    const hlo = h(lo), hhi = h(hi);
+    if (hlo > 0 && hhi > 0) return lo;
+    if (hlo < 0 && hhi < 0) return hi;
+    for (let iter = 0; iter < 40; iter++) {
+      const mid = (lo + hi) / 2;
+      if (h(mid) > 0) hi = mid; else lo = mid;
+    }
+    return (lo + hi) / 2;
   }
 }

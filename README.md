@@ -4,7 +4,7 @@ A **desktop RAW photo editor** built with Electron + React, featuring a WebGL2/C
 processing pipeline, native LibRaw demosaicing, colour-managed export, and
 non-destructive local adjustments.
 
-![Version](https://img.shields.io/badge/Version-1.3.1-blue)
+![Version](https://img.shields.io/badge/Version-1.5.0-blue)
 ![TypeScript](https://img.shields.io/badge/TypeScript-0_errors-blue)
 ![Tests](https://img.shields.io/badge/Tests-812_passing-brightgreen)
 ![Lint](https://img.shields.io/badge/Lint-clean-brightgreen)
@@ -28,12 +28,16 @@ non-destructive local adjustments.
   Created from the top of Basic Adjustments; drag on the canvas to place / move / resize /
   rotate, click off to deselect, Delete to remove. Each mask gets its own Basic-Adjustments
   panel plus a feather control.
-- **White Balance**, **Tone Curve** (with auto-levels), **Noise Reduction** (Apply button),
-  **Color Balance**, **Lens Corrections**.
+- **White Balance** (with **median gray-world Auto** that neutralises both warmth and
+  tint), **Color Balance**, **Tone Curve** (with auto-levels), **Noise Reduction**
+  (Apply button), **Sharpen** (unsharp-mask Amount / Radius / Detail), **Lens
+  Corrections** (Distortion, Vignetting, Chromatic Aberration, plus non-destructive
+  **Blur** and **Film Grain** sections).
 - **Copy / Paste Style** — transfer a colour grade between images via per-channel
   histogram matching.
-- **Auto adjustments** — one-click *Auto All* driven by a per-image style profile,
-  plus Auto Levels / Contrast / Color.
+- **Auto adjustments** — one-click *Auto All* (its white-balance step uses the same
+  median gray-world neutralisation as the WB panel's Auto button), plus Auto Levels /
+  Contrast / Color.
 - Non-destructive: adjustments are reversible and re-processed live, and **persist per
   image across sessions and app updates** (restored when you reopen a photo).
 - **History** — a per-image checkpoint timeline of everything you've done; click any
@@ -49,10 +53,11 @@ non-destructive local adjustments.
   automatic CPU fallback when WebGL2 is unavailable.
 
 ### Export & workflow
-- **Export** to JPEG / PNG / TIFF / WebP, 8- and 16-bit (**defaults to PNG 16-bit**
-  to preserve the 32-bit float pipeline), in **sRGB or wide-gamut**
-  (Adobe RGB / ProPhoto / Rec.2020) using generated ICC profiles, with **EXIF/XMP**
-  metadata embedding.
+- **Export** (the toolbar **Export** button, or `Ctrl+E`) to JPEG / PNG / TIFF / WebP,
+  8- and 16-bit (**defaults to PNG 16-bit** to preserve the 32-bit float pipeline), in
+  **sRGB or wide-gamut** (Adobe RGB / ProPhoto / Rec.2020) using generated ICC profiles,
+  with **EXIF/XMP** metadata embedding. Sharpening is no longer a separate export option —
+  the **Sharpen** module's result is baked into every export automatically.
 - **Multi-export.** Select several photos in the filmstrip (**Ctrl/Cmd+click** to
   toggle individual ones, **Shift+click** for a contiguous range), then **Export N**
   writes them all with one set of settings — each with **its own saved edits** — into
@@ -81,7 +86,7 @@ pnpm run electron-dev   # Vite dev server + Electron
 ### Build a Windows release
 ```bash
 npm run build:win       # clean dist + release -> tsc + vite build -> NSIS installer + portable (x64)
-# Output: release/Photo Editor Pro Setup 1.4.1.exe  and  release/Photo Editor Pro 1.4.1.exe
+# Output: release/Photo Editor Pro Setup 1.5.0.exe  and  release/Photo Editor Pro 1.5.0.exe
 npm run build:win:dir   # fast unpacked build (no installer)
 npm run dist            # electron-builder for the current platform
 ```

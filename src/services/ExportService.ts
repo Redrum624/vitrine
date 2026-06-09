@@ -86,9 +86,10 @@ export class ExportService {
     includeProcessingHistory: false,
     customMetadata: {},
     outputSharpening: {
-      // OFF by default: the canvas applies no sharpening, so default-on output
-      // sharpening made exports look noisier/harsher than the preview (especially
-      // full-res RAW, where the unsharp mask amplifies sensor noise). Opt-in only.
+      // Always OFF. Sharpening now lives in the develop pipeline as the "Sharpen"
+      // module (sidebar, under Noise Reduction) so the canvas preview and the export
+      // match exactly. The legacy export-time unsharp path is kept inert for back-
+      // compat; leaving it enabled here would double-sharpen on top of the module.
       enabled: false,
       amount: 50,
       radius: 1.0,
@@ -110,7 +111,7 @@ export class ExportService {
         width: 2048,
         height: 2048,
         resizeMode: 'fit',
-        outputSharpening: { enabled: true, media: 'web', amount: 60, radius: 1.0, threshold: 0 }
+        outputSharpening: { enabled: false, media: 'web', amount: 60, radius: 1.0, threshold: 0 }
       }
     },
     {
@@ -125,7 +126,7 @@ export class ExportService {
         width: 1200,
         height: 1200,
         resizeMode: 'fit',
-        outputSharpening: { enabled: true, media: 'web', amount: 50, radius: 1.0, threshold: 0 }
+        outputSharpening: { enabled: false, media: 'web', amount: 50, radius: 1.0, threshold: 0 }
       }
     },
     {
@@ -137,7 +138,7 @@ export class ExportService {
         colorSpace: 'adobergb',
         bitDepth: 16,
         compression: 'lzw',
-        outputSharpening: { enabled: true, media: 'print', amount: 40, radius: 1.2, threshold: 0 }
+        outputSharpening: { enabled: false, media: 'print', amount: 40, radius: 1.2, threshold: 0 }
       }
     },
     {
@@ -165,7 +166,7 @@ export class ExportService {
         width: 1080,
         height: 1080,
         resizeMode: 'crop',
-        outputSharpening: { enabled: true, media: 'web', amount: 70, radius: 1.0, threshold: 0 }
+        outputSharpening: { enabled: false, media: 'web', amount: 70, radius: 1.0, threshold: 0 }
       }
     }
   ];

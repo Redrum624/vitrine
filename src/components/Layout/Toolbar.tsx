@@ -51,7 +51,7 @@ export function Toolbar({ onExport, onPrint, onBatchProcess: _onBatchProcess, on
               style={{...btnStyle, width: 'auto', padding: '0 12px'}}
               title="Export Image"
             >
-              Save
+              Export
             </button>
             <button
               onClick={onPrint}

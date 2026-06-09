@@ -33,12 +33,6 @@ interface MenuBarProps {
   onBrightnessContrast?: () => void;
   onLevels?: () => void;
   onCurves?: () => void;
-  // Filter menu
-  onSharpen?: () => void;
-  onBlur?: () => void;
-  onNoiseReduction?: () => void;
-  onVignette?: () => void;
-  onFilmGrain?: () => void;
   // State
   canUndo?: boolean;
   canRedo?: boolean;
@@ -78,11 +72,6 @@ export function MenuBar({
   onBrightnessContrast,
   onLevels,
   onCurves,
-  onSharpen,
-  onBlur,
-  onNoiseReduction,
-  onVignette,
-  onFilmGrain,
   canUndo = false,
   canRedo = false,
   showGrid = false,
@@ -193,13 +182,6 @@ export function MenuBar({
         </button>
         {activeMenu === 'file' && (
           <div className="absolute top-full left-0 mt-0.5 border min-w-[180px] py-1 z-50" style={{backgroundColor: 'var(--gray-800)', borderColor: 'var(--border)', boxShadow: 'var(--shadow-lg)', borderRadius: '0'}}>
-            <button
-              className="w-full text-left px-4 py-1.5 text-xs text-dark-200 hover:bg-dark-700 bg-transparent border-0 cursor-pointer"
-              onClick={() => handleMenuItemClick(onWindowWelcome)}
-            >
-              New...
-            </button>
-            <div className="h-px bg-dark-700 my-1"></div>
             <button
               className="w-full text-left px-4 py-1.5 text-xs text-dark-200 hover:bg-dark-700 bg-transparent border-0 cursor-pointer"
               onClick={() => handleMenuItemClick(onFileOpen)}
@@ -368,54 +350,6 @@ export function MenuBar({
               onClick={() => handleMenuItemClick(onCurves)}
             >
               Curves...
-            </button>
-          </div>
-        )}
-      </div>
-
-      {/* Filter Menu */}
-      <div className="relative">
-        <button
-          className="bg-transparent border-0 cursor-pointer text-dark-200 hover:text-white"
-          style={{padding: '8px 14px', fontSize: '12px', transition: 'var(--transition-fast)', backgroundColor: activeMenu === 'filter' ? 'var(--gray-850)' : 'transparent'}}
-          onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'var(--gray-850)'}
-          onMouseLeave={(e) => e.currentTarget.style.backgroundColor = activeMenu === 'filter' ? 'var(--gray-850)' : 'transparent'}
-          onClick={() => handleMenuClick('filter')}
-        >
-          Filter
-        </button>
-        {activeMenu === 'filter' && (
-          <div className="absolute top-full left-0 mt-0.5 border min-w-[180px] py-1 z-50" style={{backgroundColor: 'var(--gray-800)', borderColor: 'var(--border)', boxShadow: 'var(--shadow-lg)', borderRadius: '0'}}>
-            <button
-              className={`w-full text-left px-4 py-1.5 text-xs bg-transparent border-0 cursor-pointer ${hasImage ? 'text-dark-200 hover:bg-dark-700' : 'text-dark-500 cursor-not-allowed'}`}
-              onClick={() => hasImage && handleMenuItemClick(onSharpen)}
-            >
-              Sharpen...
-            </button>
-            <button
-              className={`w-full text-left px-4 py-1.5 text-xs bg-transparent border-0 cursor-pointer ${hasImage ? 'text-dark-200 hover:bg-dark-700' : 'text-dark-500 cursor-not-allowed'}`}
-              onClick={() => hasImage && handleMenuItemClick(onBlur)}
-            >
-              Blur...
-            </button>
-            <button
-              className="w-full text-left px-4 py-1.5 text-xs text-dark-200 hover:bg-dark-700 bg-transparent border-0 cursor-pointer"
-              onClick={() => handleMenuItemClick(onNoiseReduction)}
-            >
-              Noise Reduction...
-            </button>
-            <div className="h-px bg-dark-700 my-1"></div>
-            <button
-              className={`w-full text-left px-4 py-1.5 text-xs bg-transparent border-0 cursor-pointer ${hasImage ? 'text-dark-200 hover:bg-dark-700' : 'text-dark-500 cursor-not-allowed'}`}
-              onClick={() => hasImage && handleMenuItemClick(onVignette)}
-            >
-              Vignette...
-            </button>
-            <button
-              className={`w-full text-left px-4 py-1.5 text-xs bg-transparent border-0 cursor-pointer ${hasImage ? 'text-dark-200 hover:bg-dark-700' : 'text-dark-500 cursor-not-allowed'}`}
-              onClick={() => hasImage && handleMenuItemClick(onFilmGrain)}
-            >
-              Film Grain...
             </button>
           </div>
         )}

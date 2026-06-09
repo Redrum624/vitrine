@@ -4,6 +4,54 @@ All notable changes to **Photo Editor Pro** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.5.0] - 2026-06-09
+
+### Added
+- **Sharpen module** (right sidebar, under Noise Reduction). A non-destructive
+  unsharp-mask develop module with live **Amount / Radius / Detail** sliders. It runs
+  inside the pipeline, so the canvas preview and the export match exactly. This
+  replaces the old export-only "Output Sharpening". Files: `SharpenModule.ts`,
+  `SharpenModuleComponent.tsx`, `ImageProcessingPipeline`, `AdjustmentPanel`, `IconSidebar`.
+- **Blur & Film Grain in Lens Corrections** (non-destructive). Two new collapsible
+  sections — **Blur** (Gaussian radius) and **Film Grain** (Amount + Grain Size,
+  deterministic/seeded so it doesn't shimmer between preview and export) — relocated
+  from the removed Filter menu. Files: `LensCorrectionsModule(.ts/Pipeline)`,
+  `LensCorrectionsModuleComponent`.
+
+### Changed
+- **Auto White Balance is now median gray-world.** The White Balance panel's **Auto**
+  button *and* **Auto All** scan the image's overall **median** colour cast and
+  neutralise **both warmth (temperature) and tint**, inverting the module's own gain
+  model so the corrected median is genuinely neutral. Cause of the old behaviour: it
+  only gently nudged `meanR/meanB` toward a style-profile target (and used the mean),
+  so it under-corrected. Files: `WhiteBalanceModule.ts`, `AdjustmentPanel`, `App`.
+- **Sidebar order.** Color Balance moved to directly under White Balance; the new
+  Sharpen module sits under Noise Reduction.
+- **Lens Corrections** was silently inert in the live pipeline — its wrapper required
+  a top-level `enabled` flag nothing ever set, so Vignetting/Distortion/Chromatic
+  Aberration never ran. Enablement is now derived from the sections, so those
+  corrections (and the new Blur/Film Grain) actually apply.
+- **Toolbar export button** renamed **"Save" → "Export"**.
+- **Seamless zoom-out.** The canvas background now matches the surrounding container,
+  so a zoomed-out image no longer sits in a lighter-grey rectangle with a border.
+  (Full-window zoom-in remains a planned follow-up.)
+
+### Removed
+- **Filter menu** removed from the menu bar. Its **Blur** and **Film Grain** moved
+  into Lens Corrections (non-destructive); **Sharpen** and **Noise Reduction** are
+  sidebar modules. The orphaned `FilterDialog` component was deleted.
+- **Export "Output Sharpening" tab** removed — sharpening is now the Sharpen develop
+  module, and export presets no longer apply export-time sharpening (prevents
+  double-sharpening on top of the module).
+- **File → New…** menu item removed (a placeholder that opened the Welcome screen;
+  the Welcome screen is still under the **Window** menu).
+
+### Fixed
+- **Thumbnail selection checkmark couldn't be cleared.** Re-clicking a selected
+  thumbnail kept the blue check. Cause: plain-click always re-selected and the check
+  badge had no handler. The badge is now a clickable **"Deselect"** toggle, and
+  re-clicking the sole-selected thumbnail clears it.
+
 ## [1.4.1] - 2026-06-08
 
 ### Fixed

@@ -10,6 +10,7 @@ import { ShadowsHighlightsPipelineModule } from '../modules/ShadowsHighlightsPip
 import { LocalAdjustmentsPipelineModule } from '../modules/LocalAdjustmentsPipelineModule';
 import { LensCorrectionsPipelineModule } from '../modules/LensCorrectionsPipelineModule';
 import { NoiseReductionModule } from '../modules/NoiseReductionModule';
+import { SharpenModule } from '../modules/SharpenModule';
 import { webWorkerImageProcessor, WorkerModuleConfig } from './WebWorkerImageProcessor';
 
 // Module-specific param interfaces for type-safe identity checks
@@ -109,8 +110,9 @@ export class ImageProcessingPipeline {
     const shadowsHighlightsModule = new ShadowsHighlightsPipelineModule();
     const localAdjustmentsModule = new LocalAdjustmentsPipelineModule();
     const noiseReductionModule = new NoiseReductionModule();
+    const sharpenModule = new SharpenModule();
 
-    // Pipeline order: Geometric → Color/Tone → Denoise → Tone Recovery → Local
+    // Pipeline order: Geometric → Color/Tone → Denoise → Sharpen → Tone Recovery → Local
     // Note: Transform (rotate/flip) is now integrated into CropModule
     this.addModule(cropModule, 0); // First - crop/transform (unified)
     this.addModule(lensCorrectionsModule, 1); // Second - lens corrections (geometric)
@@ -119,11 +121,12 @@ export class ImageProcessingPipeline {
     this.addModule(basicAdjModule, 4); // Fifth - basic adjustments
     this.addModule(toneCurveModule, 5); // Sixth - tone curve
     this.addModule(colorBalanceModule, 6); // Seventh - color balance
-    this.addModule(noiseReductionModule, 7); // Eighth - noise reduction (before SH to avoid amplifying noise)
-    this.addModule(shadowsHighlightsModule, 8); // Ninth - shadows/highlights recovery
-    this.addModule(localAdjustmentsModule, 9); // Tenth - local adjustments
+    this.addModule(noiseReductionModule, 7); // Eighth - noise reduction (before sharpen so it isn't amplified)
+    this.addModule(sharpenModule, 8); // Ninth - sharpen (unsharp mask, after denoise)
+    this.addModule(shadowsHighlightsModule, 9); // Tenth - shadows/highlights recovery
+    this.addModule(localAdjustmentsModule, 10); // Eleventh - local adjustments
 
-    logger.info('Image processing pipeline initialized with 10 modules:', this.processingOrder);
+    logger.info('Image processing pipeline initialized with 11 modules:', this.processingOrder);
   }
 
   addModule(module: PipelineModule, position?: number): void {
@@ -275,6 +278,13 @@ export class ImageProcessingPipeline {
           // non-zero, so the generic all-zero check below would wrongly run it.
           return (params as ModuleWithEnabledParams).enabled === false
             || (params as ModuleWithEnabledParams).enabled === undefined;
+        }
+
+        case 'sharpen': {
+          // Sharpen is identity when disabled or amount is 0. Its non-zero default
+          // radius would otherwise defeat the generic all-zero check below.
+          const sp = params as ModuleWithEnabledParams & { amount?: number };
+          return sp.enabled === false || !sp.amount || sp.amount <= 0;
         }
 
         case 'crop':

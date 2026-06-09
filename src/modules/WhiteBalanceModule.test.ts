@@ -254,6 +254,52 @@ describe('WhiteBalanceModule', () => {
     });
   });
 
+  describe('Auto white balance neutralization (median gray-world)', () => {
+    const fill = (w: number, h: number, r: number, g: number, b: number) => {
+      const d = new Float32Array(w * h * 4);
+      for (let i = 0; i < w * h; i++) { d[i * 4] = r; d[i * 4 + 1] = g; d[i * 4 + 2] = b; d[i * 4 + 3] = 1; }
+      return d;
+    };
+
+    it('cools a warm cast so corrected R≈B and G sits between them', () => {
+      const w = 24, h = 24;
+      const input = fill(w, h, 0.62, 0.5, 0.40); // warm: R > B
+      const ctx = { width: w, height: h, channels: 4 };
+      module.autoDetectWhiteBalance(input, ctx);
+      expect(module.getParams().auto).toBe(true);
+      expect(module.getParams().temperature).toBeLessThan(6500); // cooled to fight the warm cast
+      const out = module.process(input, ctx);
+      expect(Math.abs(out[0] - out[2])).toBeLessThan(0.02);             // R ≈ B
+      expect(Math.abs(out[1] - (out[0] + out[2]) / 2)).toBeLessThan(0.02); // G neutralized
+    });
+
+    it('removes a green cast with negative tint', () => {
+      const w = 24, h = 24;
+      const input = fill(w, h, 0.5, 0.6, 0.5); // green: G high
+      const ctx = { width: w, height: h, channels: 4 };
+      module.autoDetectWhiteBalance(input, ctx);
+      expect(module.getParams().tint).toBeLessThan(0); // negative tint removes green
+      const out = module.process(input, ctx);
+      expect(Math.abs(out[1] - (out[0] + out[2]) / 2)).toBeLessThan(0.02);
+    });
+
+    it('leaves a neutral image essentially unchanged', () => {
+      const w = 24, h = 24;
+      const ctx = { width: w, height: h, channels: 4 };
+      module.autoDetectWhiteBalance(fill(w, h, 0.5, 0.5, 0.5), ctx);
+      expect(Math.abs(module.getParams().temperature - 6500)).toBeLessThan(400);
+      expect(Math.abs(module.getParams().tint)).toBeLessThan(2);
+    });
+
+    it('uses the median — blown-out highlights do not drag the estimate toward neutral', () => {
+      const w = 40, h = 40;
+      const d = fill(w, h, 0.62, 0.5, 0.40);  // warm midtones
+      for (let i = 0; i < Math.floor(w * h * 0.3); i++) { d[i * 4] = 1; d[i * 4 + 1] = 1; d[i * 4 + 2] = 1; } // 30% clipped white
+      module.autoDetectWhiteBalance(d, { width: w, height: h, channels: 4 });
+      expect(module.getParams().temperature).toBeLessThan(6500); // warm cast still detected
+    });
+  });
+
   describe('Edge cases', () => {
     it('should handle single pixel image', () => {
       const width = 1;

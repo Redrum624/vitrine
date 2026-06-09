@@ -165,10 +165,13 @@ When you first open Photo Editor Pro:
    - Graduated filters
    - Spot corrections
 
-6. **Export**
+6. **Sharpen** (Sharpen module)
+   - Apply unsharp-mask sharpening with Amount / Radius / Detail
+   - The result is baked into the export automatically
+
+7. **Export**
    - Choose appropriate format
    - Set quality settings
-   - Add output sharpening
 
 ---
 
@@ -193,13 +196,14 @@ When you first open Photo Editor Pro:
 5. Use **Cancel** to revert
 
 ### 2. Lens Corrections
-**Purpose:** Fix optical lens issues
+**Purpose:** Fix optical lens issues and add creative finishing effects
 
 **Features:**
-- **Vignetting:** Remove dark corners
 - **Distortion:** Fix barrel/pincushion distortion
+- **Vignetting:** Remove dark corners (with **Auto-Detect**)
 - **Chromatic Aberration:** Remove color fringing
-- **Auto-Detect:** Automatic vignette detection
+- **Blur:** Non-destructive Gaussian blur (radius 0–20 px)
+- **Film Grain:** Non-destructive grain (Amount 0–100%, Grain Size 1–4)
 
 ### 3. White Balance
 **Purpose:** Correct color temperature
@@ -208,10 +212,12 @@ When you first open Photo Editor Pro:
 - **Temperature:** Warm (yellow) to Cool (blue)
 - **Tint:** Green to Magenta correction
 - **Presets:** Daylight, Cloudy, Tungsten, Fluorescent, etc.
+- **Auto:** Median gray-world neutralisation — scans the image's overall median colour
+  cast and corrects both temperature (warmth) and tint in one click
 
 **Tips:**
 - Start with a preset, then fine-tune
-- Use eyedropper on neutral gray area
+- Use eyedropper on neutral gray area, or click **Auto** for an automatic neutral
 - Temperature: 2000K (candle) to 10000K (blue sky)
 
 ### 4. Basic Adjustments
@@ -289,6 +295,18 @@ When you first open Photo Editor Pro:
 4. Adjust parameters (exposure, saturation, etc.)
 5. Refine mask if needed
 
+### 9. Sharpen
+**Purpose:** Non-destructive unsharp-mask sharpening (in the sidebar, below Noise Reduction)
+
+**Controls:**
+- **Amount:** Sharpening strength (0–150%)
+- **Radius:** Edge radius (0.5–3 px)
+- **Detail:** Protects smooth areas and noise (0–100)
+
+**Notes:**
+- Applies to the whole image, so the canvas preview matches the export exactly
+- Sharpening is baked into exports automatically — there is no separate export option
+
 ---
 
 ## Exporting Images
@@ -344,11 +362,9 @@ Access via:
 - **8-bit:** Standard, smaller files
 - **16-bit:** Professional, maximum quality
 
-**Output Sharpening**
-- **None:** No additional sharpening
-- **Screen:** For digital display (1.0-1.5)
-- **Print:** For photo printing (1.5-2.0)
-- **Web:** For web use (0.5-1.0)
+**Sharpening**
+- Sharpening is not an export option. Use the **Sharpen** module (sidebar, below Noise
+  Reduction) to set Amount / Radius / Detail; its result is baked into the export.
 
 **Metadata**
 - **Preserve All:** Keep EXIF, GPS, camera data
@@ -361,13 +377,11 @@ Access via:
 - Format: JPEG
 - Quality: 90%
 - Color: sRGB
-- Sharpening: Screen (1.0)
 
 **Print - Maximum Quality**
 - Format: TIFF
 - Depth: 16-bit
 - Color: Adobe RGB
-- Sharpening: Print (2.0)
 
 **Social Media**
 - Format: JPEG
@@ -608,14 +622,14 @@ Access via:
 - Format: JPEG
 - Quality: 80-90%
 - Color: sRGB
-- Sharpening: Screen 0.5-1.0
+- Sharpen module: modest Amount, ~1 px Radius
 - Max dimension: 2000px
 
 **For Print:**
 - Format: TIFF or JPEG (95%+)
 - Color: Adobe RGB
 - Resolution: 300 DPI
-- Sharpening: Print 1.5-2.0
+- Sharpen module: higher Amount, ~1.5–2 px Radius
 - 16-bit if possible
 
 **For Archival:**

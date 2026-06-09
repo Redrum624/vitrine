@@ -3,7 +3,6 @@ import {
   Download,
   Image,
   Palette,
-  Zap,
   File,
   X,
   AlertTriangle,
@@ -30,7 +29,7 @@ interface ExportDialogProps {
   multiPaths?: string[];
 }
 
-type TabType = 'format' | 'dimensions' | 'color' | 'sharpening';
+type TabType = 'format' | 'dimensions' | 'color';
 
 export const ExportDialog: React.FC<ExportDialogProps> = ({
   isOpen,
@@ -123,20 +122,6 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
 
   const handleOptionChange = useCallback((key: keyof ExportOptions, value: string | number | boolean | object | undefined) => {
     setExportOptions(prev => ({ ...prev, [key]: value }));
-
-    if (selectedPreset) {
-      setSelectedPreset('');
-    }
-  }, [selectedPreset]);
-
-  const handleOutputSharpeningChange = useCallback((key: string, value: string | number | boolean) => {
-    setExportOptions(prev => ({
-      ...prev,
-      outputSharpening: {
-        ...prev.outputSharpening,
-        [key]: value
-      }
-    }));
 
     if (selectedPreset) {
       setSelectedPreset('');
@@ -538,81 +523,6 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
     </div>
   );
 
-  const renderSharpeningTab = () => (
-    <div className="space-y-6">
-      {/* Enable Toggle */}
-      <label className="flex items-center space-x-2 cursor-pointer">
-        <input
-          type="checkbox"
-          checked={exportOptions.outputSharpening.enabled}
-          onChange={(e) => handleOutputSharpeningChange('enabled', e.target.checked)}
-          className="rounded"
-        />
-        <span className="text-sm font-semibold" style={{ color: 'var(--gray-200)' }}>Enable Output Sharpening</span>
-      </label>
-
-      {exportOptions.outputSharpening.enabled && (
-        <div className="space-y-4">
-          {/* Media Type */}
-          <div className="space-y-2">
-            <h3 className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--gray-500)' }}>Media Type</h3>
-            <div className="grid grid-cols-3 gap-2">
-              {[
-                { media: 'screen', label: 'Screen' },
-                { media: 'print', label: 'Print' },
-                { media: 'web', label: 'Web' }
-              ].map(({ media, label }) => (
-                <button
-                  key={media}
-                  onClick={() => handleOutputSharpeningChange('media', media)}
-                  className="p-2 rounded border text-center transition-colors"
-                  style={{
-                    backgroundColor: exportOptions.outputSharpening.media === media ? 'var(--gray-700)' : 'var(--gray-800)',
-                    borderColor: exportOptions.outputSharpening.media === media ? 'var(--gray-500)' : 'var(--border)'
-                  }}
-                >
-                  <div className="text-sm font-semibold" style={{ color: 'var(--gray-200)' }}>{label}</div>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Sharpening Controls */}
-          <SliderControl
-            label="Amount"
-            value={exportOptions.outputSharpening.amount}
-            min={0}
-            max={100}
-            step={1}
-            onChange={(value: number) => handleOutputSharpeningChange('amount', value)}
-            className="text-sm"
-            showPercentage
-          />
-
-          <SliderControl
-            label="Radius"
-            value={exportOptions.outputSharpening.radius}
-            min={0.1}
-            max={5.0}
-            step={0.1}
-            onChange={(value: number) => handleOutputSharpeningChange('radius', value)}
-            className="text-sm"
-          />
-
-          <SliderControl
-            label="Threshold"
-            value={exportOptions.outputSharpening.threshold}
-            min={0}
-            max={255}
-            step={1}
-            onChange={(value: number) => handleOutputSharpeningChange('threshold', value)}
-            className="text-sm"
-          />
-        </div>
-      )}
-    </div>
-  );
-
   if (!isOpen) return null;
 
   return (
@@ -644,8 +554,7 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
                 {[
                   { key: 'format', label: 'Format & Quality', icon: File },
                   { key: 'dimensions', label: 'Dimensions', icon: Image },
-                  { key: 'color', label: 'Color & Metadata', icon: Palette },
-                  { key: 'sharpening', label: 'Output Sharpening', icon: Zap }
+                  { key: 'color', label: 'Color & Metadata', icon: Palette }
                 ].map(({ key, label, icon: Icon }) => (
                   <button
                     key={key}
@@ -669,7 +578,6 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
             {activeTab === 'format' && renderFormatTab()}
             {activeTab === 'dimensions' && renderDimensionsTab()}
             {activeTab === 'color' && renderColorTab()}
-            {activeTab === 'sharpening' && renderSharpeningTab()}
           </div>
         </div>
 

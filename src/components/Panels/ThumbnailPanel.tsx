@@ -258,7 +258,13 @@ export function ThumbnailPanel({
       toggleImageSelection(image.id);
       return;
     }
-    // Plain click: load to canvas and reset the selection to just this image.
+    // Plain click on the SOLE already-selected thumbnail clears its checkmark
+    // (re-click toggles the selection off; the image stays on the canvas).
+    if (selectedSet.size === 1 && selectedSet.has(image.id)) {
+      setSelection([], null);
+      return;
+    }
+    // Plain click: load to canvas and collapse the selection to just this image.
     onImageSelect(image);
     loadThumbnail(image); // no-op if already loaded/loading
     setSelection([image.id], image.id);
@@ -455,11 +461,16 @@ export function ThumbnailPanel({
                 }}
                 title={`${image.name} (${image.format})`}
               >
-                {/* Multi-select check badge (top-left) */}
+                {/* Multi-select check badge (top-left). Click it to toggle the
+                    selection off without disturbing the canvas. */}
                 {inSelection && (
                   <div
-                    className="absolute z-10 flex items-center justify-center rounded-full"
+                    data-testid={`check-${image.id}`}
+                    role="button"
+                    title="Deselect"
+                    className="absolute z-10 flex items-center justify-center rounded-full cursor-pointer"
                     style={{ top: '4px', left: '4px', width: '16px', height: '16px', backgroundColor: '#3b82f6' }}
+                    onClick={(e) => { e.stopPropagation(); toggleImageSelection(image.id); }}
                   >
                     <Check className="w-2.5 h-2.5" style={{ color: 'white' }} strokeWidth={3} />
                   </div>

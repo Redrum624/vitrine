@@ -61,17 +61,31 @@ export class LensCorrectionsPipelineModule implements PipelineModule {
         autoDetect: true,
         profileName: '',
         strength: 100
+      },
+      blur: {
+        enabled: false,
+        radius: 0
+      },
+      filmGrain: {
+        enabled: false,
+        amount: 0,
+        size: 1
       }
     }
   };
 
+  // Active whenever ANY section is enabled. (The previous gate also required a
+  // top-level `enabled` flag that nothing ever set, so the whole module silently
+  // never ran in the live pipeline — this derives enablement from the sections.)
   get isEnabled(): boolean {
-    const { lensCorrectionsParams } = this.params;
-    return this.params.enabled && (
-      lensCorrectionsParams.vignetting.enabled ||
-      lensCorrectionsParams.distortion.enabled ||
-      lensCorrectionsParams.chromaticAberration.enabled ||
-      lensCorrectionsParams.profile.enabled
+    const p = this.params.lensCorrectionsParams;
+    return (
+      p.vignetting.enabled ||
+      p.distortion.enabled ||
+      p.chromaticAberration.enabled ||
+      p.profile.enabled ||
+      p.blur.enabled ||
+      p.filmGrain.enabled
     );
   }
 
@@ -165,6 +179,15 @@ export class LensCorrectionsPipelineModule implements PipelineModule {
           autoDetect: true,
           profileName: '',
           strength: 100
+        },
+        blur: {
+          enabled: false,
+          radius: 0
+        },
+        filmGrain: {
+          enabled: false,
+          amount: 0,
+          size: 1
         }
       }
     };
@@ -234,15 +257,28 @@ export class LensCorrectionsPipelineModule implements PipelineModule {
     this.params.lensCorrectionsParams.chromaticAberration = lensCorrectionsModule.getParams().chromaticAberration;
   }
 
+  resetBlur(): void {
+    lensCorrectionsModule.resetBlur();
+    this.params.lensCorrectionsParams.blur = lensCorrectionsModule.getParams().blur;
+  }
+
+  resetFilmGrain(): void {
+    lensCorrectionsModule.resetFilmGrain();
+    this.params.lensCorrectionsParams.filmGrain = lensCorrectionsModule.getParams().filmGrain;
+  }
+
   // Get the underlying lens corrections module
   getLensCorrectionsModule() {
     return lensCorrectionsModule;
   }
 
-  // Get current parameters (required by pipeline)
+  // Get current parameters (required by pipeline). `enabled` is derived from the
+  // sections so the pipeline's identity check skips the module only when every
+  // section is off (and runs it as soon as one is enabled).
   getParams(): Record<string, unknown> {
     return {
       ...this.params,
+      enabled: this.isEnabled,
       lensCorrections: lensCorrectionsModule.getParams()
     };
   }

@@ -1,5 +1,43 @@
 # Photo Editor Pro - Release Notes
 
+## Version 1.5.0 (2026-06-09)
+
+**Sharpen module, streamlined menus, and a smarter Auto White Balance.**
+
+### Added
+- **Sharpen module** in the right icon sidebar, directly below Noise Reduction. A
+  non-destructive unsharp-mask develop module with live sliders: **Amount** (0–150%),
+  **Radius** (0.5–3 px), and **Detail** (0–100, protects smooth areas/noise). It applies
+  to the whole image, so the canvas preview and the export match.
+- **Blur** and **Film Grain** sections inside the **Lens Corrections** panel — both
+  non-destructive. Blur is a Gaussian radius (0–20 px); Film Grain has Amount (0–100%)
+  and Grain Size (1–4). Lens Corrections now contains Distortion, Vignetting, Chromatic
+  Aberration, Blur, and Film Grain.
+
+### Changed
+- **Output Sharpening tab removed from the Export dialog.** Sharpening is now the Sharpen
+  sidebar module; its result is baked into every export automatically by the pipeline.
+- **Toolbar export button relabelled** from "Save" to **"Export"**.
+- **Sidebar tool order** is now Crop & Transform, Basic Adjustments, White Balance, Color
+  Balance, Tone Curve, Noise Reduction, Sharpen, Lens Corrections, History (Color Balance
+  moved directly under White Balance; Sharpen is new under Noise Reduction).
+- **Filter menu removed** from the top menu bar. Its former effects now live elsewhere:
+  Sharpen and Noise Reduction are sidebar modules; Blur and Film Grain are Lens
+  Corrections sections; Vignette is covered by the Vignetting section.
+- **File → New… removed** (it was a placeholder). The Welcome screen is still available
+  via **Window → Welcome Screen…**.
+- **Auto White Balance now uses median gray-world.** Both the White Balance panel's
+  **Auto** button and the **Auto All** action scan the image's overall median colour cast
+  and neutralise both warmth (temperature) and tint (previously it only nudged toward a
+  style profile).
+
+### Fixed
+- **Canvas zoom-out is now seamless** — the zoomed-out image no longer sits in a
+  lighter-grey rectangle/border; it floats on the uniform dark canvas. (Zooming in is
+  still bounded by the fit-to-window rectangle.)
+
+---
+
 ## Version 1.0.0 (2025-12-18)
 
 **First Production Release**

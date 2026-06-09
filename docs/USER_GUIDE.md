@@ -23,7 +23,7 @@ Welcome to the Professional Photo Editing Application - a powerful, privacy-focu
 
 ### Key Features
 
-- **10-Module Processing Pipeline** - Professional-grade image adjustments
+- **Multi-Module Processing Pipeline** - Professional-grade image adjustments
 - **World-Class Noise Reduction** - 4 advanced algorithms (BM3D, NLMeans, Wavelet, Hybrid)
 - **GPU Acceleration** - Hardware-accelerated processing for real-time previews
 - **ACES Color Science** - Hollywood-standard color grading
@@ -50,8 +50,8 @@ Welcome to the Professional Photo Editing Application - a powerful, privacy-focu
 
 ### Opening an Image
 
-1. Use **File → Open…**, or **File → New…** to bring up the welcome / open-folder
-   screen, or drag-and-drop a file onto the application
+1. Use **File → Open…**, or **Window → Welcome Screen…** to bring up the welcome /
+   open-folder screen, or drag-and-drop a file onto the application
 2. Supported formats: JPG, PNG, TIFF, RAW (CR2, CR3, NEF, ARW, ORF, DNG, RW2, PEF, …)
 3. Wait for the image to load and process
 
@@ -84,7 +84,7 @@ The typical editing workflow follows this order:
 
 ## Processing Pipeline
 
-The application processes images through 10 modules in this order:
+The application processes images through these modules in this order:
 
 ### 1. Crop & Transform
 **Purpose:** Geometric corrections
@@ -101,18 +101,23 @@ The application processes images through 10 modules in this order:
 - Hold Shift while dragging to maintain aspect ratio
 
 ### 2. Lens Corrections
-**Purpose:** Correct lens distortion, vignetting, chromatic aberration
+**Purpose:** Correct lens distortion, vignetting, chromatic aberration — plus creative
+finishing effects (Blur, Film Grain)
 **When to use:** After crop, before color adjustments
 
 **Controls:**
 - **Distortion Correction:** Barrel and pincushion correction
 - **Vignetting Removal:** Brighten darkened corners
 - **Chromatic Aberration:** Remove color fringing
+- **Blur:** Non-destructive Gaussian blur (radius 0–20 px)
+- **Film Grain:** Non-destructive grain (Amount 0–100%, Grain Size 1–4)
 
 **Tips:**
 - Enable for wide-angle shots (distortion)
 - Use for images with dark corners (vignetting)
 - Most noticeable in high-contrast edges
+- Blur and Film Grain are non-destructive sections — they re-process live and persist
+  with the image like every other adjustment
 
 ### 3. Exposure
 **Purpose:** Overall image brightness
@@ -144,8 +149,12 @@ The application processes images through 10 modules in this order:
 - **Fluorescent:** 4000K - For office lighting
 - **Flash:** 5500K - Camera flash
 
+**Auto:** The **Auto** button uses **median gray-world** neutralisation — it scans the
+image's overall median colour cast and corrects both warmth (Temperature) and Tint in
+one click. (The same logic drives the white-balance step of **Auto All**.)
+
 **Tips:**
-- Find a neutral gray/white area to reference
+- Find a neutral gray/white area to reference, or click **Auto** for an automatic neutral
 - Daylight is usually 5500K
 - Indoor tungsten lights need cooling (lower K)
 - Shade needs warming (higher K)
@@ -261,13 +270,28 @@ that area only. Switch masks with the chips, and remove one with the trash icon.
 - Chroma noise (color noise) more visible than luminance
 - Don't denoise ISO 100-400 images (unnecessary)
 
+### 11. Sharpen
+**Purpose:** Non-destructive unsharp-mask sharpening
+**When to use:** After noise reduction, just before export
+
+**Controls:**
+- **Amount:** 0–150% (sharpening strength)
+- **Radius:** 0.5–3 px (edge radius)
+- **Detail:** 0–100 (protects smooth areas and noise)
+
+**Notes:**
+- It's a live develop module reached from the sidebar (below Noise Reduction)
+- It applies to the whole image, so the canvas preview matches the export, and the
+  result is baked into exports automatically (there is no separate export-sharpening
+  option)
+
 ---
 
 ## Auto Adjustments
 
 Every **Auto** button — the per-module ones and the **Auto All** button in the toolbar — now uses *your personal style profile*, extracted from 200 of your graded photos at `~\Pictures\Portfolio-Sep 22, 2019 – Feb 6, 2025`. Instead of aiming at generic "neutral" targets, the Auto functions aim at the way *you* actually grade: darker, warmer, with more contrast and less saturation than a textbook neutral.
 
-The profile is split into 5 **buckets** — `low_light`, `high_key`, `warm`, `cool`, and `standard`. **Auto All** automatically picks the right bucket for the current image based on its brightness and white balance, then adjusts Exposure, White Balance, Basic Adjustments (including Highlights/Shadows), Tone Curve, and Color Balance in one click. The bucket it chose is written to the log (e.g. `AutoExposure[warm]: …`) so you can tell which profile fired.
+The profile is split into 5 **buckets** — `low_light`, `high_key`, `warm`, `cool`, and `standard`. **Auto All** automatically picks the right bucket for the current image based on its brightness and white balance, then adjusts Exposure, Basic Adjustments (including Highlights/Shadows), Tone Curve, and Color Balance in one click. Its **white-balance step** uses **median gray-world** neutralisation (the same as the WB panel's **Auto** button) — it scans the image's overall median colour cast and neutralises both warmth and tint, rather than nudging toward the style profile. The bucket it chose is written to the log (e.g. `AutoExposure[warm]: …`) so you can tell which profile fired.
 
 **To regenerate the profile after grading more photos**, re-run the extractor:
 
