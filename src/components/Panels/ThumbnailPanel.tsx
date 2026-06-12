@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Check, Download } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Download } from 'lucide-react';
 import { StarRating } from '../common/StarRating';
 import { ImageFileInfo } from '../../services/FileSystemService';
 import { useAppStore } from '../../stores/appStore';
@@ -18,6 +18,34 @@ interface ThumbnailPanelProps {
 const RAW_EXTENSIONS = ['cr2', 'cr3', 'nef', 'nrw', 'arw', 'sr2', 'srf', 'orf', 'dng', 'raf', 'rw2', 'pef', 'srw', 'x3f', 'raw'];
 const isRawImage = (img: ImageFileInfo): boolean =>
   RAW_EXTENSIONS.includes((img.name.split('.').pop() || '').toLowerCase());
+
+/**
+ * Selection frame for a filmstrip thumbnail — ONE visual language (blue intensity
+ * hierarchy). The current canvas image gets the strongest treatment (solid blue
+ * border + subtle glow); other multi-selected images a dimmed blue border; the
+ * rest a transparent border of the SAME width so thumbnails never shift size.
+ */
+export function getThumbFrameStyle(isCurrent: boolean, inSelection: boolean): React.CSSProperties {
+  if (isCurrent) {
+    return {
+      borderWidth: '2px',
+      borderColor: '#3b82f6',
+      boxShadow: '0 0 0 1px rgba(59, 130, 246, 0.35)',
+    };
+  }
+  if (inSelection) {
+    return {
+      borderWidth: '2px',
+      borderColor: 'rgba(59, 130, 246, 0.45)',
+      boxShadow: 'none',
+    };
+  }
+  return {
+    borderWidth: '2px',
+    borderColor: 'transparent',
+    boxShadow: 'none',
+  };
+}
 
 export function ThumbnailPanel({
   images,
@@ -434,12 +462,8 @@ export function ThumbnailPanel({
                 className="relative flex-shrink-0 rounded border cursor-pointer transition-all h-full"
                 style={{
                   width: 'auto',
-                  borderWidth: '2px',
-                  borderColor: isSelected ? 'var(--white)' : 'var(--border)',
                   backgroundColor: 'var(--gray-800)',
-                  boxShadow: isSelected
-                    ? '0 0 0 1px var(--white)'
-                    : (inSelection ? '0 0 0 2px #3b82f6' : 'none')
+                  ...getThumbFrameStyle(isSelected, inSelection)
                 }}
                 draggable
                 onDragStart={(e) => {
@@ -450,32 +474,17 @@ export function ThumbnailPanel({
                 }}
                 onClick={(e) => handleThumbnailClick(image, e)}
                 onMouseEnter={(e) => {
-                  if (!isSelected) {
+                  if (!isSelected && !inSelection) {
                     e.currentTarget.style.borderColor = 'var(--border-light)';
                   }
                 }}
                 onMouseLeave={(e) => {
-                  if (!isSelected) {
-                    e.currentTarget.style.borderColor = 'var(--border)';
+                  if (!isSelected && !inSelection) {
+                    e.currentTarget.style.borderColor = 'transparent';
                   }
                 }}
                 title={`${image.name} (${image.format})`}
               >
-                {/* Multi-select check badge (top-left). Click it to toggle the
-                    selection off without disturbing the canvas. */}
-                {inSelection && (
-                  <div
-                    data-testid={`check-${image.id}`}
-                    role="button"
-                    title="Deselect"
-                    className="absolute z-10 flex items-center justify-center rounded-full cursor-pointer"
-                    style={{ top: '4px', left: '4px', width: '16px', height: '16px', backgroundColor: '#3b82f6' }}
-                    onClick={(e) => { e.stopPropagation(); toggleImageSelection(image.id); }}
-                  >
-                    <Check className="w-2.5 h-2.5" style={{ color: 'white' }} strokeWidth={3} />
-                  </div>
-                )}
-
                 {isLoading ? (
                   <div className="w-full h-full rounded flex items-center justify-center" style={{backgroundColor: 'var(--gray-800)'}}>
                     <div className="w-4 h-4 border-2 rounded-full animate-spin" style={{borderColor: 'var(--gray-600)', borderTopColor: 'var(--white)'}} />
@@ -530,11 +539,6 @@ export function ThumbnailPanel({
                     }}
                   />
                 </div>
-
-                {/* Selected indicator */}
-                {isSelected && (
-                  <div className="absolute rounded-full" style={{top: '-4px', right: '-4px', width: '10px', height: '10px', backgroundColor: 'var(--white)', border: '2px solid var(--gray-900)'}} />
-                )}
               </div>
             );
           })}
