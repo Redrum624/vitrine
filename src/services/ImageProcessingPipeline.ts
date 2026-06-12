@@ -352,7 +352,12 @@ export class ImageProcessingPipeline {
 
   // Context change detection method removed for now - will be re-added when needed
 
-  async processImage(input: Float32Array, context: ProcessingContext, useWebWorkers = true): Promise<Float32Array> {
+  async processImage(
+    input: Float32Array,
+    context: ProcessingContext,
+    useWebWorkers = true,
+    onProgress?: (completed: number, total: number) => void,
+  ): Promise<Float32Array> {
     const imageData = {
       width: context.width,
       height: context.height,
@@ -368,7 +373,7 @@ export class ImageProcessingPipeline {
     if (useWebWorkers && !isSmallPreview && webWorkerImageProcessor.shouldUseWorkers(imageData)) {
       return this.processWithWebWorkers(input, context);
     } else {
-      return this.processOnMainThread(input, context);
+      return this.processOnMainThread(input, context, onProgress);
     }
   }
 
@@ -419,11 +424,36 @@ export class ImageProcessingPipeline {
     }
   }
 
-  private async processOnMainThread(input: Float32Array, context: ProcessingContext): Promise<Float32Array> {
+  private async processOnMainThread(
+    input: Float32Array,
+    context: ProcessingContext,
+    onProgress?: (completed: number, total: number) => void,
+  ): Promise<Float32Array> {
     let currentData: Float32Array = new Float32Array(input);
 
     // Track processing statistics
     let modulesProcessed = 0;
+
+    // When a progress callback is supplied (export path), pre-count the modules
+    // that will actually run so we can report a meaningful fraction and yield to
+    // the event loop between modules — keeping the UI responsive and the
+    // top-left export bar animating instead of freezing the whole renderer.
+    let progressTotal = 0;
+    let progressDone = 0;
+    if (onProgress) {
+      for (const id of this.processingOrder) {
+        const m = this.modules.get(id);
+        if (m && m.isEnabled !== false && !this.isModuleIdentity(m)) progressTotal++;
+      }
+    }
+    const reportProgress = async (yieldToEventLoop: boolean) => {
+      if (!onProgress) return;
+      progressDone++;
+      onProgress(progressDone, progressTotal);
+      // Only yield after real (non-cached) module work — a macrotask lets React
+      // paint the bar/closed modal between heavy full-resolution passes.
+      if (yieldToEventLoop) await new Promise<void>((resolve) => setTimeout(resolve));
+    };
 
     try {
       for (const moduleId of this.processingOrder) {
@@ -458,23 +488,14 @@ export class ImageProcessingPipeline {
           // Use cached result
           logger.debug(`Module ${module.getName()} used cached result`);
           currentData = new Float32Array(cached.result);
+          await reportProgress(false);
           continue;
         }
 
         try {
-          logger.info(`Processing module: ${module.getName()}`);
+          logger.debug(`Processing module: ${module.getName()}`);
           currentData = module.process(currentData, context);
           modulesProcessed++;
-
-          // CRITICAL DEBUG: Track data after each module
-          const moduleStats = { min: Infinity, max: -Infinity, nonZero: 0 };
-          for (let i = 0; i < currentData.length; i += 4) {
-            const r = currentData[i], g = currentData[i + 1], b = currentData[i + 2];
-            moduleStats.min = Math.min(moduleStats.min, r, g, b);
-            moduleStats.max = Math.max(moduleStats.max, r, g, b);
-            if (r > 0.001 || g > 0.001 || b > 0.001) moduleStats.nonZero++;
-          }
-          logger.info(`${module.getName()} OUTPUT: range=${moduleStats.min.toFixed(4)}-${moduleStats.max.toFixed(4)}, nonZero=${moduleStats.nonZero}/${currentData.length/4}`);
 
           // Cache the result for future use with size tracking
           const resultSize = currentData.byteLength;
@@ -488,28 +509,18 @@ export class ImageProcessingPipeline {
             resultSize
           );
 
-          logger.info(`✅ Module ${module.getName()} processed successfully`);
-
         } catch (error) {
           logger.error(`Error in module ${module.getName()}:`, error);
           // Continue with previous data on error
         }
+
+        await reportProgress(true);
       }
 
       // Only log if there were issues
       if (modulesProcessed === 0) {
         logger.warn('No modules were processed - image unchanged');
       }
-
-      // Critical debugging: Track final pipeline output
-      const finalStats = { min: Infinity, max: -Infinity, nonZero: 0 };
-      for (let i = 0; i < currentData.length; i += 4) {
-        const r = currentData[i], g = currentData[i + 1], b = currentData[i + 2];
-        finalStats.min = Math.min(finalStats.min, r, g, b);
-        finalStats.max = Math.max(finalStats.max, r, g, b);
-        if (r > 0.001 || g > 0.001 || b > 0.001) finalStats.nonZero++;
-      }
-      logger.info(`Pipeline: FINAL OUTPUT - range=${finalStats.min.toFixed(4)}-${finalStats.max.toFixed(4)}, nonZero=${finalStats.nonZero}/${currentData.length/4}`);
 
       return currentData;
 

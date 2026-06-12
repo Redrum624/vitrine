@@ -80,7 +80,9 @@ export class ExportService {
     compression: 'none',
     resizeMode: 'fit',
     maintainAspectRatio: true,
-    colorSpace: 'srgb',
+    // Defaults: original dimensions (no width/height set → no resize), Adobe RGB
+    // colour space, and the highest bit depth the default format (PNG) supports.
+    colorSpace: 'adobergb',
     bitDepth: 16,
     preserveMetadata: true,
     includeProcessingHistory: false,

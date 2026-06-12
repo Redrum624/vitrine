@@ -31,6 +31,11 @@ interface ExportDialogProps {
 
 type TabType = 'format' | 'dimensions' | 'color';
 
+/** Highest bit depth a given output format can store. PNG/TIFF carry 16-bit;
+ *  JPEG/WebP are 8-bit only. Used to default Bit Depth to the format maximum. */
+const maxBitDepthForFormat = (format: ExportOptions['format']): 8 | 16 =>
+  format === 'png' || format === 'tiff' ? 16 : 8;
+
 export const ExportDialog: React.FC<ExportDialogProps> = ({
   isOpen,
   onClose,
@@ -128,6 +133,16 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
     }
   }, [selectedPreset]);
 
+  // Switching format re-defaults Bit Depth to the highest the new format supports
+  // (PNG/TIFF → 16-bit, JPEG/WebP → 8-bit), so an export never silently keeps an
+  // unsupported depth from the previous format.
+  const handleFormatChange = useCallback((format: ExportOptions['format']) => {
+    setExportOptions(prev => ({ ...prev, format, bitDepth: maxBitDepthForFormat(format) }));
+    if (selectedPreset) {
+      setSelectedPreset('');
+    }
+  }, [selectedPreset]);
+
   const handleExport = useCallback(async () => {
     if (validationErrors.length > 0) {
       return;
@@ -183,7 +198,22 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
       return;
     }
 
-    setIsExporting(true);
+    // --- Single image export ---
+    // Close the modal immediately and report progress in the top-left bar (same
+    // UX as multi-export) instead of blocking on a modal spinner. The full-res
+    // pipeline still runs on the main thread, but it now yields between modules
+    // (via the onProgress hook) so the window stays responsive and the bar moves.
+    const exportName = (originalFilePath ? originalFilePath.split(/[/\\]/).pop() : undefined) || 'image';
+    onClose();
+    useAppStore.getState().startExportProgress(1);
+    const setProgress = (frac: number) =>
+      useAppStore.getState().updateExportProgress(Math.max(0, Math.min(1, frac)), exportName);
+    const isCancelled = () => !!useAppStore.getState().exportProgress?.cancelRequested;
+    setProgress(0);
+    // Let React paint the closed modal + the progress bar before the heavy,
+    // main-thread work begins (otherwise it all runs in one frame and the modal
+    // appears frozen until the export finishes).
+    await new Promise<void>((resolve) => setTimeout(resolve));
 
     try {
       let exportImageData: Float32Array;
@@ -191,15 +221,20 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
       let exportHeight: number;
 
       if (originalFilePath) {
-        logger.info('Loading full-resolution image for export');
         const fullResImageData = await imageService.loadImageForExport(originalFilePath);
+        setProgress(0.1);
 
         const pipeline = imageService.getProcessingPipeline();
         if (pipeline) {
-          logger.info(`Processing full-resolution image: ${fullResImageData.width}x${fullResImageData.height}`);
           const context = { width: fullResImageData.width, height: fullResImageData.height, channels: 4 };
-          // Force main-thread processing for exports (web workers may produce different results)
-          const processedData = await pipeline.processImage(fullResImageData.data, context, false);
+          // Force main-thread processing for exports (web workers may produce
+          // different results). The onProgress hook yields between modules.
+          const processedData = await pipeline.processImage(
+            fullResImageData.data,
+            context,
+            false,
+            (done, total) => setProgress(0.1 + 0.75 * (total > 0 ? done / total : 1)),
+          );
 
           if (processedData && typeof processedData === 'object' && 'data' in processedData) {
             const previewData = processedData as unknown as { data: Float32Array; width: number; height: number; isPreview: boolean };
@@ -215,21 +250,24 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
             exportWidth = fullResImageData.width;
             exportHeight = fullResImageData.height;
           }
-
-          logger.info(`Export using processed full-resolution image: ${exportWidth}x${exportHeight}`);
         } else {
           exportImageData = fullResImageData.data;
           exportWidth = fullResImageData.width;
           exportHeight = fullResImageData.height;
-          logger.info(`Export using unprocessed full-resolution image: ${exportWidth}x${exportHeight}`);
         }
       } else {
         exportImageData = imageData;
         exportWidth = imageWidth;
         exportHeight = imageHeight;
-        logger.info(`Export using display resolution image: ${exportWidth}x${exportHeight}`);
       }
 
+      if (isCancelled()) {
+        notificationService.warning('Export cancelled', `${exportName} was not saved`);
+        onExportComplete(false);
+        return;
+      }
+
+      setProgress(0.9);
       const result = await exportService.exportImage(
         exportImageData,
         exportWidth,
@@ -237,20 +275,21 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
         exportOptions,
         originalFilePath
       );
+      setProgress(1);
 
       if (result.success) {
+        notificationService.success('Export complete', `Saved ${exportName}`);
         onExportComplete(true, result.outputPath);
-        onClose();
       } else {
+        notificationService.error('Export failed', result.error || 'Unknown error');
         onExportComplete(false);
-        alert(`Export failed: ${result.error}`);
       }
     } catch (error) {
       logger.error('Export failed:', error);
+      notificationService.error('Export failed', String(error));
       onExportComplete(false);
-      alert(`Export failed: ${error}`);
     } finally {
-      setIsExporting(false);
+      useAppStore.getState().endExportProgress();
     }
   }, [imageData, imageWidth, imageHeight, exportOptions, originalFilePath, validationErrors, onExportComplete, onClose, multiPaths, outputDirectory]);
 
@@ -295,7 +334,7 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
           ].map(({ format, label, desc }) => (
             <button
               key={format}
-              onClick={() => handleOptionChange('format', format)}
+              onClick={() => handleFormatChange(format as ExportOptions['format'])}
               className="p-3 rounded border text-left transition-colors"
               style={{
                 backgroundColor: exportOptions.format === format ? 'var(--gray-700)' : 'var(--gray-800)',
