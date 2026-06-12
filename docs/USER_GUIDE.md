@@ -67,6 +67,9 @@ The thumbnail strip along the bottom lists every image in the current folder:
   **Shift+click** selects a contiguous range — then click the **Export N** button to
   export them all with the same settings (each keeps **its own** edits). A cancellable
   progress bar appears at the top-left, and the files are written as `<name>_PEP.<ext>`
+- **Selection borders**: the image open on the canvas has a **bright blue border**;
+  other images in a multi-selection have a **dimmer blue border**. Ctrl/Cmd+click a
+  bordered thumbnail to remove it from the selection
 - **Collapse / expand** the strip with the chevron (▼ / ▲) button in its header
 
 ### Basic Workflow

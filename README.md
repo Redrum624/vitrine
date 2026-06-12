@@ -4,9 +4,9 @@ A **desktop RAW photo editor** built with Electron + React, featuring a WebGL2/C
 processing pipeline, native LibRaw demosaicing, colour-managed export, and
 non-destructive local adjustments.
 
-![Version](https://img.shields.io/badge/Version-1.5.0-blue)
+![Version](https://img.shields.io/badge/Version-1.6.0-blue)
 ![TypeScript](https://img.shields.io/badge/TypeScript-0_errors-blue)
-![Tests](https://img.shields.io/badge/Tests-812_passing-brightgreen)
+![Tests](https://img.shields.io/badge/Tests-920_passing-brightgreen)
 ![Lint](https://img.shields.io/badge/Lint-clean-brightgreen)
 ![GPU](https://img.shields.io/badge/GPU-WebGL2_accelerated-success)
 
@@ -54,10 +54,12 @@ non-destructive local adjustments.
 
 ### Export & workflow
 - **Export** (the toolbar **Export** button, or `Ctrl+E`) to JPEG / PNG / TIFF / WebP,
-  8- and 16-bit (**defaults to PNG 16-bit** to preserve the 32-bit float pipeline), in
-  **sRGB or wide-gamut** (Adobe RGB / ProPhoto / Rec.2020) using generated ICC profiles,
-  with **EXIF/XMP** metadata embedding. Sharpening is no longer a separate export option —
-  the **Sharpen** module's result is baked into every export automatically.
+  8- and 16-bit (**defaults to PNG, Adobe RGB, and the highest bit depth the format
+  supports** — switching format auto-adjusts the depth), in **sRGB or wide-gamut**
+  (Adobe RGB / ProPhoto / Rec.2020) using generated ICC profiles, with **EXIF/XMP**
+  metadata embedding. The dialog closes as soon as the export starts and a cancellable
+  progress bar at the top-left tracks it. Sharpening is no longer a separate export
+  option — the **Sharpen** module's result is baked into every export automatically.
 - **Multi-export.** Select several photos in the filmstrip (**Ctrl/Cmd+click** to
   toggle individual ones, **Shift+click** for a contiguous range), then **Export N**
   writes them all with one set of settings — each with **its own saved edits** — into

@@ -4,6 +4,47 @@ All notable changes to **Photo Editor Pro** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.6.0] - 2026-06-12
+
+### Changed
+- **Export defaults.** Color Space now defaults to **Adobe RGB** and Bit Depth to the
+  **highest the chosen format supports** (16-bit for PNG/TIFF, 8-bit for JPEG/WebP —
+  switching format auto-adjusts the depth); Dimensions stay "original". Note: a
+  16-bit + wide-gamut combination is currently written as 8-bit on disk (sharp can't
+  embed a wide-gamut ICC into a 16-bit file without a colour shift) — pick sRGB when
+  true 16-bit output matters more than the wider gamut.
+- **Single-image export UX.** The export dialog **closes immediately** and progress is
+  shown in the same cancellable top-left bar that multi-export uses. Cause of the old
+  "stuck for minutes" feel: the full-resolution pipeline ran synchronously on the UI
+  thread — with leftover per-module debug pixel scans making it far slower — freezing
+  the window until done. The debug scans are removed and the pipeline now reports
+  progress and yields between modules. Files: `ImageProcessingPipeline`, `ExportDialog`,
+  `ExportService`.
+- **Filmstrip selection visuals unified.** One blue hierarchy: the image open on the
+  canvas gets a solid blue border + subtle glow; other multi-selected thumbnails get a
+  dimmer blue border. The competing white border, white corner dot, and blue check
+  badge were removed (deselect with **Ctrl/Cmd+click**).
+
+### Fixed
+- **Rating a photo no longer refreshes the filmstrip and jumps to the first
+  thumbnail.** Cause: the `xmp:Rating` write modified the file inside the watched
+  folder → `fs.watch` fired → full folder reload → a brand-new `images` array →
+  the strip re-rendered from scratch and lost its scroll position. Fix: app-initiated
+  writes (ratings, exports, metadata) are registered in `electron/selfWriteRegistry.cjs`
+  and the watcher ignores them (race-free debouncer that still honours genuine external
+  changes), and folder reloads that yield an identical file list keep the existing
+  array reference (`src/utils/imageList.ts`). Affects: `main.cjs`, `App.tsx`.
+- **Memory leaks.** (1) Full-resolution exports (single, multi, batch) parked a
+  Float32 copy of the image **per pipeline module** in the preview cache — hundreds of
+  MB to multiple GB per export; exports now skip the module cache (preview caching
+  unchanged). (2) The filmstrip thumbnail cache was unbounded — now capped at 400
+  entries with FIFO eviction (evicted thumbs lazily reload on scroll). (3) Stale
+  `photoapp-raw-*` temp folders left behind by interrupted RAW decodes are swept at
+  startup (>24 h old). (4) Every filmstrip scroll event re-issued thumbnail IPC
+  fetches for already-loaded thumbs — loads are now ref-guarded. Affects:
+  `ImageProcessingPipeline`, `ExportDialog`, `MultiExportService`,
+  `BatchProcessingService`, `ThumbnailPanel`, `rawDecoder.cjs`, `main.cjs`.
+
 ## [1.5.0] - 2026-06-09
 
 ### Added
