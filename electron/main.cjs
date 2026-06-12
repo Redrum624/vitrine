@@ -3,7 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { writeImageFile, writeImageMetadata } = require('./imageWriter.cjs');
-const { markSelfWrite, isSelfWrite } = require('./selfWriteRegistry.cjs');
+const { markSelfWrite, createFolderChangeDebouncer } = require('./selfWriteRegistry.cjs');
 
 // Keep a global reference of the window objects
 let mainWindow;
@@ -446,25 +446,29 @@ ipcMain.handle('watch-folder', async (event, folderPath) => {
       return { success: true, alreadyWatching: true };
     }
 
-    const watcher = fs.watch(folderPath, { persistent: false }, (eventType, filename) => {
-      // Swallow events caused by the app's own writes (rating XMP, exports) —
-      // forwarding them makes the renderer reload an unchanged folder and the
-      // filmstrip scroll back to the start.
-      if (filename && isSelfWrite(filename)) return;
-      if (filename && mainWindow && !mainWindow.isDestroyed()) {
-        // Debounce rapid changes
-        if (watcher._debounce) {
-          clearTimeout(watcher._debounce);
-        }
-        watcher._debounce = setTimeout(() => {
+    // Debounce rapid changes, swallowing events caused by the app's own writes
+    // (rating XMP, exports) — forwarding those makes the renderer reload an
+    // unchanged folder and the filmstrip scroll back to the start. The
+    // debouncer guarantees: emit iff a NON-self-write event occurred in the
+    // window; self-writes alone never emit and never delay/suppress a genuine
+    // external event. (Logic lives in selfWriteRegistry.cjs — unit-tested.)
+    const debouncer = createFolderChangeDebouncer({
+      delayMs: 100,
+      emit: ({ eventType, filename }) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('folder-changed', {
             folderPath,
             eventType,
             filename
           });
-        }, 100);
+        }
       }
     });
+
+    const watcher = fs.watch(folderPath, { persistent: false }, (eventType, filename) => {
+      debouncer.handleEvent(eventType, filename);
+    });
+    watcher._debouncer = debouncer;
 
     folderWatchers.set(folderPath, watcher);
     return { success: true };
@@ -479,6 +483,7 @@ ipcMain.handle('unwatch-folder', async (event, folderPath) => {
   try {
     const watcher = folderWatchers.get(folderPath);
     if (watcher) {
+      if (watcher._debouncer) watcher._debouncer.cancel(); // drop any pending emit
       watcher.close();
       folderWatchers.delete(folderPath);
     }

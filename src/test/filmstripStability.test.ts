@@ -13,11 +13,18 @@
 import { sameImageList } from '../utils/imageList';
 import type { ImageFileInfo } from '../services/FileSystemService';
 
-const { markSelfWrite, isSelfWrite, SELF_WRITE_TTL_MS } = require('../../electron/selfWriteRegistry.cjs');
+const {
+  markSelfWrite,
+  isSelfWrite,
+  SELF_WRITE_TTL_MS,
+  createFolderChangeDebouncer,
+  _clearAll
+} = require('../../electron/selfWriteRegistry.cjs');
 
 describe('selfWriteRegistry (Layer A — main process)', () => {
   beforeEach(() => {
     jest.useFakeTimers();
+    _clearAll(); // the registry Map is a module-level singleton — isolate tests explicitly
   });
 
   afterEach(() => {
@@ -63,6 +70,88 @@ describe('selfWriteRegistry (Layer A — main process)', () => {
   it('returns false for empty/undefined filenames', () => {
     expect(isSelfWrite('')).toBe(false);
     expect(isSelfWrite(undefined)).toBe(false);
+  });
+});
+
+describe('createFolderChangeDebouncer (watcher debounce vs self-write suppression)', () => {
+  let emit: jest.Mock;
+
+  beforeEach(() => {
+    jest.useFakeTimers();
+    _clearAll();
+    emit = jest.fn();
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  const make = () => createFolderChangeDebouncer({ delayMs: 100, emit });
+
+  it('emits once after the debounce delay for a genuine external event', () => {
+    const d = make();
+    d.handleEvent('change', 'external.jpg');
+    expect(emit).not.toHaveBeenCalled();
+    jest.advanceTimersByTime(100);
+    expect(emit).toHaveBeenCalledTimes(1);
+    expect(emit).toHaveBeenCalledWith({ eventType: 'change', filename: 'external.jpg' });
+  });
+
+  it('self-write events alone never emit', () => {
+    markSelfWrite('D:\\Photos\\rated.jpg');
+    const d = make();
+    d.handleEvent('change', 'rated.jpg');
+    d.handleEvent('change', 'rated.jpg');
+    jest.advanceTimersByTime(1000);
+    expect(emit).not.toHaveBeenCalled();
+  });
+
+  it('a self-write event mid-window does not suppress a concurrent genuine event', () => {
+    markSelfWrite('D:\\Photos\\rated.jpg');
+    const d = make();
+    d.handleEvent('rename', 'new-external.jpg'); // genuine event starts the window
+    jest.advanceTimersByTime(50);
+    d.handleEvent('change', 'rated.jpg'); // self-write arrives mid-window
+    jest.advanceTimersByTime(50); // window elapses
+    expect(emit).toHaveBeenCalledTimes(1);
+    expect(emit).toHaveBeenCalledWith({ eventType: 'rename', filename: 'new-external.jpg' });
+  });
+
+  it('self-write events do not delay (distort) a genuine emit by resetting the timer', () => {
+    markSelfWrite('D:\\Photos\\rated.jpg');
+    const d = make();
+    d.handleEvent('change', 'external.jpg');
+    jest.advanceTimersByTime(90);
+    d.handleEvent('change', 'rated.jpg'); // must NOT restart the 100ms window
+    jest.advanceTimersByTime(10); // original window elapses at t=100
+    expect(emit).toHaveBeenCalledTimes(1);
+    expect(emit).toHaveBeenCalledWith({ eventType: 'change', filename: 'external.jpg' });
+  });
+
+  it('debounces a burst of genuine events into one emit carrying the last context', () => {
+    const d = make();
+    d.handleEvent('rename', 'a.jpg');
+    jest.advanceTimersByTime(50);
+    d.handleEvent('change', 'b.jpg');
+    jest.advanceTimersByTime(100);
+    expect(emit).toHaveBeenCalledTimes(1);
+    expect(emit).toHaveBeenCalledWith({ eventType: 'change', filename: 'b.jpg' });
+  });
+
+  it('ignores events with empty/undefined filenames', () => {
+    const d = make();
+    d.handleEvent('change', '');
+    d.handleEvent('change', undefined);
+    jest.advanceTimersByTime(1000);
+    expect(emit).not.toHaveBeenCalled();
+  });
+
+  it('cancel() discards a pending emit (unwatch-folder mid-window)', () => {
+    const d = make();
+    d.handleEvent('change', 'external.jpg');
+    d.cancel();
+    jest.advanceTimersByTime(1000);
+    expect(emit).not.toHaveBeenCalled();
   });
 });
 
