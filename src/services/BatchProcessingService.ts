@@ -335,12 +335,13 @@ export class BatchProcessingService {
         // Apply the captured settings
         this.applyPipelineSettings(pipelineSettings);
 
-        // Process through the pipeline
+        // Process through the pipeline (full-res: skip the module cache so
+        // batch runs don't park huge Float32 copies in memory)
         processedData = await imageProcessingPipeline.processImage(imageData.data, {
           width: imageData.width,
           height: imageData.height,
           channels: 4
-        });
+        }, true, undefined, false);
       }
 
       // Export the processed image
