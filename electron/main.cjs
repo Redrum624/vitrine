@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { writeImageFile, writeImageMetadata } = require('./imageWriter.cjs');
+const { markSelfWrite, isSelfWrite } = require('./selfWriteRegistry.cjs');
 
 // Keep a global reference of the window objects
 let mainWindow;
@@ -446,6 +447,10 @@ ipcMain.handle('watch-folder', async (event, folderPath) => {
     }
 
     const watcher = fs.watch(folderPath, { persistent: false }, (eventType, filename) => {
+      // Swallow events caused by the app's own writes (rating XMP, exports) —
+      // forwarding them makes the renderer reload an unchanged folder and the
+      // filmstrip scroll back to the start.
+      if (filename && isSelfWrite(filename)) return;
       if (filename && mainWindow && !mainWindow.isDestroyed()) {
         // Debounce rapid changes
         if (watcher._debounce) {
@@ -652,6 +657,7 @@ function getMimeType(filePath) {
 
 ipcMain.handle('write-file', async (event, filePath, data) => {
   try {
+    markSelfWrite(filePath); // don't let the folder watcher react to our own write
     await fs.promises.writeFile(filePath, data);
     return true;
   } catch (error) {
@@ -664,6 +670,7 @@ ipcMain.handle('write-image-file', async (event, filePath, imageData, format, op
   try {
     // Delegates to electron/imageWriter.cjs (unit-tested). Correctly handles
     // 8-bit and 16-bit raw RGBA buffers and embeds an sRGB ICC profile.
+    markSelfWrite(filePath); // exports into a watched folder must not retrigger it
     return await writeImageFile(filePath, imageData, format, options);
   } catch (error) {
     console.error('Failed to write image file:', error);
@@ -718,6 +725,7 @@ ipcMain.handle('read-image-metadata', async (event, filePath) => {
 // failure so the renderer promise rejects (no silent success).
 ipcMain.handle('write-image-metadata', async (event, filePath, metadata) => {
   try {
+    markSelfWrite(filePath); // in-place metadata write must not retrigger the watcher
     return await writeImageMetadata(filePath, metadata);
   } catch (error) {
     console.error('Failed to write image metadata:', error);
@@ -735,9 +743,13 @@ ipcMain.handle('write-image-rating', async (event, filePath, rating) => {
     if (rawFormats.includes(ext)) {
       const { buildXmpPacket } = require('./imageWriter.cjs');
       const sidecar = filePath.slice(0, -ext.length) + '.xmp';
+      // Mark BEFORE writing so the folder watcher swallows the resulting
+      // change event instead of reloading the folder (filmstrip scroll reset).
+      markSelfWrite(sidecar);
       await fs.promises.writeFile(sidecar, buildXmpPacket({ rating }), 'utf8');
       return { ok: true, method: 'sidecar', path: sidecar };
     }
+    markSelfWrite(filePath);
     await writeImageMetadata(filePath, { xmp: { rating } });
     return { ok: true, method: 'embedded' };
   } catch (error) {

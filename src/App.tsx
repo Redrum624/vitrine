@@ -29,6 +29,7 @@ import { useAppStore } from './stores/appStore';
 import { editPersistenceService } from './services/EditPersistenceService';
 import { checkpointService } from './services/CheckpointService';
 import { logger } from './utils/Logger';
+import { sameImageList } from './utils/imageList';
 import { historyService } from './services/HistoryService';
 import { AdjustmentPreset } from './services/PresetService';
 import { errorHandlingService } from './services/ErrorHandlingService';
@@ -535,7 +536,11 @@ function App() {
 
   const handleFolderSelected = useCallback((images: ImageFileInfo[]) => {
     logger.info(`Folder selected with ${images.length} images`);
-    setAvailableImages(images);
+    // Keep the existing array reference when the file list is unchanged (e.g.
+    // a watcher-triggered reload after our own rating write, cloud sync or
+    // antivirus touching a file) so effects keyed on `images` don't re-run
+    // and reset the filmstrip scroll position.
+    setAvailableImages(prev => (sameImageList(prev, images) ? prev : images));
     setShowThumbnailPanel(images.length > 0);
     if (images.length > 0 && !currentImage) {
       setCurrentImage(images[0]);
