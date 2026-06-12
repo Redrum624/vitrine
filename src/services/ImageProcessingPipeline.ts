@@ -357,6 +357,7 @@ export class ImageProcessingPipeline {
     context: ProcessingContext,
     useWebWorkers = true,
     onProgress?: (completed: number, total: number) => void,
+    cacheResults = true,
   ): Promise<Float32Array> {
     const imageData = {
       width: context.width,
@@ -373,7 +374,7 @@ export class ImageProcessingPipeline {
     if (useWebWorkers && !isSmallPreview && webWorkerImageProcessor.shouldUseWorkers(imageData)) {
       return this.processWithWebWorkers(input, context);
     } else {
-      return this.processOnMainThread(input, context, onProgress);
+      return this.processOnMainThread(input, context, onProgress, cacheResults);
     }
   }
 
@@ -428,6 +429,7 @@ export class ImageProcessingPipeline {
     input: Float32Array,
     context: ProcessingContext,
     onProgress?: (completed: number, total: number) => void,
+    cacheResults = true,
   ): Promise<Float32Array> {
     let currentData: Float32Array = new Float32Array(input);
 
@@ -497,17 +499,23 @@ export class ImageProcessingPipeline {
           currentData = module.process(currentData, context);
           modulesProcessed++;
 
-          // Cache the result for future use with size tracking
-          const resultSize = currentData.byteLength;
-          this.moduleCache.set(
-            moduleId,
-            {
-              params: cacheKey,
-              result: new Float32Array(currentData),
-              context: { ...context }
-            },
-            resultSize
-          );
+          // Cache the result for future use with size tracking. Skipped on the
+          // export path (cacheResults=false): a full-resolution result is a
+          // ~hundreds-of-MB Float32 copy per module that would evict the
+          // preview-size entries the slider-drag fast path relies on and stay
+          // resident long after the export finishes.
+          if (cacheResults) {
+            const resultSize = currentData.byteLength;
+            this.moduleCache.set(
+              moduleId,
+              {
+                params: cacheKey,
+                result: new Float32Array(currentData),
+                context: { ...context }
+              },
+              resultSize
+            );
+          }
 
         } catch (error) {
           logger.error(`Error in module ${module.getName()}:`, error);

@@ -20,6 +20,24 @@ const isRawImage = (img: ImageFileInfo): boolean =>
   RAW_EXTENSIONS.includes((img.name.split('.').pop() || '').toLowerCase());
 
 /**
+ * Cap for the thumbnail data-URL cache. Without a bound, browsing a folder with
+ * thousands of images accumulates a multi-MB data URL per file and never frees
+ * any of it. Oldest-inserted entries are evicted first — they belong to thumbnails
+ * scrolled furthest away, and the lazy loader re-fetches them on demand.
+ */
+export const MAX_THUMBNAIL_CACHE = 400;
+
+/** Evict oldest-inserted entries until the map is at or below `max`. Mutates in place. */
+export function evictOldestThumbnails(map: Map<string, string>, max = MAX_THUMBNAIL_CACHE): Map<string, string> {
+  while (map.size > max) {
+    const oldest = map.keys().next().value;
+    if (oldest === undefined) break;
+    map.delete(oldest);
+  }
+  return map;
+}
+
+/**
  * Selection frame for a filmstrip thumbnail — ONE visual language (blue intensity
  * hierarchy). The current canvas image gets the strongest treatment (solid blue
  * border + subtle glow); other multi-selected images a dimmed blue border; the
@@ -99,7 +117,7 @@ export function ThumbnailPanel({
       if (window.electronAPI) {
         const dataUrl = await window.electronAPI.readImageAsDataURL(image.path);
         if (dataUrl) {
-          setThumbnails(prev => new Map(prev).set(image.id, dataUrl));
+          setThumbnails(prev => evictOldestThumbnails(new Map(prev).set(image.id, dataUrl)));
         } else {
           // RAW file that couldn't be processed - create placeholder with filename
           const canvas = document.createElement('canvas');
@@ -116,7 +134,7 @@ export function ThumbnailPanel({
             ctx.font = '9px sans-serif';
             ctx.fillText(image.format || 'RAW', 75, 60);
           }
-          setThumbnails(prev => new Map(prev).set(image.id, canvas.toDataURL()));
+          setThumbnails(prev => evictOldestThumbnails(new Map(prev).set(image.id, canvas.toDataURL())));
         }
       } else {
         // Browser fallback - create placeholder
@@ -132,7 +150,7 @@ export function ThumbnailPanel({
           ctx.textAlign = 'center';
           ctx.fillText(image.name, 75, 50);
         }
-        setThumbnails(prev => new Map(prev).set(image.id, canvas.toDataURL()));
+        setThumbnails(prev => evictOldestThumbnails(new Map(prev).set(image.id, canvas.toDataURL())));
       }
     } catch (error) {
       logger.warn(`Failed to load thumbnail for ${image.name}:`, error);
@@ -149,7 +167,7 @@ export function ThumbnailPanel({
         ctx.textAlign = 'center';
         ctx.fillText('Error', 75, 50);
       }
-      setThumbnails(prev => new Map(prev).set(image.id, canvas.toDataURL()));
+      setThumbnails(prev => evictOldestThumbnails(new Map(prev).set(image.id, canvas.toDataURL())));
     } finally {
       setLoadingThumbnails(prev => {
         const newSet = new Set(prev);

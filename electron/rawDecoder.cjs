@@ -222,6 +222,37 @@ async function decodeEmbeddedJpeg(filePath, log) {
   return { data, width: info.width, height: info.height, channels: info.channels, bitDepth: 8 };
 }
 
+const RAW_TMP_DIR_RE = /^photoapp-raw-[0-9a-f]+$/;
+
+/**
+ * Purge stale `photoapp-raw-*` temp dirs left behind when the per-decode
+ * best-effort cleanup in decodeNative never ran (crash / kill mid-decode).
+ * Called once at app startup. Only dirs older than `maxAgeMs` are removed so a
+ * decode running in another window/session is never swept. Returns the number
+ * of dirs removed; never throws.
+ */
+function sweepStaleRawTmpDirs({ baseDir = os.tmpdir(), maxAgeMs = 24 * 60 * 60 * 1000 } = {}) {
+  let removed = 0;
+  try {
+    const cutoff = Date.now() - maxAgeMs;
+    for (const name of fs.readdirSync(baseDir)) {
+      if (!RAW_TMP_DIR_RE.test(name)) continue;
+      const dir = path.join(baseDir, name);
+      try {
+        const st = fs.statSync(dir);
+        if (!st.isDirectory() || st.mtimeMs > cutoff) continue;
+        fs.rmSync(dir, { recursive: true, force: true });
+        removed++;
+      } catch (_) {
+        /* best-effort per dir */
+      }
+    }
+  } catch (_) {
+    /* best-effort sweep */
+  }
+  return removed;
+}
+
 /**
  * Decode a RAW file to packed pixels, trying each engine in order of quality and
  * degrading gracefully. Throws only if every path fails.
@@ -247,5 +278,6 @@ module.exports = {
   decodeEmbeddedJpeg,
   parsePpm16,
   resolveLibrawBin,
+  sweepStaleRawTmpDirs,
   DCRAW_FLAGS,
 };

@@ -229,11 +229,14 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
           const context = { width: fullResImageData.width, height: fullResImageData.height, channels: 4 };
           // Force main-thread processing for exports (web workers may produce
           // different results). The onProgress hook yields between modules.
+          // cacheResults=false: never park full-resolution module results in the
+          // pipeline cache (hundreds of MB per module at 24MP+).
           const processedData = await pipeline.processImage(
             fullResImageData.data,
             context,
             false,
             (done, total) => setProgress(0.1 + 0.75 * (total > 0 ? done / total : 1)),
+            false,
           );
 
           if (processedData && typeof processedData === 'object' && 'data' in processedData) {

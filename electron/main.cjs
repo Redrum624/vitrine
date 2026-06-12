@@ -904,6 +904,17 @@ app.whenReady().then(() => {
   // Remove the default menu bar
   Menu.setApplicationMenu(null);
 
+  // Purge stale RAW-decode temp dirs (left behind if a previous session crashed
+  // mid-decode; the per-decode cleanup is best-effort only). Deferred so it
+  // never competes with startup work.
+  setTimeout(() => {
+    try {
+      require('./rawDecoder.cjs').sweepStaleRawTmpDirs();
+    } catch (_) {
+      /* best-effort */
+    }
+  }, 5000);
+
   app.on('activate', () => {
     // On macOS it's common to re-create a window in the app when the
     // dock icon is clicked and there are no other windows open

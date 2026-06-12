@@ -64,12 +64,13 @@ class MultiExportService {
           await editPersistenceService.restoreForPath(path, img.width, img.height);
 
           // Process at full resolution on the main thread (matches ExportDialog).
+          // cacheResults=false keeps full-res module results out of the pipeline cache.
           let data: Float32Array = img.data;
           let width = img.width;
           let height = img.height;
           if (pipeline) {
             const context = { width: img.width, height: img.height, channels: 4 };
-            const processed = await pipeline.processImage(img.data, context, false);
+            const processed = await pipeline.processImage(img.data, context, false, undefined, false);
             if (processed && typeof processed === 'object' && 'data' in processed) {
               const p = processed as unknown as { data: Float32Array; width: number; height: number };
               data = p.data;
