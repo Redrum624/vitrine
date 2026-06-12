@@ -75,6 +75,12 @@ export function ThumbnailPanel({
 }: ThumbnailPanelProps) {
   const [thumbnails, setThumbnails] = useState<Map<string, string>>(new Map());
   const [loadingThumbnails, setLoadingThumbnails] = useState<Set<string>>(new Set());
+  // Refs mirroring the maps above so loadThumbnail can bail out synchronously —
+  // scroll events re-request every visible thumb, and without these guards each
+  // request re-issued the IPC fetch (and raced the eviction cap) even when the
+  // thumbnail was already loaded or in flight.
+  const thumbnailsRef = useRef<Map<string, string>>(new Map());
+  const loadingRef = useRef<Set<string>>(new Set());
   const [ratingFilter, setRatingFilter] = useState<number>(0); // 0 = show all
   const [collapsed, setCollapsed] = useState(false); // filmstrip hidden/shown via the arrow toggle
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -90,34 +96,28 @@ export function ThumbnailPanel({
 
   // Load thumbnail for an image
   const loadThumbnail = useCallback(async (image: ImageFileInfo) => {
-    // Check current state using functional updates to avoid stale closures
-    setLoadingThumbnails(prev => {
-      if (prev.has(image.id)) {
-        return prev; // Already loading
-      }
-      return new Set(prev).add(image.id);
-    });
+    // Synchronous re-entrancy guard: skip if already loaded or in flight.
+    if (thumbnailsRef.current.has(image.id) || loadingRef.current.has(image.id)) {
+      return;
+    }
+    loadingRef.current.add(image.id);
+    setLoadingThumbnails(prev => new Set(prev).add(image.id));
 
-    // Check if already loaded
-    setThumbnails(prev => {
-      if (prev.has(image.id)) {
-        // Already loaded, remove from loading set
-        setLoadingThumbnails(loading => {
-          const newSet = new Set(loading);
-          newSet.delete(image.id);
-          return newSet;
-        });
-        return prev;
-      }
-      return prev;
-    });
+    // Write-through helper keeping the ref in sync with the evicted state map.
+    const storeThumbnail = (dataUrl: string) => {
+      setThumbnails(prev => {
+        const next = evictOldestThumbnails(new Map(prev).set(image.id, dataUrl));
+        thumbnailsRef.current = next;
+        return next;
+      });
+    };
 
     try {
       // Try to load thumbnail via Electron API
       if (window.electronAPI) {
         const dataUrl = await window.electronAPI.readImageAsDataURL(image.path);
         if (dataUrl) {
-          setThumbnails(prev => evictOldestThumbnails(new Map(prev).set(image.id, dataUrl)));
+          storeThumbnail(dataUrl);
         } else {
           // RAW file that couldn't be processed - create placeholder with filename
           const canvas = document.createElement('canvas');
@@ -134,7 +134,7 @@ export function ThumbnailPanel({
             ctx.font = '9px sans-serif';
             ctx.fillText(image.format || 'RAW', 75, 60);
           }
-          setThumbnails(prev => evictOldestThumbnails(new Map(prev).set(image.id, canvas.toDataURL())));
+          storeThumbnail(canvas.toDataURL());
         }
       } else {
         // Browser fallback - create placeholder
@@ -150,7 +150,7 @@ export function ThumbnailPanel({
           ctx.textAlign = 'center';
           ctx.fillText(image.name, 75, 50);
         }
-        setThumbnails(prev => evictOldestThumbnails(new Map(prev).set(image.id, canvas.toDataURL())));
+        storeThumbnail(canvas.toDataURL());
       }
     } catch (error) {
       logger.warn(`Failed to load thumbnail for ${image.name}:`, error);
@@ -167,8 +167,9 @@ export function ThumbnailPanel({
         ctx.textAlign = 'center';
         ctx.fillText('Error', 75, 50);
       }
-      setThumbnails(prev => evictOldestThumbnails(new Map(prev).set(image.id, canvas.toDataURL())));
+      storeThumbnail(canvas.toDataURL());
     } finally {
+      loadingRef.current.delete(image.id);
       setLoadingThumbnails(prev => {
         const newSet = new Set(prev);
         newSet.delete(image.id);
