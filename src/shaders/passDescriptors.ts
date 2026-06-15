@@ -7,20 +7,13 @@
  *   - `cpuBridges` — module IDs that must run on the CPU (disabled GPU modules,
  *                    CPU-only modules, or lenscorrections when no GPU sub-effect fires).
  *
- * IMPORTANT ID NOTE:
- *   The string IDs used in GPU_MODULE_IDS match the conventions used in the
- *   CheckpointService / AdjustmentPanel / task spec. Some real pipeline module IDs
- *   differ — specifically WhiteBalanceModule.getId() returns 'temperature', not
- *   'whitebalance'. Task 4 (GpuPreviewPipeline) must map 'temperature' → 'whitebalance'
- *   when looking up GPU capability, or add 'temperature' to GPU_MODULE_IDS as an alias.
- *   Reported as DONE_WITH_CONCERNS item #1.
+ * All module IDs in GPU_MODULE_IDS match the REAL values returned by each module's
+ * getId() — WhiteBalanceModule.getId() returns 'temperature', not 'whitebalance'.
  *
- * DEHAZE CONCERN:
- *   basicAdj's setUniforms uses basicAdjUniforms(p, dz) which requires a DehazeState
- *   computed from the actual pixel data. buildPassList is a pure function with no image
- *   data, so the returned setUniforms closure uses a zero/inactive DehazeState by default.
- *   The real GpuPreviewPipeline must call computeDehaze (or equivalent) before binding
- *   uniforms for the basicadj pass. Reported as DONE_WITH_CONCERNS item #2.
+ * `setUniforms` on every PassDescriptor has arity 3: (gl, program, rt: PassRuntime).
+ * The pipeline computes a single PassRuntime per render (real width/height from the
+ * framebuffer, dehaze from source pixels) and passes it into every setUniforms call.
+ * This eliminates baked-in 0/0 placeholders and inactive dehaze hacks.
  */
 
 import {
@@ -31,36 +24,55 @@ import {
   distortionUniforms,
   lateralCAUniforms,
   vignetteUniforms,
-  hueCurvesUniforms,
-  type UniformSetter,
 } from './uniforms';
 import type { BasicAdjustmentsParams, DehazeState, HueCurveLuts } from '../services/WebGLImageProcessor';
-import { temperatureToRgb, safeDivide } from '../modules/utils/ColorUtils';
+import { computeWBGains } from '../modules/WhiteBalanceModule';
 
 // ── GPU capability sets ────────────────────────────────────────────────────────
 
 /**
  * Module IDs for the P1 GPU pass set (auto-included by buildPassList).
- * NOTE: 'whitebalance' is the convention ID; the real WhiteBalanceModule.getId()
- * returns 'temperature'. See file-level note above.
+ * These are the REAL ids returned by each module's getId() method.
+ * - 'temperature'    = WhiteBalanceModule (getId() returns 'temperature')
+ * - 'basicadj'       = BasicAdjustmentsModule
+ * - 'tonecurve'      = ToneCurvePipelineModule
+ * - 'colorbalance'   = ColorBalancePipelineModule
+ * - 'lenscorrections'= LensCorrectionsPipelineModule
+ * HueCurves is NOT included — it is a standalone singleton, never registered in the
+ * live pipeline. Exposure is deferred to Task 7.
  */
 export const GPU_MODULE_IDS: readonly string[] = [
-  'whitebalance',
+  'temperature',
   'basicadj',
   'tonecurve',
   'colorbalance',
   'lenscorrections',
-  'huecurves',
 ];
 
 /**
- * Opt-in GPU modules — NOT auto-included. The pipeline must explicitly opt in
- * (e.g. user enables GPU NR). 'noisereduction' maps to the NLM denoise shader.
+ * Opt-in GPU modules — NOT auto-included. The pipeline must explicitly opt in.
+ * 'noise-reduction' maps to the NLM denoise shader (GPU NR is expensive; user-triggered).
  */
 export const OPT_IN_GPU_MODULE_IDS: readonly string[] = [
-  'noisereduction',
-  'exposure', // deferred to Task 7
+  'noise-reduction',
 ];
+
+// ── Runtime context ────────────────────────────────────────────────────────────
+
+/**
+ * Per-render context injected at draw time.
+ * The pipeline computes this once per frame and threads it through every setUniforms call.
+ *
+ * - `width`/`height` — actual framebuffer dimensions (needed by lens-corrections passes).
+ * - `dehaze`         — pre-computed dehaze state from source pixels (needed by basicadj).
+ *                      A default inactive value `{active:false,hazeStrength:0,hazeDivisor:1}`
+ *                      is acceptable until Task 4 wires up the real computeDehaze.
+ */
+export interface PassRuntime {
+  width: number;
+  height: number;
+  dehaze: DehazeState;
+}
 
 // ── PassDescriptor type ────────────────────────────────────────────────────────
 
@@ -68,14 +80,15 @@ export const OPT_IN_GPU_MODULE_IDS: readonly string[] = [
  * Describes a single GPU draw-call in the resident-texture pipeline.
  *
  * `programKey`  — selects the compiled WebGL program (e.g. 'gains', 'basicadj').
- * `setUniforms` — sets all scalar/vector uniforms for this pass (no texture ops).
+ * `setUniforms` — sets all scalar/vector uniforms for this pass. Arity 3:
+ *                 `(gl, program, rt: PassRuntime) => void`.
  * `luts`        — optional Float32Arrays for LUT textures that the pipeline must upload
- *                 before drawing (tonecurve master/red/green/blue; huecurves curves).
+ *                 before drawing (tonecurve master/red/green/blue).
  */
 export interface PassDescriptor {
   id: string;
   programKey: string;
-  setUniforms: UniformSetter;
+  setUniforms: (gl: WebGL2RenderingContext, program: WebGLProgram, rt: PassRuntime) => void;
   luts?: Record<string, Float32Array>;
 }
 
@@ -92,70 +105,37 @@ interface MinimalModule {
   getParams?(): Record<string, unknown>;
 }
 
+// ── Re-export computeWBGains for test access ──────────────────────────────────
+// The function lives in WhiteBalanceModule.ts (single source of truth) and is
+// re-exported from here so the test suite can import it alongside buildPassList.
+export { computeWBGains };
+
 // ── Per-module descriptor builders ────────────────────────────────────────────
-
-/**
- * Compute per-channel WB gains from temperature (K) + tint (-100..100).
- * Single-sourced from WhiteBalanceModule.computeGains() — extracted here so
- * both process() and buildPassList call the same math.
- *
- * NOTE: WhiteBalanceModule.computeGains is private. We replicate the formula
- * here (3 lines + tint application). A unit test in this file pins the output.
- * If WhiteBalanceModule.computeGains ever changes, the test will catch drift.
- * Reported as DONE_WITH_CONCERNS item #3.
- */
-export function computeWBGains(temperature: number, tint: number): { r: number; g: number; b: number } {
-  const ref = temperatureToRgb(6500);
-  const cur = temperatureToRgb(temperature);
-  let r = safeDivide(ref.r, cur.r, 1);
-  let g = safeDivide(ref.g, cur.g, 1);
-  let b = safeDivide(ref.b, cur.b, 1);
-
-  // Apply tint (matches WhiteBalanceModule.applyTint exactly)
-  const tintFactor = tint / 100.0;
-  if (tintFactor > 0) {
-    r *= (1 - tintFactor * 0.1);
-    g *= (1 + tintFactor * 0.1);
-    b *= (1 - tintFactor * 0.1);
-  } else {
-    const m = -tintFactor;
-    r *= (1 + m * 0.1);
-    g *= (1 - m * 0.1);
-    b *= (1 + m * 0.1);
-  }
-
-  const avg = (r + g + b) / 3 || 1;
-  return { r: r / avg, g: g / avg, b: b / avg };
-}
 
 function buildWBPass(params: Record<string, unknown>): PassDescriptor {
   const temperature = typeof params.temperature === 'number' ? params.temperature : 6500;
   const tint = typeof params.tint === 'number' ? params.tint : 0;
   const { r, g, b } = computeWBGains(temperature, tint);
   return {
-    id: 'whitebalance',
+    id: 'temperature',
     programKey: 'gains',
-    setUniforms: gainsUniforms(r, g, b),
+    // gains do not depend on rt (no dimension/dehaze needed)
+    setUniforms: (_gl, _prog, _rt) => gainsUniforms(r, g, b)(_gl, _prog),
   };
 }
 
 function buildBasicAdjPass(params: Record<string, unknown>): PassDescriptor {
-  // Cast params — the real module always provides all fields; fakes may be sparse.
   const p = params as unknown as BasicAdjustmentsParams;
-  // DehazeState must be computed from pixel data at draw time (see file-level note).
-  // We return an inactive zero state here; GpuPreviewPipeline overrides this at runtime.
-  const dz: DehazeState = { active: false, hazeStrength: 0, hazeDivisor: 1 };
   return {
     id: 'basicadj',
     programKey: 'basicadj',
-    setUniforms: basicAdjUniforms(p, dz),
+    // dehaze is injected from rt at draw time — no baked-in placeholder
+    setUniforms: (gl, prog, rt) => basicAdjUniforms(p, rt.dehaze)(gl, prog),
   };
 }
 
 function buildToneCurvePass(params: Record<string, unknown>): PassDescriptor {
   const preserveColors = typeof params.preserveColors === 'number' ? params.preserveColors : 0;
-  // LUTs are stored as instance properties on ToneCurveModule (not in getParams()),
-  // but the fake module in the test passes them through getParams() for testability.
   const master = params.lookupTable instanceof Float32Array ? params.lookupTable : undefined;
   const rgbTables = params.rgbLookupTables as { red?: Float32Array; green?: Float32Array; blue?: Float32Array } | undefined;
   const red = rgbTables?.red instanceof Float32Array ? rgbTables.red : undefined;
@@ -171,13 +151,13 @@ function buildToneCurvePass(params: Record<string, unknown>): PassDescriptor {
   return {
     id: 'tonecurve',
     programKey: 'tonecurve',
-    setUniforms: toneCurveUniforms(preserveColors),
+    // tonecurve does not need rt (no dimension/dehaze)
+    setUniforms: (gl, prog, _rt) => toneCurveUniforms(preserveColors)(gl, prog),
     luts: Object.keys(luts).length > 0 ? luts : undefined,
   };
 }
 
 function buildColorBalancePass(params: Record<string, unknown>): PassDescriptor {
-  // Mirror ColorBalanceModule.process() GPU-path exactly.
   const shadows = (params.shadows as Record<string, number> | undefined) ?? { cyan_red: 0, magenta_green: 0, yellow_blue: 0 };
   const midtones = (params.midtones as Record<string, number> | undefined) ?? { cyan_red: 0, magenta_green: 0, yellow_blue: 0 };
   const highlights = (params.highlights as Record<string, number> | undefined) ?? { cyan_red: 0, magenta_green: 0, yellow_blue: 0 };
@@ -194,30 +174,25 @@ function buildColorBalancePass(params: Record<string, unknown>): PassDescriptor 
   return {
     id: 'colorbalance',
     programKey: 'colorbalance',
-    setUniforms: colorBalanceUniforms(
+    // colorbalance does not need rt
+    setUniforms: (gl, prog, _rt) => colorBalanceUniforms(
       [shadows.cyan_red, shadows.magenta_green, shadows.yellow_blue],
       [midtones.cyan_red, midtones.magenta_green, midtones.yellow_blue],
       [highlights.cyan_red, highlights.magenta_green, highlights.yellow_blue],
       sat, lum, hue,
-    ),
+    )(gl, prog),
   };
 }
 
 /**
  * LensCorrections maps to up to three sub-passes (distortion, lateralCA, vignette).
- * Returns an empty array when all sub-effects are identity/disabled (caller sends
- * the module id to cpuBridges in that case).
+ * Each setUniforms reads width/height from rt — no baked-in 0,0 placeholders.
+ * Returns an empty array when all sub-effects are identity/disabled.
  */
-function buildLensCorrectionsSubPasses(
-  params: Record<string, unknown>,
-  moduleIsEnabled: boolean,
-): PassDescriptor[] {
-  if (!moduleIsEnabled) return [];
-
+function buildLensCorrectionsSubPasses(params: Record<string, unknown>): PassDescriptor[] {
   const passes: PassDescriptor[] = [];
 
   // ── Distortion ──────────────────────────────────────────────────────────────
-  // Mirror LensCorrectionsModule.processImage() distortion guard exactly.
   const dist = params.distortion as {
     enabled?: boolean;
     barrel?: number;
@@ -232,18 +207,14 @@ function buildLensCorrectionsSubPasses(
     const scale = dist.scale ?? 1.0;
     const isIdentity = barrel === 0 && perspH === 0 && perspV === 0 && scale === 1.0;
     if (!isIdentity) {
-      // Width/height are not known at buildPassList time; pass 0,0 as placeholders.
-      // GpuPreviewPipeline must patch u_res before drawing.
+      const barrelN = barrel / 100;
+      const perspHRad = perspH * Math.PI / 180;
+      const perspVRad = perspV * Math.PI / 180;
       passes.push({
         id: 'lenscorrections:distortion',
         programKey: 'distortion',
-        setUniforms: distortionUniforms(
-          0, 0,
-          barrel / 100,
-          scale,
-          perspH * Math.PI / 180,
-          perspV * Math.PI / 180,
-        ),
+        // width/height come from rt at draw time
+        setUniforms: (gl, prog, rt) => distortionUniforms(rt.width, rt.height, barrelN, scale, perspHRad, perspVRad)(gl, prog),
       });
     }
   }
@@ -262,7 +233,7 @@ function buildLensCorrectionsSubPasses(
       passes.push({
         id: 'lenscorrections:lateralca',
         programKey: 'lateralca',
-        setUniforms: lateralCAUniforms(0, 0, redCyan, blueMagenta),
+        setUniforms: (gl, prog, rt) => lateralCAUniforms(rt.width, rt.height, redCyan, blueMagenta)(gl, prog),
       });
     }
   }
@@ -282,31 +253,18 @@ function buildLensCorrectionsSubPasses(
       const midpoint = vig.midpoint ?? 0.5;
       const roundness = vig.roundness ?? 0;
       const feather = vig.feather ?? 0.5;
+      const amountN = amount / 100;
+      const roundnessN = roundness / 100;
+      const featherN = feather / 100;
       passes.push({
         id: 'lenscorrections:vignette',
         programKey: 'vignette',
-        setUniforms: vignetteUniforms(0, 0, amount / 100, midpoint, roundness / 100, feather / 100),
+        setUniforms: (gl, prog, rt) => vignetteUniforms(rt.width, rt.height, amountN, midpoint, roundnessN, featherN)(gl, prog),
       });
     }
   }
 
   return passes;
-}
-
-function buildHueCurvesPass(params: Record<string, unknown>): PassDescriptor {
-  // Mirror HueCurvesModule.process() exactly: pass pre-built luts + masterBlend.
-  // When called via buildPassList, luts must be pre-computed by the module (via
-  // setParams/buildLUTs) and exposed through getParams() for the pipeline to read.
-  const luts = (params.luts as HueCurveLuts | undefined) ?? {
-    hueVsHue: null, hueVsSat: null, hueVsLum: null,
-    satVsSat: null, lumVsSat: null,
-  };
-  const blend = typeof params.masterBlend === 'number' ? params.masterBlend : 1;
-  return {
-    id: 'huecurves',
-    programKey: 'huecurves',
-    setUniforms: hueCurvesUniforms(luts, blend),
-  };
 }
 
 // ── buildPassList ──────────────────────────────────────────────────────────────
@@ -328,7 +286,7 @@ export function buildPassList(modules: MinimalModule[]): PassList {
 
   for (const module of modules) {
     const id = module.getId();
-    const enabled = module.isEnabled !== false; // treat missing isEnabled as true (PipelineModule default)
+    const enabled = module.isEnabled !== false; // treat missing isEnabled as true
 
     if (!enabled) {
       cpuBridges.push(id);
@@ -338,11 +296,11 @@ export function buildPassList(modules: MinimalModule[]): PassList {
     const params: Record<string, unknown> = module.getParams?.() ?? {};
 
     if (id === 'lenscorrections') {
-      const subPasses = buildLensCorrectionsSubPasses(params, true);
+      const subPasses = buildLensCorrectionsSubPasses(params);
       if (subPasses.length > 0) {
         passes.push(...subPasses);
       } else {
-        // All sub-effects are identity/disabled — nothing for the GPU to do.
+        // All sub-effects are identity/disabled — nothing for GPU to do.
         cpuBridges.push(id);
       }
       continue;
@@ -354,7 +312,7 @@ export function buildPassList(modules: MinimalModule[]): PassList {
     }
 
     switch (id) {
-      case 'whitebalance':
+      case 'temperature':
         passes.push(buildWBPass(params));
         break;
       case 'basicadj':
@@ -366,9 +324,6 @@ export function buildPassList(modules: MinimalModule[]): PassList {
       case 'colorbalance':
         passes.push(buildColorBalancePass(params));
         break;
-      case 'huecurves':
-        passes.push(buildHueCurvesPass(params));
-        break;
       default:
         // Future GPU modules in GPU_MODULE_IDS without a dedicated builder yet.
         cpuBridges.push(id);
@@ -377,3 +332,6 @@ export function buildPassList(modules: MinimalModule[]): PassList {
 
   return { passes, cpuBridges };
 }
+
+// HueCurveLuts re-exported to avoid unused-import if referenced by consumers
+export type { HueCurveLuts };

@@ -27,6 +27,36 @@ export const WHITE_BALANCE_PRESETS = {
   flash: { temperature: 5500, tint: 0 }
 };
 
+/**
+ * Compute normalized per-channel WB gains from temperature (K) + tint (-100..100).
+ * Exported as a module-level pure function so both WhiteBalanceModule.process() and
+ * the GPU pass-list builder can share the SAME formula with zero drift risk.
+ */
+export function computeWBGains(temperature: number, tint: number): { r: number; g: number; b: number } {
+  const tempRGB = temperatureToRgb(temperature);
+  const referenceRGB = temperatureToRgb(6500);
+
+  let r = safeDivide(referenceRGB.r, tempRGB.r, 1);
+  let g = safeDivide(referenceRGB.g, tempRGB.g, 1);
+  let b = safeDivide(referenceRGB.b, tempRGB.b, 1);
+
+  // Apply green/magenta tint (positive = more green, negative = more magenta)
+  const tintFactor = tint / 100.0;
+  if (tintFactor > 0) {
+    r *= (1 - tintFactor * 0.1);
+    g *= (1 + tintFactor * 0.1);
+    b *= (1 - tintFactor * 0.1);
+  } else {
+    const m = -tintFactor;
+    r *= (1 + m * 0.1);
+    g *= (1 - m * 0.1);
+    b *= (1 + m * 0.1);
+  }
+
+  const avg = (r + g + b) / 3 || 1;
+  return { r: r / avg, g: g / avg, b: b / avg };
+}
+
 export class WhiteBalanceModule {
   private params: WhiteBalanceParams = {
     temperature: 6500, // D65 reference (no correction / identity)
@@ -76,47 +106,11 @@ export class WhiteBalanceModule {
 
   /**
    * Normalized per-channel gains the module applies for a given temperature (K) +
-   * tint. Shared by process() and autoDetectWhiteBalance so the auto estimator
-   * inverts the exact transform that will be applied. Note: applyTint scales R and
-   * B by the SAME factor, so tint never disturbs the red/blue (warm/cool) balance.
+   * tint. Delegates to the module-level `computeWBGains` so both process() and the
+   * GPU pass-list builder share the identical formula.
    */
   private computeGains(temperature: number, tint: number): { r: number; g: number; b: number } {
-    const tempRGB = temperatureToRgb(temperature);
-    const referenceRGB = temperatureToRgb(6500);
-
-    let r = safeDivide(referenceRGB.r, tempRGB.r, 1);
-    let g = safeDivide(referenceRGB.g, tempRGB.g, 1);
-    let b = safeDivide(referenceRGB.b, tempRGB.b, 1);
-
-    const tinted = this.applyTint(r, g, b, tint);
-    r = tinted.r; g = tinted.g; b = tinted.b;
-
-    // Normalize to prevent an overall brightness change.
-    const avg = (r + g + b) / 3 || 1;
-    return { r: r / avg, g: g / avg, b: b / avg };
-  }
-
-  private applyTint(r: number, g: number, b: number, tint: number): { r: number; g: number; b: number } {
-    // Apply green/magenta tint adjustment
-    // Positive tint = more green, negative tint = more magenta
-    const tintFactor = tint / 100.0;
-
-    if (tintFactor > 0) {
-      // Add green, reduce magenta (red + blue)
-      return {
-        r: r * (1 - tintFactor * 0.1),
-        g: g * (1 + tintFactor * 0.1),
-        b: b * (1 - tintFactor * 0.1)
-      };
-    } else {
-      // Add magenta, reduce green
-      const magentaFactor = -tintFactor;
-      return {
-        r: r * (1 + magentaFactor * 0.1),
-        g: g * (1 - magentaFactor * 0.1),
-        b: b * (1 + magentaFactor * 0.1)
-      };
-    }
+    return computeWBGains(temperature, tint);
   }
 
   process(input: Float32Array, context: WhiteBalanceProcessingContext): Float32Array {
