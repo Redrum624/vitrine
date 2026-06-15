@@ -29,6 +29,18 @@ import {
   FRAG_LATERALCA,
   FRAG_BASICADJ,
 } from '../shaders/sources';
+import {
+  exposureUniforms,
+  gainsUniforms,
+  basicAdjUniforms,
+  colorBalanceUniforms,
+  toneCurveUniforms,
+  vignetteUniforms,
+  distortionUniforms,
+  lateralCAUniforms,
+  hueCurvesUniforms,
+  denoiseUniforms,
+} from '../shaders/uniforms';
 
 export interface BasicAdjustmentsParams {
   black_point: number;
@@ -256,9 +268,7 @@ class WebGLImageProcessor {
     const gl = this.ensureContext();
     if (gl && this.gainsProgram && this.vao) {
       try {
-        return this.runPass(this.gainsProgram, data, width, height, (g, prog) => {
-          g.uniform3f(g.getUniformLocation(prog, 'u_gains'), gr, gg, gb);
-        });
+        return this.runPass(this.gainsProgram, data, width, height, gainsUniforms(gr, gg, gb));
       } catch (e) { logger.warn('[GPU] gains failed — CPU:', e instanceof Error ? e.message : String(e)); }
     }
     const out = new Float32Array(data.length);
@@ -276,13 +286,7 @@ class WebGLImageProcessor {
     const gl = this.ensureContext();
     if (!gl || !this.denoiseProgram || !this.vao) return null;
     try {
-      const s = Math.max(0, Math.min(100, strength)) / 100;
-      const h = 0.015 + s * 0.12;  // filter strength grows with the denoise strength
-      const h2 = h * h * 27.0;     // 27 = 3x3 patch * 3 channels
-      return this.runPass(this.denoiseProgram, data, width, height, (g, prog) => {
-        g.uniform2f(g.getUniformLocation(prog, 'u_texel'), 1 / width, 1 / height);
-        g.uniform1f(g.getUniformLocation(prog, 'u_h2'), h2);
-      });
+      return this.runPass(this.denoiseProgram, data, width, height, denoiseUniforms(width, height, strength));
     } catch (e) {
       logger.warn('[GPU] denoise failed:', e instanceof Error ? e.message : String(e));
       return null;
@@ -307,14 +311,8 @@ class WebGLImageProcessor {
     shadows: number[], mid: number[], high: number[], sat: number[], lum: number[], hue: number[]
   ): Float32Array {
     void gl;
-    return this.runPass(this.colorBalanceProgram!, data, width, height, (g, prog) => {
-      g.uniform3f(g.getUniformLocation(prog, 'u_shadows'), shadows[0], shadows[1], shadows[2]);
-      g.uniform3f(g.getUniformLocation(prog, 'u_mid'), mid[0], mid[1], mid[2]);
-      g.uniform3f(g.getUniformLocation(prog, 'u_high'), high[0], high[1], high[2]);
-      g.uniform1fv(g.getUniformLocation(prog, 'u_sat'), sat);
-      g.uniform1fv(g.getUniformLocation(prog, 'u_lum'), lum);
-      g.uniform1fv(g.getUniformLocation(prog, 'u_hue'), hue);
-    });
+    return this.runPass(this.colorBalanceProgram!, data, width, height,
+      colorBalanceUniforms(shadows, mid, high, sat, lum, hue));
   }
 
   private verifyColorBalance(): boolean {
@@ -399,7 +397,7 @@ class WebGLImageProcessor {
     if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) { cleanup(); throw new Error('framebuffer incomplete'); }
     gl.viewport(0, 0, width, height);
     gl.useProgram(prog);
-    gl.uniform1f(gl.getUniformLocation(prog, 'u_preserveColors'), preserveColors);
+    toneCurveUniforms(preserveColors)(gl, prog);
     const names = ['u_image', 'u_master', 'u_red', 'u_green', 'u_blue'];
     [tex, ...luts].forEach((t, unit) => {
       gl.activeTexture(gl.TEXTURE0 + unit);
@@ -465,13 +463,8 @@ class WebGLImageProcessor {
     const gl = this.ensureContext();
     if (gl && this.vignetteProgram && this.vao && this.verifyVignette()) {
       try {
-        return this.runPass(this.vignetteProgram, data, width, height, (g, prog) => {
-          g.uniform2f(g.getUniformLocation(prog, 'u_res'), width, height);
-          g.uniform1f(g.getUniformLocation(prog, 'u_strength'), strength);
-          g.uniform1f(g.getUniformLocation(prog, 'u_midpoint'), midpoint);
-          g.uniform1f(g.getUniformLocation(prog, 'u_roundness'), roundnessNorm);
-          g.uniform1f(g.getUniformLocation(prog, 'u_feather'), featherNorm);
-        });
+        return this.runPass(this.vignetteProgram, data, width, height,
+          vignetteUniforms(width, height, strength, midpoint, roundnessNorm, featherNorm));
       } catch (e) { logger.warn('[GPU] vignette failed — CPU:', e instanceof Error ? e.message : String(e)); }
     }
     return this.vignettingCPU(data, width, height, strength, midpoint, roundnessNorm, featherNorm);
@@ -482,13 +475,8 @@ class WebGLImageProcessor {
     let ok = false;
     try {
       const { data, w, h } = CB_SELFTEST;
-      const a = this.runPass(this.vignetteProgram!, data, w, h, (g, prog) => {
-        g.uniform2f(g.getUniformLocation(prog, 'u_res'), w, h);
-        g.uniform1f(g.getUniformLocation(prog, 'u_strength'), 0.5);
-        g.uniform1f(g.getUniformLocation(prog, 'u_midpoint'), 0.5);
-        g.uniform1f(g.getUniformLocation(prog, 'u_roundness'), 0.2);
-        g.uniform1f(g.getUniformLocation(prog, 'u_feather'), 0.6);
-      });
+      const a = this.runPass(this.vignetteProgram!, data, w, h,
+        vignetteUniforms(w, h, 0.5, 0.5, 0.2, 0.6));
       const c = this.vignettingCPU(data, w, h, 0.5, 0.5, 0.2, 0.6);
       let maxDiff = 0;
       for (let i = 0; i < c.length; i++) maxDiff = Math.max(maxDiff, Math.abs(a[i] - c[i]));
@@ -543,18 +531,7 @@ class WebGLImageProcessor {
     gl: WebGL2RenderingContext, data: Float32Array, width: number, height: number, luts: HueCurveLuts, blend: number
   ): Float32Array {
     void gl;
-    return this.runPass(this.hueCurvesProgram!, data, width, height, (g, p) => {
-      const set = (arr: Float32Array | null, name: string, flag: string) => {
-        g.uniform1f(g.getUniformLocation(p, flag), arr ? 1 : 0);
-        if (arr) g.uniform1fv(g.getUniformLocation(p, name), arr);
-      };
-      set(luts.hueVsHue, 'u_hh', 'u_onHH');
-      set(luts.hueVsSat, 'u_hs', 'u_onHS');
-      set(luts.hueVsLum, 'u_hl', 'u_onHL');
-      set(luts.satVsSat, 'u_ss', 'u_onSS');
-      set(luts.lumVsSat, 'u_ls', 'u_onLS');
-      g.uniform1f(g.getUniformLocation(p, 'u_blend'), blend);
-    });
+    return this.runPass(this.hueCurvesProgram!, data, width, height, hueCurvesUniforms(luts, blend));
   }
 
   private verifyHueCurves(): boolean {
@@ -615,13 +592,8 @@ class WebGLImageProcessor {
     const gl = this.ensureContext();
     if (gl && this.distortionProgram && this.vao && this.verifyDistortion()) {
       try {
-        return this.runPass(this.distortionProgram, data, width, height, (g, prog) => {
-          g.uniform2f(g.getUniformLocation(prog, 'u_res'), width, height);
-          g.uniform1f(g.getUniformLocation(prog, 'u_barrel'), barrelAmount);
-          g.uniform1f(g.getUniformLocation(prog, 'u_scale'), scale);
-          g.uniform1f(g.getUniformLocation(prog, 'u_perspH'), perspH);
-          g.uniform1f(g.getUniformLocation(prog, 'u_perspV'), perspV);
-        });
+        return this.runPass(this.distortionProgram, data, width, height,
+          distortionUniforms(width, height, barrelAmount, scale, perspH, perspV));
       } catch (e) { logger.warn('[GPU] distortion failed — CPU:', e instanceof Error ? e.message : String(e)); }
     }
     return this.distortionCPU(data, width, height, barrelAmount, scale, perspH, perspV);
@@ -634,13 +606,8 @@ class WebGLImageProcessor {
       const { data, w, h } = CB_SELFTEST;
       // Mild barrel only → all samples interior (no out-of-bounds discontinuity),
       // and the manual bilinear is continuous so GPU/CPU agree to ~float precision.
-      const a = this.runPass(this.distortionProgram!, data, w, h, (g, prog) => {
-        g.uniform2f(g.getUniformLocation(prog, 'u_res'), w, h);
-        g.uniform1f(g.getUniformLocation(prog, 'u_barrel'), 0.1);
-        g.uniform1f(g.getUniformLocation(prog, 'u_scale'), 1.0);
-        g.uniform1f(g.getUniformLocation(prog, 'u_perspH'), 0.0);
-        g.uniform1f(g.getUniformLocation(prog, 'u_perspV'), 0.0);
-      });
+      const a = this.runPass(this.distortionProgram!, data, w, h,
+        distortionUniforms(w, h, 0.1, 1.0, 0.0, 0.0));
       const c = this.distortionCPU(data, w, h, 0.1, 1.0, 0.0, 0.0);
       let maxDiff = 0;
       for (let i = 0; i < c.length; i++) maxDiff = Math.max(maxDiff, Math.abs(a[i] - c[i]));
@@ -697,11 +664,8 @@ class WebGLImageProcessor {
     const gl = this.ensureContext();
     if (gl && this.lateralCAProgram && this.vao && this.verifyLateralCA()) {
       try {
-        return this.runPass(this.lateralCAProgram, data, width, height, (g, prog) => {
-          g.uniform2f(g.getUniformLocation(prog, 'u_res'), width, height);
-          g.uniform1f(g.getUniformLocation(prog, 'u_redShift'), redShift);
-          g.uniform1f(g.getUniformLocation(prog, 'u_blueShift'), blueShift);
-        });
+        return this.runPass(this.lateralCAProgram, data, width, height,
+          lateralCAUniforms(width, height, redShift, blueShift));
       } catch (e) { logger.warn('[GPU] lateral-CA failed — CPU:', e instanceof Error ? e.message : String(e)); }
     }
     return this.lateralCACPU(data, width, height, redShift, blueShift);
@@ -712,11 +676,8 @@ class WebGLImageProcessor {
     let ok = false;
     try {
       const { data, w, h } = CB_SELFTEST;
-      const a = this.runPass(this.lateralCAProgram!, data, w, h, (g, prog) => {
-        g.uniform2f(g.getUniformLocation(prog, 'u_res'), w, h);
-        g.uniform1f(g.getUniformLocation(prog, 'u_redShift'), 0.02);
-        g.uniform1f(g.getUniformLocation(prog, 'u_blueShift'), -0.01);
-      });
+      const a = this.runPass(this.lateralCAProgram!, data, w, h,
+        lateralCAUniforms(w, h, 0.02, -0.01));
       const c = this.lateralCACPU(data, w, h, 0.02, -0.01);
       let maxDiff = 0;
       for (let i = 0; i < c.length; i++) maxDiff = Math.max(maxDiff, Math.abs(a[i] - c[i]));
@@ -822,10 +783,6 @@ class WebGLImageProcessor {
   ): Float32Array | null {
     const prog = this.basicAdjProgram!;
     const dz = this.computeDehaze(data, width, height, p.dehaze);
-    const clamp1 = (v: number) => Math.max(-1, Math.min(1, v));
-    const hlActive = Math.abs(clamp1(p.highlights)) > 0.001;
-    const shActive = Math.abs(clamp1(p.shadows)) > 0.001;
-
     const tex = this.makeTexture(gl, width, height, data);
     const dst = this.makeTexture(gl, width, height, null);
     const fbo = gl.createFramebuffer();
@@ -837,24 +794,10 @@ class WebGLImageProcessor {
     }
     gl.viewport(0, 0, width, height);
     gl.useProgram(prog);
-    const u = (n: string) => gl.getUniformLocation(prog, n);
-    gl.uniform1f(u('u_exposure'), p.exposure);
-    gl.uniform1f(u('u_blackPoint'), p.black_point);
-    gl.uniform1f(u('u_brightness'), p.brightness);
-    gl.uniform1f(u('u_contrast'), p.contrast);
-    gl.uniform1f(u('u_dehazeActive'), dz.active ? 1 : 0);
-    gl.uniform1f(u('u_dehaze'), clamp1(p.dehaze));
-    gl.uniform1f(u('u_hazeStrength'), dz.hazeStrength);
-    gl.uniform1f(u('u_hazeDivisor'), dz.hazeDivisor);
-    gl.uniform1f(u('u_hlActive'), hlActive ? 1 : 0);
-    gl.uniform1f(u('u_shActive'), shActive ? 1 : 0);
-    gl.uniform1f(u('u_highlights'), clamp1(p.highlights));
-    gl.uniform1f(u('u_shadows'), clamp1(p.shadows));
-    gl.uniform1f(u('u_saturation'), p.saturation);
-    gl.uniform1f(u('u_vibrance'), p.vibrance);
+    basicAdjUniforms(p, dz)(gl, prog);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, tex);
-    gl.uniform1i(u('u_image'), 0);
+    gl.uniform1i(gl.getUniformLocation(prog, 'u_image'), 0);
     gl.bindVertexArray(this.vao);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     gl.bindVertexArray(null);
@@ -878,7 +821,7 @@ class WebGLImageProcessor {
     }
     gl.viewport(0, 0, width, height);
     gl.useProgram(this.exposureProgram);
-    gl.uniform1f(gl.getUniformLocation(this.exposureProgram!, 'u_gain'), gain);
+    exposureUniforms(gain)(gl, this.exposureProgram!);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, tex);
     gl.uniform1i(gl.getUniformLocation(this.exposureProgram!, 'u_image'), 0);
