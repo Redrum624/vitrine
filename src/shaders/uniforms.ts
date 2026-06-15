@@ -10,7 +10,7 @@
  * GpuPreviewPipeline so both always set identical uniforms.
  */
 
-import type { BasicAdjustmentsParams } from '../services/WebGLImageProcessor';
+import type { BasicAdjustmentsParams, DehazeState, HueCurveLuts } from '../services/WebGLImageProcessor';
 
 /** Setter type used by WebGLImageProcessor.runPass. */
 export type UniformSetter = (gl: WebGL2RenderingContext, prog: WebGLProgram) => void;
@@ -35,12 +35,6 @@ export function gainsUniforms(gr: number, gg: number, gb: number): UniformSetter
 }
 
 // ── Basic adjustments pass ───────────────────────────────────────────────────
-
-interface DehazeState {
-  active: boolean;
-  hazeStrength: number;
-  hazeDivisor: number;
-}
 
 /**
  * @param p   BasicAdjustmentsParams (raw, not yet clamped — factory clamps internally
@@ -147,14 +141,6 @@ export function lateralCAUniforms(
 // NOTE: The HueCurves shader passes the 256-entry LUTs as uniform float arrays
 // (u_hh / u_hs / u_hl / u_ss / u_ls), not as textures, so they ARE safe to
 // include in the factory. The companion flag uniforms (u_onHH etc.) are also here.
-
-type HueCurveLuts = {
-  hueVsHue: Float32Array | null;
-  hueVsSat: Float32Array | null;
-  hueVsLum: Float32Array | null;
-  satVsSat: Float32Array | null;
-  lumVsSat: Float32Array | null;
-};
 
 export function hueCurvesUniforms(luts: HueCurveLuts, blend: number): UniformSetter {
   return (gl, prog) => {

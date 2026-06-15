@@ -54,7 +54,7 @@ export interface BasicAdjustmentsParams {
   shadows: number;
 }
 
-type HueCurveLuts = {
+export type HueCurveLuts = {
   hueVsHue: Float32Array | null; hueVsSat: Float32Array | null; hueVsLum: Float32Array | null;
   satVsSat: Float32Array | null; lumVsSat: Float32Array | null;
 };
@@ -63,7 +63,7 @@ type HueCurveLuts = {
 const LUM = { R: 0.299, G: 0.587, B: 0.114 };
 const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
 
-interface DehazeState { active: boolean; hazeStrength: number; hazeDivisor: number; }
+export interface DehazeState { active: boolean; hazeStrength: number; hazeDivisor: number; }
 
 // ── Color Balance helpers (mirror ColorBalanceModule exactly) ────────────────
 function cbTonalWeight(l: number, range: 0 | 1 | 2): number {
