@@ -77,6 +77,8 @@ export class GpuPreviewPipeline {
   // Cache of uploaded LUT textures, keyed by Float32Array identity. Re-uploaded
   // only when the LUT array reference changes.
   private lutCache = new WeakMap<Float32Array, WebGLTexture>();
+  // Parallel iterable set so destroy() can delete every LUT texture (WeakMap isn't iterable).
+  private lutTextures = new Set<WebGLTexture>();
 
   /**
    * Create the WebGL2 context (on the given canvas, or an internally-created one for
@@ -187,7 +189,7 @@ export class GpuPreviewPipeline {
 
   /** Create or resize the two ping-pong FBO+texture pairs. No-op when size unchanged. */
   private ensureFramebuffers(gl: WebGL2RenderingContext, width: number, height: number): void {
-    if (this.ping[0] && this.width === width && this.height === height) return;
+    if (this.ping[0] && this.ping[1] && this.width === width && this.height === height) return;
 
     for (const pp of this.ping) {
       if (pp) {
@@ -245,6 +247,7 @@ export class GpuPreviewPipeline {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, 256, 256, 0, gl.RED, gl.FLOAT, lut);
     this.lutCache.set(lut, tex);
+    this.lutTextures.add(tex);
     return tex;
   }
 
@@ -303,7 +306,7 @@ export class GpuPreviewPipeline {
       // u_master/u_red/u_green/u_blue as 256x256 R32F on units 1..4.
       if (pass.luts) {
         TONECURVE_LUT_NAMES.forEach((name, i) => {
-          const lut = pass.luts![name === 'u_master' ? 'master' : name === 'u_red' ? 'red' : name === 'u_green' ? 'green' : 'blue'];
+          const lut = pass.luts![name.replace('u_', '') as 'master' | 'red' | 'green' | 'blue'];
           if (!lut) return;
           const unit = i + 1;
           const tex = this.uploadLut(gl, lut);
@@ -393,6 +396,8 @@ export class GpuPreviewPipeline {
           gl.deleteTexture(pp.texture);
         }
       }
+      for (const tex of this.lutTextures) gl.deleteTexture(tex);
+      this.lutTextures.clear();
       if (this.srcTexture) gl.deleteTexture(this.srcTexture);
       if (this.quadBuffer) gl.deleteBuffer(this.quadBuffer);
       if (this.vao) gl.deleteVertexArray(this.vao);

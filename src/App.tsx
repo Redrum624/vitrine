@@ -22,7 +22,7 @@ import { WelcomeScreen } from './components/Welcome/WelcomeScreen';
 import { PerformanceMonitor } from './components/Debug/PerformanceMonitor';
 import { keyboardShortcutsService, createDefaultShortcuts, createRatingShortcuts } from './services/KeyboardShortcutsService';
 import { webGLImageProcessor } from './services/WebGLImageProcessor';
-import { gpuPreviewPipeline } from './shaders/GpuPreviewPipeline';
+import { GpuPreviewPipeline } from './shaders/GpuPreviewPipeline';
 import { electronService } from './services/ElectronService';
 import { imageService } from './services/ImageService';
 import { ImageFileInfo, fileSystemService } from './services/FileSystemService';
@@ -903,13 +903,23 @@ function App() {
     );
 
     // [GPU-PIPELINE] Resident-texture ping-pong self-test: render a basicadj pass
-    // through GpuPreviewPipeline and compare the readback to the WebGLImageProcessor
-    // reference. Verifies the core ping-pong path (no LUTs) at app startup.
-    if (gpuPreviewPipeline.attach()) {
-      const st = gpuPreviewPipeline.selfTest();
-      logger.info(`[GPU-PIPELINE] self-test maxDiff=${st.maxDiff.toExponential(2)} ${st.ok ? 'PASS' : 'FAIL'}`);
-    } else {
-      logger.info('[GPU-PIPELINE] self-test skipped — WebGL2/float unavailable');
+    // through a THROWAWAY GpuPreviewPipeline instance and compare the readback to
+    // the WebGLImageProcessor reference. Uses a fresh instance (not the singleton)
+    // so the singleton is never left attached to a throwaway canvas or holding stale
+    // test data — which would collide when Task 6 attaches it to the real canvas.
+    // Guarded to DEV builds only; no-ops in production.
+    if (process.env.NODE_ENV === 'development') {
+      const probe = new GpuPreviewPipeline();
+      try {
+        if (probe.attach()) {
+          const st = probe.selfTest();
+          logger.info(`[GPU-PIPELINE] self-test maxDiff=${st.maxDiff.toExponential(2)} ${st.ok ? 'PASS' : 'FAIL'}`);
+        } else {
+          logger.info('[GPU-PIPELINE] self-test skipped — WebGL2/float unavailable');
+        }
+      } finally {
+        probe.destroy();
+      }
     }
   }, []);
 
