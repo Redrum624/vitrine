@@ -166,6 +166,93 @@ export class ImageProcessingPipeline {
     return [...this.processingOrder];
   }
 
+  /**
+   * Ordered, GPU-pass-list-ready view of the pipeline modules (in processing order).
+   *
+   * Returned for the resident-texture GPU preview path: `buildPassList()` consumes an
+   * array of `{ getId, isEnabled, getParams, getGpuLuts? }`. We return lightweight
+   * adapters (NOT the raw modules) so this method can normalise per-module param
+   * shapes WITHOUT leaking pipeline internals or reaching into private fields:
+   *
+   *  - `lenscorrections`: its own `getParams()` nests the sub-effect objects under a
+   *    `lensCorrections` key, but `buildLensCorrectionsSubPasses()` reads
+   *    `params.distortion / .chromaticAberration / .vignetting` at the top level.
+   *    The adapter lifts the nested object to the top so the GPU builder sees the
+   *    right shape (and the builder's own tests, which use the flat shape, stay valid).
+   *  - every other module forwards `getParams()` unchanged.
+   *  - `getGpuLuts` is forwarded when present (tone curve) so the builder can attach LUTs.
+   *
+   * Identity ("nothing to do") modules are NOT filtered here — `buildPassList()` already
+   * skips disabled modules and emits no passes for identity sub-effects; an enabled but
+   * neutral module simply produces an identity pass (cheap) or a cpuBridge entry.
+   */
+  getOrderedModules(): Array<{
+    getId(): string;
+    isEnabled?: boolean;
+    getParams(): Record<string, unknown>;
+    getGpuLuts?(): { master: Float32Array; red: Float32Array; green: Float32Array; blue: Float32Array } | null;
+  }> {
+    const adapters: Array<{
+      getId(): string;
+      isEnabled?: boolean;
+      getParams(): Record<string, unknown>;
+      getGpuLuts?(): { master: Float32Array; red: Float32Array; green: Float32Array; blue: Float32Array } | null;
+    }> = [];
+
+    for (const moduleId of this.processingOrder) {
+      const module = this.modules.get(moduleId);
+      if (!module) continue;
+
+      const moduleWithLuts = module as PipelineModule & {
+        getGpuLuts?(): { master: Float32Array; red: Float32Array; green: Float32Array; blue: Float32Array } | null;
+      };
+
+      adapters.push({
+        getId: () => moduleId,
+        get isEnabled() { return module.isEnabled; },
+        getParams: () => {
+          const params = this.getModuleParams(module, moduleId);
+          // Lift lenscorrections' nested sub-effects to the top level for the builder.
+          if (moduleId === 'lenscorrections' && params.lensCorrections && typeof params.lensCorrections === 'object') {
+            return { ...(params.lensCorrections as Record<string, unknown>), enabled: params.enabled };
+          }
+          return params;
+        },
+        getGpuLuts: typeof moduleWithLuts.getGpuLuts === 'function'
+          ? () => moduleWithLuts.getGpuLuts!()
+          : undefined,
+      });
+    }
+
+    return adapters;
+  }
+
+  /**
+   * Public predicate: does this module actually change pixels in the current state?
+   *
+   * "Active" = registered, enabled (isEnabled !== false), AND non-identity (its params
+   * are not at the neutral/default no-op values). Mirrors the exact gate the CPU
+   * `processImage` loop uses to decide whether to run a module, so callers outside the
+   * pipeline (the GPU routing in AdjustmentPanel) can make the SAME enabled+non-identity
+   * decision the plan specifies — WITHOUT reaching into private fields.
+   *
+   * This is the load-bearing fix for the GPU live path: `buildPassList()` maps every
+   * CPU-only module id (crop, exposure, sharpen, shadowshighlights, localadjustments,
+   * noise-reduction) to `cpuBridges` purely by id, even when that module is at its
+   * default/identity state. With all 11 modules registered, `cpuBridges` would never be
+   * empty and the GPU path would never fire. AdjustmentPanel filters the cpuBridges
+   * through this predicate so only modules that are genuinely doing CPU-only work block
+   * the GPU path — an inactive (identity) crop/sharpen/etc. does not.
+   *
+   * Unknown module id → false (not active).
+   */
+  isModuleActive(moduleId: string): boolean {
+    const module = this.modules.get(moduleId);
+    if (!module) return false;
+    if (module.isEnabled === false) return false;
+    return !this.isModuleIdentity(module);
+  }
+
   setModuleEnabled(moduleId: string, enabled: boolean): void {
     const module = this.modules.get(moduleId);
     if (module) {

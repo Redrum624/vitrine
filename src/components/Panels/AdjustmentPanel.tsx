@@ -25,6 +25,8 @@ import { imageService } from '../../services/ImageService';
 import { progressivePreviewService } from '../../services/ProgressivePreviewService';
 import { adaptiveDebounceService } from '../../services/AdaptiveDebounceService';
 import { useAppStore } from '../../stores/appStore';
+import { gpuPreviewPipeline } from '../../shaders/GpuPreviewPipeline';
+import { buildPassList } from '../../shaders/passDescriptors';
 import { logger } from '../../utils/Logger';
 
 interface AdjustmentPanelProps {
@@ -53,6 +55,18 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
   const isProcessingRef = useRef<boolean>(false);
   const pendingReprocessRef = useRef<boolean>(false);
   // NOTE: Removed lastProcessedImagePathRef - was blocking param change reprocessing
+
+  // ── GPU resident-texture preview: source-reupload gating ──────────────────────
+  // The whole point of the resident pipeline is to upload the source ONCE and then
+  // re-run only the cheap GPU passes per slider tick. We re-upload setSource() ONLY
+  // when the source identity changes (new image, or preview dims changed). Re-uploading
+  // every tick would defeat that win. Crop is handled by the CPU path (crop active ⇒
+  // it lands in cpuBridges ⇒ GPU mode is skipped), so the source here is always the
+  // raw decoded image downsampled to the preview — no crop baked in.
+  const lastGpuSourceKeyRef = useRef<string | null>(null);
+  // Trailing throttle for the GPU→CPU histogram readback (keeps the histogram live in
+  // gpu mode without blocking the present path). Cleared on unmount.
+  const gpuReadbackTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Connect the processing pipeline to image service for auto-adjustments
   useEffect(() => {
@@ -221,6 +235,77 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
         channels: 4
       };
 
+      // ── GPU resident-texture fast path ──────────────────────────────────────────
+      // Build the GPU pass list from the SAME ordered modules the CPU pipeline uses
+      // (via getOrderedModules() — no private-field access). The plan routes a frame to
+      // the GPU only when every *active* module is GPU-capable, where "active" means
+      // enabled AND non-identity (the exact gate the CPU processImage loop uses).
+      //
+      // buildPassList() maps CPU-only module ids (crop, exposure, sharpen,
+      // shadowshighlights, localadjustments, noise-reduction) to cpuBridges purely by id
+      // — it has no notion of identity, so with all 11 modules registered it would ALWAYS
+      // report a non-empty cpuBridges and the GPU path would never fire. We therefore
+      // keep only the cpuBridges that are genuinely ACTIVE (imageProcessingPipeline
+      // .isModuleActive). An inactive (default/identity) crop or sharpen does not block
+      // GPU; an actually-cropped image or an applied sharpen / a live local-adjustment
+      // mask does → CPU fallback for that frame.
+      const orderedModules = imageProcessingPipeline.getOrderedModules();
+      const { passes, cpuBridges } = buildPassList(orderedModules);
+      const activeCpuBridges = cpuBridges.filter((id) => imageProcessingPipeline.isModuleActive(id));
+
+      if (gpuPreviewPipeline.isAvailable() && activeCpuBridges.length === 0 && passes.length > 0) {
+        // Source identity: image path + preview dims. Crop never contributes here
+        // (active crop ⇒ activeCpuBridges non-empty ⇒ this branch is skipped), so the
+        // source is the raw downsampled image and only changes on image switch / dim change.
+        const sourceKey = `${currentImage.filePath ?? ''}_${previewWidth}x${previewHeight}`;
+        if (lastGpuSourceKeyRef.current !== sourceKey) {
+          gpuPreviewPipeline.setSource(previewData, previewWidth, previewHeight);
+          lastGpuSourceKeyRef.current = sourceKey;
+        }
+
+        // dehaze is a source-pixel statistic; feed the basicadj dehaze param so the
+        // pipeline can compute the real haze floor (default 0 ⇒ inactive, no cost).
+        const basicAdjDehaze = (() => {
+          const p = basicAdjModule?.getParams?.() as { dehaze?: number } | undefined;
+          return typeof p?.dehaze === 'number' ? p.dehaze : 0;
+        })();
+        gpuPreviewPipeline.setDehazeParam(basicAdjDehaze);
+
+        gpuPreviewPipeline.render(passes);
+        useAppStore.getState().setRenderMode('gpu');
+        useAppStore.getState().bumpGpuResult();
+
+        // Histogram stays live in gpu mode via a trailing, throttled GPU→CPU readback
+        // (~150ms). This does NOT gate the present path (which reads the resident texture
+        // directly) — it only refreshes processedImageData for the histogram consumers.
+        if (gpuReadbackTimerRef.current) clearTimeout(gpuReadbackTimerRef.current);
+        gpuReadbackTimerRef.current = setTimeout(() => {
+          try {
+            const rb = gpuPreviewPipeline.readback();
+            useAppStore.getState().setProcessedImageData({
+              data: rb,
+              width: previewWidth,
+              height: previewHeight,
+              isPreview: true,
+            });
+          } catch (e) {
+            logger.warn('GPU histogram readback failed:', e instanceof Error ? e.message : String(e));
+          }
+        }, 150);
+
+        const processTime = performance.now() - startTime;
+        const pipelineStats = imageProcessingPipeline.getStats();
+        setProcessingStats({
+          timeMs: processTime,
+          active: pipelineStats.enabledModules,
+          total: pipelineStats.moduleCount,
+        });
+        logger.debug(`GPU preview render completed in ${processTime.toFixed(2)}ms (${passes.length} passes), size: ${previewWidth}x${previewHeight}`);
+        return; // GL canvas presents from the resident result — skip the CPU blit path.
+      }
+
+      // ── CPU fallback path (proven 2D-canvas blit) ───────────────────────────────
+      useAppStore.getState().setRenderMode('cpu');
       const processedData = await imageProcessingPipeline.processImage(previewData, processingContext, false); // Disable web workers for preview
 
       // CRITICAL: Use the context dimensions which may have been updated by CropModule rotation
@@ -449,6 +534,10 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
       cleanup();
       adaptiveDebounceService.cancelAll();
       progressivePreviewService.cancelActiveRequests();
+      if (gpuReadbackTimerRef.current) {
+        clearTimeout(gpuReadbackTimerRef.current);
+        gpuReadbackTimerRef.current = null;
+      }
     };
   }, [processCurrentImageRealTime]);
 

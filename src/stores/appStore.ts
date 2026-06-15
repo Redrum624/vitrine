@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { AppState, ImageFile, Layer, ViewportState, ProcessedImageData } from '../types';
+import type { AppState, ImageFile, Layer, ViewportState, ProcessedImageData, RenderMode } from '../types';
 
 interface AppStore extends AppState {
   setCurrentImage: (image: ImageFile | null) => void;
@@ -29,6 +29,16 @@ interface AppStore extends AppState {
   // processed image lands (setProcessedImageData).
   isProcessing: boolean;
   setIsProcessing: (v: boolean) => void;
+  // Which display path the Canvas should use:
+  //  'gpu' → present the resident-texture GPU result on the WebGL2 canvas (zero readback)
+  //  'cpu' → blit `processedImageData` to the 2D canvas (the proven path)
+  // Default 'cpu' (safe); AdjustmentPanel flips to 'gpu' only when it actually renders
+  // a frame on the GPU pipeline (all enabled modules have a GPU path).
+  renderMode: RenderMode;
+  setRenderMode: (mode: RenderMode) => void;
+  // Bumped every time a GPU render completes so the Canvas re-presents the new result.
+  gpuResultVersion: number;
+  bumpGpuResult: () => void;
   // Live processing stats (surfaced in the StatusBar)
   lastProcessingTimeMs: number;
   modulesActive: number;
@@ -81,6 +91,8 @@ export const useAppStore = create<AppStore>((set) => ({
   processingVersion: 0,
   externalParamsVersion: 0,
   isProcessing: false,
+  renderMode: 'cpu',
+  gpuResultVersion: 0,
   lastProcessingTimeMs: 0,
   modulesActive: 0,
   modulesTotal: 0,
@@ -104,6 +116,10 @@ export const useAppStore = create<AppStore>((set) => ({
   })),
 
   setIsProcessing: (v) => set({ isProcessing: v }),
+
+  setRenderMode: (mode) => set({ renderMode: mode }),
+
+  bumpGpuResult: () => set((state) => ({ gpuResultVersion: state.gpuResultVersion + 1 })),
 
   setCurrentImage: (image) => set({ currentImage: image }),
 

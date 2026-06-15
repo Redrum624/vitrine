@@ -315,6 +315,8 @@ export interface ProcessedImageData {
   isPreview: boolean;
 }
 
+export type RenderMode = 'gpu' | 'cpu';
+
 export interface AppState {
   currentImage: ImageFile | null;
   selectedTool: string | null;

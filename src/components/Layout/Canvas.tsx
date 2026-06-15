@@ -14,6 +14,7 @@ import { LocalAdjustmentsPipelineModule } from '../../modules/LocalAdjustmentsPi
 import { LocalAdjustmentMaskOverlay } from '../Canvas/LocalAdjustmentMaskOverlay';
 import { notificationService } from '../../services/NotificationService';
 import { StarRating } from '../common/StarRating';
+import { gpuPreviewPipeline } from '../../shaders/GpuPreviewPipeline';
 
 // Debug mode for canvas rendering - set to false for production
 const DEBUG_CANVAS = process.env.NODE_ENV === 'development';
@@ -29,9 +30,18 @@ interface CanvasProps {
 
 export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize, onZoomIn: _onZoomIn, onZoomOut: _onZoomOut, zoom: _zoom, currentImage }: CanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  // Second canvas dedicated to the WebGL2 GPU present path. A <canvas> can only ever
+  // hold ONE context type for its lifetime, so we keep the proven 2D canvas above for
+  // the CPU path and present the resident GPU result onto this one. Exactly one is
+  // visible at a time (toggled by renderMode); both are sized pixel-identically so the
+  // overlays (grid/rulers/crop/mask) align with whichever is showing.
+  const glCanvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasWrapperRef = useRef<HTMLDivElement>(null);
-  const { viewport, setViewport, processedImageData, isAdjustingRotation, selectedTool, triggerReprocessing, showGrid, showRulers, showOriginal, referenceMode, isProcessing, imageRatings, setImageRating } = useAppStore();
+  const { viewport, setViewport, processedImageData, isAdjustingRotation, selectedTool, triggerReprocessing, showGrid, showRulers, showOriginal, referenceMode, isProcessing, imageRatings, setImageRating, renderMode, gpuResultVersion, setRenderMode } = useAppStore();
+  // Whether attach() succeeded on this canvas (WebGL2 present available). When false the
+  // app behaves exactly as before: GL canvas stays hidden and renderMode is forced 'cpu'.
+  const glAvailableRef = useRef<boolean>(false);
   const [isDragging, setIsDragging] = useState(false);
   const [lastPan, setLastPan] = useState({ x: 0, y: 0 });
   const [displayImage, setDisplayImage] = useState<ImageFileInfo | null>(null);
@@ -262,6 +272,15 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
     canvas.width = Math.floor(canvasWidth);
     canvas.height = Math.floor(canvasHeight);
 
+    // Mirror the GL canvas's internal (drawing-buffer) size to the 2D canvas so the
+    // present() dest-rect math (which uses gl.canvas.width/height) places the image
+    // identically and the shared overlays align with either canvas.
+    const glCanvas = glCanvasRef.current;
+    if (glCanvas) {
+      glCanvas.width = canvas.width;
+      glCanvas.height = canvas.height;
+    }
+
     // Calculate CSS display size to fit container while maintaining aspect ratio
     let displayWidth, displayHeight;
     if (currentImageData && displayImage) {
@@ -286,6 +305,12 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
     canvas.style.width = `${Math.floor(displayWidth)}px`;
     canvas.style.height = `${Math.floor(displayHeight)}px`;
 
+    // Mirror the GL canvas's CSS display size so it overlaps the 2D canvas exactly.
+    if (glCanvas) {
+      glCanvas.style.width = `${Math.floor(displayWidth)}px`;
+      glCanvas.style.height = `${Math.floor(displayHeight)}px`;
+    }
+
     // Update canvas dimensions state for overlay positioning
     setCanvasDimensions({ width: Math.floor(displayWidth), height: Math.floor(displayHeight) });
 
@@ -295,6 +320,14 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
     CSS Display: ${canvas.style.width} x ${canvas.style.height}
     Computed: ${window.getComputedStyle(canvas).width} x ${window.getComputedStyle(canvas).height}
     Scale factor: ${(displayWidth / canvas.width).toFixed(2)}x`);
+    }
+
+    // In GPU mode the visible result is presented onto the GL canvas (a separate
+    // effect calls gpuPreviewPipeline.present on gpuResultVersion/viewport/showOriginal
+    // changes). The 2D canvas is hidden, so we skip its (now redundant) blit entirely —
+    // sizing above still runs so the GL canvas stays pixel-synced and overlays align.
+    if (useAppStore.getState().renderMode === 'gpu' && glAvailableRef.current) {
+      return;
     }
 
     // Clear canvas. Use the SAME colour as the surrounding container (bg-dark-900
@@ -671,10 +704,13 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
     }
   }, [currentImage, displayImage, loadImage]);
 
-  // Redraw canvas when processed image data changes
+  // Redraw canvas when processed image data changes. Also re-run when renderMode or
+  // gpuResultVersion changes so the (shared) sizing logic keeps the GL canvas's
+  // drawing-buffer + CSS size synced with the 2D canvas before present() runs — this
+  // covers the first GPU render after an image load and param-only GPU edits.
   useEffect(() => {
     redrawCanvas();
-  }, [processedImageData, displayImage]);
+  }, [processedImageData, displayImage, renderMode, gpuResultVersion]);
 
 
   const navigateImage = async (direction: 'next' | 'prev') => {
@@ -692,6 +728,44 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
   useEffect(() => {
     redrawCanvas();
   }, [viewport]);
+
+  // Attach the WebGL2 GPU present pipeline to the GL canvas on mount. If WebGL2 / float
+  // render targets are unavailable, attach() returns false: we force renderMode to 'cpu'
+  // and never show the GL canvas, so the app behaves exactly as before. (AdjustmentPanel
+  // also gates on gpuPreviewPipeline.isAvailable(), so the two stay consistent.)
+  useEffect(() => {
+    const glCanvas = glCanvasRef.current;
+    if (!glCanvas) return;
+    const ok = gpuPreviewPipeline.attach(glCanvas);
+    glAvailableRef.current = ok;
+    if (!ok) {
+      setRenderMode('cpu');
+    }
+    // Free GL resources on unmount so a remount (HMR, route change) gets a clean context.
+    return () => {
+      gpuPreviewPipeline.destroy();
+      glAvailableRef.current = false;
+    };
+  }, [setRenderMode]);
+
+  // Present the resident GPU result to the GL canvas. Runs in gpu mode on every:
+  //   - gpuResultVersion change (a new GPU render completed)
+  //   - viewport change (zoom / pan)
+  //   - showOriginal change (before/after split toggle)
+  // No GPU→CPU readback — present() blits the resident result texture directly.
+  useEffect(() => {
+    if (renderMode !== 'gpu' || !glAvailableRef.current) return;
+    const glCanvas = glCanvasRef.current;
+    if (!glCanvas) return;
+    gpuPreviewPipeline.present({
+      zoom: viewport.zoom,
+      panX: viewport.panX,
+      panY: viewport.panY,
+      // Before/after split shows the original on the left half (canvas drawing-buffer
+      // pixels). -1 disables the split.
+      splitX: showOriginal ? glCanvas.width / 2 : -1,
+    });
+  }, [renderMode, gpuResultVersion, viewport, showOriginal]);
 
   // Get crop module from pipeline
   useEffect(() => {
@@ -877,7 +951,23 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
               className={isDragging ? 'cursor-grabbing' : 'cursor-grab'}
               style={{
                 // Manual aspect ratio handling - no object-fit needed
-                display: 'block'
+                // Hidden in GPU mode (the GL canvas presents instead); shown otherwise.
+                display: renderMode === 'gpu' && glAvailableRef.current ? 'none' : 'block'
+              }}
+            />
+
+            {/* WebGL2 GPU present canvas — overlaps the 2D canvas pixel-for-pixel.
+                Visible only in GPU mode; absolutely positioned so it doesn't affect
+                the wrapper's layout (the 2D canvas defines the wrapper box). Overlays
+                below sit above BOTH canvases. */}
+            <canvas
+              ref={glCanvasRef}
+              className={isDragging ? 'cursor-grabbing' : 'cursor-grab'}
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                display: renderMode === 'gpu' && glAvailableRef.current ? 'block' : 'none'
               }}
             />
 
