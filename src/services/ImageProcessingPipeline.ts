@@ -76,6 +76,14 @@ export interface PipelineModule {
   resetParams?(): void;
 }
 
+/** Adapter shape returned by getOrderedModules() — consumed by the GPU pass builder. */
+export interface OrderedModuleAdapter {
+  getId(): string;
+  isEnabled?: boolean;
+  getParams(): Record<string, unknown>;
+  getGpuLuts?(): { master: Float32Array; red: Float32Array; green: Float32Array; blue: Float32Array } | null;
+}
+
 export class ImageProcessingPipeline {
   private modules: Map<string, PipelineModule> = new Map();
   private processingOrder: string[] = [];
@@ -186,18 +194,8 @@ export class ImageProcessingPipeline {
    * skips disabled modules and emits no passes for identity sub-effects; an enabled but
    * neutral module simply produces an identity pass (cheap) or a cpuBridge entry.
    */
-  getOrderedModules(): Array<{
-    getId(): string;
-    isEnabled?: boolean;
-    getParams(): Record<string, unknown>;
-    getGpuLuts?(): { master: Float32Array; red: Float32Array; green: Float32Array; blue: Float32Array } | null;
-  }> {
-    const adapters: Array<{
-      getId(): string;
-      isEnabled?: boolean;
-      getParams(): Record<string, unknown>;
-      getGpuLuts?(): { master: Float32Array; red: Float32Array; green: Float32Array; blue: Float32Array } | null;
-    }> = [];
+  getOrderedModules(): OrderedModuleAdapter[] {
+    const adapters: OrderedModuleAdapter[] = [];
 
     for (const moduleId of this.processingOrder) {
       const module = this.modules.get(moduleId);

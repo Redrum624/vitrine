@@ -263,7 +263,8 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
           lastGpuSourceKeyRef.current = sourceKey;
         }
 
-        // dehaze is a source-pixel statistic; feed the basicadj dehaze param so the
+        // dehaze is a source-pixel statistic; read the current param from basicAdjModule
+        // (resolved above via imageProcessingPipeline.getModule('basicadj')) so the GPU
         // pipeline can compute the real haze floor (default 0 ⇒ inactive, no cost).
         const basicAdjDehaze = (() => {
           const p = basicAdjModule?.getParams?.() as { dehaze?: number } | undefined;

@@ -108,6 +108,10 @@ export class GpuPreviewPipeline {
    * headless/self-test), compile all programs, build the fullscreen-quad VAO.
    * Returns false (and stays unavailable) if WebGL2 / float-color render targets
    * are missing (jsdom, weak GPUs).
+   *
+   * Safe to call again after destroy() — destroy() resets `attached` to false and
+   * nulls `gl`, so a subsequent attach() fully reinitializes the pipeline (StrictMode
+   * double-mount safe).
    */
   attach(canvas?: HTMLCanvasElement): boolean {
     if (this.attached) return this.gl !== null;

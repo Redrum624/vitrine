@@ -41,7 +41,8 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
   const { viewport, setViewport, processedImageData, isAdjustingRotation, selectedTool, triggerReprocessing, showGrid, showRulers, showOriginal, referenceMode, isProcessing, imageRatings, setImageRating, renderMode, gpuResultVersion, setRenderMode } = useAppStore();
   // Whether attach() succeeded on this canvas (WebGL2 present available). When false the
   // app behaves exactly as before: GL canvas stays hidden and renderMode is forced 'cpu'.
-  const glAvailableRef = useRef<boolean>(false);
+  // Kept as React state (not just a ref) so JSX visibility re-renders when it changes.
+  const [glAvailable, setGlAvailable] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [lastPan, setLastPan] = useState({ x: 0, y: 0 });
   const [displayImage, setDisplayImage] = useState<ImageFileInfo | null>(null);
@@ -326,7 +327,9 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
     // effect calls gpuPreviewPipeline.present on gpuResultVersion/viewport/showOriginal
     // changes). The 2D canvas is hidden, so we skip its (now redundant) blit entirely —
     // sizing above still runs so the GL canvas stays pixel-synced and overlays align.
-    if (useAppStore.getState().renderMode === 'gpu' && glAvailableRef.current) {
+    // Use committed closure values (renderMode state + glAvailable state) rather than
+    // getState() so this guard always reflects the same render that scheduled this call.
+    if (renderMode === 'gpu' && glAvailable) {
       return;
     }
 
@@ -390,7 +393,7 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
       // Draw placeholder content
       drawPlaceholder(ctx, canvas);
     }
-  }, [processedImageData, displayImage, viewport]);
+  }, [processedImageData, displayImage, viewport, renderMode, glAvailable]);
 
   // Optimized image drawing with caching and requestAnimationFrame
   const drawLoadedImageOptimized = useCallback((ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, imageInfo: { width: number; height: number }, data: Float32Array) => {
@@ -724,10 +727,14 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
   };
 
 
-  // Redraw canvas when viewport changes
+  // Redraw the 2D canvas when viewport (pan/zoom) changes. In GPU mode the present()
+  // effect above already handles viewport changes, so the 2D blit is a no-op; skip it
+  // explicitly to avoid a spurious drawLoadedImageOptimized call on every pan event.
   useEffect(() => {
-    redrawCanvas();
-  }, [viewport]);
+    if (renderMode !== 'gpu') {
+      redrawCanvas();
+    }
+  }, [viewport, renderMode, redrawCanvas]);
 
   // Attach the WebGL2 GPU present pipeline to the GL canvas on mount. If WebGL2 / float
   // render targets are unavailable, attach() returns false: we force renderMode to 'cpu'
@@ -737,14 +744,15 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
     const glCanvas = glCanvasRef.current;
     if (!glCanvas) return;
     const ok = gpuPreviewPipeline.attach(glCanvas);
-    glAvailableRef.current = ok;
+    setGlAvailable(ok);
     if (!ok) {
       setRenderMode('cpu');
     }
     // Free GL resources on unmount so a remount (HMR, route change) gets a clean context.
+    // destroy() resets `attached` so a subsequent attach() (StrictMode remount) fully reinits.
     return () => {
       gpuPreviewPipeline.destroy();
-      glAvailableRef.current = false;
+      setGlAvailable(false);
     };
   }, [setRenderMode]);
 
@@ -754,7 +762,7 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
   //   - showOriginal change (before/after split toggle)
   // No GPU→CPU readback — present() blits the resident result texture directly.
   useEffect(() => {
-    if (renderMode !== 'gpu' || !glAvailableRef.current) return;
+    if (renderMode !== 'gpu' || !glAvailable) return;
     const glCanvas = glCanvasRef.current;
     if (!glCanvas) return;
     gpuPreviewPipeline.present({
@@ -952,7 +960,7 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
               style={{
                 // Manual aspect ratio handling - no object-fit needed
                 // Hidden in GPU mode (the GL canvas presents instead); shown otherwise.
-                display: renderMode === 'gpu' && glAvailableRef.current ? 'none' : 'block'
+                display: renderMode === 'gpu' && glAvailable ? 'none' : 'block'
               }}
             />
 
@@ -967,7 +975,7 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
                 position: 'absolute',
                 top: 0,
                 left: 0,
-                display: renderMode === 'gpu' && glAvailableRef.current ? 'block' : 'none'
+                display: renderMode === 'gpu' && glAvailable ? 'block' : 'none'
               }}
             />
 
