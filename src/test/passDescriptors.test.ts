@@ -1,4 +1,4 @@
-import { buildPassList, GPU_MODULE_IDS, OPT_IN_GPU_MODULE_IDS } from '../shaders/passDescriptors';
+import { buildPassList, computeWBGains, GPU_MODULE_IDS, OPT_IN_GPU_MODULE_IDS } from '../shaders/passDescriptors';
 import { WhiteBalanceModule } from '../modules/WhiteBalanceModule';
 import { BasicAdjustmentsModule } from '../modules/BasicAdjustmentsModule';
 import { ToneCurvePipelineModule } from '../modules/ToneCurvePipelineModule';
@@ -211,9 +211,6 @@ test('empty module list returns empty results', () => {
 // ---------------------------------------------------------------------------
 
 test('computeWBGains (from WhiteBalanceModule) output matches module process() for a known temperature', () => {
-  // Import the exported helper that passDescriptors uses
-  const { computeWBGains } = require('../shaders/passDescriptors');
-
   const temperature = 4000;
   const tint = 20;
 

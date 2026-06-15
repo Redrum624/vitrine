@@ -25,7 +25,7 @@ import {
   lateralCAUniforms,
   vignetteUniforms,
 } from './uniforms';
-import type { BasicAdjustmentsParams, DehazeState, HueCurveLuts } from '../services/WebGLImageProcessor';
+import type { BasicAdjustmentsParams, DehazeState } from '../services/WebGLImageProcessor';
 import { computeWBGains } from '../modules/WhiteBalanceModule';
 
 // ── GPU capability sets ────────────────────────────────────────────────────────
@@ -110,6 +110,10 @@ interface MinimalModule {
 // re-exported from here so the test suite can import it alongside buildPassList.
 export { computeWBGains };
 
+// ── Shared defaults ───────────────────────────────────────────────────────────
+
+const NEUTRAL_TONE = { cyan_red: 0, magenta_green: 0, yellow_blue: 0 } as const;
+
 // ── Per-module descriptor builders ────────────────────────────────────────────
 
 function buildWBPass(params: Record<string, unknown>): PassDescriptor {
@@ -158,9 +162,9 @@ function buildToneCurvePass(params: Record<string, unknown>): PassDescriptor {
 }
 
 function buildColorBalancePass(params: Record<string, unknown>): PassDescriptor {
-  const shadows = (params.shadows as Record<string, number> | undefined) ?? { cyan_red: 0, magenta_green: 0, yellow_blue: 0 };
-  const midtones = (params.midtones as Record<string, number> | undefined) ?? { cyan_red: 0, magenta_green: 0, yellow_blue: 0 };
-  const highlights = (params.highlights as Record<string, number> | undefined) ?? { cyan_red: 0, magenta_green: 0, yellow_blue: 0 };
+  const shadows = (params.shadows as Record<string, number> | undefined) ?? NEUTRAL_TONE;
+  const midtones = (params.midtones as Record<string, number> | undefined) ?? NEUTRAL_TONE;
+  const highlights = (params.highlights as Record<string, number> | undefined) ?? NEUTRAL_TONE;
 
   const colors = ['red', 'orange', 'yellow', 'green', 'cyan', 'blue', 'purple', 'magenta'];
   const getNum = (key: string): number => {
@@ -333,5 +337,3 @@ export function buildPassList(modules: MinimalModule[]): PassList {
   return { passes, cpuBridges };
 }
 
-// HueCurveLuts re-exported to avoid unused-import if referenced by consumers
-export type { HueCurveLuts };
