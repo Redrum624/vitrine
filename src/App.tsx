@@ -22,6 +22,7 @@ import { WelcomeScreen } from './components/Welcome/WelcomeScreen';
 import { PerformanceMonitor } from './components/Debug/PerformanceMonitor';
 import { keyboardShortcutsService, createDefaultShortcuts, createRatingShortcuts } from './services/KeyboardShortcutsService';
 import { webGLImageProcessor } from './services/WebGLImageProcessor';
+import { gpuPreviewPipeline } from './shaders/GpuPreviewPipeline';
 import { electronService } from './services/ElectronService';
 import { imageService } from './services/ImageService';
 import { ImageFileInfo, fileSystemService } from './services/FileSystemService';
@@ -900,6 +901,16 @@ function App() {
       `[GPU POC] WebGL2 ${r.available ? 'AVAILABLE' : 'unavailable'} — exposure ${r.width}x${r.height}: ` +
       `GPU=${r.gpuMs != null ? r.gpuMs.toFixed(1) + 'ms' : 'n/a'} CPU=${r.cpuMs.toFixed(1)}ms maxDiff=${r.maxDiff.toExponential(1)}`
     );
+
+    // [GPU-PIPELINE] Resident-texture ping-pong self-test: render a basicadj pass
+    // through GpuPreviewPipeline and compare the readback to the WebGLImageProcessor
+    // reference. Verifies the core ping-pong path (no LUTs) at app startup.
+    if (gpuPreviewPipeline.attach()) {
+      const st = gpuPreviewPipeline.selfTest();
+      logger.info(`[GPU-PIPELINE] self-test maxDiff=${st.maxDiff.toExponential(2)} ${st.ok ? 'PASS' : 'FAIL'}`);
+    } else {
+      logger.info('[GPU-PIPELINE] self-test skipped — WebGL2/float unavailable');
+    }
   }, []);
 
   // Persist the current image's edits (debounced) whenever the processed result

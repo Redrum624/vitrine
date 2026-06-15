@@ -756,6 +756,15 @@ class WebGLImageProcessor {
     return out;
   }
 
+  /**
+   * Public single-source dehaze-state estimator. Delegates to the private
+   * `computeDehaze` so the resident-texture GpuPreviewPipeline computes its
+   * PassRuntime.dehaze from the SAME formula the per-module path uses — no copy.
+   */
+  computeDehazeState(data: Float32Array, width: number, height: number, dehaze: number): DehazeState {
+    return this.computeDehaze(data, width, height, dehaze);
+  }
+
   // ── dehaze pre-pass (identical to BasicAdjustmentsModule) ───────────────────
   private computeDehaze(data: Float32Array, width: number, height: number, dehaze: number): DehazeState {
     const clampedDehaze = Math.max(-1.0, Math.min(1.0, dehaze));
