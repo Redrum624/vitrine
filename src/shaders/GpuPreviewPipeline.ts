@@ -44,6 +44,10 @@ interface PingPong {
   texture: WebGLTexture;
 }
 
+/** Constant quad vertices for the present pass (TRIANGLE_STRIP: BL, BR, TL, TR).
+ *  Allocated once; uploaded to the GPU buffer at attach() time via STATIC_DRAW. */
+const PRESENT_QUAD_VERTS = new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]);
+
 /** programKey → fragment source. Keys must match those emitted by passDescriptors.ts. */
 const PROGRAM_SOURCES: Record<string, string> = {
   gains: FRAG_GAINS,
@@ -70,6 +74,17 @@ export class GpuPreviewPipeline {
   // clip-space rect (image rect after zoom/pan), not necessarily [-1,1]×[-1,1].
   private presentProgram: WebGLProgram | null = null;
   private presentQuadBuffer: WebGLBuffer | null = null;
+
+  // Uniform locations for the present program, cached at attach() time.
+  private presentUniforms: {
+    u_destRect: WebGLUniformLocation | null;
+    u_image: WebGLUniformLocation | null;
+    u_original: WebGLUniformLocation | null;
+    u_splitX: WebGLUniformLocation | null;
+  } | null = null;
+
+  // Reusable 4-element buffer for the u_destRect uniform — avoids per-call allocation.
+  private presentDestRect = new Float32Array(4);
 
   private srcTexture: WebGLTexture | null = null;
   private srcData: Float32Array | null = null;
@@ -132,9 +147,23 @@ export class GpuPreviewPipeline {
       gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
       gl.bindVertexArray(null);
 
-      // Dynamic per-call vertex buffer for the present quad (covers an arbitrary
-      // clip-space rect, not necessarily fullscreen — uploaded per present() call).
+      // Static vertex buffer for the present quad. The positions are constant
+      // (VERT_PRESENT remaps them via u_destRect); only the uniform changes per call.
       this.presentQuadBuffer = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.presentQuadBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, PRESENT_QUAD_VERTS, gl.STATIC_DRAW);
+      gl.bindBuffer(gl.ARRAY_BUFFER, null);
+
+      // Cache uniform locations for the present program (4 getUniformLocation calls once
+      // at startup, not 4× per present() frame).
+      if (this.presentProgram) {
+        this.presentUniforms = {
+          u_destRect: gl.getUniformLocation(this.presentProgram, 'u_destRect'),
+          u_image:    gl.getUniformLocation(this.presentProgram, 'u_image'),
+          u_original: gl.getUniformLocation(this.presentProgram, 'u_original'),
+          u_splitX:   gl.getUniformLocation(this.presentProgram, 'u_splitX'),
+        };
+      }
 
       logger.info(`[GPU-PIPELINE] attached — ${this.programs.size} programs compiled`);
       return true;
@@ -425,6 +454,7 @@ export class GpuPreviewPipeline {
     this.programs.clear();
     this.presentProgram = null;
     this.presentQuadBuffer = null;
+    this.presentUniforms = null;
     this.ping = [null, null];
     this.srcTexture = null;
     this.srcData = null;
@@ -480,7 +510,7 @@ export class GpuPreviewPipeline {
       logger.warn('[GPU-PIPELINE] present() called before setSource()/render() — no-op');
       return;
     }
-    if (!this.presentProgram || !this.presentQuadBuffer) {
+    if (!this.presentProgram || !this.presentQuadBuffer || !this.presentUniforms) {
       logger.warn('[GPU-PIPELINE] present program not available — no-op');
       return;
     }
@@ -499,18 +529,11 @@ export class GpuPreviewPipeline {
     // NDC:           (-1,1) top-left, (1,-1) bottom-right
     //   ndcX =  (pixX / canvasW) * 2 - 1
     //   ndcY = -((pixY / canvasH) * 2 - 1)  ← invert Y so top-pixel → NDC top
-    const ndcX0 =  (pixX          / canvasW) * 2 - 1;
-    const ndcX1 =  ((pixX + scaledW) / canvasW) * 2 - 1;
-    const ndcY0 = -((pixY          / canvasH) * 2 - 1);  // top edge in NDC
-    const ndcY1 = -(((pixY + scaledH) / canvasH) * 2 - 1); // bottom edge in NDC
     // u_destRect = (x0_ndc, y0_ndc, x1_ndc, y1_ndc) where y0 > y1 (top > bottom in NDC)
-    const destRect = new Float32Array([ndcX0, ndcY0, ndcX1, ndcY1]);
-
-    // TRIANGLE_STRIP corners: BL(-1,-1), BR(1,-1), TL(-1,1), TR(1,1)
-    // VERT_PRESENT maps these via a_pos→unit→destRect, so the strip produces the
-    // correct clip-space quad. The fullscreen quad vertices are fine to reuse here
-    // because the vertex shader remaps them via u_destRect.
-    const quadVerts = new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]);
+    this.presentDestRect[0] =  (pixX              / canvasW) * 2 - 1;
+    this.presentDestRect[1] = -((pixY              / canvasH) * 2 - 1);  // top edge in NDC
+    this.presentDestRect[2] =  ((pixX + scaledW)   / canvasW) * 2 - 1;
+    this.presentDestRect[3] = -(((pixY + scaledH)  / canvasH) * 2 - 1); // bottom edge in NDC
 
     // ── Render to default framebuffer ──
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -520,36 +543,39 @@ export class GpuPreviewPipeline {
 
     gl.useProgram(this.presentProgram);
 
-    // Upload per-call quad vertices into the dynamic buffer (no VAO needed — just
-    // bind the buffer and point the attribute manually for this draw).
+    // Bind the static buffer (data uploaded once at attach()) and set the attribute.
+    // TRIANGLE_STRIP corners: BL(-1,-1), BR(1,-1), TL(-1,1), TR(1,1)
+    // VERT_PRESENT remaps them via u_destRect, so the strip covers the correct clip-space rect.
     gl.bindBuffer(gl.ARRAY_BUFFER, this.presentQuadBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, quadVerts, gl.DYNAMIC_DRAW);
     const aPosLoc = gl.getAttribLocation(this.presentProgram, 'a_pos');
     gl.enableVertexAttribArray(aPosLoc);
     gl.vertexAttribPointer(aPosLoc, 2, gl.FLOAT, false, 0, 0);
 
-    // Set the dest-rect uniform.
-    gl.uniform4fv(gl.getUniformLocation(this.presentProgram, 'u_destRect'), destRect);
+    // Set uniforms using cached locations (no getUniformLocation per frame).
+    gl.uniform4fv(this.presentUniforms.u_destRect, this.presentDestRect);
 
     // Bind processed result → unit 0 (u_image).
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.resultTexture);
-    gl.uniform1i(gl.getUniformLocation(this.presentProgram, 'u_image'), 0);
+    gl.uniform1i(this.presentUniforms.u_image, 0);
 
     // Bind source/original → unit 1 (u_original); fall back to resultTexture if no
     // source is available (split will show the same image on both sides, harmless).
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, this.srcTexture ?? this.resultTexture);
-    gl.uniform1i(gl.getUniformLocation(this.presentProgram, 'u_original'), 1);
+    gl.uniform1i(this.presentUniforms.u_original, 1);
 
     // Before/after split: pass canvas-pixel x, or -1 to disable.
-    gl.uniform1f(gl.getUniformLocation(this.presentProgram, 'u_splitX'), opts.splitX ?? -1);
+    gl.uniform1f(this.presentUniforms.u_splitX, opts.splitX ?? -1);
 
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
     // Clean up attribute state so subsequent VAO-based draws aren't affected.
     gl.disableVertexAttribArray(aPosLoc);
     gl.bindBuffer(gl.ARRAY_BUFFER, null);
+
+    // Restore the conventional default texture unit so subsequent code isn't surprised.
+    gl.activeTexture(gl.TEXTURE0);
   }
 
   /**
