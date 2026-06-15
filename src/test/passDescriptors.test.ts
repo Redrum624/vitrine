@@ -183,7 +183,7 @@ test('lenscorrections identity distortion is skipped → cpuBridges', () => {
 // tonecurve carries luts
 // ---------------------------------------------------------------------------
 
-test('tonecurve pass carries luts when provided', () => {
+test('tonecurve pass carries luts when provided (fake module with lookupTable in params)', () => {
   const lut = new Float32Array(65536);
   const modules = [fakeModule('tonecurve', true, {
     lookupTable: lut,
@@ -194,6 +194,46 @@ test('tonecurve pass carries luts when provided', () => {
   expect(passes).toHaveLength(1);
   expect(passes[0].luts).toBeDefined();
   expect(passes[0].luts!.master).toBe(lut);
+});
+
+// ---------------------------------------------------------------------------
+// REAL ToneCurvePipelineModule exposes LUTs via getGpuLuts() → pass builder
+// This is the correctness test: when a real module has a non-identity curve,
+// the GPU pass must carry all 4 Float32Array LUTs (master/red/green/blue).
+// ---------------------------------------------------------------------------
+
+test('real ToneCurvePipelineModule with non-identity curve produces a tonecurve pass with all 4 LUTs', () => {
+  const tcModule = new ToneCurvePipelineModule();
+  // Set a clearly non-identity master curve that darkens midtones:
+  // midpoint pulled down from 0.5→0.35
+  tcModule.getToneCurveModule().setParams({
+    baseCurve: [
+      { x: 0.0, y: 0.0 },
+      { x: 0.5, y: 0.35 },
+      { x: 1.0, y: 1.0 },
+    ],
+    baseCurveNodes: 3,
+  });
+
+  const { passes } = buildPassList([tcModule]);
+  expect(passes).toHaveLength(1);
+  expect(passes[0].id).toBe('tonecurve');
+
+  const { luts } = passes[0];
+  expect(luts).toBeDefined();
+  expect(luts!.master).toBeInstanceOf(Float32Array);
+  expect(luts!.red).toBeInstanceOf(Float32Array);
+  expect(luts!.green).toBeInstanceOf(Float32Array);
+  expect(luts!.blue).toBeInstanceOf(Float32Array);
+  expect(luts!.master.length).toBe(65536);
+  expect(luts!.red.length).toBe(65536);
+  expect(luts!.green.length).toBe(65536);
+  expect(luts!.blue.length).toBe(65536);
+
+  // The master LUT must NOT be identity at the midpoint — value at index 32768
+  // (which maps to input ~0.5) should be ~0.35, not ~0.5
+  const midVal = luts!.master[32768];
+  expect(midVal).toBeLessThan(0.45); // darkened midtone
 });
 
 // ---------------------------------------------------------------------------

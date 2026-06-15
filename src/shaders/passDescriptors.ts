@@ -103,6 +103,8 @@ interface MinimalModule {
   getId(): string;
   isEnabled?: boolean;
   getParams?(): Record<string, unknown>;
+  /** Optional: returns pre-built LUT arrays for the GPU tone-curve pass. */
+  getGpuLuts?(): { master: Float32Array; red: Float32Array; green: Float32Array; blue: Float32Array } | null;
 }
 
 // ── Re-export computeWBGains for test access ──────────────────────────────────
@@ -138,13 +140,33 @@ function buildBasicAdjPass(params: Record<string, unknown>): PassDescriptor {
   };
 }
 
-function buildToneCurvePass(params: Record<string, unknown>): PassDescriptor {
+function buildToneCurvePass(module: MinimalModule, params: Record<string, unknown>): PassDescriptor {
   const preserveColors = typeof params.preserveColors === 'number' ? params.preserveColors : 0;
-  const master = params.lookupTable instanceof Float32Array ? params.lookupTable : undefined;
-  const rgbTables = params.rgbLookupTables as { red?: Float32Array; green?: Float32Array; blue?: Float32Array } | undefined;
-  const red = rgbTables?.red instanceof Float32Array ? rgbTables.red : undefined;
-  const green = rgbTables?.green instanceof Float32Array ? rgbTables.green : undefined;
-  const blue = rgbTables?.blue instanceof Float32Array ? rgbTables.blue : undefined;
+
+  // Prefer getGpuLuts() on the real module (single-source: same arrays used in process()).
+  // Fall back to reading lookupTable / rgbLookupTables from params for fake/test modules
+  // that bake LUTs directly into the params record.
+  let master: Float32Array | undefined;
+  let red: Float32Array | undefined;
+  let green: Float32Array | undefined;
+  let blue: Float32Array | undefined;
+
+  if (typeof module.getGpuLuts === 'function') {
+    const gpuLuts = module.getGpuLuts();
+    if (gpuLuts !== null) {
+      master = gpuLuts.master;
+      red = gpuLuts.red;
+      green = gpuLuts.green;
+      blue = gpuLuts.blue;
+    }
+  } else {
+    // Fallback: read from params (covers fake modules in tests that inject LUTs via params)
+    master = params.lookupTable instanceof Float32Array ? params.lookupTable : undefined;
+    const rgbTables = params.rgbLookupTables as { red?: Float32Array; green?: Float32Array; blue?: Float32Array } | undefined;
+    red = rgbTables?.red instanceof Float32Array ? rgbTables.red : undefined;
+    green = rgbTables?.green instanceof Float32Array ? rgbTables.green : undefined;
+    blue = rgbTables?.blue instanceof Float32Array ? rgbTables.blue : undefined;
+  }
 
   const luts: Record<string, Float32Array> = {};
   if (master) luts.master = master;
@@ -323,7 +345,7 @@ export function buildPassList(modules: MinimalModule[]): PassList {
         passes.push(buildBasicAdjPass(params));
         break;
       case 'tonecurve':
-        passes.push(buildToneCurvePass(params));
+        passes.push(buildToneCurvePass(module, params));
         break;
       case 'colorbalance':
         passes.push(buildColorBalancePass(params));

@@ -68,6 +68,16 @@ export class ToneCurvePipelineModule implements PipelineModule {
     return this.toneCurveModule.getParams();
   }
 
+  /**
+   * Returns the current built LUT arrays from the underlying ToneCurveModule.
+   * These are the same Float32Array instances used in process() / applyToneCurve().
+   * The pass builder uses these to populate descriptor.luts without re-implementing
+   * the curve→LUT math.
+   */
+  getGpuLuts(): { master: Float32Array; red: Float32Array; green: Float32Array; blue: Float32Array } | null {
+    return this.toneCurveModule.getGpuLuts();
+  }
+
   // Reset module to defaults
   reset(): void {
     this.toneCurveModule.reset();

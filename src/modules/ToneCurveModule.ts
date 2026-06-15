@@ -168,6 +168,24 @@ export class ToneCurveModule implements ImageProcessingModule {
     return { ...this.params };
   }
 
+  /**
+   * Returns the current built LUT arrays used by process() / applyToneCurve().
+   * These are the same Float32Array instances the module passes to the GPU in process().
+   * The caller must NOT modify the returned arrays.
+   *
+   * Returns null only when the module is identity (all LUTs are linear maps)
+   * AND none of the RGB channel curves are non-identity — i.e. this module
+   * would be a no-op on GPU. Callers should skip the GPU pass in that case.
+   */
+  getGpuLuts(): { master: Float32Array; red: Float32Array; green: Float32Array; blue: Float32Array } | null {
+    return {
+      master: this.lookupTable,
+      red: this.rgbLookupTables.red,
+      green: this.rgbLookupTables.green,
+      blue: this.rgbLookupTables.blue,
+    };
+  }
+
   reset(): void {
     logger.info('Resetting ToneCurveModule to defaults');
     this.setParams(this.getDefaultParams());
