@@ -19,6 +19,7 @@
 import { logger } from '../utils/Logger';
 import {
   VERT_SRC,
+  VERT_PRESENT,
   FRAG_GAINS,
   FRAG_BASICADJ,
   FRAG_TONECURVE,
@@ -26,6 +27,7 @@ import {
   FRAG_DISTORTION,
   FRAG_LATERALCA,
   FRAG_VIGNETTE,
+  FRAG_PRESENT,
 } from './sources';
 import type { PassDescriptor, PassRuntime } from './passDescriptors';
 import { basicAdjUniforms } from './uniforms';
@@ -62,6 +64,12 @@ export class GpuPreviewPipeline {
   private vao: WebGLVertexArrayObject | null = null;
   private quadBuffer: WebGLBuffer | null = null;
   private programs = new Map<string, WebGLProgram>();
+
+  // Separate program + dynamic vertex buffer for the present pass.
+  // We can't share the fullscreen VAO because the present quad covers an arbitrary
+  // clip-space rect (image rect after zoom/pan), not necessarily [-1,1]×[-1,1].
+  private presentProgram: WebGLProgram | null = null;
+  private presentQuadBuffer: WebGLBuffer | null = null;
 
   private srcTexture: WebGLTexture | null = null;
   private srcData: Float32Array | null = null;
@@ -104,6 +112,12 @@ export class GpuPreviewPipeline {
       this.gl = gl;
       this.compilePrograms(gl);
 
+      // Compile the present program (VERT_PRESENT + FRAG_PRESENT).
+      this.presentProgram = this.buildProgram(gl, VERT_PRESENT, FRAG_PRESENT);
+      if (!this.presentProgram) {
+        logger.warn('[GPU-PIPELINE] present program failed to compile — present() will be a no-op');
+      }
+
       // Fullscreen-quad VAO (TRIANGLE_STRIP of 4 verts), mirrors WebGLImageProcessor.
       this.quadBuffer = gl.createBuffer();
       gl.bindBuffer(gl.ARRAY_BUFFER, this.quadBuffer);
@@ -117,6 +131,10 @@ export class GpuPreviewPipeline {
       gl.enableVertexAttribArray(aPos);
       gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
       gl.bindVertexArray(null);
+
+      // Dynamic per-call vertex buffer for the present quad (covers an arbitrary
+      // clip-space rect, not necessarily fullscreen — uploaded per present() call).
+      this.presentQuadBuffer = gl.createBuffer();
 
       logger.info(`[GPU-PIPELINE] attached — ${this.programs.size} programs compiled`);
       return true;
@@ -390,6 +408,7 @@ export class GpuPreviewPipeline {
     const gl = this.gl;
     if (gl) {
       for (const prog of this.programs.values()) gl.deleteProgram(prog);
+      if (this.presentProgram) gl.deleteProgram(this.presentProgram);
       for (const pp of this.ping) {
         if (pp) {
           gl.deleteFramebuffer(pp.framebuffer);
@@ -400,9 +419,12 @@ export class GpuPreviewPipeline {
       this.lutTextures.clear();
       if (this.srcTexture) gl.deleteTexture(this.srcTexture);
       if (this.quadBuffer) gl.deleteBuffer(this.quadBuffer);
+      if (this.presentQuadBuffer) gl.deleteBuffer(this.presentQuadBuffer);
       if (this.vao) gl.deleteVertexArray(this.vao);
     }
     this.programs.clear();
+    this.presentProgram = null;
+    this.presentQuadBuffer = null;
     this.ping = [null, null];
     this.srcTexture = null;
     this.srcData = null;
@@ -413,6 +435,121 @@ export class GpuPreviewPipeline {
     this.attached = false;
     this.width = 0;
     this.height = 0;
+  }
+
+  /**
+   * Return the most recent GL error code (gl.getError()). Used by the dev self-test
+   * to assert that present() issues no GL errors. Returns 0 (NO_ERROR) when there is
+   * no pending error or when the pipeline is not attached.
+   */
+  glError(): number {
+    return this.gl ? this.gl.getError() : 0;
+  }
+
+  /**
+   * Blit `resultTexture` to the default framebuffer (the visible canvas) with the
+   * same zoom/pan geometry used by the 2D-canvas path in Canvas.tsx.
+   *
+   * No GPU→CPU readback — the texture stays resident on the GPU.
+   *
+   * Zoom/pan math (mirrors Canvas.tsx lines ~574-577):
+   *   scaledW = canvasW * zoom
+   *   scaledH = canvasH * zoom
+   *   x = (canvasW - scaledW)/2 + panX   (left edge, in canvas pixels)
+   *   y = (canvasH - scaledH)/2 + panY   (top  edge, in canvas pixels)
+   *
+   * Y-flip reasoning (see VERT_PRESENT for the authoritative comment):
+   *   texImage2D stores row 0 of the Float32Array at the BOTTOM of the OpenGL texture
+   *   (bottom-left origin). The default framebuffer is also bottom-left origin. So a
+   *   naive v = unit.y would render the image upside-down (row 0 at bottom of quad =
+   *   bottom of canvas = bottom of screen). We flip to v = 1-unit.y so row 0 of the
+   *   texture (the top of the image) lands at the TOP of the quad on screen. This
+   *   matches the 2D-canvas path (putImageData which is top-left-origin). The flip is
+   *   in VERT_PRESENT; this method needs no additional inversion.
+   *
+   * Before/after split: fragments with canvas-pixel x < splitX sample srcTexture
+   * (original); others sample resultTexture (processed). Pass splitX < 0 to disable.
+   */
+  present(opts: { zoom: number; panX: number; panY: number; splitX?: number }): void {
+    const gl = this.gl;
+    if (!gl || !this.attached) {
+      logger.warn('[GPU-PIPELINE] present() called before a successful attach() — no-op');
+      return;
+    }
+    if (!this.resultTexture) {
+      logger.warn('[GPU-PIPELINE] present() called before setSource()/render() — no-op');
+      return;
+    }
+    if (!this.presentProgram || !this.presentQuadBuffer) {
+      logger.warn('[GPU-PIPELINE] present program not available — no-op');
+      return;
+    }
+
+    const canvasW = (gl.canvas as HTMLCanvasElement).width;
+    const canvasH = (gl.canvas as HTMLCanvasElement).height;
+
+    // ── Destination rect in canvas pixels (same formula as Canvas.tsx ~574-577) ──
+    const scaledW = canvasW * opts.zoom;
+    const scaledH = canvasH * opts.zoom;
+    const pixX = (canvasW - scaledW) / 2 + opts.panX;    // left edge
+    const pixY = (canvasH - scaledH) / 2 + opts.panY;    // top  edge (canvas-pixel, top-origin)
+
+    // ── Convert pixel rect to clip space (NDC [-1,1], bottom-left origin) ──
+    // Canvas pixels: (0,0) top-left, (canvasW, canvasH) bottom-right
+    // NDC:           (-1,1) top-left, (1,-1) bottom-right
+    //   ndcX =  (pixX / canvasW) * 2 - 1
+    //   ndcY = -((pixY / canvasH) * 2 - 1)  ← invert Y so top-pixel → NDC top
+    const ndcX0 =  (pixX          / canvasW) * 2 - 1;
+    const ndcX1 =  ((pixX + scaledW) / canvasW) * 2 - 1;
+    const ndcY0 = -((pixY          / canvasH) * 2 - 1);  // top edge in NDC
+    const ndcY1 = -(((pixY + scaledH) / canvasH) * 2 - 1); // bottom edge in NDC
+    // u_destRect = (x0_ndc, y0_ndc, x1_ndc, y1_ndc) where y0 > y1 (top > bottom in NDC)
+    const destRect = new Float32Array([ndcX0, ndcY0, ndcX1, ndcY1]);
+
+    // TRIANGLE_STRIP corners: BL(-1,-1), BR(1,-1), TL(-1,1), TR(1,1)
+    // VERT_PRESENT maps these via a_pos→unit→destRect, so the strip produces the
+    // correct clip-space quad. The fullscreen quad vertices are fine to reuse here
+    // because the vertex shader remaps them via u_destRect.
+    const quadVerts = new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]);
+
+    // ── Render to default framebuffer ──
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, canvasW, canvasH);
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+
+    gl.useProgram(this.presentProgram);
+
+    // Upload per-call quad vertices into the dynamic buffer (no VAO needed — just
+    // bind the buffer and point the attribute manually for this draw).
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.presentQuadBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, quadVerts, gl.DYNAMIC_DRAW);
+    const aPosLoc = gl.getAttribLocation(this.presentProgram, 'a_pos');
+    gl.enableVertexAttribArray(aPosLoc);
+    gl.vertexAttribPointer(aPosLoc, 2, gl.FLOAT, false, 0, 0);
+
+    // Set the dest-rect uniform.
+    gl.uniform4fv(gl.getUniformLocation(this.presentProgram, 'u_destRect'), destRect);
+
+    // Bind processed result → unit 0 (u_image).
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.resultTexture);
+    gl.uniform1i(gl.getUniformLocation(this.presentProgram, 'u_image'), 0);
+
+    // Bind source/original → unit 1 (u_original); fall back to resultTexture if no
+    // source is available (split will show the same image on both sides, harmless).
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, this.srcTexture ?? this.resultTexture);
+    gl.uniform1i(gl.getUniformLocation(this.presentProgram, 'u_original'), 1);
+
+    // Before/after split: pass canvas-pixel x, or -1 to disable.
+    gl.uniform1f(gl.getUniformLocation(this.presentProgram, 'u_splitX'), opts.splitX ?? -1);
+
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+    // Clean up attribute state so subsequent VAO-based draws aren't affected.
+    gl.disableVertexAttribArray(aPosLoc);
+    gl.bindBuffer(gl.ARRAY_BUFFER, null);
   }
 
   /**

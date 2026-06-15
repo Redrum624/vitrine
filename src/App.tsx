@@ -914,6 +914,12 @@ function App() {
         if (probe.attach()) {
           const st = probe.selfTest();
           logger.info(`[GPU-PIPELINE] self-test maxDiff=${st.maxDiff.toExponential(2)} ${st.ok ? 'PASS' : 'FAIL'}`);
+          // present() self-test: call with identity zoom/pan on the same data left by
+          // selfTest(), check that no GL errors were issued. Visual correctness is
+          // deferred to the Task 6 Electron smoke test.
+          probe.present({ zoom: 1, panX: 0, panY: 0 });
+          const presentErr = probe.glError();
+          logger.info(`[GPU-PIPELINE] present glError=${presentErr}${presentErr === 0 ? ' (OK)' : ' (UNEXPECTED ERROR)'}`);
         } else {
           logger.info('[GPU-PIPELINE] self-test skipped — WebGL2/float unavailable');
         }

@@ -286,6 +286,58 @@ void main() {
   }
 }`;
 
+// ─── Present shader pair ──────────────────────────────────────────────────────
+// Used by GpuPreviewPipeline.present() to blit the final result texture to the
+// default framebuffer (visible canvas) with zoom/pan and optional before/after split.
+// We need a dedicated vertex shader because the quad is NOT always fullscreen —
+// it covers only the dest rect (image scaled+panned within the canvas). We pass the
+// rect as clip-space coords via uniforms and emit matching texcoords from a unit quad.
+export const VERT_PRESENT = `#version 300 es
+// Receives the four corners of a unit quad [0..1]×[0..1] in a_pos (same TRIANGLE_STRIP
+// layout as VERT_SRC, but remapped from [-1,1] to [0,1] before use).
+in vec2 a_pos;
+// Clip-space rect for the destination image rectangle on the canvas.
+// (x0,y0)=bottom-left, (x1,y1)=top-right — both in NDC [-1,1].
+uniform vec4 u_destRect; // (x0, y0, x1, y1) in clip space
+out vec2 v_uv;
+void main() {
+  // Map a_pos from [-1,1]^2 (clip quad) to [0,1]^2 (unit quad) for texcoords.
+  vec2 unit = a_pos * 0.5 + 0.5;         // [0,1]
+  // Texcoord: u goes left→right, v goes bottom→top in OpenGL convention.
+  // The source texture was uploaded row-0-first (top of image = row 0 = low address).
+  // texImage2D places row 0 at the BOTTOM of the texture in OpenGL (default framebuffer
+  // is also bottom-origin). A naive v=unit.y would therefore show the image flipped.
+  // Flip v so the image top (texture row 0) appears at the visual top of the quad.
+  v_uv = vec2(unit.x, 1.0 - unit.y);
+  // Map the unit quad to the dest rect in clip space.
+  vec2 clipPos = mix(u_destRect.xy, u_destRect.zw, unit);
+  gl_Position = vec4(clipPos, 0.0, 1.0);
+}`;
+
+// Fragment shader for the present pass.
+// Samples u_image (processed result, already sRGB-display-encoded) or u_original
+// (source texture) based on the before/after split position u_splitX.
+// No color-space conversion — the pipeline output is already display-ready.
+export const FRAG_PRESENT = `#version 300 es
+precision highp float;
+uniform sampler2D u_image;    // processed result texture (unit 0)
+uniform sampler2D u_original; // source / original texture (unit 1)
+// Canvas-pixel x-coordinate of the before/after split line.
+// Fragments with gl_FragCoord.x < u_splitX show u_original; others show u_image.
+// Set to -1.0 to disable the split (always show u_image).
+uniform float u_splitX;
+in vec2 v_uv;
+out vec4 outColor;
+void main() {
+  vec4 color;
+  if (u_splitX >= 0.0 && gl_FragCoord.x < u_splitX) {
+    color = texture(u_original, v_uv);
+  } else {
+    color = texture(u_image, v_uv);
+  }
+  outColor = vec4(clamp(color.rgb, 0.0, 1.0), color.a);
+}`;
+
 // Lateral chromatic aberration: radially shift the R and B channels, bilinear-sampled
 // (manual, out-of-bounds -> 0). Mirrors correctLateralCA + sampleChannel.
 export const FRAG_LATERALCA = `#version 300 es
