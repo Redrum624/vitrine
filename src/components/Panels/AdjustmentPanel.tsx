@@ -51,6 +51,9 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
   // guarded on it so a stale/overlapping run can never leave the canvas spinner (and its
   // backdrop-blur overlay) stuck on — which read as a permanently "blurry/soft" image.
   const processingGenRef = useRef<number>(0);
+  // Monotonic counter per preview run. If a newer run starts while an older async run is
+  // still in-flight, the older one discards its result rather than overwriting the newer frame.
+  const previewSeqRef = useRef<number>(0);
   // Synchronous in-flight guard (React state is stale inside the async closure). Without
   // it a slow run (noise reduction) + a second edit ran two pipeline passes concurrently
   // through the shared WebGL processor, corrupting the output (blurry). A skipped run sets
@@ -135,6 +138,7 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
       if (processingGenRef.current === gen) useAppStore.getState().setIsProcessing(true);
     }, 800);
     try {
+      const seq = ++previewSeqRef.current;
       setIsProcessing(true);
       const startTime = performance.now();
 
@@ -382,6 +386,9 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
         outputWidth  = processingContext.width;
         outputHeight = processingContext.height;
       }
+
+      // Discard stale results if a newer preview has already started.
+      if (previewSeqRef.current !== seq) return;
 
       // Update UI once with final result — use the TRUE output dims.
       setProcessedImageData({
