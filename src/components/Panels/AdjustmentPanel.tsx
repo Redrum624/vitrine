@@ -30,6 +30,7 @@ import { buildPassList } from '../../shaders/passDescriptors';
 import { logger } from '../../utils/Logger';
 import { webWorkerImageProcessor } from '../../services/WebWorkerImageProcessor';
 import type { WorkerModuleConfig } from '../../services/WebWorkerImageProcessor';
+import { WORKER_MIN_PIXELS } from '../../services/previewRouting';
 
 interface AdjustmentPanelProps {
   selectedModule?: string | null;
@@ -334,7 +335,6 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
       // On any worker error we fall back to main-thread processing so the app
       // never breaks if worker URL resolution fails in Electron.
       const pixelCount = previewWidth * previewHeight;
-      const WORKER_MIN_PIXELS = 1_000_000; // 1MP — round-trip overhead not worth it below
 
       let processedData: Float32Array;
       let outputWidth = previewWidth;
@@ -343,12 +343,6 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
       const useWorker = pixelCount >= WORKER_MIN_PIXELS;
 
       if (useWorker) {
-        // Lazy-init the pool on first CPU-path use (no-op if already initialised).
-        if (!webWorkerImageProcessor.shouldUseWorkers({ width: previewWidth, height: previewHeight, data: previewData, channels: 4 })) {
-          // Not yet initialised — attempt it now.
-          await webWorkerImageProcessor.initialize();
-        }
-
         // Build WorkerModuleConfig from the LIVE pipeline state (same source the GPU
         // pass-list uses). `getParams()` returns a plain JSON-serialisable object so
         // it survives the structured-clone boundary without any manual conversion.

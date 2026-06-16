@@ -16,39 +16,11 @@
  *      `outputWidth`/`outputHeight` into the result `width`/`height` fields.
  */
 
+import { choosePreviewPath } from '../services/previewRouting';
+
 // ---------------------------------------------------------------------------
-// 1. Pure routing-decision helper — extracted from AdjustmentPanel logic.
+// 1. Pure routing-decision helper — now in src/services/previewRouting.ts.
 // ---------------------------------------------------------------------------
-
-const WORKER_MIN_PIXELS = 1_000_000; // 1MP
-
-/**
- * Mirrors the inline routing decision in AdjustmentPanel's CPU branch.
- * Returns the selected execution path for a given set of conditions.
- */
-function choosePreviewPath(opts: {
-  gpuAvailable: boolean;
-  activeCpuBridgeCount: number;
-  passCount: number;
-  width: number;
-  height: number;
-}): 'gpu' | 'worker' | 'main' {
-  const { gpuAvailable, activeCpuBridgeCount, passCount, width, height } = opts;
-
-  // GPU path: available, no active cpu bridges, at least one GPU pass.
-  if (gpuAvailable && activeCpuBridgeCount === 0 && passCount > 0) {
-    return 'gpu';
-  }
-
-  // Worker path: CPU fallback AND image is ≥1MP.
-  const pixelCount = width * height;
-  if (pixelCount >= WORKER_MIN_PIXELS) {
-    return 'worker';
-  }
-
-  // Main-thread path: tiny preview, worker overhead not worth it.
-  return 'main';
-}
 
 // ---------------------------------------------------------------------------
 // 2. Routing decision tests
