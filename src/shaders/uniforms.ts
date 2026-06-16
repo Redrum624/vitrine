@@ -18,11 +18,14 @@ export type UniformSetter = (gl: WebGL2RenderingContext, prog: WebGLProgram) => 
 // ── Exposure pass ────────────────────────────────────────────────────────────
 
 /**
- * @param gain  Linear gain (caller must pre-compute `Math.pow(2, stops)`).
+ * @param gain   Linear gain (caller must pre-compute `Math.pow(2, stops)`).
+ * @param black  Black-level offset to subtract before applying gain (default 0).
+ *               Matches ExposureModule.processWithContext: max(0, v-black)*gain, clamp.
  */
-export function exposureUniforms(gain: number): UniformSetter {
+export function exposureUniforms(gain: number, black = 0): UniformSetter {
   return (gl, prog) => {
     gl.uniform1f(gl.getUniformLocation(prog, 'u_gain'), gain);
+    gl.uniform1f(gl.getUniformLocation(prog, 'u_black'), black);
   };
 }
 

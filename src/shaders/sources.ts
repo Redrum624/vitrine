@@ -10,13 +10,22 @@ in vec2 a_pos;
 out vec2 v_uv;
 void main() { v_uv = a_pos * 0.5 + 0.5; gl_Position = vec4(a_pos, 0.0, 1.0); }`;
 
+// Exposure: subtract black level (clamp-at-0), multiply by gain (2^stops), clamp to [0,1].
+// Matches ExposureModule.processWithContext exactly: max(0, v-black)*gain, then clamp.
+// u_gain  = pow(2, stops) — caller pre-computes.
+// u_black = black-level offset (default 0 = no black adjustment).
 export const FRAG_EXPOSURE = `#version 300 es
 precision highp float;
 uniform sampler2D u_image;
 uniform float u_gain;
+uniform float u_black;
 in vec2 v_uv;
 out vec4 outColor;
-void main() { vec4 c = texture(u_image, v_uv); outColor = vec4(c.rgb * u_gain, c.a); }`;
+void main() {
+  vec4 c = texture(u_image, v_uv);
+  vec3 rgb = clamp(max(c.rgb - u_black, 0.0) * u_gain, 0.0, 1.0);
+  outColor = vec4(rgb, c.a);
+}`;
 
 // Per-channel gains + clamp (white balance applies pre-computed R/G/B factors).
 export const FRAG_GAINS = `#version 300 es

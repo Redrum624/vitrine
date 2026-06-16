@@ -17,6 +17,7 @@
  */
 
 import {
+  exposureUniforms,
   gainsUniforms,
   basicAdjUniforms,
   toneCurveUniforms,
@@ -43,6 +44,7 @@ import { computeWBGains } from '../modules/WhiteBalanceModule';
  */
 export const GPU_MODULE_IDS: readonly string[] = [
   'temperature',
+  'exposure',
   'basicadj',
   'tonecurve',
   'colorbalance',
@@ -117,6 +119,21 @@ export { computeWBGains };
 const NEUTRAL_TONE = { cyan_red: 0, magenta_green: 0, yellow_blue: 0 } as const;
 
 // ── Per-module descriptor builders ────────────────────────────────────────────
+
+function buildExposurePass(params: Record<string, unknown>): PassDescriptor {
+  // ExposureModule.getParams() returns { mode, black, exposure, deflicker_percentile,
+  // deflicker_target_level, compensate_exposure_bias }. Only 'exposure' (stops) and
+  // 'black' drive processWithContext() — all other params are for the deflicker UI.
+  const stops = typeof params.exposure === 'number' ? params.exposure : 0;
+  const black = typeof params.black === 'number' ? params.black : 0;
+  const gain = Math.pow(2, stops);
+  return {
+    id: 'exposure',
+    programKey: 'exposure',
+    // exposure does not depend on rt (no dimension/dehaze needed)
+    setUniforms: (_gl, _prog, _rt) => exposureUniforms(gain, black)(_gl, _prog),
+  };
+}
 
 function buildWBPass(params: Record<string, unknown>): PassDescriptor {
   const temperature = typeof params.temperature === 'number' ? params.temperature : 6500;
@@ -340,6 +357,9 @@ export function buildPassList(modules: MinimalModule[]): PassList {
     switch (id) {
       case 'temperature':
         passes.push(buildWBPass(params));
+        break;
+      case 'exposure':
+        passes.push(buildExposurePass(params));
         break;
       case 'basicadj':
         passes.push(buildBasicAdjPass(params));

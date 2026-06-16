@@ -20,6 +20,7 @@ import { logger } from '../utils/Logger';
 import {
   VERT_SRC,
   VERT_PRESENT,
+  FRAG_EXPOSURE,
   FRAG_GAINS,
   FRAG_BASICADJ,
   FRAG_TONECURVE,
@@ -30,9 +31,10 @@ import {
   FRAG_PRESENT,
 } from './sources';
 import type { PassDescriptor, PassRuntime } from './passDescriptors';
-import { basicAdjUniforms } from './uniforms';
+import { basicAdjUniforms, exposureUniforms } from './uniforms';
 import type { DehazeState } from '../services/WebGLImageProcessor';
 import { webGLImageProcessor } from '../services/WebGLImageProcessor';
+import { ExposureModule } from '../modules/ExposureModule';
 
 export interface PreviewRenderResult {
   width: number;
@@ -50,6 +52,7 @@ const PRESENT_QUAD_VERTS = new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]);
 
 /** programKey → fragment source. Keys must match those emitted by passDescriptors.ts. */
 const PROGRAM_SOURCES: Record<string, string> = {
+  exposure: FRAG_EXPOSURE,
   gains: FRAG_GAINS,
   basicadj: FRAG_BASICADJ,
   tonecurve: FRAG_TONECURVE,
@@ -583,12 +586,12 @@ export class GpuPreviewPipeline {
   }
 
   /**
-   * Dev-only runtime correctness gate. Renders a synthetic 16x16 gradient through a
-   * SINGLE basicadj pass (non-default params) and compares the readback to the
-   * reference WebGLImageProcessor.applyBasicAdjustments. ok = maxDiff < 1e-4.
+   * Dev-only runtime correctness gate. Renders a synthetic 16x16 gradient through:
+   *   1. A SINGLE basicadj pass — verifies the core ping-pong path (no LUT complexity).
+   *   2. A SINGLE exposure pass — verifies shader matches ExposureModule.process()
+   *      pixel-for-pixel (maxDiff < 1e-4) for non-default exposure + black params.
    *
-   * basicadj is non-LUT, so this verifies the core ping-pong path without LUT
-   * complexity. Requires a real WebGL2 context — runs in the Electron app, NOT Jest.
+   * Requires a real WebGL2 context — runs in the Electron app, NOT Jest.
    */
   selfTest(): { ok: boolean; maxDiff: number } {
     if (!this.gl) {
@@ -596,7 +599,7 @@ export class GpuPreviewPipeline {
       return { ok: false, maxDiff: Infinity };
     }
     try {
-      // 16x16 RGBA Float32 gradient.
+      // 16x16 RGBA Float32 gradient (same data for both sub-tests).
       const w = 16, h = 16;
       const data = new Float32Array(w * h * 4);
       for (let i = 0; i < w * h; i++) {
@@ -606,30 +609,65 @@ export class GpuPreviewPipeline {
         data[i * 4 + 3] = 1;
       }
 
-      const params = {
+      // ── 1. basicadj sub-test ────────────────────────────────────────────────
+      const basicAdjParams = {
         black_point: 0.1, exposure: 0.3, contrast: 0.5, brightness: 0.2,
         saturation: 0.3, vibrance: 0.2, dehaze: 0, highlights: 0.4, shadows: -0.3,
       };
 
       // Build a single basicadj PassDescriptor via the real pass-list builder, so the
       // exact production uniform path is exercised.
-      const passDesc: PassDescriptor = {
+      const basicAdjPass: PassDescriptor = {
         id: 'basicadj',
         programKey: 'basicadj',
         // Reuse the shared uniform-setter (the same one buildPassList wires).
-        setUniforms: (gl, prog, rt) => basicAdjUniforms(params, rt.dehaze)(gl, prog),
+        setUniforms: (gl, prog, rt) => basicAdjUniforms(basicAdjParams, rt.dehaze)(gl, prog),
       };
 
       this.setSource(data, w, h);
-      this.setDehazeParam(params.dehaze);
-      this.render([passDesc]);
-      const gpu = this.readback();
+      this.setDehazeParam(basicAdjParams.dehaze);
+      this.render([basicAdjPass]);
+      const gpuBasicAdj = this.readback();
 
-      const ref = webGLImageProcessor.applyBasicAdjustments(data, w, h, params);
+      const refBasicAdj = webGLImageProcessor.applyBasicAdjustments(data, w, h, basicAdjParams);
 
-      let maxDiff = 0;
-      for (let i = 0; i < ref.length; i++) maxDiff = Math.max(maxDiff, Math.abs(gpu[i] - ref[i]));
-      const ok = maxDiff < 1e-4;
+      let basicAdjMaxDiff = 0;
+      for (let i = 0; i < refBasicAdj.length; i++) {
+        basicAdjMaxDiff = Math.max(basicAdjMaxDiff, Math.abs(gpuBasicAdj[i] - refBasicAdj[i]));
+      }
+      const basicAdjOk = basicAdjMaxDiff < 1e-4;
+      logger.info(`[GPU-PIPELINE] basicadj self-test maxDiff=${basicAdjMaxDiff.toExponential(2)} ${basicAdjOk ? 'PASS' : 'FAIL'}`);
+
+      // ── 2. exposure sub-test ────────────────────────────────────────────────
+      // Non-default params: 0.7 EV + 0.05 black — exercises both terms.
+      const exposureStops = 0.7;
+      const exposureBlack = 0.05;
+      const exposureGain = Math.pow(2, exposureStops);
+
+      const exposurePass: PassDescriptor = {
+        id: 'exposure',
+        programKey: 'exposure',
+        setUniforms: (_gl, _prog, _rt) => exposureUniforms(exposureGain, exposureBlack)(_gl, _prog),
+      };
+
+      this.setSource(data, w, h);
+      this.render([exposurePass]);
+      const gpuExposure = this.readback();
+
+      // Reference: ExposureModule.processWithContext with same params (single source of truth).
+      const expModule = new ExposureModule();
+      expModule.setCurrentParams({ exposure: exposureStops, black: exposureBlack });
+      const refExposure = expModule.process(data, { width: w, height: h, channels: 4 });
+
+      let exposureMaxDiff = 0;
+      for (let i = 0; i < refExposure.length; i++) {
+        exposureMaxDiff = Math.max(exposureMaxDiff, Math.abs(gpuExposure[i] - refExposure[i]));
+      }
+      const exposureOk = exposureMaxDiff < 1e-4;
+      logger.info(`[GPU-PIPELINE] exposure self-test maxDiff=${exposureMaxDiff.toExponential(2)} ${exposureOk ? 'PASS' : 'FAIL'}`);
+
+      const ok = basicAdjOk && exposureOk;
+      const maxDiff = Math.max(basicAdjMaxDiff, exposureMaxDiff);
       return { ok, maxDiff };
     } catch (e) {
       logger.warn('[GPU-PIPELINE] selfTest error:', e instanceof Error ? e.message : String(e));

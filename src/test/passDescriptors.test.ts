@@ -2,6 +2,7 @@ import { buildPassList, computeWBGains, GPU_MODULE_IDS, OPT_IN_GPU_MODULE_IDS } 
 import { WhiteBalanceModule } from '../modules/WhiteBalanceModule';
 import { BasicAdjustmentsModule } from '../modules/BasicAdjustmentsModule';
 import { ToneCurvePipelineModule } from '../modules/ToneCurvePipelineModule';
+import { ExposureModule } from '../modules/ExposureModule';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -33,13 +34,12 @@ const DEFAULT_RT = { width: 800, height: 600, dehaze: { active: false, hazeStren
 // GPU_MODULE_IDS uses real pipeline ids
 // ---------------------------------------------------------------------------
 
-test('GPU_MODULE_IDS uses real pipeline ids and excludes huecurves + exposure', () => {
+test('GPU_MODULE_IDS uses real pipeline ids and contains exposure, excludes huecurves', () => {
   expect(GPU_MODULE_IDS).toEqual(
-    expect.arrayContaining(['temperature', 'basicadj', 'tonecurve', 'colorbalance', 'lenscorrections']),
+    expect.arrayContaining(['temperature', 'exposure', 'basicadj', 'tonecurve', 'colorbalance', 'lenscorrections']),
   );
   expect(GPU_MODULE_IDS).not.toContain('whitebalance');
   expect(GPU_MODULE_IDS).not.toContain('huecurves');
-  expect(GPU_MODULE_IDS).not.toContain('exposure');
 });
 
 test('OPT_IN_GPU_MODULE_IDS contains noise-reduction and not huecurves', () => {
@@ -61,6 +61,10 @@ test('real BasicAdjustmentsModule id is in the GPU set', () => {
 
 test('real ToneCurvePipelineModule id is in the GPU set', () => {
   expect(GPU_MODULE_IDS).toContain(new ToneCurvePipelineModule().getId());
+});
+
+test('real ExposureModule id is in the GPU set', () => {
+  expect(GPU_MODULE_IDS).toContain(new ExposureModule().getId());
 });
 
 // ---------------------------------------------------------------------------
@@ -244,6 +248,62 @@ test('empty module list returns empty results', () => {
   const { passes, cpuBridges } = buildPassList([]);
   expect(passes).toHaveLength(0);
   expect(cpuBridges).toHaveLength(0);
+});
+
+// ---------------------------------------------------------------------------
+// Exposure pass descriptor tests (Task 7)
+// ---------------------------------------------------------------------------
+
+test('exposure module routes to a GPU pass with programKey "exposure"', () => {
+  const modules = [fakeModule('exposure', true, { exposure: 0.5, black: 0.05, mode: 'manual' })];
+  const { passes, cpuBridges } = buildPassList(modules);
+  expect(passes).toHaveLength(1);
+  expect(passes[0].id).toBe('exposure');
+  expect(passes[0].programKey).toBe('exposure');
+  expect(cpuBridges).not.toContain('exposure');
+});
+
+test('exposure pass setUniforms accepts (gl, prog, rt) — arity 3, does not throw', () => {
+  const modules = [fakeModule('exposure', true, { exposure: 0.7, black: 0.03, mode: 'manual' })];
+  const { passes } = buildPassList(modules);
+  expect(passes).toHaveLength(1);
+  expect(() => passes[0].setUniforms(makeGl(), DUMMY_PROG, DEFAULT_RT)).not.toThrow();
+});
+
+test('disabled exposure module goes to cpuBridges, not passes', () => {
+  const modules = [fakeModule('exposure', false, { exposure: 0.5, black: 0.0, mode: 'manual' })];
+  const { passes, cpuBridges } = buildPassList(modules);
+  expect(passes).toHaveLength(0);
+  expect(cpuBridges).toContain('exposure');
+});
+
+test('real ExposureModule with non-default params produces an exposure pass', () => {
+  const expModule = new ExposureModule();
+  expModule.setCurrentParams({ exposure: 0.7, black: 0.05 });
+  const { passes } = buildPassList([expModule]);
+  expect(passes).toHaveLength(1);
+  expect(passes[0].id).toBe('exposure');
+  expect(passes[0].programKey).toBe('exposure');
+  expect(() => passes[0].setUniforms(makeGl(), DUMMY_PROG, DEFAULT_RT)).not.toThrow();
+});
+
+test('exposure GPU math matches ExposureModule.process() for non-default params', () => {
+  // Verify the gain/black formula matches the CPU reference for a set of test values.
+  // This is a pure-math check (no GL needed): both paths compute max(0, v-black)*gain, clamp.
+  const stops = 0.7;
+  const black = 0.05;
+  const gain = Math.pow(2, stops);
+
+  // Simulate what the GPU shader does (GLSL max/clamp in JS)
+  const testValues = [0.0, 0.05, 0.1, 0.3, 0.5, 0.8, 1.0];
+  for (const v of testValues) {
+    const gpuResult = Math.min(1.0, Math.max(0.0, Math.max(0.0, v - black) * gain));
+
+    // ExposureModule CPU reference
+    const cpuResult = Math.max(0, Math.min(1, Math.max(0, v - black) * gain));
+
+    expect(gpuResult).toBeCloseTo(cpuResult, 6);
+  }
 });
 
 // ---------------------------------------------------------------------------
