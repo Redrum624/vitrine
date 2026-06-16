@@ -157,6 +157,21 @@ export class CropPipelineModule implements PipelineModule {
     return this.isEnabled && this.cropModule.isCropped();
   }
 
+  /**
+   * Returns true when this module is a geometric no-op — i.e. the crop rect covers
+   * the full image AND there is no rotation, flip, or straighten transform applied.
+   * Used by ImageProcessingPipeline.isModuleIdentity() so a fresh/default crop does
+   * not block the GPU path.
+   */
+  isNoOp(): boolean {
+    const p = this.cropModule.getParams();
+    const rectIsFullFrame =
+      p.x === 0.0 && p.y === 0.0 && p.width === 1.0 && p.height === 1.0;
+    const transformIsIdentity =
+      p.angle === 0.0 && !p.flipHorizontal && !p.flipVertical;
+    return rectIsFullFrame && transformIsIdentity;
+  }
+
   // Set original dimensions (should be called when loading new image)
   setOriginalDimensions(width: number, height: number): void {
     this.cropModule.setOriginalDimensions(width, height);

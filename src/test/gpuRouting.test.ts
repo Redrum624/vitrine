@@ -158,6 +158,33 @@ describe('isModuleActive() + activeCpuBridges gate (faithful to the CPU processI
     expect(activeCpuBridges).not.toContain('localadjustments');
   });
 
+  it('full-frame default crop (no rect, no rotation, no flip) is NOT active — does not block GPU', () => {
+    // After reset(), CropPipelineModule is at identity defaults (x=0,y=0,w=1,h=1, angle=0, no flips).
+    // isModuleActive('crop') must return false so the GPU path is not blocked on a fresh image.
+    imageProcessingPipeline.getModule<CropPipelineModule>('crop')?.reset?.();
+    expect(imageProcessingPipeline.isModuleActive('crop')).toBe(false);
+  });
+
+  it('a non-full-frame crop rect is still ACTIVE — must not silently skip processing', () => {
+    const crop = imageProcessingPipeline.getModule<CropPipelineModule>('crop')!;
+    crop.setCropRegion(0.1, 0.1, 0.8, 0.8);
+    expect(imageProcessingPipeline.isModuleActive('crop')).toBe(true);
+  });
+
+  it('a rotation (non-zero angle) is still ACTIVE even when rect is full-frame', () => {
+    const crop = imageProcessingPipeline.getModule<CropPipelineModule>('crop')!;
+    crop.setEnabled(true); // ensure the pipeline-level enabled flag is on
+    crop.getCropModule().setParams({ x: 0, y: 0, width: 1.0, height: 1.0, angle: 5.0 });
+    expect(imageProcessingPipeline.isModuleActive('crop')).toBe(true);
+  });
+
+  it('a horizontal flip is still ACTIVE even when rect is full-frame', () => {
+    const crop = imageProcessingPipeline.getModule<CropPipelineModule>('crop')!;
+    crop.setEnabled(true); // ensure the pipeline-level enabled flag is on
+    crop.getCropModule().setParams({ x: 0, y: 0, width: 1.0, height: 1.0, flipHorizontal: true });
+    expect(imageProcessingPipeline.isModuleActive('crop')).toBe(true);
+  });
+
   it('activating a CPU-only module (crop) makes it appear in the ACTIVE cpu bridges', () => {
     const crop = imageProcessingPipeline.getModule<CropPipelineModule>('crop')!;
     crop.setCropRegion(0.1, 0.1, 0.8, 0.8); // enables crop with a non-identity region

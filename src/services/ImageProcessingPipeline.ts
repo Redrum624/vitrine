@@ -372,7 +372,13 @@ export class ImageProcessingPipeline {
           return sp.enabled === false || !sp.amount || sp.amount <= 0;
         }
 
-        case 'crop':
+        case 'crop': {
+          // A crop is identity when the rect is full-frame AND there is no rotation/flip.
+          // Delegate to CropPipelineModule.isNoOp() so the condition is single-sourced.
+          const cropPipeline = module as CropPipelineModule;
+          return cropPipeline.isNoOp();
+        }
+
         case 'transform':
         case 'lenscorrections':
         case 'localadjustments': {
