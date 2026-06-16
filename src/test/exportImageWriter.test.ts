@@ -98,6 +98,75 @@ describe('imageWriter.writeImageFile', () => {
     expect(read(0, 2)).toBeCloseTo(0.5, 1);
   });
 
+  test('resizes via sharp in the writer (8-bit) — written file has the target dims and sane pixels', async () => {
+    // 4x4 solid mid-grey, downscaled to 2x2. The resize now happens inside the
+    // writer (sharp lanczos3) instead of a renderer-side bicubic loop. We assert
+    // the file is the REQUESTED size and not byte-garbled (a flat input must stay
+    // flat grey after a downscale).
+    const w = 4, h = 4;
+    const px = [];
+    for (let i = 0; i < w * h; i++) px.push([128, 128, 128, 255]);
+    const out = path.join(tmpDir, 'resize8.png');
+
+    await writeImageFile(out, packRgba(px, Uint8Array), 'png', {
+      width: w, height: h, channels: 4, bitDepth: 8,
+      targetWidth: 2, targetHeight: 2, targetFit: 'fill'
+    });
+
+    const { data, info } = await sharp(out).raw().toBuffer({ resolveWithObject: true });
+    expect(info.width).toBe(2);
+    expect(info.height).toBe(2);
+    const read = makeReader(data, info);
+    // Flat grey in → flat grey out (~0.5), every channel, no garbling.
+    for (let p = 0; p < 4; p++) {
+      expect(read(p, 0)).toBeCloseTo(128 / 255, 1);
+      expect(read(p, 1)).toBeCloseTo(128 / 255, 1);
+      expect(read(p, 2)).toBeCloseTo(128 / 255, 1);
+    }
+  });
+
+  test('resizes via sharp in the writer (16-bit) — stays a true ushort file with sane pixels (regression RC-3)', async () => {
+    // A 16-bit resize must keep the ushort working space all the way through encode
+    // (resize on ushort raw → toColourspace('rgb16') → 16-bit PNG). A regression
+    // here would either downconvert to 8-bit or garble the bytes.
+    const w = 4, h = 4;
+    const mid = Math.round(0.5 * 65535);
+    const px = [];
+    for (let i = 0; i < w * h; i++) px.push([mid, mid, mid, 65535]);
+    const out = path.join(tmpDir, 'resize16.png');
+
+    await writeImageFile(out, packRgba(px, Uint16Array), 'png', {
+      width: w, height: h, channels: 4, bitDepth: 16,
+      targetWidth: 2, targetHeight: 2, targetFit: 'fill'
+    });
+
+    const meta = await sharp(out).metadata();
+    expect(meta.width).toBe(2);
+    expect(meta.height).toBe(2);
+    expect(meta.depth).toBe('ushort'); // still a real 16-bit file after resize
+
+    const { data, info } = await sharp(out).raw().toBuffer({ resolveWithObject: true });
+    const read = makeReader(data, info);
+    for (let p = 0; p < 4; p++) {
+      expect(read(p, 0)).toBeCloseTo(0.5, 1);
+      expect(read(p, 1)).toBeCloseTo(0.5, 1);
+      expect(read(p, 2)).toBeCloseTo(0.5, 1);
+    }
+  });
+
+  test('writer-side resize still validates the INCOMING buffer size (mismatch throws)', async () => {
+    // The size check guards the full-res input buffer, not the target. A buffer
+    // that does not match width/height must still throw before any resize.
+    const out = path.join(tmpDir, 'resize-bad.png');
+    const px = [[0, 0, 0, 255]]; // 1 px
+    await expect(
+      writeImageFile(out, packRgba(px, Uint8Array), 'png', {
+        width: 4, height: 4, channels: 4, bitDepth: 8,
+        targetWidth: 2, targetHeight: 2
+      })
+    ).rejects.toThrow(/mismatch/i);
+  });
+
   test('throws on buffer/size mismatch instead of writing a corrupt file', async () => {
     const out = path.join(tmpDir, 'bad.png');
     // Claim 4x4 (16 px) but only supply 4 px worth of bytes.

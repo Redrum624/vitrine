@@ -120,6 +120,12 @@ export interface ElectronAPI {
     compressionLevel?: number;
     compression?: string;
     lossless?: boolean;
+    // Primary export resize done in the main process (sharp, off the renderer
+    // thread). width/height describe the incoming full-res buffer; these are the
+    // output dimensions sharp resizes to before encoding.
+    targetWidth?: number;
+    targetHeight?: number;
+    targetFit?: string;
     resize?: {
       width?: number;
       height?: number;

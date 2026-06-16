@@ -215,7 +215,10 @@ const WIDE_GAMUT_ICC = { adobergb: 'AdobeRGB1998.icc', prophoto: 'ProPhoto.icc',
  * @param {string} filePath           destination path
  * @param {ArrayBuffer|Buffer} imageData  raw interleaved RGBA samples
  * @param {string} format             'jpeg' | 'png' | 'tiff' | 'webp'
- * @param {object} options            { width, height, channels?, bitDepth?, colorSpace?, quality?, progressive?, compressionLevel?, compression?, lossless?, resize?, metadata? }
+ * @param {object} options            { width, height, channels?, bitDepth?, colorSpace?, quality?, progressive?, compressionLevel?, compression?, lossless?, targetWidth?, targetHeight?, targetFit?, resize?, metadata? }
+ *                                     targetWidth/targetHeight/targetFit = primary export resize done here in the
+ *                                       main process (off the renderer thread) on the RAW input BEFORE encode.
+ *                                       width/height describe the incoming (full-res) buffer; targetWidth/Height the output.
  *                                     metadata = { exif?: { Copyright?, Artist?, ImageDescription?, DateTimeOriginal? },
  *                                                  xmp?: { rights?, creator?[], title?, description?, subject?[], credit?, source?, webStatement?, usageTerms? } }
  * @returns {Promise<boolean>}
@@ -264,6 +267,27 @@ async function writeImageFile(filePath, imageData, format, options = {}) {
   let img = sharp(rawInput, {
     raw: { width: options.width, height: options.height, channels }
   });
+
+  // Primary export resize, performed in the MAIN process off the renderer thread.
+  // ExportService used to run a CPU bicubic loop on the renderer (blocking the UI)
+  // and pass us a buffer already at the target size; now it passes the FULL-res
+  // processed buffer plus the target dimensions, and we downscale here with
+  // sharp's lanczos3 kernel (higher quality than the old bicubic).
+  //
+  // CORRECTNESS: this MUST be the FIRST pixel operation, before removeAlpha /
+  // toColourspace('rgb16') / encode, so the resize sees the raw RGBA samples at
+  // their declared bit depth (uchar or ushort). ExportService already computed
+  // aspect-correct dimensions, so we use fit:'fill' to honour them exactly and
+  // allow enlargement (no withoutEnlargement) so an upscale request is respected.
+  // The 16-bit (ushort) raw input is resized as ushort and stays ushort, so the
+  // downstream toColourspace('rgb16') + true 16-bit encode are unaffected.
+  if (options.targetWidth && options.targetHeight &&
+      (options.targetWidth !== options.width || options.targetHeight !== options.height)) {
+    img = img.resize(options.targetWidth, options.targetHeight, {
+      kernel: 'lanczos3',
+      fit: options.targetFit || 'fill'
+    });
+  }
 
   const fmt = String(format).toLowerCase();
   // Keep a 16-bit working space (PNG/TIFF only). NOT for wide-gamut: sharp's

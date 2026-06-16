@@ -226,9 +226,31 @@ export class ExportService {
         exportOptions
       );
 
-      // Resize if needed
+      const needsResize =
+        outputDimensions.width !== originalWidth || outputDimensions.height !== originalHeight;
+
+      // RESIZE STRATEGY (moved off the renderer main thread):
+      //  - No watermark (the common path): defer the resize to the main process.
+      //    sharp downscales the raw buffer with lanczos3 BEFORE encode, off the UI
+      //    thread and at higher quality than the old JS bicubic. The renderer-side
+      //    sharpening/colour-space/bit-depth steps below run at FULL resolution —
+      //    they are all PER-PIXEL transforms, so the result is identical whether
+      //    applied before or after a resize (only the pixel count differs).
+      //  - Watermark enabled: a watermark MUST be composited at the OUTPUT size, or
+      //    its placement/scale would differ once downscaled. We therefore keep the
+      //    legacy renderer resize for that path so output is byte-for-byte preserved.
+      const watermarkEnabled = !!exportOptions.watermark?.enabled;
+      const resizeInMainProcess = needsResize && !watermarkEnabled;
+
+      // Dimensions the renderer-side per-pixel steps (sharpen/colour/bit-depth)
+      // operate on, and that the buffer handed to createImageFile is sized for.
+      // When the resize is deferred to sharp this stays at the full/original size.
       let processedData = imageData;
-      if (outputDimensions.width !== originalWidth || outputDimensions.height !== originalHeight) {
+      let workingWidth = originalWidth;
+      let workingHeight = originalHeight;
+
+      if (needsResize && !resizeInMainProcess) {
+        // Watermark path: resize on the renderer (legacy behaviour, preserved exactly).
         processedData = await this.resizeImage(
           imageData,
           originalWidth,
@@ -237,25 +259,28 @@ export class ExportService {
           outputDimensions.height,
           exportOptions.resizeMode
         );
+        workingWidth = outputDimensions.width;
+        workingHeight = outputDimensions.height;
       }
 
-      // Apply output sharpening
+      // Apply output sharpening (disabled by default; sharpening lives in the
+      // develop pipeline now). Kept inert here for back-compat.
       if (exportOptions.outputSharpening.enabled) {
         processedData = this.applyOutputSharpening(
           processedData,
-          outputDimensions.width,
-          outputDimensions.height,
+          workingWidth,
+          workingHeight,
           exportOptions.outputSharpening
         );
       }
 
-      // Apply watermark if enabled
-      if (exportOptions.watermark?.enabled) {
+      // Apply watermark if enabled (only reached on the renderer-resize path).
+      if (watermarkEnabled) {
         processedData = await this.applyWatermark(
           processedData,
-          outputDimensions.width,
-          outputDimensions.height,
-          exportOptions.watermark
+          workingWidth,
+          workingHeight,
+          exportOptions.watermark!
         );
       }
 
@@ -263,8 +288,8 @@ export class ExportService {
       if (exportOptions.colorSpace !== 'srgb') {
         processedData = this.convertColorSpace(
           processedData,
-          outputDimensions.width,
-          outputDimensions.height,
+          workingWidth,
+          workingHeight,
           'srgb',
           exportOptions.colorSpace
         );
@@ -277,21 +302,24 @@ export class ExportService {
       // Convert to the appropriate bit depth
       const outputData = this.convertBitDepth(
         processedData,
-        outputDimensions.width,
-        outputDimensions.height,
+        workingWidth,
+        workingHeight,
         exportOptions.bitDepth
       );
 
       // Determine output path
       const outputPath = this.generateOutputPath(originalFilePath, exportOptions);
 
-      // Create the image file
+      // Create the image file. When the resize was deferred, we pass the full-res
+      // buffer dimensions plus the target dimensions so the main-process writer
+      // resizes with sharp before encoding.
       await this.createImageFile(
         outputData,
-        outputDimensions.width,
-        outputDimensions.height,
+        workingWidth,
+        workingHeight,
         exportOptions,
-        outputPath
+        outputPath,
+        resizeInMainProcess ? outputDimensions : undefined
       );
 
       // Get file size
@@ -784,7 +812,12 @@ export class ExportService {
     width: number,
     height: number,
     options: ExportOptions,
-    outputPath: string
+    outputPath: string,
+    // When set, the buffer is at full/original resolution and the main-process
+    // writer must resize it (with sharp, off the renderer thread) to these dims
+    // BEFORE encoding. Omitted when the resize already happened on the renderer
+    // (watermark path) or no resize is needed.
+    targetDimensions?: { width: number; height: number }
   ): Promise<void> {
     logger.debug(`Creating ${options.format.toUpperCase()} file: ${width}x${height}, ${options.bitDepth}-bit`);
 
@@ -802,6 +835,15 @@ export class ExportService {
         compression: options.compression,
         lossless: options.lossless
       };
+
+      // Primary export resize, deferred to the main process (sharp lanczos3).
+      // ExportService.calculateOutputDimensions already produced aspect-correct
+      // dimensions, so 'fill' honours them exactly without re-applying aspect math.
+      if (targetDimensions) {
+        exportOptions.targetWidth = targetDimensions.width;
+        exportOptions.targetHeight = targetDimensions.height;
+        exportOptions.targetFit = 'fill';
+      }
 
       // Add resize options if specified
       if (options.resize && (options.resize.width || options.resize.height)) {
@@ -832,6 +874,9 @@ export class ExportService {
           compressionLevel?: number;
           compression?: string;
           lossless?: boolean;
+          targetWidth?: number;
+          targetHeight?: number;
+          targetFit?: string;
           resize?: {
             width?: number;
             height?: number;
