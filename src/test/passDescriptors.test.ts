@@ -3,6 +3,7 @@ import { WhiteBalanceModule } from '../modules/WhiteBalanceModule';
 import { BasicAdjustmentsModule } from '../modules/BasicAdjustmentsModule';
 import { ToneCurvePipelineModule } from '../modules/ToneCurvePipelineModule';
 import { ExposureModule } from '../modules/ExposureModule';
+import { ShadowsHighlightsModule } from '../modules/ShadowsHighlightsModule';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -36,10 +37,14 @@ const DEFAULT_RT = { width: 800, height: 600, dehaze: { active: false, hazeStren
 
 test('GPU_MODULE_IDS uses real pipeline ids and contains exposure, excludes huecurves', () => {
   expect(GPU_MODULE_IDS).toEqual(
-    expect.arrayContaining(['temperature', 'exposure', 'basicadj', 'tonecurve', 'colorbalance', 'lenscorrections']),
+    expect.arrayContaining(['temperature', 'exposure', 'basicadj', 'tonecurve', 'colorbalance', 'lenscorrections', 'shadowshighlights']),
   );
   expect(GPU_MODULE_IDS).not.toContain('whitebalance');
   expect(GPU_MODULE_IDS).not.toContain('huecurves');
+});
+
+test('GPU_MODULE_IDS contains shadowshighlights', () => {
+  expect(GPU_MODULE_IDS).toContain('shadowshighlights');
 });
 
 test('OPT_IN_GPU_MODULE_IDS contains noise-reduction and not huecurves', () => {
@@ -304,6 +309,149 @@ test('exposure GPU math matches ExposureModule.process() for non-default params'
 
     expect(gpuResult).toBeCloseTo(cpuResult, 6);
   }
+});
+
+// ---------------------------------------------------------------------------
+// Shadows/Highlights pass descriptor tests (Task 9)
+// ---------------------------------------------------------------------------
+
+test('real ShadowsHighlightsModule id is in the GPU set', () => {
+  // ShadowsHighlightsModule implements ImageProcessingModule (id property), while the
+  // pipeline wrapper's getId() returns the same 'shadowshighlights'. Lock both.
+  expect(GPU_MODULE_IDS).toContain(new ShadowsHighlightsModule().id);
+});
+
+test('shadowshighlights with maskBlur:0 + non-neutral params yields a GPU pass', () => {
+  // Use the REAL module's getParams() so param field names are verified, then flip
+  // maskBlur to 0 (default is 1.0) and push a non-neutral value through.
+  const realParams = new ShadowsHighlightsModule().getParams();
+  const params = { ...realParams, maskBlur: 0, bilateralFilter: false, shadows: 70 };
+  const modules = [fakeModule('shadowshighlights', true, params)];
+  const { passes, cpuBridges } = buildPassList(modules);
+  expect(passes).toHaveLength(1);
+  expect(passes[0].id).toBe('shadowshighlights');
+  expect(passes[0].programKey).toBe('shadowshighlights');
+  expect(cpuBridges).not.toContain('shadowshighlights');
+  // setUniforms has arity 3 and must not throw with the no-op GL mock
+  expect(() => passes[0].setUniforms(makeGl(), DUMMY_PROG, DEFAULT_RT)).not.toThrow();
+});
+
+test('shadowshighlights with default maskBlur (1.0) falls back to CPU bridge', () => {
+  // Default maskBlur is 1.0 (>0) → cross-pixel blur the shader cannot match → CPU.
+  const params = new ShadowsHighlightsModule().getParams();
+  expect(params.maskBlur).toBeGreaterThan(0); // lock the default assumption
+  const modules = [fakeModule('shadowshighlights', true, { ...params, shadows: 70 })];
+  const { passes, cpuBridges } = buildPassList(modules);
+  expect(passes).toHaveLength(0);
+  expect(cpuBridges).toContain('shadowshighlights');
+});
+
+test('shadowshighlights with bilateralFilter:true falls back to CPU bridge even at maskBlur:0', () => {
+  const params = new ShadowsHighlightsModule().getParams();
+  const modules = [fakeModule('shadowshighlights', true, { ...params, maskBlur: 0, bilateralFilter: true })];
+  const { passes, cpuBridges } = buildPassList(modules);
+  expect(passes).toHaveLength(0);
+  expect(cpuBridges).toContain('shadowshighlights');
+});
+
+test('disabled shadowshighlights goes to cpuBridges, not passes', () => {
+  const params = new ShadowsHighlightsModule().getParams();
+  const modules = [fakeModule('shadowshighlights', false, { ...params, maskBlur: 0 })];
+  const { passes, cpuBridges } = buildPassList(modules);
+  expect(passes).toHaveLength(0);
+  expect(cpuBridges).toContain('shadowshighlights');
+});
+
+// Pure-math correctness: replicate the FRAG_SHADOWSHIGHLIGHTS analytic math in JS and
+// compare to the real ShadowsHighlightsModule.process() at maskBlur:0. No GL needed —
+// this catches formula drift between the shader and the CPU at the unit-test level (the
+// runtime GL selfTest is the second gate). Tolerance mirrors color-balance (2e-2).
+test('shadows/highlights analytic shader math matches CPU module (maskBlur:0)', () => {
+  const W = { r: 0.2126, g: 0.7152, b: 0.0722 };
+  const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
+  const p = {
+    shadows: 70, highlights: 35, shadowsRadius: 60, highlightsRadius: 55,
+    shadowsColorTransfer: 30, highlightsColorTransfer: 20,
+    whitePoint: 0.5, blackPoint: 5, compress: 25,
+    shadowsColorCorrection: 15, highlightsColorCorrection: 10,
+    maskFalloff: 2.0, strength: 1.2, preserveColor: false, iterations: 2,
+    maskBlur: 0, bilateralFilter: false, enabled: true,
+  };
+
+  // JS replica of the fragment shader (per pixel).
+  const shaderPixel = (r0: number, g0: number, b0: number): [number, number, number] => {
+    let r = r0, g = g0, b = b0;
+    const lum0 = r * W.r + g * W.g + b * W.b;
+    const sRad = p.shadowsRadius / 100;
+    const hRad = p.highlightsRadius / 100, hThr = 1 - hRad;
+    const shadowMask = lum0 < sRad ? 1 : (lum0 < sRad * 2 ? 1 - Math.pow((lum0 - sRad) / sRad, p.maskFalloff) : 0);
+    const highlightMask = lum0 > hThr ? 1 : (lum0 > hThr * 0.5 ? 1 - Math.pow((hThr - lum0) / (hThr * 0.5), p.maskFalloff) : 0);
+    const shadowAmount = (p.shadows - 50) / 50, highlightAmount = (p.highlights - 50) / 50;
+    const sCT = p.shadowsColorTransfer / 100, hCT = p.highlightsColorTransfer / 100;
+    const whiteAdjust = 1 + p.whitePoint * 0.25, blackAdjust = p.blackPoint / 100;
+    for (let it = 0; it < p.iterations; it++) {
+      if (p.shadows !== 50) {
+        const effect = shadowMask * shadowAmount * p.strength;
+        if (effect !== 0) {
+          const lum = r * W.r + g * W.g + b * W.b;
+          const recovery = Math.pow(1 - lum, 0.5) * effect;
+          const mix = sCT * Math.abs(effect), avg = (r + g + b) / 3;
+          r = clamp01(r + recovery + (avg - r) * mix);
+          g = clamp01(g + recovery + (avg - g) * mix);
+          b = clamp01(b + recovery + (avg - b) * mix);
+        }
+      }
+      if (p.highlights !== 50) {
+        const effect = highlightMask * highlightAmount * p.strength;
+        if (effect !== 0) {
+          const lum = r * W.r + g * W.g + b * W.b;
+          const recovery = Math.pow(lum, 0.5) * effect * 0.3;
+          const mix = hCT * Math.abs(effect) * 0.3, avg = (r + g + b) / 3;
+          r = clamp01(r - recovery + (avg - r) * mix);
+          g = clamp01(g - recovery + (avg - g) * mix);
+          b = clamp01(b - recovery + (avg - b) * mix);
+        }
+      }
+      if (p.whitePoint !== 0 || p.blackPoint !== 0) {
+        r = Math.min(1, Math.max(0, r - blackAdjust) * whiteAdjust);
+        g = Math.min(1, Math.max(0, g - blackAdjust) * whiteAdjust);
+        b = Math.min(1, Math.max(0, b - blackAdjust) * whiteAdjust);
+      }
+    }
+    const compress = p.compress / 100;
+    if (compress >= 0.01) {
+      const factor = 1 - compress * 0.3;
+      r = clamp01(r * factor); g = clamp01(g * factor); b = clamp01(b * factor);
+    }
+    const sCorr = p.shadowsColorCorrection / 100, hCorr = p.highlightsColorCorrection / 100;
+    if (Math.abs(sCorr) >= 0.001 || Math.abs(hCorr) >= 0.001) {
+      if (shadowMask > 0 && Math.abs(sCorr) > 0.001) {
+        const c = 1 + sCorr * shadowMask; r = clamp01(r * c); g = clamp01(g * c); b = clamp01(b * c);
+      }
+      if (highlightMask > 0 && Math.abs(hCorr) > 0.001) {
+        const c = 1 - hCorr * highlightMask; r = clamp01(r * c); g = clamp01(g * c); b = clamp01(b * c);
+      }
+    }
+    return [r, g, b];
+  };
+
+  // 8x8 test image.
+  const w = 8, h = 8;
+  const data = new Float32Array(w * h * 4);
+  for (let i = 0; i < w * h; i++) {
+    data[i * 4] = (i % 8) / 8; data[i * 4 + 1] = ((i * 5) % 8) / 8; data[i * 4 + 2] = ((i * 3) % 8) / 8; data[i * 4 + 3] = 1;
+  }
+
+  const mod = new ShadowsHighlightsModule();
+  mod.setParams(p);
+  const cpu = mod.process({ width: w, height: h, data: new Float32Array(data), channels: 4 }).data;
+
+  let maxDiff = 0;
+  for (let i = 0; i < w * h; i++) {
+    const [r, g, b] = shaderPixel(data[i * 4], data[i * 4 + 1], data[i * 4 + 2]);
+    maxDiff = Math.max(maxDiff, Math.abs(r - cpu[i * 4]), Math.abs(g - cpu[i * 4 + 1]), Math.abs(b - cpu[i * 4 + 2]));
+  }
+  expect(maxDiff).toBeLessThan(0.02);
 });
 
 // ---------------------------------------------------------------------------

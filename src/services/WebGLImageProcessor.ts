@@ -28,6 +28,7 @@ import {
   FRAG_DISTORTION,
   FRAG_LATERALCA,
   FRAG_BASICADJ,
+  FRAG_SHADOWSHIGHLIGHTS,
 } from '../shaders/sources';
 import {
   exposureUniforms,
@@ -40,7 +41,9 @@ import {
   lateralCAUniforms,
   hueCurvesUniforms,
   denoiseUniforms,
+  shadowsHighlightsUniforms,
 } from '../shaders/uniforms';
+import { ShadowsHighlightsModule, ShadowsHighlightsParams } from '../modules/ShadowsHighlightsModule';
 
 export interface BasicAdjustmentsParams {
   black_point: number;
@@ -96,6 +99,20 @@ const CB_T = {
   sat: [10, -5, 8, 0, 0, 12, 0, -8], lum: [5, 0, -5, 8, 0, 0, 10, 0], hue: [10, 0, -10, 0, 15, 0, 0, -12],
 };
 
+// Non-neutral S/H self-check params. Exercises EVERY GPU op: shadow + highlight
+// recovery with color transfer (preserveColor:false), white/black point, compress,
+// shadow/highlight color correction, strength≠1, 2 iterations. maskBlur MUST be 0
+// (the only mode the analytic shader is valid for) and bilateralFilter false.
+const SH_T: ShadowsHighlightsParams = {
+  enabled: true,
+  shadows: 70, shadowsRadius: 60, shadowsColorTransfer: 30,
+  highlights: 35, highlightsRadius: 55, highlightsColorTransfer: 20,
+  whitePoint: 0.5, blackPoint: 5,
+  compress: 25, shadowsColorCorrection: 15, highlightsColorCorrection: 10,
+  maskBlur: 0, maskFalloff: 2.0, preserveColor: false,
+  bilateralFilter: false, iterations: 2, strength: 1.2,
+};
+
 class WebGLImageProcessor {
   private gl: WebGL2RenderingContext | null = null;
   private maxTextureSize = 0; // GPU MAX_TEXTURE_SIZE; passes above a safe cap fall back to CPU
@@ -115,6 +132,8 @@ class WebGLImageProcessor {
   private distortionVerified: boolean | null = null;
   private lateralCAProgram: WebGLProgram | null = null;
   private lateralCAVerified: boolean | null = null;
+  private shadowsHighlightsProgram: WebGLProgram | null = null;
+  private shadowsHighlightsVerified: boolean | null = null;
   private vao: WebGLVertexArrayObject | null = null;
   private initTried = false;
 
@@ -164,6 +183,9 @@ class WebGLImageProcessor {
       // reject. A compile failure must NOT disable the other (required) GPU ops, so
       // build it here without gating the context on it.
       this.hueCurvesProgram = this.buildProgram(gl, VERT_SRC, FRAG_HUECURVES);
+      // Optional program: shadows/highlights. Built without gating the context so a
+      // compile failure leaves only S/H on the CPU, not the whole GPU path.
+      this.shadowsHighlightsProgram = this.buildProgram(gl, VERT_SRC, FRAG_SHADOWSHIGHLIGHTS);
       this.vao = vao;
 
       // Self-check: only trust the GPU basic-adjustments path if it matches the CPU
@@ -356,6 +378,61 @@ class WebGLImageProcessor {
       out[i] = clamp01(nr); out[i + 1] = clamp01(ng); out[i + 2] = clamp01(nb);
     }
     return out;
+  }
+
+  /**
+   * Apply Shadows/Highlights. GPU when verified AND maskBlur==0 (the analytic single-pass
+   * shader only matches the CPU when the tone masks are NOT box-blurred). For maskBlur>0
+   * or bilateralFilter, the caller (passDescriptors / pipeline) must route to the CPU
+   * module; this method itself guards on maskBlur==0 && !bilateralFilter and otherwise
+   * runs the CPU reference so a direct call is always correct.
+   */
+  applyShadowsHighlights(
+    data: Float32Array, width: number, height: number, params: ShadowsHighlightsParams
+  ): Float32Array {
+    const gpuEligible = params.maskBlur === 0 && !params.bilateralFilter;
+    const gl = this.ensureContext();
+    if (gpuEligible && gl && this.shadowsHighlightsProgram && this.vao && this.verifyShadowsHighlights()) {
+      try {
+        return this.runPass(this.shadowsHighlightsProgram, data, width, height,
+          shadowsHighlightsUniforms(params));
+      } catch (e) { logger.warn('[GPU] shadows/highlights failed — CPU:', e instanceof Error ? e.message : String(e)); }
+    }
+    return this.shadowsHighlightsCPU(data, width, height, params);
+  }
+
+  /** CPU reference — the real ShadowsHighlightsModule (single source of truth). */
+  shadowsHighlightsCPU(
+    data: Float32Array, width: number, height: number, params: ShadowsHighlightsParams
+  ): Float32Array {
+    const mod = new ShadowsHighlightsModule();
+    mod.setParams({ ...params, enabled: true });
+    // The module copies the input internally (new Float32Array(data)); pass a copy
+    // anyway so this method never mutates the caller's buffer.
+    const result = mod.process({ width, height, data: new Float32Array(data), channels: 4 });
+    return result.data;
+  }
+
+  private verifyShadowsHighlights(): boolean {
+    if (this.shadowsHighlightsVerified !== null) return this.shadowsHighlightsVerified;
+    let ok = false;
+    try {
+      const { data, w, h } = CB_SELFTEST;
+      // Non-neutral params that exercise EVERY GPU op: shadow + highlight recovery
+      // (color-transfer ON via preserveColor:false), white/black point, compress,
+      // color correction, strength≠1, 2 iterations — all with maskBlur:0 (the only
+      // mode the shader is valid for) and bilateralFilter:false.
+      const p = SH_T;
+      const a = this.runPass(this.shadowsHighlightsProgram!, data, w, h, shadowsHighlightsUniforms(p));
+      const c = this.shadowsHighlightsCPU(data, w, h, p);
+      let maxDiff = 0;
+      for (let i = 0; i < c.length; i++) maxDiff = Math.max(maxDiff, Math.abs(a[i] - c[i]));
+      // pow() + additive color mixing → same tolerance class as color-balance.
+      ok = maxDiff < 0.02;
+      logger.info(`[GPU] shadows/highlights self-check maxDiff=${maxDiff.toExponential(2)} -> ${ok ? 'GPU' : 'CPU fallback'}`);
+    } catch (e) { logger.warn('[GPU] shadows/highlights self-check error:', e instanceof Error ? e.message : String(e)); }
+    this.shadowsHighlightsVerified = ok;
+    return ok;
   }
 
   /** Apply Tone Curve (base curve + per-channel RGB curves). GPU when verified, else CPU. */

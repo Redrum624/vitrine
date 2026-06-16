@@ -25,7 +25,9 @@ import {
   distortionUniforms,
   lateralCAUniforms,
   vignetteUniforms,
+  shadowsHighlightsUniforms,
 } from './uniforms';
+import type { ShadowsHighlightsUniformParams } from './uniforms';
 import type { BasicAdjustmentsParams, DehazeState } from '../services/WebGLImageProcessor';
 import { computeWBGains } from '../modules/WhiteBalanceModule';
 
@@ -39,8 +41,10 @@ import { computeWBGains } from '../modules/WhiteBalanceModule';
  * - 'tonecurve'      = ToneCurvePipelineModule
  * - 'colorbalance'   = ColorBalancePipelineModule
  * - 'lenscorrections'= LensCorrectionsPipelineModule
+ * - 'shadowshighlights' = ShadowsHighlightsPipelineModule (single-pass, maskBlur==0 only;
+ *                         maskBlur>0 / bilateralFilter route to the CPU — see builder)
  * HueCurves is NOT included — it is a standalone singleton, never registered in the
- * live pipeline. Exposure is deferred to Task 7.
+ * live pipeline.
  */
 export const GPU_MODULE_IDS: readonly string[] = [
   'temperature',
@@ -49,6 +53,7 @@ export const GPU_MODULE_IDS: readonly string[] = [
   'tonecurve',
   'colorbalance',
   'lenscorrections',
+  'shadowshighlights',
 ];
 
 /**
@@ -228,6 +233,55 @@ function buildColorBalancePass(params: Record<string, unknown>): PassDescriptor 
 }
 
 /**
+ * Shadows/Highlights → a single GPU pass, but ONLY when it can match the CPU exactly.
+ *
+ * The CPU module box-blurs the shadow/highlight tone masks across neighbouring pixels
+ * (blurMask) whenever `maskBlur > 0`, and optionally runs a bilateral pre-filter. Neither
+ * cross-pixel gather can be reproduced in the analytic single-pass shader, so those modes
+ * MUST run on the CPU. Returns `null` in that case so buildPassList routes the module to
+ * cpuBridges. The module default `maskBlur` is 1.0, so by default S/H falls back to CPU;
+ * the GPU pass engages only when the user sets maskBlur to 0 (and bilateralFilter off).
+ *
+ * Param field names are read straight from ShadowsHighlightsModule.getParams() — verified
+ * against the module, so no silent-zero name mismatch.
+ */
+function buildShadowsHighlightsPass(params: Record<string, unknown>): PassDescriptor | null {
+  const num = (k: string, dflt: number): number => {
+    const v = params[k];
+    return typeof v === 'number' && Number.isFinite(v) ? v : dflt;
+  };
+  const maskBlur = num('maskBlur', 1.0);
+  const bilateralFilter = params.bilateralFilter === true;
+  // maskBlur>0 or bilateral → cross-pixel ops the analytic shader can't match → CPU.
+  if (maskBlur > 0 || bilateralFilter) return null;
+
+  const p: ShadowsHighlightsUniformParams = {
+    shadows: num('shadows', 50),
+    highlights: num('highlights', 50),
+    shadowsRadius: num('shadowsRadius', 50),
+    highlightsRadius: num('highlightsRadius', 50),
+    shadowsColorTransfer: num('shadowsColorTransfer', 0),
+    highlightsColorTransfer: num('highlightsColorTransfer', 0),
+    whitePoint: num('whitePoint', 0),
+    blackPoint: num('blackPoint', 0),
+    compress: num('compress', 0),
+    shadowsColorCorrection: num('shadowsColorCorrection', 0),
+    highlightsColorCorrection: num('highlightsColorCorrection', 0),
+    maskFalloff: num('maskFalloff', 2.0),
+    strength: num('strength', 1.0),
+    preserveColor: params.preserveColor !== false,
+    iterations: num('iterations', 1),
+  };
+
+  return {
+    id: 'shadowshighlights',
+    programKey: 'shadowshighlights',
+    // does not depend on rt (per-pixel analytic, no dimension/dehaze)
+    setUniforms: (gl, prog, _rt) => shadowsHighlightsUniforms(p)(gl, prog),
+  };
+}
+
+/**
  * LensCorrections maps to up to three sub-passes (distortion, lateralCA, vignette).
  * Each setUniforms reads width/height from rt — no baked-in 0,0 placeholders.
  * Returns an empty array when all sub-effects are identity/disabled.
@@ -370,6 +424,13 @@ export function buildPassList(modules: MinimalModule[]): PassList {
       case 'colorbalance':
         passes.push(buildColorBalancePass(params));
         break;
+      case 'shadowshighlights': {
+        // null → maskBlur>0 / bilateralFilter: cross-pixel ops the shader can't match → CPU.
+        const shPass = buildShadowsHighlightsPass(params);
+        if (shPass) passes.push(shPass);
+        else cpuBridges.push(id);
+        break;
+      }
       default:
         // Future GPU modules in GPU_MODULE_IDS without a dedicated builder yet.
         cpuBridges.push(id);

@@ -29,12 +29,15 @@ import {
   FRAG_LATERALCA,
   FRAG_VIGNETTE,
   FRAG_PRESENT,
+  FRAG_SHADOWSHIGHLIGHTS,
 } from './sources';
 import type { PassDescriptor, PassRuntime } from './passDescriptors';
-import { basicAdjUniforms, exposureUniforms } from './uniforms';
+import { basicAdjUniforms, exposureUniforms, shadowsHighlightsUniforms } from './uniforms';
+import type { ShadowsHighlightsUniformParams } from './uniforms';
 import type { DehazeState } from '../services/WebGLImageProcessor';
 import { webGLImageProcessor } from '../services/WebGLImageProcessor';
 import { ExposureModule } from '../modules/ExposureModule';
+import { ShadowsHighlightsModule } from '../modules/ShadowsHighlightsModule';
 
 export interface PreviewRenderResult {
   width: number;
@@ -60,6 +63,7 @@ const PROGRAM_SOURCES: Record<string, string> = {
   distortion: FRAG_DISTORTION,
   lateralca: FRAG_LATERALCA,
   vignette: FRAG_VIGNETTE,
+  shadowshighlights: FRAG_SHADOWSHIGHLIGHTS,
 };
 
 /** Tone-curve LUT sampler-uniform names, in the same order runToneCurveGPU binds them. */
@@ -666,8 +670,43 @@ export class GpuPreviewPipeline {
       const exposureOk = exposureMaxDiff < 1e-4;
       logger.info(`[GPU-PIPELINE] exposure self-test maxDiff=${exposureMaxDiff.toExponential(2)} ${exposureOk ? 'PASS' : 'FAIL'}`);
 
-      const ok = basicAdjOk && exposureOk;
-      const maxDiff = Math.max(basicAdjMaxDiff, exposureMaxDiff);
+      // ── 3. shadows/highlights sub-test ──────────────────────────────────────
+      // Non-neutral params exercising every GPU op (recovery with color transfer,
+      // white/black point, compress, color correction, 2 iterations). maskBlur MUST
+      // be 0 — the only mode the analytic shader is valid for (maskBlur>0 routes to CPU).
+      const shParams: ShadowsHighlightsUniformParams = {
+        shadows: 70, highlights: 35, shadowsRadius: 60, highlightsRadius: 55,
+        shadowsColorTransfer: 30, highlightsColorTransfer: 20,
+        whitePoint: 0.5, blackPoint: 5, compress: 25,
+        shadowsColorCorrection: 15, highlightsColorCorrection: 10,
+        maskFalloff: 2.0, strength: 1.2, preserveColor: false, iterations: 2,
+      };
+
+      const shPass: PassDescriptor = {
+        id: 'shadowshighlights',
+        programKey: 'shadowshighlights',
+        setUniforms: (gl, prog, _rt) => shadowsHighlightsUniforms(shParams)(gl, prog),
+      };
+
+      this.setSource(data, w, h);
+      this.render([shPass]);
+      const gpuSH = this.readback();
+
+      // Reference: the real ShadowsHighlightsModule (single source of truth).
+      const shModule = new ShadowsHighlightsModule();
+      shModule.setParams({ ...shParams, enabled: true, maskBlur: 0, bilateralFilter: false });
+      const refSH = shModule.process({ width: w, height: h, data: new Float32Array(data), channels: 4 }).data;
+
+      let shMaxDiff = 0;
+      for (let i = 0; i < refSH.length; i++) {
+        shMaxDiff = Math.max(shMaxDiff, Math.abs(gpuSH[i] - refSH[i]));
+      }
+      // pow() + additive color mixing → same tolerance class as color-balance (2e-2).
+      const shOk = shMaxDiff < 0.02;
+      logger.info(`[GPU-PIPELINE] s/h self-test maxDiff=${shMaxDiff.toExponential(2)} ${shOk ? 'PASS' : 'FAIL'}`);
+
+      const ok = basicAdjOk && exposureOk && shOk;
+      const maxDiff = Math.max(basicAdjMaxDiff, exposureMaxDiff, shMaxDiff);
       return { ok, maxDiff };
     } catch (e) {
       logger.warn('[GPU-PIPELINE] selfTest error:', e instanceof Error ? e.message : String(e));

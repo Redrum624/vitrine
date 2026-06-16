@@ -160,6 +160,56 @@ export function hueCurvesUniforms(luts: HueCurveLuts, blend: number): UniformSet
   };
 }
 
+// ── Shadows / Highlights pass ────────────────────────────────────────────────
+
+/**
+ * Parameters consumed by the Shadows/Highlights GPU pass. Field names match
+ * ShadowsHighlightsModule.getParams() EXACTLY (verified against the module) so there
+ * is no silent-zero name mismatch.
+ *
+ * Only the fields that affect `process()` pixel math are read here. `maskBlur`,
+ * `bilateralFilter`, `enabled` are handled by buildShadowsHighlightsPass (which routes
+ * maskBlur>0 / bilateralFilter / disabled to the CPU), not by this setter.
+ */
+export interface ShadowsHighlightsUniformParams {
+  shadows: number;
+  highlights: number;
+  shadowsRadius: number;
+  highlightsRadius: number;
+  shadowsColorTransfer: number;
+  highlightsColorTransfer: number;
+  whitePoint: number;
+  blackPoint: number;
+  compress: number;
+  shadowsColorCorrection: number;
+  highlightsColorCorrection: number;
+  maskFalloff: number;
+  strength: number;
+  preserveColor: boolean;
+  iterations: number;
+}
+
+export function shadowsHighlightsUniforms(p: ShadowsHighlightsUniformParams): UniformSetter {
+  return (gl, prog) => {
+    const u = (n: string) => gl.getUniformLocation(prog, n);
+    gl.uniform1f(u('u_shadows'), p.shadows);
+    gl.uniform1f(u('u_highlights'), p.highlights);
+    gl.uniform1f(u('u_shadowsRadius'), p.shadowsRadius);
+    gl.uniform1f(u('u_highlightsRadius'), p.highlightsRadius);
+    gl.uniform1f(u('u_shadowsColorTransfer'), p.shadowsColorTransfer);
+    gl.uniform1f(u('u_highlightsColorTransfer'), p.highlightsColorTransfer);
+    gl.uniform1f(u('u_whitePoint'), p.whitePoint);
+    gl.uniform1f(u('u_blackPoint'), p.blackPoint);
+    gl.uniform1f(u('u_compress'), p.compress);
+    gl.uniform1f(u('u_shadowsColorCorrection'), p.shadowsColorCorrection);
+    gl.uniform1f(u('u_highlightsColorCorrection'), p.highlightsColorCorrection);
+    gl.uniform1f(u('u_maskFalloff'), p.maskFalloff);
+    gl.uniform1f(u('u_strength'), p.strength);
+    gl.uniform1f(u('u_preserveColor'), p.preserveColor ? 1 : 0);
+    gl.uniform1f(u('u_iterations'), p.iterations);
+  };
+}
+
 // ── Denoise pass ─────────────────────────────────────────────────────────────
 
 export function denoiseUniforms(width: number, height: number, strength: number): UniformSetter {

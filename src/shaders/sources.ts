@@ -381,6 +381,147 @@ void main() {
   outColor = vec4(r, src.g, b, src.a);
 }`;
 
+// Faithful GLSL port of ShadowsHighlightsModule.process (see that file for intent).
+//
+// IMPORTANT — single-pass validity requires maskBlur == 0. The CPU module box-blurs
+// the shadow/highlight tone masks across neighbouring pixels (blurMask). That cross-
+// pixel gather CANNOT be reproduced in a single analytic fragment pass, so this shader
+// is only wired up (and only verified) for maskBlur == 0; the pass-list builder routes
+// maskBlur > 0 to the CPU. With maskBlur == 0 the masks are purely a function of the
+// per-pixel luminance, exactly as the CPU computes them, so GPU and CPU agree.
+//
+// Op order mirrors ShadowsHighlightsModule.process exactly:
+//   1. luminance (Rec.709) → shadow mask + highlight mask (analytic, maskBlur==0)
+//   2. iterations loop: shadow recovery → highlight recovery → white/black point
+//      (lum recomputed from the running pixel each iteration, matching the CPU)
+//   3. compression
+//   4. color correction (shadow then highlight, gated on mask>0 like the CPU)
+// bilateralFilter is NOT handled here — buildShadowsHighlightsPass routes it to CPU.
+export const FRAG_SHADOWSHIGHLIGHTS = `#version 300 es
+precision highp float;
+uniform sampler2D u_image;
+uniform float u_shadows, u_highlights;             // 0..100 (50 = neutral)
+uniform float u_shadowsRadius, u_highlightsRadius; // 0.1..100
+uniform float u_shadowsColorTransfer, u_highlightsColorTransfer; // 0..100
+uniform float u_whitePoint, u_blackPoint;          // -4..4
+uniform float u_compress;                          // 0..100
+uniform float u_shadowsColorCorrection, u_highlightsColorCorrection; // 0..100
+uniform float u_maskFalloff;                       // mask falloff exponent
+uniform float u_strength;                          // 0..2
+uniform float u_preserveColor;                     // 1.0 = preserve, 0.0 = color transfer
+uniform float u_iterations;                        // 1..5
+in vec2 v_uv;
+out vec4 outColor;
+const vec3 W = vec3(0.2126, 0.7152, 0.0722);
+
+float shadowMaskFn(float lum) {
+  float radius = u_shadowsRadius / 100.0;
+  if (lum < radius) return 1.0;
+  if (lum < radius * 2.0) {
+    float t = (lum - radius) / radius;
+    return 1.0 - pow(t, u_maskFalloff);
+  }
+  return 0.0;
+}
+float highlightMaskFn(float lum) {
+  float radius = u_highlightsRadius / 100.0;
+  float threshold = 1.0 - radius;
+  if (lum > threshold) return 1.0;
+  if (lum > threshold * 0.5) {
+    float t = (threshold - lum) / (threshold * 0.5);
+    return 1.0 - pow(t, u_maskFalloff);
+  }
+  return 0.0;
+}
+
+void main() {
+  vec4 src = texture(u_image, v_uv);
+  vec3 rgb = src.rgb;
+
+  // Masks are computed from the ORIGINAL luminance (the CPU builds them once, up front).
+  float lum0 = dot(rgb, W);
+  float shadowMask = shadowMaskFn(lum0);
+  float highlightMask = highlightMaskFn(lum0);
+
+  float shadowAmount = (u_shadows - 50.0) / 50.0;
+  float highlightAmount = (u_highlights - 50.0) / 50.0;
+  float sColorTransfer = u_shadowsColorTransfer / 100.0;
+  float hColorTransfer = u_highlightsColorTransfer / 100.0;
+  float whiteAdjust = 1.0 + u_whitePoint * 0.25;
+  float blackAdjust = u_blackPoint / 100.0;
+
+  bool doShadow = abs(u_shadows - 50.0) > 1e-6;
+  bool doHighlight = abs(u_highlights - 50.0) > 1e-6;
+  bool doWB = (abs(u_whitePoint) > 1e-6) || (abs(u_blackPoint) > 1e-6);
+
+  // iterations: the CPU loops a small integer number of times. Cap at 5 (UI max) so
+  // the loop bound is a compile-time constant (GLSL ES requires constant loop bounds).
+  int iters = int(u_iterations + 0.5);
+  for (int iter = 0; iter < 5; iter++) {
+    if (iter >= iters) break;
+
+    // ── shadow recovery ──
+    if (doShadow) {
+      float effect = shadowMask * shadowAmount * u_strength;
+      if (effect != 0.0) {
+        float lum = dot(rgb, W);
+        float recovery = pow(1.0 - lum, 0.5) * effect;
+        if (u_preserveColor > 0.5) {
+          float lift = 1.0 + recovery;
+          rgb = clamp(rgb * lift, 0.0, 1.0);
+        } else {
+          float mixAmount = sColorTransfer * abs(effect);
+          float avg = (rgb.r + rgb.g + rgb.b) / 3.0;
+          rgb = clamp(rgb + recovery + (avg - rgb) * mixAmount, 0.0, 1.0);
+        }
+      }
+    }
+
+    // ── highlight recovery ──
+    if (doHighlight) {
+      float effect = highlightMask * highlightAmount * u_strength;
+      if (effect != 0.0) {
+        float lum = dot(rgb, W);
+        float recovery = pow(lum, 0.5) * effect * 0.3;
+        if (u_preserveColor > 0.5) {
+          rgb = clamp(rgb - recovery, 0.0, 1.0);
+        } else {
+          float mixAmount = hColorTransfer * abs(effect) * 0.3;
+          float avg = (rgb.r + rgb.g + rgb.b) / 3.0;
+          rgb = clamp(rgb - recovery + (avg - rgb) * mixAmount, 0.0, 1.0);
+        }
+      }
+    }
+
+    // ── white/black point ──
+    if (doWB) {
+      rgb = max(rgb - blackAdjust, 0.0);
+      rgb = min(rgb * whiteAdjust, 1.0);
+    }
+  }
+
+  // ── compression ──
+  float compress = u_compress / 100.0;
+  if (compress >= 0.01) {
+    float factor = 1.0 - compress * 0.3;
+    rgb = clamp(rgb * factor, 0.0, 1.0);
+  }
+
+  // ── color correction (shadow then highlight, gated on mask>0 like the CPU) ──
+  float sCorr = u_shadowsColorCorrection / 100.0;
+  float hCorr = u_highlightsColorCorrection / 100.0;
+  if (abs(sCorr) >= 0.001 || abs(hCorr) >= 0.001) {
+    if (shadowMask > 0.0 && abs(sCorr) > 0.001) {
+      rgb = clamp(rgb * (1.0 + sCorr * shadowMask), 0.0, 1.0);
+    }
+    if (highlightMask > 0.0 && abs(hCorr) > 0.001) {
+      rgb = clamp(rgb * (1.0 - hCorr * highlightMask), 0.0, 1.0);
+    }
+  }
+
+  outColor = vec4(rgb, src.a);
+}`;
+
 // Faithful GLSL port of BasicAdjustmentsModule.process (see that file for intent).
 export const FRAG_BASICADJ = `#version 300 es
 precision highp float;
