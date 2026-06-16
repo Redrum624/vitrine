@@ -295,6 +295,85 @@ void main() {
   }
 }`;
 
+// ─── Sharpen (unsharp mask) shaders ───────────────────────────────────────────
+// Three-pass unsharp mask matching SharpenModule.process() exactly:
+//   1. FRAG_BLUR_H — horizontal pass of a separable Gaussian
+//   2. FRAG_BLUR_V — vertical pass of the same Gaussian
+//   3. FRAG_UNSHARP — combine original (chainInput) + blurred into the sharpened result
+//
+// The Gaussian weights are PRECOMPUTED on the CPU (createGaussianKernel: sigma=radius/3,
+// taps = round(radius)*2+1, normalized) and uploaded as a uniform float array, so the GPU
+// uses the IDENTICAL kernel — no exp()/normalization rounding divergence from the CPU.
+// MAX_BLUR_TAPS bounds the array (radius max 5 → round(5)*2+1 = 11 taps; cap at 33 for headroom).
+// Edge handling: u_texel-offset sampling with CLAMP_TO_EDGE textures replicates the CPU's
+// min(dim-1, max(0, ...)) edge clamp exactly.
+
+export const MAX_BLUR_TAPS = 33;
+
+export const FRAG_BLUR_H = `#version 300 es
+precision highp float;
+uniform sampler2D u_image;
+uniform vec2 u_texel;            // (1/width, 1/height)
+uniform float u_weights[${MAX_BLUR_TAPS}];
+uniform int u_taps;             // active tap count (= size); center = u_taps/2
+in vec2 v_uv;
+out vec4 outColor;
+void main() {
+  vec4 src = texture(u_image, v_uv);
+  vec3 acc = vec3(0.0);
+  int half = u_taps / 2;
+  for (int k = 0; k < ${MAX_BLUR_TAPS}; k++) {
+    if (k >= u_taps) break;
+    float off = float(k - half) * u_texel.x;
+    acc += texture(u_image, vec2(v_uv.x + off, v_uv.y)).rgb * u_weights[k];
+  }
+  outColor = vec4(acc, src.a);   // preserve alpha (CPU passes alpha through the H pass)
+}`;
+
+export const FRAG_BLUR_V = `#version 300 es
+precision highp float;
+uniform sampler2D u_image;
+uniform vec2 u_texel;            // (1/width, 1/height)
+uniform float u_weights[${MAX_BLUR_TAPS}];
+uniform int u_taps;
+in vec2 v_uv;
+out vec4 outColor;
+void main() {
+  vec4 src = texture(u_image, v_uv);
+  vec3 acc = vec3(0.0);
+  int half = u_taps / 2;
+  for (int k = 0; k < ${MAX_BLUR_TAPS}; k++) {
+    if (k >= u_taps) break;
+    float off = float(k - half) * u_texel.y;
+    acc += texture(u_image, vec2(v_uv.x, v_uv.y + off)).rgb * u_weights[k];
+  }
+  outColor = vec4(acc, src.a);
+}`;
+
+// Unsharp combine: u_image = ORIGINAL (the module's chain input), u_blur = blurred.
+// Per RGB: detail = orig - blur; if |detail| < u_threshold then detail = 0;
+//          out = clamp(orig + detail * u_strength, 0, 1). Alpha = orig alpha.
+// Matches SharpenModule.process() exactly (strength = amount/100, threshold = detail/100*0.1).
+export const FRAG_UNSHARP = `#version 300 es
+precision highp float;
+uniform sampler2D u_image;   // original (chainInput) on unit 0
+uniform sampler2D u_blur;    // blurred intermediate on unit 1
+uniform float u_strength;
+uniform float u_threshold;
+in vec2 v_uv;
+out vec4 outColor;
+void main() {
+  vec4 orig = texture(u_image, v_uv);
+  vec3 blur = texture(u_blur, v_uv).rgb;
+  vec3 detail = orig.rgb - blur;
+  // Per-channel threshold (CPU applies abs() per channel, not on the vector).
+  detail.r = abs(detail.r) < u_threshold ? 0.0 : detail.r;
+  detail.g = abs(detail.g) < u_threshold ? 0.0 : detail.g;
+  detail.b = abs(detail.b) < u_threshold ? 0.0 : detail.b;
+  vec3 outc = clamp(orig.rgb + detail * u_strength, 0.0, 1.0);
+  outColor = vec4(outc, orig.a);
+}`;
+
 // ─── Present shader pair ──────────────────────────────────────────────────────
 // Used by GpuPreviewPipeline.present() to blit the final result texture to the
 // default framebuffer (visible canvas) with zoom/pan and optional before/after split.

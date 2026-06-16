@@ -210,6 +210,65 @@ export function shadowsHighlightsUniforms(p: ShadowsHighlightsUniformParams): Un
   };
 }
 
+// ── Sharpen passes (separable Gaussian blur + unsharp combine) ───────────────
+
+/**
+ * Compute the EXACT same Gaussian kernel as ImageFilters.createGaussianKernel:
+ *   size  = max(1, round(radius)) * 2 + 1
+ *   sigma = radius / 3
+ *   w[i]  = exp(-(x*x)/(2*sigma*sigma)),  x = i - floor(size/2),  then normalize by sum
+ * Returned as a fixed-length Float32Array padded to `maxTaps` (trailing zeros), plus the
+ * active tap count. Both the H and V GPU passes use this so the GPU kernel is bit-for-bit
+ * the CPU kernel (no GPU-side exp()/normalization rounding divergence).
+ */
+export function computeGaussianKernel(radius: number, maxTaps: number): { weights: Float32Array; taps: number } {
+  const size = Math.max(1, Math.round(radius)) * 2 + 1;
+  const taps = Math.min(size, maxTaps);
+  const sigma = radius / 3;
+  const weights = new Float32Array(maxTaps);
+  let sum = 0;
+  const half = Math.floor(size / 2);
+  for (let i = 0; i < size && i < maxTaps; i++) {
+    const x = i - half;
+    const val = Math.exp(-(x * x) / (2 * sigma * sigma));
+    weights[i] = val;
+    sum += val;
+  }
+  // Normalize over the same denominator the CPU uses (sum of ALL taps in `size`).
+  // When taps == size (always true for radius<=5 with maxTaps>=11) this is identical.
+  if (sum > 0) {
+    for (let i = 0; i < taps; i++) weights[i] /= sum;
+  }
+  return { weights, taps };
+}
+
+/**
+ * Uniform setter for a separable Gaussian blur pass (FRAG_BLUR_H / FRAG_BLUR_V).
+ * Uploads precomputed weights + active tap count + the texel size. The same setter is
+ * used for both axes — the shader picks the axis via u_texel.x vs u_texel.y.
+ */
+export function blurUniforms(width: number, height: number, weights: Float32Array, taps: number): UniformSetter {
+  return (gl, prog) => {
+    gl.uniform2f(gl.getUniformLocation(prog, 'u_texel'), 1 / width, 1 / height);
+    gl.uniform1fv(gl.getUniformLocation(prog, 'u_weights'), weights);
+    gl.uniform1i(gl.getUniformLocation(prog, 'u_taps'), taps);
+  };
+}
+
+/**
+ * Uniform setter for the unsharp combine pass (FRAG_UNSHARP).
+ * @param strength  amount/100 (SharpenModule: 0..1.5)
+ * @param threshold (detail/100)*0.1 (SharpenModule: 0..0.1 normalized contrast)
+ * NOTE: the blurred-intermediate sampler (u_blur) and the original sampler (u_image) are
+ * BOUND to texture units by the pipeline's sub-pass runner — this setter only sets scalars.
+ */
+export function unsharpUniforms(strength: number, threshold: number): UniformSetter {
+  return (gl, prog) => {
+    gl.uniform1f(gl.getUniformLocation(prog, 'u_strength'), strength);
+    gl.uniform1f(gl.getUniformLocation(prog, 'u_threshold'), threshold);
+  };
+}
+
 // ── Denoise pass ─────────────────────────────────────────────────────────────
 
 export function denoiseUniforms(width: number, height: number, strength: number): UniformSetter {

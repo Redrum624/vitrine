@@ -30,9 +30,14 @@ import {
   FRAG_VIGNETTE,
   FRAG_PRESENT,
   FRAG_SHADOWSHIGHLIGHTS,
+  FRAG_BLUR_H,
+  FRAG_BLUR_V,
+  FRAG_UNSHARP,
 } from './sources';
 import type { PassDescriptor, PassRuntime } from './passDescriptors';
+import { buildPassList } from './passDescriptors';
 import { basicAdjUniforms, exposureUniforms, shadowsHighlightsUniforms } from './uniforms';
+import { SharpenModule } from '../modules/SharpenModule';
 import type { ShadowsHighlightsUniformParams } from './uniforms';
 import type { DehazeState } from '../services/WebGLImageProcessor';
 import { webGLImageProcessor } from '../services/WebGLImageProcessor';
@@ -64,6 +69,9 @@ const PROGRAM_SOURCES: Record<string, string> = {
   lateralca: FRAG_LATERALCA,
   vignette: FRAG_VIGNETTE,
   shadowshighlights: FRAG_SHADOWSHIGHLIGHTS,
+  blur_h: FRAG_BLUR_H,
+  blur_v: FRAG_BLUR_V,
+  unsharp: FRAG_UNSHARP,
 };
 
 /** Tone-curve LUT sampler-uniform names, in the same order runToneCurveGPU binds them. */
@@ -100,6 +108,11 @@ export class GpuPreviewPipeline {
 
   // Two ping-pong FBO+texture pairs, reallocated only on size change.
   private ping: [PingPong | null, PingPong | null] = [null, null];
+
+  // Extra scratch FBO+texture for multi-pass (subPasses) module steps — e.g. sharpen's
+  // intermediate H-blur result. Allocated lazily (only when a subPasses pass runs),
+  // resized with the ping-pong pair, freed in destroy(). NOT used by single-pass passes.
+  private scratch: PingPong | null = null;
 
   // The output texture of the most recent render() (NOT read back).
   private resultTexture: WebGLTexture | null = null;
@@ -256,6 +269,13 @@ export class GpuPreviewPipeline {
       }
     }
 
+    // Drop the scratch FBO too — it is reallocated lazily at the new size on next use.
+    if (this.scratch) {
+      gl.deleteFramebuffer(this.scratch.framebuffer);
+      gl.deleteTexture(this.scratch.texture);
+      this.scratch = null;
+    }
+
     for (let i = 0; i < 2; i++) {
       const texture = this.makeTexture(gl, width, height, null);
       const framebuffer = gl.createFramebuffer()!;
@@ -268,6 +288,22 @@ export class GpuPreviewPipeline {
       this.ping[i] = { framebuffer, texture };
     }
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  }
+
+  /** Lazily create the scratch FBO+texture (for multi-pass subPasses) at the current size. */
+  private ensureScratch(gl: WebGL2RenderingContext): PingPong {
+    if (this.scratch) return this.scratch;
+    const texture = this.makeTexture(gl, this.width, this.height, null);
+    const framebuffer = gl.createFramebuffer()!;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+    if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      throw new Error(`[GPU-PIPELINE] scratch framebuffer incomplete at ${this.width}x${this.height}`);
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    this.scratch = { framebuffer, texture };
+    return this.scratch;
   }
 
   /**
@@ -344,6 +380,19 @@ export class GpuPreviewPipeline {
     let drew = false;
 
     for (const pass of passes) {
+      // ── Multi-pass module step (subPasses) ──────────────────────────────────
+      // Executed as one logical step: chainInput is preserved, intermediates go to
+      // the scratch FBO, the net output becomes the chain texture for the next module.
+      if (pass.subPasses && pass.subPasses.length > 0) {
+        const result = this.runSubPasses(gl, pass, inputTexture, idx, rt);
+        if (result) {
+          inputTexture = result.outputTexture;
+          idx = result.idx;
+          drew = true;
+        }
+        continue;
+      }
+
       const prog = this.programs.get(pass.programKey);
       if (!prog) {
         logger.warn(`[GPU-PIPELINE] no program for key '${pass.programKey}' — skipping pass '${pass.id}'`);
@@ -391,6 +440,82 @@ export class GpuPreviewPipeline {
     // If every pass was skipped (no matching program), fall back to the source.
     this.resultTexture = drew ? inputTexture : this.srcTexture;
     return { width, height };
+  }
+
+  /**
+   * Execute a multi-pass module step (PassDescriptor.subPasses) as one logical unit.
+   *
+   * Texture model (see SubPass docs in passDescriptors.ts):
+   *   - chainInput : the texture entering this module step (the module's "original");
+   *                  preserved unchanged for the whole step so a final sub-pass (e.g. the
+   *                  unsharp combine) can sample it alongside an intermediate.
+   *   - prev       : the output of the previous sub-pass; for the first sub-pass = chainInput.
+   *   - scratch    : the dedicated intermediate FBO+texture.
+   *
+   * Each sub-pass binds `inputs` (default ['prev']) to texture units 0..n via `samplerNames`
+   * (default ['u_image']), draws into its `target` FBO ('pingpong' default, or 'scratch'),
+   * and updates `prev`. Ping-pong index only advances on 'pingpong' targets so the next
+   * module continues the two-FBO ping-pong correctly. Returns the final output texture and
+   * the new ping-pong index, or null if any sub-pass program is missing (step skipped).
+   */
+  private runSubPasses(
+    gl: WebGL2RenderingContext,
+    pass: PassDescriptor,
+    chainInput: WebGLTexture,
+    startIdx: number,
+    rt: PassRuntime,
+  ): { outputTexture: WebGLTexture; idx: number } | null {
+    // All sub-pass programs must exist; otherwise skip the whole step (don't half-render).
+    for (const sp of pass.subPasses!) {
+      if (!this.programs.get(sp.programKey)) {
+        logger.warn(`[GPU-PIPELINE] no program for sub-pass '${sp.id}' (key '${sp.programKey}') — skipping module '${pass.id}'`);
+        return null;
+      }
+    }
+
+    let prev: WebGLTexture = chainInput;
+    let idx = startIdx;
+    let outputTexture: WebGLTexture = chainInput;
+
+    const resolveTexture = (which: 'chainInput' | 'prev' | 'scratch'): WebGLTexture => {
+      if (which === 'chainInput') return chainInput;
+      if (which === 'scratch') return this.ensureScratch(gl).texture;
+      return prev;
+    };
+
+    for (const sp of pass.subPasses!) {
+      const prog = this.programs.get(sp.programKey)!;
+      const target = sp.target ?? 'pingpong';
+      const dst = target === 'scratch' ? this.ensureScratch(gl) : this.ping[idx]!;
+
+      gl.bindFramebuffer(gl.FRAMEBUFFER, dst.framebuffer);
+      gl.viewport(0, 0, this.width, this.height);
+      gl.useProgram(prog);
+
+      // Bind inputs in unit order (default: single 'prev' → u_image on unit 0).
+      const inputs = sp.inputs ?? ['prev'];
+      const samplerNames = sp.samplerNames ?? ['u_image'];
+      for (let u = 0; u < inputs.length; u++) {
+        gl.activeTexture(gl.TEXTURE0 + u);
+        gl.bindTexture(gl.TEXTURE_2D, resolveTexture(inputs[u]));
+        gl.uniform1i(gl.getUniformLocation(prog, samplerNames[u]), u);
+      }
+
+      sp.setUniforms(gl, prog, rt);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+      // Advance: this sub-pass's output is the next sub-pass's 'prev'.
+      prev = dst.texture;
+      outputTexture = dst.texture;
+      // Ping-pong index only flips when we actually consumed a ping-pong slot, so the
+      // NEXT module writes to the other slot (never overwriting the live chain texture).
+      if (target === 'pingpong') idx = 1 - idx;
+
+      // Restore the default active unit so the next sub-pass / module isn't surprised.
+      gl.activeTexture(gl.TEXTURE0);
+    }
+
+    return { outputTexture, idx };
   }
 
   // basicadj's dehaze PARAM (a scalar) is baked into the pass closure by buildPassList,
@@ -705,8 +830,32 @@ export class GpuPreviewPipeline {
       const shOk = shMaxDiff < 0.02;
       logger.info(`[GPU-PIPELINE] s/h self-test maxDiff=${shMaxDiff.toExponential(2)} ${shOk ? 'PASS' : 'FAIL'}`);
 
-      const ok = basicAdjOk && exposureOk && shOk;
-      const maxDiff = Math.max(basicAdjMaxDiff, exposureMaxDiff, shMaxDiff);
+      // ── 4. sharpen sub-test (multi-pass subPasses) ──────────────────────────
+      // Non-trivial unsharp mask. Builds the REAL sharpen PassDescriptor (subPasses =
+      // blurH→blurV→unsharp) via buildPassList, renders it through the multi-pass path,
+      // and compares to SharpenModule.process() (single source of truth for the kernel +
+      // threshold math). Tolerance: the GPU uses the SAME precomputed kernel and clamps
+      // edges identically (CLAMP_TO_EDGE ↔ CPU min/max), so divergence is float-precision
+      // only — 1e-3 is comfortably achievable.
+      const sharpenMod = new SharpenModule();
+      sharpenMod.setParams({ enabled: true, amount: 80, radius: 2.0, detail: 20 });
+      const sharpenPasses = buildPassList([sharpenMod]).passes;
+
+      this.setSource(data, w, h);
+      this.render(sharpenPasses);
+      const gpuSharpen = this.readback();
+
+      const refSharpen = sharpenMod.process(new Float32Array(data), { width: w, height: h, channels: 4 });
+
+      let sharpenMaxDiff = 0;
+      for (let i = 0; i < refSharpen.length; i++) {
+        sharpenMaxDiff = Math.max(sharpenMaxDiff, Math.abs(gpuSharpen[i] - refSharpen[i]));
+      }
+      const sharpenOk = sharpenMaxDiff < 1e-3;
+      logger.info(`[GPU-PIPELINE] sharpen self-test maxDiff=${sharpenMaxDiff.toExponential(2)} ${sharpenOk ? 'PASS' : 'FAIL'}`);
+
+      const ok = basicAdjOk && exposureOk && shOk && sharpenOk;
+      const maxDiff = Math.max(basicAdjMaxDiff, exposureMaxDiff, shMaxDiff, sharpenMaxDiff);
       return { ok, maxDiff };
     } catch (e) {
       logger.warn('[GPU-PIPELINE] selfTest error:', e instanceof Error ? e.message : String(e));
