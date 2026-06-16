@@ -21,28 +21,64 @@
  */
 import { ImageProcessingPipeline } from '../services/ImageProcessingPipeline';
 import type { ProcessingContext } from '../services/ImageProcessingPipeline';
-import type { WorkerModuleConfig } from '../services/WebWorkerImageProcessor';
+import type { WorkerModuleConfig, WorkerImageData } from '../services/WebWorkerImageProcessor';
 
-// `self` inside a worker is the DedicatedWorkerGlobalScope; its postMessage takes a
-// transfer list as the 2nd arg. The project tsconfig ships the DOM lib (Window) but
-// not the WebWorker lib, so we type a local handle that exposes the worker shape.
-const ctx = self as unknown as {
-  postMessage(message: unknown, transfer?: Transferable[]): void;
-  addEventListener(type: 'message', listener: (event: MessageEvent) => void): void;
-};
+// `self` inside a worker is the DedicatedWorkerGlobalScope. The project tsconfig now
+// includes the "WebWorker" lib (added cleanly — no project-wide type conflicts), so
+// we can declare it properly rather than using an opaque `unknown` cast.
+declare const self: DedicatedWorkerGlobalScope;
+const ctx = self;
 
 // One real pipeline per worker thread. Each worker is its own module instance, so
 // configuring it from the per-message config never races with other workers.
 const pipeline = new ImageProcessingPipeline();
 
-interface WorkerImageData {
-  width: number;
-  height: number;
-  data: Float32Array;
-  channels: number;
+// ---------------------------------------------------------------------------
+// Typed discriminated union for inbound worker messages
+// ---------------------------------------------------------------------------
+
+interface InitializeMessage {
+  type: 'INITIALIZE';
+  id: string;
 }
 
-/** Configure the real pipeline from the message config, then run its CPU path. */
+interface ProcessImageMessage {
+  type: 'PROCESS_IMAGE';
+  id: string;
+  data: {
+    imageData: WorkerImageData;
+    pipeline: WorkerModuleConfig[];
+  };
+}
+
+interface ProcessTileMessage {
+  type: 'PROCESS_TILE';
+  id: string;
+  data: {
+    tileData: Float32Array;
+    tileWidth: number;
+    tileHeight: number;
+    tileX: number;
+    tileY: number;
+    /** Full-image dimensions sent by the caller; unused here — tiles are processed
+     *  as standalone images (see NOTE below). */
+    fullWidth?: number;
+    fullHeight?: number;
+    channels?: number;
+    pipeline: WorkerModuleConfig[];
+  };
+}
+
+type WorkerInboundMessage = InitializeMessage | ProcessImageMessage | ProcessTileMessage;
+
+// ---------------------------------------------------------------------------
+
+/** Configure the real pipeline from the message config, then run its CPU path.
+ *
+ * processOnMainThread() opens with `let currentData = new Float32Array(input)`,
+ * so it copies the buffer internally and does NOT mutate the caller's array.
+ * We therefore pass `data` directly — the extra `new Float32Array(data)` copy
+ * that used to live here was redundant. */
 async function runPipeline(
   data: Float32Array,
   width: number,
@@ -53,30 +89,30 @@ async function runPipeline(
   pipeline.applyWorkerConfig(config);
   const context: ProcessingContext = { width, height, channels };
   // useWebWorkers=false → CPU in-worker, NO nested workers (no recursion).
-  return pipeline.processImage(new Float32Array(data), context, false);
+  return pipeline.processImage(data, context, false);
 }
 
 ctx.addEventListener('message', async (event: MessageEvent) => {
-  const { type, id, data } = event.data;
+  // Treat the inbound payload as typed; fall through to `default` for unknown shapes.
+  const msg = event.data as WorkerInboundMessage;
 
   try {
-    switch (type) {
+    switch (msg.type) {
       case 'INITIALIZE': {
         // Pipeline is constructed at module load; nothing else to warm up.
-        ctx.postMessage({ type: 'INITIALIZE_COMPLETE', id, success: true });
+        ctx.postMessage({ type: 'INITIALIZE_COMPLETE', id: msg.id, success: true });
         break;
       }
 
       case 'PROCESS_IMAGE': {
         const startTime = performance.now();
-        const imageData = data.imageData as WorkerImageData;
-        const config = data.pipeline as WorkerModuleConfig[];
+        const { imageData, pipeline: pipelineConfig } = msg.data;
         const result = await runPipeline(
-          imageData.data, imageData.width, imageData.height, imageData.channels, config,
+          imageData.data, imageData.width, imageData.height, imageData.channels, pipelineConfig,
         );
         const processingTime = performance.now() - startTime;
         ctx.postMessage(
-          { type: 'PROCESS_COMPLETE', id, success: true, data: result, processingTime },
+          { type: 'PROCESS_COMPLETE', id: msg.id, success: true, data: result, processingTime },
           [result.buffer],
         );
         break;
@@ -84,23 +120,27 @@ ctx.addEventListener('message', async (event: MessageEvent) => {
 
       case 'PROCESS_TILE': {
         const startTime = performance.now();
-        const config = data.pipeline as WorkerModuleConfig[];
-        // A tile is processed as a standalone image (matches the retired worker).
-        const channels = (data.channels as number) ?? 4;
+        const { tileData, tileWidth, tileHeight, tileX, tileY, channels, pipeline: pipelineConfig } = msg.data;
+        // NOTE/TODO: tiles are processed as standalone images (fullWidth/fullHeight are
+        // ignored). Spatial/neighborhood filters — blur in Sharpen, NoiseReduction — will
+        // therefore produce seam artifacts at tile boundaries. Matching the retired
+        // worker's pre-existing behavior (not a regression). Seam-free tiling would
+        // require full-image context (ghost pixels / overlap regions) for those passes.
+        const resolvedChannels = channels ?? 4;
         const result = await runPipeline(
-          data.tileData as Float32Array, data.tileWidth, data.tileHeight, channels, config,
+          tileData, tileWidth, tileHeight, resolvedChannels, pipelineConfig,
         );
         const processingTime = performance.now() - startTime;
         ctx.postMessage(
           {
             type: 'TILE_COMPLETE',
-            id,
+            id: msg.id,
             success: true,
             data: result,
-            tileX: data.tileX,
-            tileY: data.tileY,
-            tileWidth: data.tileWidth,
-            tileHeight: data.tileHeight,
+            tileX,
+            tileY,
+            tileWidth,
+            tileHeight,
             processingTime,
           },
           [result.buffer],
@@ -108,13 +148,19 @@ ctx.addEventListener('message', async (event: MessageEvent) => {
         break;
       }
 
-      default:
-        ctx.postMessage({ type: 'ERROR', id, error: `Unknown message type: ${type}` });
+      default: {
+        // Exhaustiveness: `msg` is typed, but the cast above could receive unknown
+        // message types at runtime — report them rather than silently dropping.
+        const unknown = event.data as { type?: unknown; id?: unknown };
+        ctx.postMessage({ type: 'ERROR', id: unknown.id, error: `Unknown message type: ${String(unknown.type)}` });
+        break;
+      }
     }
   } catch (error) {
+    const fallbackId = (event.data as { id?: unknown }).id;
     ctx.postMessage({
       type: 'ERROR',
-      id,
+      id: fallbackId,
       error: error instanceof Error ? error.message : 'Worker error',
     });
   }
