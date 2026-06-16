@@ -544,9 +544,12 @@ export class ExportService {
     return result;
   }
 
-  // Cubic interpolation weight function
+  // Cubic interpolation weight function.
+  // NOTE: this resampler (resizeImage / bicubicSample / cubicWeight) is the
+  // RENDERER-SIDE path used ONLY when a watermark is present. The primary export
+  // resize (no watermark) runs sharp lanczos3 in imageWriter.cjs (main process).
   private cubicWeight(t: number): number {
-    const a = -0.5; // Catmull-Rom parameter
+    const a = -0.5; // Catmull-Rom / Keys cubic kernel parameter
     const absT = Math.abs(t);
 
     if (absT <= 1) {

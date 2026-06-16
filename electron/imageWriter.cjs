@@ -268,6 +268,15 @@ async function writeImageFile(filePath, imageData, format, options = {}) {
     raw: { width: options.width, height: options.height, channels }
   });
 
+  // Guard: callers must not set both resize mechanisms at the same time.
+  // targetWidth/targetHeight = primary (sharp, main process); options.resize = secondary legacy hook.
+  // If both are set, sharp would silently resize twice and corrupt the output.
+  if ((options.targetWidth || options.targetHeight) && options.resize) {
+    throw new Error(
+      'imageWriter: cannot combine targetWidth/targetHeight (primary resize) with options.resize (secondary resize)'
+    );
+  }
+
   // Primary export resize, performed in the MAIN process off the renderer thread.
   // ExportService used to run a CPU bicubic loop on the renderer (blocking the UI)
   // and pass us a buffer already at the target size; now it passes the FULL-res
