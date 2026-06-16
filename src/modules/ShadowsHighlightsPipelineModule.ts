@@ -72,6 +72,15 @@ export class ShadowsHighlightsPipelineModule implements PipelineModule {
     logger.info('ShadowsHighlights module reset to defaults');
   }
 
+  /**
+   * Returns true when the module is at neutral (identity) state — i.e. process()
+   * would leave the image unchanged.  Delegates to ShadowsHighlightsModule.isNoOp()
+   * so the condition is defined in a single place.
+   */
+  isNoOp(): boolean {
+    return this.shadowsHighlightsModule.isNoOp();
+  }
+
   // Get current parameters (for Web Worker processing)
   getParams() {
     return this.shadowsHighlightsModule.getParams();

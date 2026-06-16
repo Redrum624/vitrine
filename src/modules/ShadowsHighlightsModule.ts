@@ -145,21 +145,30 @@ export class ShadowsHighlightsModule implements ImageProcessingModule {
     return { ...autoParams };
   }
 
+  /**
+   * Returns true when all tonal parameters are at their neutral (no-op) values,
+   * meaning process() would return the input unchanged.
+   *
+   * NOTE: maskBlur, strength, and iterations are NOT part of this check —
+   * blurring a zero-effect mask still yields zero net change.
+   */
+  isNoOp(): boolean {
+    return this.params.shadows === 50 &&
+           this.params.highlights === 50 &&
+           this.params.whitePoint === 0 &&
+           this.params.blackPoint === 0 &&
+           this.params.compress === 0 &&
+           this.params.shadowsColorCorrection === 0 &&
+           this.params.highlightsColorCorrection === 0;
+  }
+
   process(imageData: ImageData): ImageData {
     if (!this.params.enabled) {
       return imageData;
     }
 
-    // Check if all parameters are at neutral values - if so, pass through unchanged
-    const isNeutral = this.params.shadows === 50 &&
-                     this.params.highlights === 50 &&
-                     this.params.whitePoint === 0 &&
-                     this.params.blackPoint === 0 &&
-                     this.params.compress === 0 &&
-                     this.params.shadowsColorCorrection === 0 &&
-                     this.params.highlightsColorCorrection === 0;
-
-    if (isNeutral) {
+    // Single-source: delegate to isNoOp() so the neutral condition is defined once.
+    if (this.isNoOp()) {
       logger.debug('ShadowsHighlights: All parameters neutral, passing through unchanged');
       return imageData;
     }

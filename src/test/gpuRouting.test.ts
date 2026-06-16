@@ -15,6 +15,7 @@ import { buildPassList } from '../shaders/passDescriptors';
 import { LensCorrectionsPipelineModule } from '../modules/LensCorrectionsPipelineModule';
 import { CropPipelineModule } from '../modules/CropPipelineModule';
 import { BasicAdjustmentsModule } from '../modules/BasicAdjustmentsModule';
+import { ShadowsHighlightsPipelineModule } from '../modules/ShadowsHighlightsPipelineModule';
 
 describe('ImageProcessingPipeline.getOrderedModules()', () => {
   it('returns modules in the pipeline processing order', () => {
@@ -206,5 +207,64 @@ describe('isModuleActive() + activeCpuBridges gate (faithful to the CPU processI
     imageProcessingPipeline.setModuleEnabled('basicadj', false);
     expect(imageProcessingPipeline.isModuleActive('basicadj')).toBe(false);
     imageProcessingPipeline.setModuleEnabled('basicadj', true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T9b — Neutral Shadows/Highlights identity (unblocks GPU path)
+// ---------------------------------------------------------------------------
+describe('ShadowsHighlights neutral identity (T9b)', () => {
+  let sh: ShadowsHighlightsPipelineModule;
+
+  beforeEach(() => {
+    sh = imageProcessingPipeline.getModule<ShadowsHighlightsPipelineModule>('shadowshighlights')!;
+    // Ensure fresh defaults before each test.
+    sh.reset();
+  });
+
+  afterEach(() => {
+    // Leave pipeline clean for other suites.
+    sh.reset();
+  });
+
+  it('fresh default S/H (shadows=50, highlights=50, all offsets=0) is NOT active — does not block GPU', () => {
+    // Default params: shadows=50, highlights=50, whitePoint=0, blackPoint=0,
+    // compress=0, shadowsColorCorrection=0, highlightsColorCorrection=0.
+    // With the fix, isModuleActive must return false.
+    expect(imageProcessingPipeline.isModuleActive('shadowshighlights')).toBe(false);
+  });
+
+  it('neutral S/H with non-default maskBlur (maskBlur=1) is still NOT active — blurring a zero-effect mask is identity', () => {
+    // maskBlur alone must not make S/H non-identity: blurring a mask that produces
+    // zero effect still yields zero net change.
+    sh.setParams({ maskBlur: 1.0 });
+    expect(imageProcessingPipeline.isModuleActive('shadowshighlights')).toBe(false);
+  });
+
+  it('S/H with shadows=70 (non-neutral tonal change) IS active — must not be treated as identity', () => {
+    sh.setParams({ shadows: 70 });
+    expect(imageProcessingPipeline.isModuleActive('shadowshighlights')).toBe(true);
+  });
+
+  it('S/H with highlights=30 (non-neutral) IS active', () => {
+    sh.setParams({ highlights: 30 });
+    expect(imageProcessingPipeline.isModuleActive('shadowshighlights')).toBe(true);
+  });
+
+  it('S/H with whitePoint=1.0 (non-zero) IS active', () => {
+    sh.setParams({ whitePoint: 1.0 });
+    expect(imageProcessingPipeline.isModuleActive('shadowshighlights')).toBe(true);
+  });
+
+  it('S/H with compress=25 (non-zero) IS active', () => {
+    sh.setParams({ compress: 25 });
+    expect(imageProcessingPipeline.isModuleActive('shadowshighlights')).toBe(true);
+  });
+
+  it('ShadowsHighlightsPipelineModule.isNoOp() mirrors isModuleActive (single-source)', () => {
+    // isNoOp() on the pipeline module itself must agree with the pipeline's routing decision.
+    expect(sh.isNoOp()).toBe(true); // defaults → identity
+    sh.setParams({ shadows: 70 });
+    expect(sh.isNoOp()).toBe(false); // non-neutral → active
   });
 });

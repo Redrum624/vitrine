@@ -49,14 +49,6 @@ interface WhiteBalanceParams {
   tint?: number;
 }
 
-interface ShadowsHighlightsParams {
-  shadows?: number;
-  highlights?: number;
-  whitePoint?: number;
-  blackPoint?: number;
-  compress?: number;
-}
-
 interface ModuleWithEnabledParams {
   enabled?: boolean;
 }
@@ -346,13 +338,13 @@ export class ImageProcessingPipeline {
         }
 
         case 'shadowshighlights': {
-          // Check main effect parameters only
-          const sh = params as ShadowsHighlightsParams;
-          return (sh.shadows === undefined || sh.shadows === 0) &&
-                 (sh.highlights === undefined || sh.highlights === 0) &&
-                 (sh.whitePoint === undefined || sh.whitePoint === 0) &&
-                 (sh.blackPoint === undefined || sh.blackPoint === 0) &&
-                 (sh.compress === undefined || sh.compress === 0);
+          // Delegate to ShadowsHighlightsPipelineModule.isNoOp() so the neutral
+          // condition is single-sourced (mirrors the pass-through check in process()).
+          // NOTE: neutral means shadows=50, highlights=50, all offsets=0.
+          // maskBlur/strength/iterations are NOT identity criteria on their own —
+          // blurring a zero-effect mask still yields zero net change.
+          const shPipeline = module as ShadowsHighlightsPipelineModule;
+          return shPipeline.isNoOp();
         }
 
         case 'noise-reduction': {
