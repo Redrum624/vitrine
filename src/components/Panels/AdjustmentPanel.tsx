@@ -30,7 +30,7 @@ import { buildPassList } from '../../shaders/passDescriptors';
 import { logger } from '../../utils/Logger';
 import { webWorkerImageProcessor } from '../../services/WebWorkerImageProcessor';
 import type { WorkerModuleConfig } from '../../services/WebWorkerImageProcessor';
-import { WORKER_MIN_PIXELS } from '../../services/previewRouting';
+import { choosePreviewPath } from '../../services/previewRouting';
 
 interface AdjustmentPanelProps {
   selectedModule?: string | null;
@@ -271,7 +271,15 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
       });
       const activeCpuBridges = cpuBridges.filter((id) => imageProcessingPipeline.isModuleActive(id));
 
-      if (gpuPreviewPipeline.isAvailable() && activeCpuBridges.length === 0 && passes.length > 0) {
+      const previewPath = choosePreviewPath({
+        gpuAvailable: gpuPreviewPipeline.isAvailable(),
+        activeCpuBridgeCount: activeCpuBridges.length,
+        passCount: passes.length,
+        width: previewWidth,
+        height: previewHeight,
+      });
+
+      if (previewPath === 'gpu') {
         // Source identity: image path + preview dims. Crop never contributes here
         // (active crop ⇒ activeCpuBridges non-empty ⇒ this branch is skipped), so the
         // source is the raw downsampled image and only changes on image switch / dim change.
@@ -338,15 +346,11 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
       //
       // On any worker error we fall back to main-thread processing so the app
       // never breaks if worker URL resolution fails in Electron.
-      const pixelCount = previewWidth * previewHeight;
-
       let processedData: Float32Array;
       let outputWidth = previewWidth;
       let outputHeight = previewHeight;
 
-      const useWorker = pixelCount >= WORKER_MIN_PIXELS;
-
-      if (useWorker) {
+      if (previewPath === 'worker') {
         // Build WorkerModuleConfig from the LIVE pipeline state (same source the GPU
         // pass-list uses). `getParams()` returns a plain JSON-serialisable object so
         // it survives the structured-clone boundary without any manual conversion.

@@ -37,7 +37,7 @@ import {
 } from './sources';
 import type { PassDescriptor, PassRuntime, SubPassTexture, MaskUpload } from './passDescriptors';
 import { buildPassList, buildLocalAdjustmentsPass } from './passDescriptors';
-import { basicAdjUniforms, exposureUniforms, shadowsHighlightsUniforms } from './uniforms';
+import { basicAdjUniforms, exposureUniforms, shadowsHighlightsUniforms, gainsUniforms, colorBalanceUniforms, vignetteUniforms } from './uniforms';
 import { SharpenModule } from '../modules/SharpenModule';
 import type { ShadowsHighlightsUniformParams } from './uniforms';
 import type { DehazeState } from '../services/WebGLImageProcessor';
@@ -45,6 +45,10 @@ import { webGLImageProcessor } from '../services/WebGLImageProcessor';
 import { ExposureModule } from '../modules/ExposureModule';
 import { ShadowsHighlightsModule } from '../modules/ShadowsHighlightsModule';
 import { LocalAdjustmentsModule } from '../modules/LocalAdjustmentsModule';
+import { WhiteBalanceModule, computeWBGains } from '../modules/WhiteBalanceModule';
+import { ToneCurveModule } from '../modules/ToneCurveModule';
+import { ColorBalanceModule } from '../modules/ColorBalanceModule';
+import { LensCorrectionsModule } from '../modules/LensCorrectionsModule';
 
 export interface PreviewRenderResult {
   width: number;
@@ -982,8 +986,175 @@ export class GpuPreviewPipeline {
       }
       logger.info(`[GPU-PIPELINE] local-adj self-test maxDiff=${laMaxDiff.toExponential(2)} ${laOk ? 'PASS' : 'FAIL'}`);
 
-      const ok = basicAdjOk && exposureOk && shOk && sharpenOk && laOk;
-      const maxDiff = Math.max(basicAdjMaxDiff, exposureMaxDiff, shMaxDiff, sharpenMaxDiff, laMaxDiff);
+      // ── 6. white-balance (gains) sub-test ──────────────────────────────────────
+      // Non-trivial params: tungsten (3200K) + tint=10 — exercises both temperature and tint
+      // terms of computeWBGains. The GPU shader is FRAG_GAINS (programKey 'gains').
+      // CPU reference: WhiteBalanceModule.process() (single source of truth for the formula).
+      const wbTemperature = 3200;
+      const wbTint = 10;
+      const { r: wbR, g: wbG, b: wbB } = computeWBGains(wbTemperature, wbTint);
+
+      const wbPass: PassDescriptor = {
+        id: 'temperature',
+        programKey: 'gains',
+        setUniforms: (_gl, _prog, _rt) => gainsUniforms(wbR, wbG, wbB)(_gl, _prog),
+      };
+
+      this.setSource(data, w, h);
+      this.render([wbPass]);
+      const gpuWB = this.readback();
+
+      const wbModule = new WhiteBalanceModule();
+      wbModule.setParams({ temperature: wbTemperature, tint: wbTint });
+      const refWB = wbModule.process(new Float32Array(data), { width: w, height: h, channels: 4 });
+
+      let wbMaxDiff = 0;
+      for (let i = 0; i < refWB.length; i++) {
+        wbMaxDiff = Math.max(wbMaxDiff, Math.abs(gpuWB[i] - refWB[i]));
+      }
+      // Gains are simple per-channel multiplies + clamp — precision is float-level.
+      const wbOk = wbMaxDiff < 1e-3;
+      logger.info(`[GPU-PIPELINE] white-balance self-test maxDiff=${wbMaxDiff.toExponential(2)} ${wbOk ? 'PASS' : 'FAIL'}`);
+
+      // ── 7. tone-curve sub-test ────────────────────────────────────────────────
+      // A non-trivial 3-point S-curve on the master channel (blue-channel stays linear).
+      // GPU pass built via buildPassList (exercises the real production LUT-upload path).
+      // CPU reference: webGLImageProcessor.applyToneCurve() with the module's own LUTs
+      // (which are the same arrays the GPU pass carries in its `luts` field).
+      const tcMod = new ToneCurveModule();
+      tcMod.setParams({
+        baseCurve: [
+          { x: 0.0, y: 0.0 },
+          { x: 0.5, y: 0.6 }, // raised midtones — non-identity S
+          { x: 1.0, y: 1.0 },
+        ],
+        baseCurveNodes: 3,
+        baseCurveType: 0, // linear segments — deterministic LUT, same CPU/GPU
+        preserveColors: 0, // apply per-channel — simplest path
+      });
+      const tcPassList = buildPassList([{
+        getId: () => 'tonecurve',
+        getParams: () => tcMod.getParams() as unknown as Record<string, unknown>,
+        getGpuLuts: () => tcMod.getGpuLuts(),
+      }]);
+      const tcPass = tcPassList.passes[0];
+      let tcMaxDiff = 0;
+      let tcOk = false;
+      if (tcPass) {
+        this.setSource(data, w, h);
+        this.render([tcPass]);
+        const gpuTC = this.readback();
+        const gpuLuts = tcMod.getGpuLuts()!;
+        const refTC = webGLImageProcessor.applyToneCurve(
+          new Float32Array(data), w, h,
+          gpuLuts.master, gpuLuts.red, gpuLuts.green, gpuLuts.blue,
+          0, // preserveColors=0 — matches setParams above
+        );
+        tcMaxDiff = 0;
+        for (let i = 0; i < refTC.length; i++) {
+          tcMaxDiff = Math.max(tcMaxDiff, Math.abs(gpuTC[i] - refTC[i]));
+        }
+        tcOk = tcMaxDiff < 1e-3;
+      } else {
+        logger.warn('[GPU-PIPELINE] tone-curve self-test: pass builder returned no pass (unexpected)');
+      }
+      logger.info(`[GPU-PIPELINE] tone-curve self-test maxDiff=${tcMaxDiff.toExponential(2)} ${tcOk ? 'PASS' : 'FAIL'}`);
+
+      // ── 8. color-balance sub-test ─────────────────────────────────────────────
+      // Non-zero shadows/midtones/highlights + a few hue saturation tweaks.
+      // CPU reference: webGLImageProcessor.applyColorBalance() (same method ColorBalanceModule
+      // calls on its GPU fast-path — the ground truth for the shader).
+      const cbMod = new ColorBalanceModule();
+      cbMod.setParams({
+        shadows:    { cyan_red: 0.3, magenta_green: -0.2, yellow_blue: 0.1 },
+        midtones:   { cyan_red: -0.1, magenta_green: 0.4, yellow_blue: 0.0 },
+        highlights: { cyan_red: 0.0, magenta_green: 0.2, yellow_blue: -0.3 },
+        green_saturation: 20,
+        blue_hue: 15,
+      });
+      const cbParams = cbMod.getParams();
+      const cbColors = ['red', 'orange', 'yellow', 'green', 'cyan', 'blue', 'purple', 'magenta'];
+      const cbSat = cbColors.map(c => (cbParams[`${c}_saturation`] as number | undefined) ?? 0);
+      const cbLum = cbColors.map(c => (cbParams[`${c}_luminance`] as number | undefined) ?? 0);
+      const cbHue = cbColors.map(c => (cbParams[`${c}_hue`] as number | undefined) ?? 0);
+      const cbSh = cbParams.shadows as { cyan_red: number; magenta_green: number; yellow_blue: number };
+      const cbMd = cbParams.midtones as { cyan_red: number; magenta_green: number; yellow_blue: number };
+      const cbHl = cbParams.highlights as { cyan_red: number; magenta_green: number; yellow_blue: number };
+
+      const cbPass: PassDescriptor = {
+        id: 'colorbalance',
+        programKey: 'colorbalance',
+        setUniforms: (gl, prog, _rt) => colorBalanceUniforms(
+          [cbSh.cyan_red, cbSh.magenta_green, cbSh.yellow_blue],
+          [cbMd.cyan_red, cbMd.magenta_green, cbMd.yellow_blue],
+          [cbHl.cyan_red, cbHl.magenta_green, cbHl.yellow_blue],
+          cbSat, cbLum, cbHue,
+        )(gl, prog),
+      };
+
+      this.setSource(data, w, h);
+      this.render([cbPass]);
+      const gpuCB = this.readback();
+
+      const refCB = webGLImageProcessor.applyColorBalance(
+        new Float32Array(data), w, h,
+        [cbSh.cyan_red, cbSh.magenta_green, cbSh.yellow_blue],
+        [cbMd.cyan_red, cbMd.magenta_green, cbMd.yellow_blue],
+        [cbHl.cyan_red, cbHl.magenta_green, cbHl.yellow_blue],
+        cbSat, cbLum, cbHue,
+      );
+
+      let cbMaxDiff = 0;
+      for (let i = 0; i < refCB.length; i++) {
+        cbMaxDiff = Math.max(cbMaxDiff, Math.abs(gpuCB[i] - refCB[i]));
+      }
+      // HSL round-trip — consistent with the existing s/h tolerance class.
+      const cbOk = cbMaxDiff < 2e-2;
+      logger.info(`[GPU-PIPELINE] color-balance self-test maxDiff=${cbMaxDiff.toExponential(2)} ${cbOk ? 'PASS' : 'FAIL'}`);
+
+      // ── 9. lens-corrections vignette sub-test ─────────────────────────────────
+      // Only vignetting enabled — cleanest comparison (distortion changes pixel addresses,
+      // CA is a radial shift — both make pixel-exact comparison harder than a per-pixel op).
+      // GPU shader is FRAG_VIGNETTE.
+      // CPU reference: LensCorrectionsModule.processImage() with ONLY vignetting enabled.
+      const vigAmount = 50;   // amount / 100 = 0.5 in the uniform (negative = darken)
+      const vigMidpoint = 1.0;
+      const vigRoundness = 0;
+      const vigFeather = 50;
+      const vigAmountN = vigAmount / 100;
+      const vigRoundnessN = vigRoundness / 100;
+      const vigFeatherN = vigFeather / 100;
+
+      const vigPass: PassDescriptor = {
+        id: 'lenscorrections:vignette',
+        programKey: 'vignette',
+        setUniforms: (gl, prog, rt) => vignetteUniforms(rt.width, rt.height, vigAmountN, vigMidpoint, vigRoundnessN, vigFeatherN)(gl, prog),
+      };
+
+      this.setSource(data, w, h);
+      this.render([vigPass]);
+      const gpuVig = this.readback();
+
+      const vigMod = new LensCorrectionsModule();
+      vigMod.setParams({
+        vignetting: { enabled: true, amount: vigAmount, midpoint: vigMidpoint, roundness: vigRoundness, feather: vigFeather },
+        distortion: { enabled: false, barrel: 0, perspective: { horizontal: 0, vertical: 0 }, scale: 1.0 },
+        chromaticAberration: { enabled: false, redCyan: 0, blueMagenta: 0, purple: { amount: 0, hue: 300, range: 10 }, green: { amount: 0, hue: 60, range: 10 } },
+        blur: { enabled: false, radius: 0 },
+        filmGrain: { enabled: false, amount: 0, size: 1 },
+      });
+      const refVig = vigMod.processImage(new Float32Array(data), w, h);
+
+      let vigMaxDiff = 0;
+      for (let i = 0; i < refVig.length; i++) {
+        vigMaxDiff = Math.max(vigMaxDiff, Math.abs(gpuVig[i] - refVig[i]));
+      }
+      // Per-pixel smoothstep vignette — same formula both sides.
+      const vigOk = vigMaxDiff < 1e-3;
+      logger.info(`[GPU-PIPELINE] vignette self-test maxDiff=${vigMaxDiff.toExponential(2)} ${vigOk ? 'PASS' : 'FAIL'}`);
+
+      const ok = basicAdjOk && exposureOk && shOk && sharpenOk && laOk && wbOk && tcOk && cbOk && vigOk;
+      const maxDiff = Math.max(basicAdjMaxDiff, exposureMaxDiff, shMaxDiff, sharpenMaxDiff, laMaxDiff, wbMaxDiff, tcMaxDiff, cbMaxDiff, vigMaxDiff);
       return { ok, maxDiff };
     } catch (e) {
       logger.warn('[GPU-PIPELINE] selfTest error:', e instanceof Error ? e.message : String(e));

@@ -673,6 +673,10 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
       // styles/edits don't bleed between photos.
       canvasCache.current = {};
       useAppStore.getState().setProcessedImageData(null);
+      // Reset renderMode so the GL canvas doesn't flash the previous image's texture
+      // while the new image loads. AdjustmentPanel will flip back to 'gpu' on the
+      // first render if the new image is eligible.
+      useAppStore.getState().setRenderMode('cpu');
       imageProcessingPipeline.resetAllModules();
 
 
