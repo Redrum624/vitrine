@@ -6,7 +6,6 @@ import { ColorBalancePipelineModule } from '../../modules/ColorBalancePipelineMo
 import { ShadowsHighlightsPipelineModule } from '../../modules/ShadowsHighlightsPipelineModule';
 import { CropPipelineModule } from '../../modules/CropPipelineModule';
 import { LocalAdjustmentsPipelineModule } from '../../modules/LocalAdjustmentsPipelineModule';
-import { localAdjustmentsModule as localAdjustmentsCore } from '../../modules/LocalAdjustmentsModule';
 import { LensCorrectionsPipelineModule } from '../../modules/LensCorrectionsPipelineModule';
 import { NoiseReductionModule } from '../../modules/NoiseReductionModule';
 import { SharpenModule } from '../../modules/SharpenModule';
@@ -259,10 +258,8 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
         width: previewWidth,
         height: previewHeight,
         rebuildMask: (layerId, w, h) => {
-          const layer = localAdjustmentsCore.getLayer(layerId);
-          if (!layer || !layer.geometry) return null;
-          localAdjustmentsCore.setLayerGeometry(layerId, layer.geometry, w, h);
-          return localAdjustmentsCore.getLayer(layerId)?.mask ?? null;
+          const laMod = imageProcessingPipeline.getModule('localadjustments') as LocalAdjustmentsPipelineModule | undefined;
+          return laMod?.rebuildMask(layerId, w, h) ?? null;
         },
       });
       const activeCpuBridges = cpuBridges.filter((id) => imageProcessingPipeline.isModuleActive(id));

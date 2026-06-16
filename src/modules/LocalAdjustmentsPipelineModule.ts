@@ -241,6 +241,19 @@ export class LocalAdjustmentsPipelineModule implements PipelineModule {
     return success;
   }
 
+  /**
+   * Rebuild the baked mask for a layer at the given (width, height) resolution.
+   * Routes through the inner module's setLayerGeometry so geometry→mask logic
+   * is never duplicated here. Returns the freshly-baked mask, or null when the
+   * layer doesn't exist or has no geometry to rebuild from.
+   */
+  rebuildMask(layerId: string, width: number, height: number): Float32Array | null {
+    const layer = localAdjustmentsModule.getLayer(layerId);
+    if (!layer || !layer.geometry) return null;
+    localAdjustmentsModule.setLayerGeometry(layerId, layer.geometry, width, height);
+    return localAdjustmentsModule.getLayer(layerId)?.mask ?? null;
+  }
+
   updateBrushParameters(params: Partial<BrushParameters>): void {
     this.params.brushParams = { ...this.params.brushParams, ...params };
 

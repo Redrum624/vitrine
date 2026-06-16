@@ -80,6 +80,9 @@ const PROGRAM_SOURCES: Record<string, string> = {
 /** Tone-curve LUT sampler-uniform names, in the same order runToneCurveGPU binds them. */
 const TONECURVE_LUT_NAMES = ['u_master', 'u_red', 'u_green', 'u_blue'] as const;
 
+/** Maximum number of mask textures kept in maskCache before LRU eviction. */
+const MAX_MASK_TEXTURES = 32;
+
 export class GpuPreviewPipeline {
   private gl: WebGL2RenderingContext | null = null;
   private attached = false;
@@ -129,6 +132,8 @@ export class GpuPreviewPipeline {
   // Cache of uploaded local-adjustment mask textures (Task 10), keyed by MaskUpload.key
   // (layer id + dims + value hash). Re-uploaded only when the key changes (geometry/dims
   // change → mask rebuilt → new hash). NOT re-uploaded per frame for a static mask.
+  // Bounded to MAX_MASK_TEXTURES entries (LRU eviction: least-recently-used entry is
+  // the first key in the insertion-ordered Map).
   private maskCache = new Map<string, WebGLTexture>();
 
   /**
@@ -369,7 +374,19 @@ export class GpuPreviewPipeline {
       return null;
     }
     const cached = this.maskCache.get(upload.key);
-    if (cached) return cached;
+    if (cached) {
+      // Cache hit: move to end (most recently used) by deleting and re-inserting.
+      this.maskCache.delete(upload.key);
+      this.maskCache.set(upload.key, cached);
+      return cached;
+    }
+    // Cache miss: evict the oldest entry (first key) when at capacity.
+    if (this.maskCache.size >= MAX_MASK_TEXTURES) {
+      const firstKey = this.maskCache.keys().next().value as string;
+      const evicted = this.maskCache.get(firstKey)!;
+      gl.deleteTexture(evicted);
+      this.maskCache.delete(firstKey);
+    }
     const tex = gl.createTexture()!;
     gl.bindTexture(gl.TEXTURE_2D, tex);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
@@ -654,7 +671,6 @@ export class GpuPreviewPipeline {
       if (this.vao) gl.deleteVertexArray(this.vao);
     }
     this.programs.clear();
-    this.maskCache.clear();
     this.presentProgram = null;
     this.presentQuadBuffer = null;
     this.presentUniforms = null;

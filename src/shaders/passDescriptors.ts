@@ -169,6 +169,7 @@ export interface PassDescriptor {
  */
 export interface MaskUpload {
   kind: 'mask';
+  /** baked per-layer mask uploaded to a GPU texture at render time; memory ∝ image size */
   data: Float32Array;
   /** Stable identity for the mask cache (e.g. `${layerId}:${w}x${h}:${geomHash}`). */
   key: string;
