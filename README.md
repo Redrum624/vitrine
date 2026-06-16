@@ -4,9 +4,9 @@ A **desktop RAW photo editor** built with Electron + React, featuring a WebGL2/C
 processing pipeline, native LibRaw demosaicing, colour-managed export, and
 non-destructive local adjustments.
 
-![Version](https://img.shields.io/badge/Version-1.6.0-blue)
+![Version](https://img.shields.io/badge/Version-1.7.0-blue)
 ![TypeScript](https://img.shields.io/badge/TypeScript-0_errors-blue)
-![Tests](https://img.shields.io/badge/Tests-920_passing-brightgreen)
+![Tests](https://img.shields.io/badge/Tests-1027_passing-brightgreen)
 ![Lint](https://img.shields.io/badge/Lint-clean-brightgreen)
 ![GPU](https://img.shields.io/badge/GPU-WebGL2_accelerated-success)
 
@@ -43,14 +43,21 @@ non-destructive local adjustments.
 - **History** — a per-image checkpoint timeline of everything you've done; click any
   checkpoint to jump back to that state. Kept between sessions; separate from Ctrl+Z undo.
 
-### GPU acceleration (WebGL2)
-- The editing pipeline runs on the **GPU** when available: Basic Adjustments, White
-  Balance, Color Balance, Tone Curve, Hue Curves, Lens vignetting/distortion/chromatic
-  aberration, and a **GPU Non-Local-Means noise reducer** (sub-second even on RAW).
-- Each GPU op carries a CPU reference and an init **self-check** — the GPU path is
-  used only if its output matches the CPU within tolerance, so a faulty shader
-  **falls back silently rather than corrupting an image**. Fully transparent, with
-  automatic CPU fallback when WebGL2 is unavailable.
+### GPU acceleration (WebGL2 resident-texture pipeline)
+- The live preview runs as a **resident-texture WebGL2 pipeline**: the image is uploaded
+  to the GPU once, every editing module runs as a fragment-shader pass ping-ponging
+  between float textures, and the result is **presented directly to the canvas with zero
+  GPU→CPU readback** — for real-time slider feedback. Covered on the GPU: Exposure, White
+  Balance, Basic Adjustments, Tone Curve, Color Balance, Lens distortion/chromatic-
+  aberration/vignetting, Shadows/Highlights, Sharpen (separable unsharp mask), Local
+  Adjustment masks, and a **GPU Non-Local-Means noise reducer**.
+- Each GPU op carries a CPU reference and an init **self-check** — the GPU path is used
+  only if its output matches the CPU within tolerance, so a faulty shader **falls back
+  rather than corrupting an image**.
+- **Nothing blocks the UI thread.** When the GPU path can't be used (no WebGL2, or an
+  active operation without a GPU path), the CPU pipeline runs in a **Web Worker** off the
+  main thread, and full-resolution **export resize runs in the Electron main process**
+  via sharp — so previews stay responsive and exports don't freeze the window.
 
 ### Export & workflow
 - **Export** (the toolbar **Export** button, or `Ctrl+E`) to JPEG / PNG / TIFF / WebP,
@@ -88,7 +95,7 @@ pnpm run electron-dev   # Vite dev server + Electron
 ### Build a Windows release
 ```bash
 npm run build:win       # clean dist + release -> tsc + vite build -> NSIS installer + portable (x64)
-# Output: release/Photo Editor Pro Setup 1.5.0.exe  and  release/Photo Editor Pro 1.5.0.exe
+# Output: release/Photo Editor Pro Setup 1.7.0.exe  and  release/Photo Editor Pro 1.7.0.exe
 npm run build:win:dir   # fast unpacked build (no installer)
 npm run dist            # electron-builder for the current platform
 ```
@@ -99,8 +106,9 @@ npm run dist            # electron-builder for the current platform
 - **Desktop**: Electron 39
 - **Frontend**: React 19 + TypeScript 5.9 + Vite 7 + Zustand 5
 - **Styling**: Tailwind CSS 4
-- **Processing**: WebGL2 GPU shaders + CPU pipeline + Web Workers; native LibRaw
-  (`dcraw_emu`) and `libraw-wasm` for RAW; **sharp** for export encode/ICC/metadata
+- **Processing**: resident-texture WebGL2 GPU pipeline (zero-readback, presents to
+  canvas) with a CPU fallback that runs in a Web Worker; native LibRaw (`dcraw_emu`) and
+  `libraw-wasm` for RAW; **sharp** for export resize + encode/ICC/metadata
 - **Build**: Vite + `tsc` + ESLint; packaging via electron-builder
 
 ### Core services

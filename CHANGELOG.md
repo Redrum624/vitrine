@@ -4,6 +4,44 @@ All notable changes to **Photo Editor Pro** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.7.0] - 2026-06-16
+
+### Added
+- **Resident-texture WebGL2 GPU pipeline for the live preview.** The image is uploaded
+  to the GPU once; every editing module runs as a fragment-shader pass ping-ponging
+  between RGBA32F float textures, and the final result is **presented directly to the
+  canvas with zero GPU→CPU readback** (on a dedicated WebGL canvas; the previous
+  2D-canvas path stays as the CPU fallback, switched by a `renderMode` store flag). This
+  replaces the old per-module GPU calls that copied pixels back to the CPU between every
+  step. All editing modules now have a GPU path: Exposure, White Balance, Basic
+  Adjustments, Tone Curve, Color Balance, Lens distortion/CA/vignetting,
+  Shadows/Highlights, Sharpen (separable unsharp mask, multi-pass), and Local Adjustment
+  masks (one mask-blend pass per layer). Why: real-time slider feedback without the
+  per-module readback stalls. Files: `src/shaders/GpuPreviewPipeline.ts`,
+  `passDescriptors.ts`, `sources.ts`, `uniforms.ts`, `Canvas.tsx`, `AdjustmentPanel.tsx`.
+- **CPU fallback runs off the renderer main thread.** When WebGL2 is unavailable or an
+  active operation has no GPU path, the preview pipeline runs in a **Web Worker** instead
+  of blocking the UI. The worker is a Vite module worker that imports the real
+  `ImageProcessingPipeline` — no duplicated pixel math (the old hand-ported worker that
+  kept diverged copies of 5 modules was retired). The worker returns output dimensions so
+  cropped previews stay correct across the worker boundary, with a graceful main-thread
+  fallback if the worker can't be used. Files: `src/workers/pipeline.worker.ts`,
+  `WebWorkerImageProcessor.ts`, `previewRouting.ts`.
+
+### Changed
+- **Export resize moved off the renderer thread.** Full-resolution downscaling now runs
+  via **sharp in the Electron main process** (Lanczos3) for the common path, instead of a
+  per-pixel bicubic loop on the UI thread — exports no longer freeze the window. The
+  watermark path keeps the renderer-side resize (so the watermark composites at output
+  size); 16-bit (true ushort) and ICC handling are unchanged, with a guard against
+  double-resizing. Files: `electron/imageWriter.cjs`, `src/services/ExportService.ts`.
+
+### Safety / correctness
+- Every GPU operation keeps its CPU reference and a startup **GPU-vs-CPU self-check**; the
+  GPU path is used only when it matches the CPU within tolerance. `renderMode` defaults to
+  CPU and only flips to GPU once a render succeeds, so a machine without working WebGL2
+  behaves exactly as before. Test suite: 1027 passing (was 920).
+
 ## [1.6.0] - 2026-06-12
 
 ### Changed
