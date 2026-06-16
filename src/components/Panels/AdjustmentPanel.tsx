@@ -28,6 +28,8 @@ import { useAppStore } from '../../stores/appStore';
 import { gpuPreviewPipeline } from '../../shaders/GpuPreviewPipeline';
 import { buildPassList } from '../../shaders/passDescriptors';
 import { logger } from '../../utils/Logger';
+import { webWorkerImageProcessor } from '../../services/WebWorkerImageProcessor';
+import type { WorkerModuleConfig } from '../../services/WebWorkerImageProcessor';
 
 interface AdjustmentPanelProps {
   selectedModule?: string | null;
@@ -318,42 +320,81 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
 
       // ── CPU fallback path (proven 2D-canvas blit) ───────────────────────────────
       useAppStore.getState().setRenderMode('cpu');
-      const processedData = await imageProcessingPipeline.processImage(previewData, processingContext, false); // Disable web workers for preview
 
-      // CRITICAL: Use the context dimensions which may have been updated by CropModule rotation
-      // When expandCanvas is true during rotation, the output dimensions change
-      const outputWidth = processingContext.width;
-      const outputHeight = processingContext.height;
+      // Route large previews (≥1MP) through the worker pool so pixel math runs
+      // off the renderer main thread. The worker returns the TRUE output dims so
+      // an active CropModule (which mutates context.width/height in-place) is
+      // handled correctly across the structured-clone boundary.
+      //
+      // Decision: gpu | worker | main
+      //   gpu    → handled above (GPU path, already returned)
+      //   worker → ≥1MP AND worker pool available (lazy-init on first use)
+      //   main   → tiny preview below 1MP threshold, OR worker unavailable
+      //
+      // On any worker error we fall back to main-thread processing so the app
+      // never breaks if worker URL resolution fails in Electron.
+      const pixelCount = previewWidth * previewHeight;
+      const WORKER_MIN_PIXELS = 1_000_000; // 1MP — round-trip overhead not worth it below
 
-      console.log(`AdjustmentPanel: Processed dimensions: ${outputWidth}x${outputHeight} (input was ${previewWidth}x${previewHeight})`);
+      let processedData: Float32Array;
+      let outputWidth = previewWidth;
+      let outputHeight = previewHeight;
 
-      // Validate that the data length matches the output dimensions
-      const expectedLength = outputWidth * outputHeight * 4;
-      if (processedData.length !== expectedLength) {
-        console.warn(`AdjustmentPanel: Data length mismatch! Expected ${expectedLength}, got ${processedData.length}`);
-        // Try to infer correct dimensions from data length
-        const actualPixels = processedData.length / 4;
-        const inferredHeight = Math.round(Math.sqrt(actualPixels / (outputWidth / outputHeight)));
-        const inferredWidth = Math.round(inferredHeight * (outputWidth / outputHeight));
-        console.log(`AdjustmentPanel: Inferring dimensions as ${inferredWidth}x${inferredHeight}`);
+      const useWorker = pixelCount >= WORKER_MIN_PIXELS;
+
+      if (useWorker) {
+        // Lazy-init the pool on first CPU-path use (no-op if already initialised).
+        if (!webWorkerImageProcessor.shouldUseWorkers({ width: previewWidth, height: previewHeight, data: previewData, channels: 4 })) {
+          // Not yet initialised — attempt it now.
+          await webWorkerImageProcessor.initialize();
+        }
+
+        // Build WorkerModuleConfig from the LIVE pipeline state (same source the GPU
+        // pass-list uses). `getParams()` returns a plain JSON-serialisable object so
+        // it survives the structured-clone boundary without any manual conversion.
+        const workerConfig: WorkerModuleConfig[] = orderedModules.map((m) => ({
+          moduleId: m.getId(),
+          enabled: m.isEnabled !== false,
+          params: m.getParams() as Record<string, unknown>,
+        }));
+
+        try {
+          const workerResult = await webWorkerImageProcessor.processImage(
+            { width: previewWidth, height: previewHeight, data: previewData, channels: 4 },
+            workerConfig,
+          );
+
+          if (workerResult.success) {
+            processedData = workerResult.data;
+            // Use the dims the WORKER returned — these are the post-crop output dims
+            // (the worker's local ProcessingContext was mutated by CropModule).
+            outputWidth  = workerResult.width  ?? previewWidth;
+            outputHeight = workerResult.height ?? previewHeight;
+            logger.debug(`CPU-worker preview completed in ${workerResult.processingTime.toFixed(2)}ms, out: ${outputWidth}x${outputHeight}`);
+          } else {
+            throw new Error(workerResult.error ?? 'Worker returned failure');
+          }
+        } catch (workerErr) {
+          // Worker failed (URL resolution, crash, timeout) → graceful main-thread fallback.
+          logger.warn('Worker processing failed, falling back to main thread:', workerErr instanceof Error ? workerErr.message : String(workerErr));
+          processedData = await imageProcessingPipeline.processImage(previewData, processingContext, false);
+          outputWidth  = processingContext.width;
+          outputHeight = processingContext.height;
+        }
+      } else {
+        // Tiny preview — keep it on the main thread (worker overhead not worth it).
+        processedData = await imageProcessingPipeline.processImage(previewData, processingContext, false);
+        // CRITICAL: CropModule mutates processingContext.width/height in place.
+        outputWidth  = processingContext.width;
+        outputHeight = processingContext.height;
       }
 
-      // Critical debugging: Track data before passing to Canvas
-      const stats = { min: Infinity, max: -Infinity, nonZero: 0 };
-      for (let i = 0; i < processedData.length; i += 4) {
-        const r = processedData[i], g = processedData[i + 1], b = processedData[i + 2];
-        stats.min = Math.min(stats.min, r, g, b);
-        stats.max = Math.max(stats.max, r, g, b);
-        if (r > 0.001 || g > 0.001 || b > 0.001) stats.nonZero++;
-      }
-      logger.info(`AdjustmentPanel: FINAL DATA before Canvas - range=${stats.min.toFixed(4)}-${stats.max.toFixed(4)}, nonZero=${stats.nonZero}/${processedData.length/4}`);
-
-      // Update UI once with final result - use OUTPUT dimensions from context
+      // Update UI once with final result — use the TRUE output dims.
       setProcessedImageData({
         data: processedData,
         width: outputWidth,
         height: outputHeight,
-        isPreview: true
+        isPreview: true,
       });
 
       const processTime = performance.now() - startTime;

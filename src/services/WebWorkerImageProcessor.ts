@@ -19,6 +19,10 @@ export interface ProcessingResult {
   data: Float32Array;
   processingTime: number;
   error?: string;
+  /** True output width after processing (may differ from input when CropModule is active). */
+  width?: number;
+  /** True output height after processing (may differ from input when CropModule is active). */
+  height?: number;
 }
 
 export interface TileProcessingResult extends ProcessingResult {
@@ -111,13 +115,23 @@ export class WebWorkerImageProcessor {
           }
           break;
 
-        case 'PROCESS_COMPLETE':
+        case 'PROCESS_COMPLETE': {
           if (success) {
-            pendingMessage.resolve({ success: true, data, processingTime });
+            // Include outputWidth/outputHeight from the worker so callers can use the
+            // TRUE post-crop dims (CropModule mutates the worker-local context).
+            const { outputWidth, outputHeight } = event.data as { outputWidth?: number; outputHeight?: number };
+            pendingMessage.resolve({
+              success: true,
+              data,
+              processingTime,
+              width: outputWidth,
+              height: outputHeight,
+            });
           } else {
             pendingMessage.reject(new Error(error || 'Processing failed'));
           }
           break;
+        }
 
         case 'TILE_COMPLETE':
           pendingMessage.resolve({ success, data, processingTime, error, ...rest });

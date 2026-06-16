@@ -107,12 +107,30 @@ ctx.addEventListener('message', async (event: MessageEvent) => {
       case 'PROCESS_IMAGE': {
         const startTime = performance.now();
         const { imageData, pipeline: pipelineConfig } = msg.data;
-        const result = await runPipeline(
-          imageData.data, imageData.width, imageData.height, imageData.channels, pipelineConfig,
-        );
+        // Build a local context so we can read the output dims AFTER processing.
+        // CropModule mutates context.width/height in place when an active crop
+        // changes the image dimensions. The structured-clone boundary means the
+        // caller's context never sees that mutation, so we must return the final
+        // dims explicitly in the response.
+        const context: ProcessingContext = {
+          width: imageData.width,
+          height: imageData.height,
+          channels: imageData.channels,
+        };
+        pipeline.applyWorkerConfig(pipelineConfig);
+        const result = await pipeline.processImage(imageData.data, context, false);
         const processingTime = performance.now() - startTime;
+        // context.width / context.height now hold the TRUE output dims (post-crop).
         ctx.postMessage(
-          { type: 'PROCESS_COMPLETE', id: msg.id, success: true, data: result, processingTime },
+          {
+            type: 'PROCESS_COMPLETE',
+            id: msg.id,
+            success: true,
+            data: result,
+            processingTime,
+            outputWidth: context.width,
+            outputHeight: context.height,
+          },
           [result.buffer],
         );
         break;
