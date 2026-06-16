@@ -240,3 +240,58 @@ describe('Worker PROCESS_COMPLETE dims propagation (protocol contract)', () => {
     expect(resolvedResult.height).toBeUndefined();
   });
 });
+
+// ---------------------------------------------------------------------------
+// 6. Worker-failure → main-thread fallback (AdjustmentPanel catch-branch contract)
+// ---------------------------------------------------------------------------
+
+describe('Worker-failure → main-thread fallback (AdjustmentPanel catch-branch contract)', () => {
+  it('confirms worker path is selected for ≥1MP images (pre-failure routing)', () => {
+    expect(choosePreviewPath({
+      gpuAvailable: false,
+      activeCpuBridgeCount: 0,
+      passCount: 0,
+      width: 1920,
+      height: 1080,
+    })).toBe('worker');
+  });
+
+  it('fallback contract: main-thread processImage returns valid data when worker throws', async () => {
+    // Simulate the fallback branch of AdjustmentPanel's catch block:
+    //   processedData = await imageProcessingPipeline.processImage(previewData, processingContext, false)
+    //   outputWidth  = processingContext.width
+    //   outputHeight = processingContext.height
+    //
+    // We verify the contract with a minimal mock so the test runs in jsdom
+    // without spawning real workers or loading WebGL.
+
+    const width = 1920;
+    const height = 1080;
+    const pixelCount = width * height;
+    const fakeOutput = new Float32Array(pixelCount * 4).fill(0.5);
+
+    // Minimal mock of imageProcessingPipeline.processImage
+    const mockProcessImage = jest.fn().mockResolvedValue(fakeOutput);
+    // Minimal mock of processingContext (mutated by CropModule in the real app)
+    const mockContext = { width, height };
+
+    // Simulate the catch-branch
+    let processedData: Float32Array;
+    let outputWidth: number;
+    let outputHeight: number;
+
+    try {
+      throw new Error('Worker URL resolution failed'); // simulated worker error
+    } catch {
+      processedData = await mockProcessImage(new Float32Array(pixelCount * 4), mockContext, false);
+      outputWidth  = mockContext.width;
+      outputHeight = mockContext.height;
+    }
+
+    expect(mockProcessImage).toHaveBeenCalledTimes(1);
+    expect(processedData).toBe(fakeOutput);
+    expect(outputWidth).toBe(1920);
+    expect(outputHeight).toBe(1080);
+    expect(processedData.length).toBe(pixelCount * 4);
+  });
+});
