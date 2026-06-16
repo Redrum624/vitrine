@@ -321,10 +321,10 @@ out vec4 outColor;
 void main() {
   vec4 src = texture(u_image, v_uv);
   vec3 acc = vec3(0.0);
-  int half = u_taps / 2;
+  int halfTaps = u_taps / 2;
   for (int k = 0; k < ${MAX_BLUR_TAPS}; k++) {
     if (k >= u_taps) break;
-    float off = float(k - half) * u_texel.x;
+    float off = float(k - halfTaps) * u_texel.x;
     acc += texture(u_image, vec2(v_uv.x + off, v_uv.y)).rgb * u_weights[k];
   }
   outColor = vec4(acc, src.a);   // preserve alpha (CPU passes alpha through the H pass)
@@ -341,10 +341,10 @@ out vec4 outColor;
 void main() {
   vec4 src = texture(u_image, v_uv);
   vec3 acc = vec3(0.0);
-  int half = u_taps / 2;
+  int halfTaps = u_taps / 2;
   for (int k = 0; k < ${MAX_BLUR_TAPS}; k++) {
     if (k >= u_taps) break;
-    float off = float(k - half) * u_texel.y;
+    float off = float(k - halfTaps) * u_texel.y;
     acc += texture(u_image, vec2(v_uv.x, v_uv.y + off)).rgb * u_weights[k];
   }
   outColor = vec4(acc, src.a);

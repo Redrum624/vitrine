@@ -34,7 +34,7 @@ import {
   FRAG_BLUR_V,
   FRAG_UNSHARP,
 } from './sources';
-import type { PassDescriptor, PassRuntime } from './passDescriptors';
+import type { PassDescriptor, PassRuntime, SubPassTexture } from './passDescriptors';
 import { buildPassList } from './passDescriptors';
 import { basicAdjUniforms, exposureUniforms, shadowsHighlightsUniforms } from './uniforms';
 import { SharpenModule } from '../modules/SharpenModule';
@@ -477,10 +477,12 @@ export class GpuPreviewPipeline {
     let idx = startIdx;
     let outputTexture: WebGLTexture = chainInput;
 
-    const resolveTexture = (which: 'chainInput' | 'prev' | 'scratch'): WebGLTexture => {
+    const resolveTexture = (which: SubPassTexture): WebGLTexture => {
       if (which === 'chainInput') return chainInput;
       if (which === 'scratch') return this.ensureScratch(gl).texture;
-      return prev;
+      if (which === 'prev') return prev;
+      // External WebGLTexture — bind directly, no ownership transfer.
+      return which as WebGLTexture;
     };
 
     for (const sp of pass.subPasses!) {
@@ -492,13 +494,13 @@ export class GpuPreviewPipeline {
       gl.viewport(0, 0, this.width, this.height);
       gl.useProgram(prog);
 
-      // Bind inputs in unit order (default: single 'prev' → u_image on unit 0).
-      const inputs = sp.inputs ?? ['prev'];
-      const samplerNames = sp.samplerNames ?? ['u_image'];
-      for (let u = 0; u < inputs.length; u++) {
+      // Bind textures in unit order (default: single prev → u_image on unit 0).
+      const bindings = sp.bindings ?? [{ texture: 'prev', sampler: 'u_image' }];
+      for (let u = 0; u < bindings.length; u++) {
+        const { texture, sampler } = bindings[u];
         gl.activeTexture(gl.TEXTURE0 + u);
-        gl.bindTexture(gl.TEXTURE_2D, resolveTexture(inputs[u]));
-        gl.uniform1i(gl.getUniformLocation(prog, samplerNames[u]), u);
+        gl.bindTexture(gl.TEXTURE_2D, resolveTexture(texture));
+        gl.uniform1i(gl.getUniformLocation(prog, sampler), u);
       }
 
       sp.setUniforms(gl, prog, rt);

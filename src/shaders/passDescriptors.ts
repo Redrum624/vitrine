@@ -99,6 +99,11 @@ export interface PassRuntime {
  */
 export interface PassDescriptor {
   id: string;
+  /**
+   * Selects the compiled WebGL program for single-pass descriptors.
+   * Ignored when `subPasses` is present — the pipeline executes sub-passes directly
+   * without ever resolving this key.
+   */
   programKey: string;
   setUniforms: (gl: WebGL2RenderingContext, program: WebGLProgram, rt: PassRuntime) => void;
   luts?: Record<string, Float32Array>;
@@ -120,8 +125,9 @@ export interface PassDescriptor {
  * A single draw within a multi-pass module step.
  *
  * Multi-INPUT binding (the load-bearing part for sharpen + T10 masks):
- *   `inputs` lists the textures to bind, in unit order starting at TEXTURE0. Each entry
- *   names a logical texture the pipeline tracks per module step:
+ *   `bindings` is an ordered array of `{ texture, sampler }` pairs, one per texture unit
+ *   starting at TEXTURE0. Each `texture` is either a logical name the pipeline resolves
+ *   per-frame, or an already-uploaded WebGLTexture bound directly:
  *     - 'chainInput' — the chain texture AS IT ENTERED this module step (the module's
  *                      input / "original"). Preserved across all sub-passes so the final
  *                      combine can sample it (unsharp reads chainInput + the blurred scratch).
@@ -130,30 +136,36 @@ export interface PassDescriptor {
  *     - 'scratch'    — the dedicated scratch texture (an extra FBO+texture the pipeline keeps
  *                      for intermediate results, e.g. the H-blur result read by the V-blur, or
  *                      the V-blur result read by the unsharp combine). Reserved for T10 mask use.
- *   `samplerNames` (parallel to `inputs`) gives the sampler uniform each bound unit maps to.
- *   Default when omitted: inputs = ['prev'], samplerNames = ['u_image'] — the classic
- *   single-input pass.
+ *     - WebGLTexture — an externally-owned texture bound directly (e.g. a mask texture uploaded
+ *                      by a T10 local-adjustments pass). The pipeline binds it as-is with no
+ *                      ownership transfer.
+ *   `sampler` gives the GLSL uniform name for that binding's texture unit.
+ *   Default when omitted: a single binding `{ texture: 'prev', sampler: 'u_image' }` —
+ *   the classic single-input pass.
  *
  *   `target` selects where this sub-pass writes:
  *     - 'pingpong' (default) — write to the active ping-pong FBO (advances the chain).
  *     - 'scratch'            — write to the scratch FBO (intermediate not yet the chain output).
  *
  * Sharpen wiring:
- *   1. blurH:  inputs ['prev']               → target 'scratch'   (prev = chainInput; H-blur → scratch)
- *   2. blurV:  inputs ['scratch']            → target 'pingpong'  (V-blur of scratch → ping-pong)
- *   3. unsharp:inputs ['chainInput','prev']  → target 'pingpong'  (orig + V-blurred → ping-pong)
+ *   1. blurH:  bindings [{texture:'prev',sampler:'u_image'}]                                      → target 'scratch'
+ *   2. blurV:  bindings [{texture:'scratch',sampler:'u_image'}]                                   → target 'pingpong'
+ *   3. unsharp:bindings [{texture:'chainInput',sampler:'u_image'},{texture:'prev',sampler:'u_blur'}] → target 'pingpong'
  *      where 'prev' for step 3 is step 2's ping-pong output (the fully blurred image).
  */
-export type SubPassTexture = 'chainInput' | 'prev' | 'scratch';
+
+/** Named logical texture OR an already-uploaded WebGLTexture for direct binding. */
+export type SubPassTexture = 'chainInput' | 'prev' | 'scratch' | WebGLTexture;
 
 export interface SubPass {
   id: string;
   programKey: string;
   setUniforms: (gl: WebGL2RenderingContext, program: WebGLProgram, rt: PassRuntime) => void;
-  /** Logical textures to bind, in unit order from TEXTURE0. Default ['prev']. */
-  inputs?: SubPassTexture[];
-  /** Sampler uniform name per bound unit (parallel to inputs). Default ['u_image']. */
-  samplerNames?: string[];
+  /**
+   * Ordered texture bindings, one per unit from TEXTURE0.
+   * Default (when absent): `[{ texture: 'prev', sampler: 'u_image' }]`.
+   */
+  bindings?: { texture: SubPassTexture; sampler: string }[];
   /** Where this sub-pass writes. Default 'pingpong'. */
   target?: 'pingpong' | 'scratch';
 }
@@ -370,8 +382,7 @@ function buildSharpenPass(params: Record<string, unknown>): PassDescriptor | nul
       // H-blur of the module input (prev == chainInput for the first sub-pass) → scratch.
       id: 'sharpen:blurH',
       programKey: 'blur_h',
-      inputs: ['prev'],
-      samplerNames: ['u_image'],
+      bindings: [{ texture: 'prev', sampler: 'u_image' }],
       target: 'scratch',
       setUniforms: (gl, prog, rt) => blurUniforms(rt.width, rt.height, weights, taps)(gl, prog),
     },
@@ -379,8 +390,7 @@ function buildSharpenPass(params: Record<string, unknown>): PassDescriptor | nul
       // V-blur of the scratch (H-blur result) → ping-pong (fully blurred image).
       id: 'sharpen:blurV',
       programKey: 'blur_v',
-      inputs: ['scratch'],
-      samplerNames: ['u_image'],
+      bindings: [{ texture: 'scratch', sampler: 'u_image' }],
       target: 'pingpong',
       setUniforms: (gl, prog, rt) => blurUniforms(rt.width, rt.height, weights, taps)(gl, prog),
     },
@@ -388,16 +398,19 @@ function buildSharpenPass(params: Record<string, unknown>): PassDescriptor | nul
       // Combine ORIGINAL (chainInput) on unit 0 + the blurred ping-pong (prev) on unit 1.
       id: 'sharpen:unsharp',
       programKey: 'unsharp',
-      inputs: ['chainInput', 'prev'],
-      samplerNames: ['u_image', 'u_blur'],
+      bindings: [
+        { texture: 'chainInput', sampler: 'u_image' },
+        { texture: 'prev',       sampler: 'u_blur'  },
+      ],
       target: 'pingpong',
       setUniforms: (gl, prog, _rt) => unsharpUniforms(strength, threshold)(gl, prog),
     },
   ];
 
+  // programKey is ignored when subPasses is present — the pipeline runs sub-passes directly.
   return {
     id: 'sharpen',
-    programKey: 'unsharp', // nominal; ignored when subPasses present
+    programKey: 'sharpen:multi',
     setUniforms: () => undefined, // ignored when subPasses present
     subPasses,
   };

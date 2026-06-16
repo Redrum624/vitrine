@@ -487,14 +487,16 @@ test('sharpen subPasses declare the correct multi-input binding for the unsharp 
   const { passes } = buildPassList(modules);
   const sub = passes[0].subPasses!;
   // blurH: prev → scratch
-  expect(sub[0].inputs).toEqual(['prev']);
+  expect(sub[0].bindings).toEqual([{ texture: 'prev', sampler: 'u_image' }]);
   expect(sub[0].target).toBe('scratch');
   // blurV: scratch → pingpong
-  expect(sub[1].inputs).toEqual(['scratch']);
+  expect(sub[1].bindings).toEqual([{ texture: 'scratch', sampler: 'u_image' }]);
   expect(sub[1].target).toBe('pingpong');
   // unsharp: reads chainInput (original) + prev (blurred), via u_image + u_blur, → pingpong
-  expect(sub[2].inputs).toEqual(['chainInput', 'prev']);
-  expect(sub[2].samplerNames).toEqual(['u_image', 'u_blur']);
+  expect(sub[2].bindings).toEqual([
+    { texture: 'chainInput', sampler: 'u_image' },
+    { texture: 'prev',       sampler: 'u_blur'  },
+  ]);
   expect(sub[2].target).toBe('pingpong');
 });
 
