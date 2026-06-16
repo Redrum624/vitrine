@@ -583,6 +583,10 @@ export class GpuPreviewPipeline {
       for (const tex of this.lutTextures) gl.deleteTexture(tex);
       this.lutTextures.clear();
       if (this.srcTexture) gl.deleteTexture(this.srcTexture);
+      if (this.scratch) {
+        gl.deleteFramebuffer(this.scratch.framebuffer);
+        gl.deleteTexture(this.scratch.texture);
+      }
       if (this.quadBuffer) gl.deleteBuffer(this.quadBuffer);
       if (this.presentQuadBuffer) gl.deleteBuffer(this.presentQuadBuffer);
       if (this.vao) gl.deleteVertexArray(this.vao);
@@ -591,6 +595,7 @@ export class GpuPreviewPipeline {
     this.presentProgram = null;
     this.presentQuadBuffer = null;
     this.presentUniforms = null;
+    this.scratch = null;
     this.ping = [null, null];
     this.srcTexture = null;
     this.srcData = null;
