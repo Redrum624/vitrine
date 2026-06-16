@@ -374,6 +374,38 @@ void main() {
   outColor = vec4(outc, orig.a);
 }`;
 
+// ─── Local-adjustment layer blend (Task 10) ───────────────────────────────────
+// Blends a per-layer "adjusted" image back over the running "base" image weighted by
+// a grayscale mask × opacity. This is the GPU equivalent of
+// LocalAdjustmentsModule.applyBasicAdjLayer's per-channel blend:
+//   imageData[i] = base + (mask*opacity) * (adjusted - base)
+// i.e. out.rgb = mix(base.rgb, adjusted.rgb, mask*opacity), out.a = base.a.
+//
+// u_base     (unit 0) — the running image BEFORE this layer (the per-layer "original").
+// u_adjusted (unit 1) — FRAG_BASICADJ applied to the running image (the "processed").
+// u_mask     (unit 2) — R32F mask, value read from .r (0=no effect, 1=full effect).
+// u_opacity          — the layer opacity (0..1).
+//
+// The CPU does NOT re-clamp here: applyBasicAdjLayer assigns the linear mix directly,
+// and `processed` is already clamped to [0,1] by BasicAdjustmentsModule while `base`
+// is the running image. The mix of two in-range values stays in range, so no extra
+// clamp is applied (matching the CPU exactly). The mask×opacity weight is NOT clamped
+// either — the CPU multiplies mask[i]*opacity raw (both are already 0..1).
+export const FRAG_LAYER_BLEND = `#version 300 es
+precision highp float;
+uniform sampler2D u_base;
+uniform sampler2D u_adjusted;
+uniform sampler2D u_mask;
+uniform float u_opacity;
+in vec2 v_uv;
+out vec4 outColor;
+void main() {
+  vec4 base = texture(u_base, v_uv);
+  vec3 adjusted = texture(u_adjusted, v_uv).rgb;
+  float w = texture(u_mask, v_uv).r * u_opacity;
+  outColor = vec4(mix(base.rgb, adjusted, w), base.a);
+}`;
+
 // ─── Present shader pair ──────────────────────────────────────────────────────
 // Used by GpuPreviewPipeline.present() to blit the final result texture to the
 // default framebuffer (visible canvas) with zoom/pan and optional before/after split.

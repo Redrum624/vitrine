@@ -1,4 +1,6 @@
-import { buildPassList, computeWBGains, GPU_MODULE_IDS, OPT_IN_GPU_MODULE_IDS } from '../shaders/passDescriptors';
+import { buildPassList, buildLocalAdjustmentsPass, computeWBGains, GPU_MODULE_IDS, OPT_IN_GPU_MODULE_IDS } from '../shaders/passDescriptors';
+import type { MaskUpload } from '../shaders/passDescriptors';
+import { LocalAdjustmentsModule } from '../modules/LocalAdjustmentsModule';
 import { computeGaussianKernel } from '../shaders/uniforms';
 import { MAX_BLUR_TAPS } from '../shaders/sources';
 import { WhiteBalanceModule } from '../modules/WhiteBalanceModule';
@@ -623,4 +625,160 @@ test('computeWBGains (from WhiteBalanceModule) output matches module process() f
   expect(gains.r).toBeCloseTo(impliedR, 4);
   expect(gains.g).toBeCloseTo(impliedG, 4);
   expect(gains.b).toBeCloseTo(impliedB, 4);
+});
+
+// ---------------------------------------------------------------------------
+// Local Adjustments pass descriptor tests (Task 10 — masks on GPU)
+// Pure logic only — NO real GL. Mask upload happens in render() at runtime.
+// ---------------------------------------------------------------------------
+
+const W2 = 16, H2 = 16;
+
+/** Build a real LA module with one active radial basicAdj layer, return its getParams shape. */
+const oneActiveLayer = () => {
+  const m = new LocalAdjustmentsModule();
+  const id = m.createLayer('radial_gradient', 'L1', W2, H2);
+  m.updateLayerBasicAdj(id, { exposure: 0.3, contrast: 0.2 });
+  return { params: { enabled: true, layers: m.getLayers() } as Record<string, unknown>, id };
+};
+
+test('buildLocalAdjustmentsPass: one active basicAdj layer yields basicadj + layerblend sub-passes', () => {
+  const { params, id } = oneActiveLayer();
+  const pass = buildLocalAdjustmentsPass(params, W2, H2);
+  expect(pass).not.toBeNull();
+  expect(pass!.id).toBe('localadjustments');
+  expect(pass!.subPasses).toBeDefined();
+  expect(pass!.subPasses!).toHaveLength(2); // 2 per layer
+
+  const [basicadj, blend] = pass!.subPasses!;
+  expect(basicadj.programKey).toBe('basicadj');
+  expect(basicadj.bindings).toEqual([{ texture: 'prev', sampler: 'u_image' }]);
+  expect(basicadj.target).toBe('scratch');
+  expect(basicadj.id).toContain(id);
+
+  expect(blend.programKey).toBe('layerblend');
+  expect(blend.target).toBe('pingpong');
+  // base = prev (running), adjusted = scratch, mask = a MaskUpload bound to u_mask.
+  expect(blend.bindings![0]).toEqual({ texture: 'prev', sampler: 'u_base' });
+  expect(blend.bindings![1]).toEqual({ texture: 'scratch', sampler: 'u_adjusted' });
+  const maskBinding = blend.bindings![2];
+  expect(maskBinding.sampler).toBe('u_mask');
+  const mask = maskBinding.texture as MaskUpload;
+  expect(mask.kind).toBe('mask');
+  expect(mask.data).toBeInstanceOf(Float32Array);
+  expect(mask.width).toBe(W2);
+  expect(mask.height).toBe(H2);
+  expect(mask.data.length).toBe(W2 * H2);
+});
+
+test('buildLocalAdjustmentsPass: two active layers yield 4 sub-passes (basicadj+blend per layer)', () => {
+  const m = new LocalAdjustmentsModule();
+  const id1 = m.createLayer('radial_gradient', 'L1', W2, H2);
+  m.updateLayerBasicAdj(id1, { exposure: 0.3 });
+  const id2 = m.createLayer('radial_gradient', 'L2', W2, H2);
+  m.updateLayerBasicAdj(id2, { brightness: 0.4 });
+  const params = { enabled: true, layers: m.getLayers() } as Record<string, unknown>;
+
+  const pass = buildLocalAdjustmentsPass(params, W2, H2);
+  expect(pass).not.toBeNull();
+  expect(pass!.subPasses!).toHaveLength(4);
+  expect(pass!.subPasses!.map(sp => sp.programKey)).toEqual(['basicadj', 'layerblend', 'basicadj', 'layerblend']);
+  // Each layer's blend advances the chain; each basicadj writes scratch.
+  expect(pass!.subPasses!.map(sp => sp.target)).toEqual(['scratch', 'pingpong', 'scratch', 'pingpong']);
+});
+
+test('buildLocalAdjustmentsPass: no active layers → null (identity)', () => {
+  const m = new LocalAdjustmentsModule();
+  m.createLayer('radial_gradient', 'L1', W2, H2); // created but neutral basicAdj-less → not active
+  const params = { enabled: true, layers: m.getLayers() } as Record<string, unknown>;
+  expect(buildLocalAdjustmentsPass(params, W2, H2)).toBeNull();
+});
+
+test('buildLocalAdjustmentsPass: a neutral basicAdj layer (all zero) → null (identity)', () => {
+  const m = new LocalAdjustmentsModule();
+  const id = m.createLayer('radial_gradient', 'L1', W2, H2);
+  m.updateLayerBasicAdj(id, {}); // marks basicAdj but all-neutral
+  const params = { enabled: true, layers: m.getLayers() } as Record<string, unknown>;
+  expect(buildLocalAdjustmentsPass(params, W2, H2)).toBeNull();
+});
+
+test('buildLocalAdjustmentsPass: a disabled active layer is skipped → null', () => {
+  const m = new LocalAdjustmentsModule();
+  const id = m.createLayer('radial_gradient', 'L1', W2, H2);
+  m.updateLayerBasicAdj(id, { exposure: 0.3 });
+  const layer = m.getLayer(id)!;
+  layer.enabled = false;
+  const params = { enabled: true, layers: m.getLayers() } as Record<string, unknown>;
+  expect(buildLocalAdjustmentsPass(params, W2, H2)).toBeNull();
+});
+
+test('buildLocalAdjustmentsPass: a per-layer dehaze layer is NOT GPU-representable → null (CPU fallback)', () => {
+  const m = new LocalAdjustmentsModule();
+  const id = m.createLayer('radial_gradient', 'L1', W2, H2);
+  m.updateLayerBasicAdj(id, { dehaze: 0.5 });
+  const params = { enabled: true, layers: m.getLayers() } as Record<string, unknown>;
+  // dehaze is a per-layer running-input statistic the build-time pass can't carry → CPU.
+  expect(buildLocalAdjustmentsPass(params, W2, H2)).toBeNull();
+});
+
+test('buildLocalAdjustmentsPass: a mismatched-resolution mask is rebuilt via the callback', () => {
+  const m = new LocalAdjustmentsModule();
+  const id = m.createLayer('radial_gradient', 'L1', 8, 8); // baked at 8x8
+  m.updateLayerBasicAdj(id, { exposure: 0.3 });
+  const params = { enabled: true, layers: m.getLayers() } as Record<string, unknown>;
+
+  let rebuilt = false;
+  const pass = buildLocalAdjustmentsPass(params, W2, H2, (layerId, w, h) => {
+    rebuilt = true;
+    m.setLayerGeometry(layerId, m.getLayer(layerId)!.geometry!, w, h);
+    return m.getLayer(layerId)!.mask;
+  });
+  expect(rebuilt).toBe(true);
+  expect(pass).not.toBeNull();
+  const mask = pass!.subPasses![1].bindings![2].texture as MaskUpload;
+  expect(mask.data.length).toBe(W2 * H2); // rebuilt to the render resolution
+});
+
+test('buildLocalAdjustmentsPass: mismatched mask with no rebuilder → null (no misalignment)', () => {
+  const m = new LocalAdjustmentsModule();
+  const id = m.createLayer('radial_gradient', 'L1', 8, 8);
+  m.updateLayerBasicAdj(id, { exposure: 0.3 });
+  const params = { enabled: true, layers: m.getLayers() } as Record<string, unknown>;
+  // No rebuildMask callback → can't get a 16x16 mask → CPU fallback.
+  expect(buildLocalAdjustmentsPass(params, W2, H2)).toBeNull();
+});
+
+test('buildPassList: localadjustments with an active GPU-representable layer + opts yields a GPU pass (not cpuBridge)', () => {
+  const { params } = oneActiveLayer();
+  const laView = { getId: () => 'localadjustments', isEnabled: true, getParams: () => params };
+  const { passes, cpuBridges } = buildPassList([laView], { width: W2, height: H2 });
+  expect(passes.map(p => p.id)).toContain('localadjustments');
+  expect(cpuBridges).not.toContain('localadjustments');
+});
+
+test('buildPassList: localadjustments WITHOUT opts → cpuBridge (routing-only callers)', () => {
+  const { params } = oneActiveLayer();
+  const laView = { getId: () => 'localadjustments', isEnabled: true, getParams: () => params };
+  const { passes, cpuBridges } = buildPassList([laView]); // no opts
+  expect(passes).toHaveLength(0);
+  expect(cpuBridges).toContain('localadjustments');
+});
+
+test('buildPassList: localadjustments with a legacy parameters layer (no basicAdj) → cpuBridge even with opts', () => {
+  const m = new LocalAdjustmentsModule();
+  const id = m.createLayer('radial_gradient', 'L1', W2, H2);
+  m.updateLayerParameters(id, { exposure: 1.0 }); // legacy path, no basicAdj
+  const params = { enabled: true, layers: m.getLayers() } as Record<string, unknown>;
+  const laView = { getId: () => 'localadjustments', isEnabled: true, getParams: () => params };
+  const { passes, cpuBridges } = buildPassList([laView], { width: W2, height: H2 });
+  expect(passes).toHaveLength(0);
+  expect(cpuBridges).toContain('localadjustments');
+});
+
+test('buildLocalAdjustmentsPass setUniforms have arity 2/3 and do not throw with the no-op GL mock', () => {
+  const { params } = oneActiveLayer();
+  const pass = buildLocalAdjustmentsPass(params, W2, H2)!;
+  for (const sp of pass.subPasses!) {
+    expect(() => sp.setUniforms(makeGl(), DUMMY_PROG, DEFAULT_RT)).not.toThrow();
+  }
 });

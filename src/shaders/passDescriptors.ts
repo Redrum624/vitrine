@@ -29,6 +29,7 @@ import {
   blurUniforms,
   unsharpUniforms,
   computeGaussianKernel,
+  layerBlendUniforms,
 } from './uniforms';
 import { MAX_BLUR_TAPS } from './sources';
 import type { ShadowsHighlightsUniformParams } from './uniforms';
@@ -154,8 +155,32 @@ export interface PassDescriptor {
  *      where 'prev' for step 3 is step 2's ping-pong output (the fully blurred image).
  */
 
-/** Named logical texture OR an already-uploaded WebGLTexture for direct binding. */
-export type SubPassTexture = 'chainInput' | 'prev' | 'scratch' | WebGLTexture;
+/**
+ * A CPU-side mask to upload+cache as an R32F texture at render time.
+ *
+ * The pass builder (buildLocalAdjustmentsPass) has no GL context, so it cannot create
+ * the WebGLTexture itself. Instead it carries the baked Float32 mask + a stable cache
+ * key + the dimensions it was baked at; GpuPreviewPipeline.render() uploads it once and
+ * caches it (keyed by `key`), re-uploading only when the key changes (geometry/dims).
+ *
+ * `width`/`height` are the resolution the mask was baked at. The pipeline verifies they
+ * match the render dimensions; a mismatch means the pass builder must rebuild the layer
+ * mask (it does, via setLayerGeometry) before emitting the pass.
+ */
+export interface MaskUpload {
+  kind: 'mask';
+  data: Float32Array;
+  /** Stable identity for the mask cache (e.g. `${layerId}:${w}x${h}:${geomHash}`). */
+  key: string;
+  width: number;
+  height: number;
+}
+
+/**
+ * Named logical texture, an already-uploaded WebGLTexture for direct binding, or a
+ * MaskUpload the pipeline uploads+caches at render time (Task 10 local-adjustment masks).
+ */
+export type SubPassTexture = 'chainInput' | 'prev' | 'scratch' | WebGLTexture | MaskUpload;
 
 export interface SubPass {
   id: string;
@@ -173,6 +198,23 @@ export interface SubPass {
 export interface PassList {
   passes: PassDescriptor[];
   cpuBridges: string[];
+}
+
+/**
+ * Optional render-time context for buildPassList. Required only by the local-adjustments
+ * pass (Task 10), which bakes masks at the render resolution. When omitted, an active
+ * localadjustments module is treated as a cpuBridge (the routing-decision call sites that
+ * don't render — e.g. tests — don't need GPU masks).
+ *
+ * - width/height : the render (preview) resolution masks must match.
+ * - rebuildMask  : reuses the module's setLayerGeometry to rebuild a layer mask at
+ *                  (w,h) when its baked length != w*h (preview vs export). Returns the
+ *                  new mask or null if it has no geometry to rebuild from.
+ */
+export interface BuildPassOpts {
+  width: number;
+  height: number;
+  rebuildMask?: (layerId: string, w: number, h: number) => Float32Array | null;
 }
 
 // ── Minimal PipelineModule interface (subset used here) ───────────────────────
@@ -499,6 +541,158 @@ function buildLensCorrectionsSubPasses(params: Record<string, unknown>): PassDes
   return passes;
 }
 
+// ── Local Adjustments (Task 10 — masks on GPU) ───────────────────────────────
+
+/**
+ * Minimal view of a LocalAdjustmentLayer as it appears in the LA module's getParams().
+ * Only the fields the GPU pass needs are typed; the rest are ignored.
+ */
+interface LayerView {
+  id?: string;
+  enabled?: boolean;
+  opacity?: number;
+  basicAdj?: BasicAdjustmentsParams;
+  mask?: Float32Array;
+  geometry?: { type?: string; [k: string]: unknown };
+}
+
+/**
+ * Whether a layer is GPU-representable in the resident-texture pipeline.
+ *
+ * The CPU `process()` runs ONE of two paths per layer:
+ *   - applyBasicAdjLayer  — when `layer.basicAdj` is set: runs BasicAdjustmentsModule
+ *                           (the EXACT FRAG_BASICADJ shader, via the GPU fast-path) on the
+ *                           running image then blends by mask*opacity. THIS is GPU-ported.
+ *   - applyLayerToImage   — the legacy `parameters` path (exposure/temp/contrast/blend
+ *                           modes). NOT ported to a shader → such a layer forces CPU.
+ *
+ * Additionally, per-layer dehaze (`basicAdj.dehaze != 0`) is NOT GPU-representable here:
+ * the shared PassRuntime.dehaze is computed once from the SOURCE pixels with the main
+ * basicadj's param, but a layer's dehaze must be estimated from that layer's RUNNING input
+ * — a per-layer statistic the build-time pass list can't carry. So a dehaze layer → CPU.
+ */
+function isLayerGpuRepresentable(layer: LayerView): boolean {
+  if (!layer.basicAdj) return false;                 // legacy parameters path → CPU
+  if (!(layer.mask instanceof Float32Array)) return false; // no baked mask → can't upload
+  if (typeof layer.basicAdj.dehaze === 'number' && Math.abs(layer.basicAdj.dehaze) > 0.001) {
+    return false;                                    // per-layer dehaze → CPU
+  }
+  return true;
+}
+
+/** A layer is "active" (non-identity) when its basicAdj has any non-neutral value AND
+ *  opacity > 0 AND it is enabled — mirroring applyBasicAdjLayer's skip conditions
+ *  (disabled / opacity 0 / all-neutral basicAdj are no-ops on the CPU too). */
+function isLayerActive(layer: LayerView): boolean {
+  if (layer.enabled === false) return false;
+  if (layer.opacity === 0) return false;
+  const adj = layer.basicAdj;
+  if (!adj) return false;
+  return Object.values(adj).some((v) => typeof v === 'number' && Math.abs(v) > 1e-6);
+}
+
+/** Stable cache key for a layer's mask: id + dims + a hash of the baked values.
+ *  The mask is rebuilt (and its reference replaced) whenever geometry/dims change, so a
+ *  cheap strided sample hash is enough to detect a re-bake without scanning every pixel. */
+function maskCacheKey(layer: LayerView, width: number, height: number): string {
+  const m = layer.mask!;
+  let h = 0;
+  const step = Math.max(1, Math.floor(m.length / 64));
+  for (let i = 0; i < m.length; i += step) {
+    h = (h * 31 + Math.round(m[i] * 1000)) | 0;
+  }
+  return `${layer.id ?? 'layer'}:${width}x${height}:${m.length}:${h}`;
+}
+
+/**
+ * Build a PassDescriptor for the Local Adjustments module: per ENABLED+ACTIVE layer,
+ * two sub-passes that reproduce applyBasicAdjLayer's `mix(running, basicAdj(running), mask*op)`:
+ *
+ *   1. basicadj sub-pass — FRAG_BASICADJ on the running image (`prev`) → SCRATCH.
+ *      This is the layer's "adjusted" version. Writing to scratch keeps the running
+ *      image (`prev`) intact for the blend.
+ *   2. blend sub-pass    — FRAG_LAYER_BLEND, bindings:
+ *        u_base     ← 'prev'   (the running image, untouched by step 1)
+ *        u_adjusted ← 'scratch'(step 1's output)
+ *        u_mask     ← MaskUpload (the layer's baked Float32 mask, uploaded+cached by render)
+ *      → PINGPONG (advances the chain). The NEXT layer's step-1 `prev` is THIS blend output,
+ *      giving the exact CPU sequential semantics (layer N sees layer N-1's result).
+ *
+ * Returns null when no layer is GPU-representable+active (caller routes to cpuBridges).
+ * If SOME layers are active but ANY active layer is not GPU-representable, also returns
+ * null (whole module → CPU) so the GPU path never silently drops a layer's effect.
+ *
+ * @param rebuildMask  Optional callback to rebuild a layer's mask at (width,height) when its
+ *                     baked length != width*height — reuses the module's setLayerGeometry
+ *                     (no geometry→mask reimplementation). Returns the (possibly new) mask,
+ *                     or null if it couldn't rebuild (no geometry).
+ */
+export function buildLocalAdjustmentsPass(
+  params: Record<string, unknown>,
+  width: number,
+  height: number,
+  rebuildMask?: (layerId: string, w: number, h: number) => Float32Array | null,
+): PassDescriptor | null {
+  const layers = (params.layers as LayerView[] | undefined) ?? [];
+  const active = layers.filter(isLayerActive);
+  if (active.length === 0) return null; // identity — nothing for GPU to do
+
+  // If ANY active layer can't be expressed on the GPU, the whole module falls back to CPU
+  // (dropping just one layer's effect would diverge silently — worse than CPU).
+  if (!active.every(isLayerGpuRepresentable)) return null;
+
+  const subPasses: SubPass[] = [];
+  for (const layer of active) {
+    let mask = layer.mask!;
+    // Rebuild the mask at the render resolution if it was baked at a different size
+    // (preview vs export) — mirrors LocalAdjustmentsModule.processImage. Uses the module's
+    // own setLayerGeometry via the callback; we do NOT reimplement geometry→mask here.
+    if (mask.length !== width * height && rebuildMask && layer.id) {
+      const rebuilt = rebuildMask(layer.id, width, height);
+      if (!(rebuilt instanceof Float32Array) || rebuilt.length !== width * height) {
+        return null; // couldn't get a matching-resolution mask → CPU (don't misalign)
+      }
+      mask = rebuilt;
+    }
+    if (mask.length !== width * height) return null; // no rebuilder + mismatch → CPU
+
+    const adj = layer.basicAdj!;
+    const opacity = typeof layer.opacity === 'number' ? layer.opacity : 1;
+    const maskUpload: MaskUpload = {
+      kind: 'mask', data: mask, key: maskCacheKey(layer, width, height), width, height,
+    };
+
+    // dehaze is INACTIVE for GPU-representable layers (dehaze!=0 routes to CPU above), so
+    // the shared inactive dehaze state is exact. We pass it via rt.dehaze in the closure.
+    subPasses.push({
+      id: `localadjustments:${layer.id ?? 'layer'}:basicadj`,
+      programKey: 'basicadj',
+      bindings: [{ texture: 'prev', sampler: 'u_image' }],
+      target: 'scratch',
+      // Force an inactive dehaze state regardless of rt — a GPU layer never has dehaze.
+      setUniforms: (gl, prog) => basicAdjUniforms(adj, { active: false, hazeStrength: 0, hazeDivisor: 1 })(gl, prog),
+    });
+    subPasses.push({
+      id: `localadjustments:${layer.id ?? 'layer'}:blend`,
+      programKey: 'layerblend',
+      bindings: [
+        { texture: 'prev',       sampler: 'u_base'     },
+        { texture: 'scratch',    sampler: 'u_adjusted' },
+        { texture: maskUpload,   sampler: 'u_mask'     },
+      ],
+      target: 'pingpong',
+      setUniforms: (gl, prog) => layerBlendUniforms(opacity)(gl, prog),
+    });
+  }
+
+  return {
+    id: 'localadjustments',
+    programKey: 'localadjustments:multi', // ignored — subPasses present
+    setUniforms: () => undefined,
+    subPasses,
+  };
+}
+
 // ── buildPassList ──────────────────────────────────────────────────────────────
 
 /**
@@ -512,7 +706,7 @@ function buildLensCorrectionsSubPasses(params: Record<string, unknown>): PassDes
  *   lenscorrections).
  * - All other modules are CPU-only and go to cpuBridges.
  */
-export function buildPassList(modules: MinimalModule[]): PassList {
+export function buildPassList(modules: MinimalModule[], opts?: BuildPassOpts): PassList {
   const passes: PassDescriptor[] = [];
   const cpuBridges: string[] = [];
 
@@ -526,6 +720,18 @@ export function buildPassList(modules: MinimalModule[]): PassList {
     }
 
     const params: Record<string, unknown> = module.getParams?.() ?? {};
+
+    if (id === 'localadjustments') {
+      // GPU only when render dims are known (opts) AND every active layer is
+      // GPU-representable (has basicAdj, a baked mask, no per-layer dehaze). Otherwise
+      // the whole module runs on the CPU so no layer's effect is silently dropped.
+      const laPass = opts
+        ? buildLocalAdjustmentsPass(params, opts.width, opts.height, opts.rebuildMask)
+        : null;
+      if (laPass) passes.push(laPass);
+      else cpuBridges.push(id);
+      continue;
+    }
 
     if (id === 'lenscorrections') {
       const subPasses = buildLensCorrectionsSubPasses(params);

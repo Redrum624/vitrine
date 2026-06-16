@@ -269,6 +269,21 @@ export function unsharpUniforms(strength: number, threshold: number): UniformSet
   };
 }
 
+// ── Local-adjustment layer blend pass (Task 10) ──────────────────────────────
+
+/**
+ * Uniform setter for the per-layer mask blend (FRAG_LAYER_BLEND).
+ * @param opacity  The layer opacity (0..1). Combined with the mask in-shader as
+ *                 `w = mask * opacity`, matching applyBasicAdjLayer's `mask[i]*op`.
+ * NOTE: the three samplers (u_base unit 0, u_adjusted unit 1, u_mask unit 2) are bound
+ * to texture units by the pipeline's sub-pass runner — this setter only sets the scalar.
+ */
+export function layerBlendUniforms(opacity: number): UniformSetter {
+  return (gl, prog) => {
+    gl.uniform1f(gl.getUniformLocation(prog, 'u_opacity'), opacity);
+  };
+}
+
 // ── Denoise pass ─────────────────────────────────────────────────────────────
 
 export function denoiseUniforms(width: number, height: number, strength: number): UniformSetter {

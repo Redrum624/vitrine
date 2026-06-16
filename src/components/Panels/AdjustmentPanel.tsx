@@ -6,6 +6,7 @@ import { ColorBalancePipelineModule } from '../../modules/ColorBalancePipelineMo
 import { ShadowsHighlightsPipelineModule } from '../../modules/ShadowsHighlightsPipelineModule';
 import { CropPipelineModule } from '../../modules/CropPipelineModule';
 import { LocalAdjustmentsPipelineModule } from '../../modules/LocalAdjustmentsPipelineModule';
+import { localAdjustmentsModule as localAdjustmentsCore } from '../../modules/LocalAdjustmentsModule';
 import { LensCorrectionsPipelineModule } from '../../modules/LensCorrectionsPipelineModule';
 import { NoiseReductionModule } from '../../modules/NoiseReductionModule';
 import { SharpenModule } from '../../modules/SharpenModule';
@@ -250,7 +251,20 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
       // GPU; an actually-cropped image or an applied sharpen / a live local-adjustment
       // mask does → CPU fallback for that frame.
       const orderedModules = imageProcessingPipeline.getOrderedModules();
-      const { passes, cpuBridges } = buildPassList(orderedModules);
+      // Provide the render dims + a mask-rebuild callback so the local-adjustments pass
+      // (Task 10) can bake/upload masks at the preview resolution. rebuildMask reuses the
+      // module's OWN setLayerGeometry (no geometry→mask reimplementation) and returns the
+      // freshly-baked mask for the layer, or null when the layer has no geometry.
+      const { passes, cpuBridges } = buildPassList(orderedModules, {
+        width: previewWidth,
+        height: previewHeight,
+        rebuildMask: (layerId, w, h) => {
+          const layer = localAdjustmentsCore.getLayer(layerId);
+          if (!layer || !layer.geometry) return null;
+          localAdjustmentsCore.setLayerGeometry(layerId, layer.geometry, w, h);
+          return localAdjustmentsCore.getLayer(layerId)?.mask ?? null;
+        },
+      });
       const activeCpuBridges = cpuBridges.filter((id) => imageProcessingPipeline.isModuleActive(id));
 
       if (gpuPreviewPipeline.isAvailable() && activeCpuBridges.length === 0 && passes.length > 0) {

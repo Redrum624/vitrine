@@ -33,9 +33,10 @@ import {
   FRAG_BLUR_H,
   FRAG_BLUR_V,
   FRAG_UNSHARP,
+  FRAG_LAYER_BLEND,
 } from './sources';
-import type { PassDescriptor, PassRuntime, SubPassTexture } from './passDescriptors';
-import { buildPassList } from './passDescriptors';
+import type { PassDescriptor, PassRuntime, SubPassTexture, MaskUpload } from './passDescriptors';
+import { buildPassList, buildLocalAdjustmentsPass } from './passDescriptors';
 import { basicAdjUniforms, exposureUniforms, shadowsHighlightsUniforms } from './uniforms';
 import { SharpenModule } from '../modules/SharpenModule';
 import type { ShadowsHighlightsUniformParams } from './uniforms';
@@ -43,6 +44,7 @@ import type { DehazeState } from '../services/WebGLImageProcessor';
 import { webGLImageProcessor } from '../services/WebGLImageProcessor';
 import { ExposureModule } from '../modules/ExposureModule';
 import { ShadowsHighlightsModule } from '../modules/ShadowsHighlightsModule';
+import { LocalAdjustmentsModule } from '../modules/LocalAdjustmentsModule';
 
 export interface PreviewRenderResult {
   width: number;
@@ -72,6 +74,7 @@ const PROGRAM_SOURCES: Record<string, string> = {
   blur_h: FRAG_BLUR_H,
   blur_v: FRAG_BLUR_V,
   unsharp: FRAG_UNSHARP,
+  layerblend: FRAG_LAYER_BLEND,
 };
 
 /** Tone-curve LUT sampler-uniform names, in the same order runToneCurveGPU binds them. */
@@ -122,6 +125,11 @@ export class GpuPreviewPipeline {
   private lutCache = new WeakMap<Float32Array, WebGLTexture>();
   // Parallel iterable set so destroy() can delete every LUT texture (WeakMap isn't iterable).
   private lutTextures = new Set<WebGLTexture>();
+
+  // Cache of uploaded local-adjustment mask textures (Task 10), keyed by MaskUpload.key
+  // (layer id + dims + value hash). Re-uploaded only when the key changes (geometry/dims
+  // change → mask rebuilt → new hash). NOT re-uploaded per frame for a static mask.
+  private maskCache = new Map<string, WebGLTexture>();
 
   /**
    * Create the WebGL2 context (on the given canvas, or an internally-created one for
@@ -346,6 +354,34 @@ export class GpuPreviewPipeline {
   }
 
   /**
+   * Upload a local-adjustment mask (Task 10) as a width×height R32F texture, NEAREST +
+   * CLAMP_TO_EDGE (NEAREST because the CPU indexes mask[pixelIndex] — a nearest lookup,
+   * not a bilinear blend — so the GPU must sample the exact same texel). Cached by
+   * `upload.key`; re-uploaded only when the key changes (geometry/dims → rebuilt mask).
+   *
+   * The mask must match the render dimensions — the pass builder rebuilds it (via the
+   * module's setLayerGeometry) before emitting the pass, so a stale-size mask never
+   * reaches here. We still guard: a size mismatch means we don't upload (caller fell back).
+   */
+  private uploadMask(gl: WebGL2RenderingContext, upload: MaskUpload): WebGLTexture | null {
+    if (upload.width !== this.width || upload.height !== this.height) {
+      logger.warn(`[GPU-PIPELINE] mask '${upload.key}' size ${upload.width}x${upload.height} != render ${this.width}x${this.height} — skipping`);
+      return null;
+    }
+    const cached = this.maskCache.get(upload.key);
+    if (cached) return cached;
+    const tex = gl.createTexture()!;
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, upload.width, upload.height, 0, gl.RED, gl.FLOAT, upload.data);
+    this.maskCache.set(upload.key, tex);
+    return tex;
+  }
+
+  /**
    * Run all passes in order, ping-ponging between the two RGBA32F framebuffers.
    * NO readPixels — the final output stays resident as `resultTexture`.
    */
@@ -477,10 +513,14 @@ export class GpuPreviewPipeline {
     let idx = startIdx;
     let outputTexture: WebGLTexture = chainInput;
 
-    const resolveTexture = (which: SubPassTexture): WebGLTexture => {
+    const resolveTexture = (which: SubPassTexture): WebGLTexture | null => {
       if (which === 'chainInput') return chainInput;
       if (which === 'scratch') return this.ensureScratch(gl).texture;
       if (which === 'prev') return prev;
+      // MaskUpload — a CPU mask the pipeline uploads+caches as an R32F texture (Task 10).
+      if (typeof which === 'object' && which !== null && (which as MaskUpload).kind === 'mask') {
+        return this.uploadMask(gl, which as MaskUpload);
+      }
       // External WebGLTexture — bind directly, no ownership transfer.
       return which as WebGLTexture;
     };
@@ -498,20 +538,38 @@ export class GpuPreviewPipeline {
       const bindings = sp.bindings ?? [{ texture: 'prev', sampler: 'u_image' }];
       for (let u = 0; u < bindings.length; u++) {
         const { texture, sampler } = bindings[u];
+        const tex = resolveTexture(texture);
+        if (!tex) {
+          // A required texture (e.g. a mask upload that failed/size-mismatched) is
+          // missing — abort the whole module step rather than render a half-bound pass.
+          logger.warn(`[GPU-PIPELINE] sub-pass '${sp.id}' binding '${sampler}' unresolved — skipping module '${pass.id}'`);
+          gl.activeTexture(gl.TEXTURE0);
+          return null;
+        }
         gl.activeTexture(gl.TEXTURE0 + u);
-        gl.bindTexture(gl.TEXTURE_2D, resolveTexture(texture));
+        gl.bindTexture(gl.TEXTURE_2D, tex);
         gl.uniform1i(gl.getUniformLocation(prog, sampler), u);
       }
 
       sp.setUniforms(gl, prog, rt);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
-      // Advance: this sub-pass's output is the next sub-pass's 'prev'.
-      prev = dst.texture;
-      outputTexture = dst.texture;
-      // Ping-pong index only flips when we actually consumed a ping-pong slot, so the
-      // NEXT module writes to the other slot (never overwriting the live chain texture).
-      if (target === 'pingpong') idx = 1 - idx;
+      // Advance only on a PING-PONG target. A 'scratch' write is an INTERMEDIATE side
+      // buffer, NOT the chain — it must not become 'prev' (a sub-pass reads scratch via
+      // the explicit 'scratch' binding, never via 'prev'). Critically this lets the
+      // local-adjustments blend read the RUNNING image as 'prev' (u_base) even though the
+      // immediately-preceding basicadj sub-pass wrote its result to scratch:
+      //   layer: basicadj(prev=running) → scratch ; blend(u_base=prev=running, u_adjusted=scratch) → pingpong
+      // and the NEXT layer's basicadj then reads prev = THIS blend output (correct
+      // sequential semantics). Sharpen is unaffected: its blurV binds 'scratch' explicitly
+      // and its unsharp's 'prev' is the blurV PING-PONG output (which DOES advance prev).
+      if (target === 'pingpong') {
+        prev = dst.texture;
+        outputTexture = dst.texture;
+        // Flip the ping-pong slot so the NEXT pingpong write goes to the other slot,
+        // never overwriting the live chain texture currently held in 'prev'.
+        idx = 1 - idx;
+      }
 
       // Restore the default active unit so the next sub-pass / module isn't surprised.
       gl.activeTexture(gl.TEXTURE0);
@@ -584,6 +642,8 @@ export class GpuPreviewPipeline {
       }
       for (const tex of this.lutTextures) gl.deleteTexture(tex);
       this.lutTextures.clear();
+      for (const tex of this.maskCache.values()) gl.deleteTexture(tex);
+      this.maskCache.clear();
       if (this.srcTexture) gl.deleteTexture(this.srcTexture);
       if (this.scratch) {
         gl.deleteFramebuffer(this.scratch.framebuffer);
@@ -594,6 +654,7 @@ export class GpuPreviewPipeline {
       if (this.vao) gl.deleteVertexArray(this.vao);
     }
     this.programs.clear();
+    this.maskCache.clear();
     this.presentProgram = null;
     this.presentQuadBuffer = null;
     this.presentUniforms = null;
@@ -861,8 +922,52 @@ export class GpuPreviewPipeline {
       const sharpenOk = sharpenMaxDiff < 1e-3;
       logger.info(`[GPU-PIPELINE] sharpen self-test maxDiff=${sharpenMaxDiff.toExponential(2)} ${sharpenOk ? 'PASS' : 'FAIL'}`);
 
-      const ok = basicAdjOk && exposureOk && shOk && sharpenOk;
-      const maxDiff = Math.max(basicAdjMaxDiff, exposureMaxDiff, shMaxDiff, sharpenMaxDiff);
+      // ── 5. local-adjustments sub-test (masks + sequential blend) ────────────
+      // The hard one: build a real LA module with TWO enabled radial-mask layers, each
+      // with a non-trivial basicAdj, then render through the multi-pass LA descriptor
+      // (basicadj→scratch + blend→pingpong PER LAYER) and compare to the CPU
+      // LocalAdjustmentsModule.processImage (which itself runs the SAME FRAG_BASICADJ via
+      // BasicAdjustmentsModule's GPU fast-path, then the same mask*opacity blend). This
+      // verifies (a) mask upload/sampling alignment, (b) the per-layer blend formula, and
+      // (c) the SEQUENTIAL semantics (layer 2 operates on layer 1's result). Tolerance
+      // 1e-3: same shader + same kernel; divergence is float-precision only.
+      const laModule = new LocalAdjustmentsModule();
+      const id1 = laModule.createLayer('radial_gradient', 'L1', w, h);
+      laModule.updateLayerBasicAdj(id1, { exposure: 0.3, contrast: 0.4, saturation: 0.2 });
+      // Non-unity opacity exercises the mask*opacity weight in the blend (set directly —
+      // the module has no opacity setter; getLayer returns the live layer object).
+      const layer1 = laModule.getLayer(id1);
+      if (layer1) layer1.opacity = 0.85;
+      const id2 = laModule.createLayer('radial_gradient', 'L2', w, h);
+      // Move layer 2's mask so it overlaps layer 1 partially (tests sequential blend).
+      laModule.setLayerGeometry(id2, {
+        type: 'radial', centerX: 0.65, centerY: 0.4, radiusX: 0.35, radiusY: 0.25,
+        startX: 0.5, startY: 0.15, endX: 0.5, endY: 0.85, feather: 0.4, invert: false, rotation: 0.3,
+      }, w, h);
+      laModule.updateLayerBasicAdj(id2, { brightness: 0.5, vibrance: 0.3, highlights: -0.2 });
+
+      // Build the GPU LA pass from the module's getParams()-shaped layer list.
+      const laParams = { enabled: true, layers: laModule.getLayers() } as Record<string, unknown>;
+      const laPass = buildLocalAdjustmentsPass(laParams, w, h);
+      let laMaxDiff = Infinity;
+      let laOk = false;
+      if (laPass) {
+        this.setSource(data, w, h);
+        this.render([laPass]);
+        const gpuLA = this.readback();
+        const refLA = laModule.processImage(new Float32Array(data), w, h);
+        laMaxDiff = 0;
+        for (let i = 0; i < refLA.length; i++) {
+          laMaxDiff = Math.max(laMaxDiff, Math.abs(gpuLA[i] - refLA[i]));
+        }
+        laOk = laMaxDiff < 1e-3;
+      } else {
+        logger.warn('[GPU-PIPELINE] local-adj self-test: pass builder returned null (unexpected for GPU-representable layers)');
+      }
+      logger.info(`[GPU-PIPELINE] local-adj self-test maxDiff=${laMaxDiff.toExponential(2)} ${laOk ? 'PASS' : 'FAIL'}`);
+
+      const ok = basicAdjOk && exposureOk && shOk && sharpenOk && laOk;
+      const maxDiff = Math.max(basicAdjMaxDiff, exposureMaxDiff, shMaxDiff, sharpenMaxDiff, laMaxDiff);
       return { ok, maxDiff };
     } catch (e) {
       logger.warn('[GPU-PIPELINE] selfTest error:', e instanceof Error ? e.message : String(e));
