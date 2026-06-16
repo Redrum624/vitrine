@@ -161,6 +161,33 @@ export default [
       ...reactCompilerRulesOff,
     },
   },
+  // Web Worker module files — DedicatedWorkerGlobalScope, not Window.
+  {
+    files: ['src/workers/**/*.{ts,tsx}'],
+    languageOptions: {
+      parser: typescriptParser,
+      ecmaVersion: 2022,
+      sourceType: 'module',
+      globals: {
+        ...browserGlobals,
+        self: 'readonly',
+        Transferable: 'readonly',
+        DedicatedWorkerGlobalScope: 'readonly',
+        importScripts: 'readonly',
+      },
+    },
+    plugins: {
+      '@typescript-eslint': typescript,
+    },
+    rules: {
+      ...js.configs.recommended.rules,
+      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrors: 'none' }],
+      '@typescript-eslint/no-explicit-any': 'warn',
+      'prefer-const': 'error',
+      'no-console': 'off',
+      'no-unused-vars': 'off',
+    },
+  },
   // Test files
   {
     files: ['src/**/*.test.{ts,tsx}', 'src/**/*.spec.{ts,tsx}', 'src/**/__tests__/**/*.{ts,tsx}', 'src/setupTests.ts'],

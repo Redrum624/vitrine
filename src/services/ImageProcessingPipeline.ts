@@ -691,6 +691,64 @@ export class ImageProcessingPipeline {
     }
   }
 
+  /**
+   * Apply a WorkerModuleConfig[] (the exact shape produced by processWithWebWorkers)
+   * back onto this pipeline's registered modules: set each module's params + enabled
+   * flag so a subsequent processImage(..., useWebWorkers=false) reproduces the
+   * configured edit. This is the INVERSE of getModuleParams and is the ONLY place
+   * config→module mapping lives — the pipeline.worker.ts module worker calls this so
+   * it runs the REAL modules with NO duplicated pixel math.
+   *
+   * Setter shapes mirror getModuleParams' getter shapes:
+   *  - setParams(params)        → temperature(WB), basicadj, tonecurve(adapter),
+   *                               colorbalance(adapter), shadowshighlights(adapter),
+   *                               noisereduction, sharpen, crop(adapter)
+   *  - setCurrentParams(params) → exposure
+   *  - setParameters(params)    → lenscorrections, localadjustments
+   * Each module also gets its enabled flag set via setEnabled(b) when present, else
+   * the public `isEnabled` field is assigned directly.
+   */
+  applyWorkerConfig(config: WorkerModuleConfig[]): void {
+    for (const { moduleId, enabled, params } of config) {
+      const module = this.modules.get(moduleId);
+      if (!module) {
+        logger.warn(`applyWorkerConfig: module not found: ${moduleId}`);
+        continue;
+      }
+
+      // Apply enabled flag. setEnabled() when present; else assign the public field.
+      // localadjustments / lenscorrections expose isEnabled as a getter-only accessor
+      // (no setter) that derives enablement from their params — setParameters() below
+      // restores it, so a direct assignment (which would throw in strict mode) is
+      // skipped for them via the try/catch.
+      const withEnable = module as PipelineModule & { setEnabled?(b: boolean): void };
+      if (typeof withEnable.setEnabled === 'function') {
+        withEnable.setEnabled(enabled);
+      } else {
+        try { module.isEnabled = enabled; } catch { /* getter-only isEnabled */ }
+      }
+
+      // Apply params via the module's own setter (heterogeneous across modules).
+      const withSetters = module as PipelineModule & {
+        setParams?(p: Record<string, unknown>): void;
+        setParameters?(p: Record<string, unknown>): void;
+        setCurrentParams?(p: Record<string, unknown>): void;
+      };
+      if (typeof withSetters.setParams === 'function') {
+        withSetters.setParams(params);
+      } else if (typeof withSetters.setParameters === 'function') {
+        withSetters.setParameters(params);
+      } else if (typeof withSetters.setCurrentParams === 'function') {
+        withSetters.setCurrentParams(params);
+      } else {
+        logger.warn(`applyWorkerConfig: no param setter for module ${moduleId}`);
+      }
+    }
+    // The config changed every module's state — drop any cached per-module results
+    // so the next processOnMainThread recomputes against the new params.
+    this.moduleCache.clear();
+  }
+
   // Process image in Web Worker for better performance
   async processImageAsync(input: Float32Array, context: ProcessingContext): Promise<Float32Array> {
     return new Promise((resolve, reject) => {

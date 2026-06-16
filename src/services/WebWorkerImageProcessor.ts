@@ -1,4 +1,5 @@
 import { logger } from '../utils/Logger';
+import { pipelineWorkerUrl } from '../workers/pipelineWorkerUrl';
 
 export interface WorkerImageData {
   width: number;
@@ -61,7 +62,10 @@ export class WebWorkerImageProcessor {
 
       // Create workers
       for (let i = 0; i < this.maxWorkers; i++) {
-        const worker = new Worker('/workers/image-processor.worker.js');
+        // Vite MODULE worker — bundles the real ImageProcessingPipeline (zero drift).
+        // pipelineWorkerUrl wraps `new URL('./pipeline.worker.ts', import.meta.url)`,
+        // which Vite rewrites to the hashed worker chunk at build time.
+        const worker = new Worker(pipelineWorkerUrl, { type: 'module' });
         this.setupWorkerEventHandlers(worker);
         this.workers.push(worker);
         this.availableWorkers.push(worker);
@@ -311,6 +315,7 @@ export class WebWorkerImageProcessor {
         tileHeight,
         fullWidth: width,
         fullHeight: height,
+        channels,
         pipeline
       }) as TileProcessingResult;
 

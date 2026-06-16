@@ -19,7 +19,11 @@ module.exports = {
   },
   moduleNameMapper: {
     '\\.(css|less|scss|sass)$': 'identity-obj-proxy',
-    '\\.(jpg|jpeg|png|gif|webp|svg)$': '<rootDir>/src/__mocks__/fileMock.js'
+    '\\.(jpg|jpeg|png|gif|webp|svg)$': '<rootDir>/src/__mocks__/fileMock.js',
+    // The worker-URL module uses `import.meta.url`, which ts-jest (CommonJS) cannot
+    // parse. Stub it: tests never construct a real Worker, they exercise the
+    // config→pipeline translation directly. See src/workers/pipelineWorkerUrl.ts.
+    '^.*/workers/pipelineWorkerUrl$': '<rootDir>/src/__mocks__/pipelineWorkerUrlMock.js'
   },
   setupFilesAfterEnv: ['<rootDir>/src/setupTests.ts'],
   moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json', 'node'],
