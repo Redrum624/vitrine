@@ -87,9 +87,49 @@ const TONECURVE_LUT_NAMES = ['u_master', 'u_red', 'u_green', 'u_blue'] as const;
 /** Maximum number of mask textures kept in maskCache before LRU eviction. */
 const MAX_MASK_TEXTURES = 32;
 
+/** Exact signature of WebGL2RenderingContext.getUniformLocation, for a faithful wrap. */
+export type GetUniformLocationFn = (program: WebGLProgram, name: string) => WebGLUniformLocation | null;
+
+/**
+ * Wrap a raw `getUniformLocation` with a per-program memoization cache.
+ *
+ * Uniform locations are STABLE for a program's lifetime (programs are compiled once
+ * and never relinked in GpuPreviewPipeline), so the per-frame driver round-trips are
+ * safely cacheable. The returned function is a drop-in replacement that returns EXACTLY
+ * what `raw` would (same location object, or null), just cached — so it cannot change
+ * rendering output.
+ *
+ * Caching rules (correctness-critical):
+ *   - Keyed by program via the WeakMap (so different programs never collide, and a
+ *     deleted program's cache entry is GC'd).
+ *   - `null` results are cached too (`map.has(name)`, NOT truthiness): a uniform
+ *     optimized-out of a shader returns null; without caching null we'd re-query it
+ *     every frame, defeating the optimization.
+ */
+export function memoizeUniformLocation(raw: GetUniformLocationFn): GetUniformLocationFn {
+  const cache = new WeakMap<WebGLProgram, Map<string, WebGLUniformLocation | null>>();
+  return (program: WebGLProgram, name: string): WebGLUniformLocation | null => {
+    let map = cache.get(program);
+    if (!map) {
+      map = new Map<string, WebGLUniformLocation | null>();
+      cache.set(program, map);
+    }
+    if (map.has(name)) return map.get(name) ?? null;
+    const loc = raw(program, name);
+    map.set(name, loc);
+    return loc;
+  };
+}
+
 export class GpuPreviewPipeline {
   private gl: WebGL2RenderingContext | null = null;
   private attached = false;
+
+  // The raw (un-memoized) getUniformLocation captured at attach() time, before we replace
+  // the context method with a memoized version. Non-null acts as the double-wrap guard:
+  // if it's already set on the CURRENT context, attach() has already wrapped that context
+  // and must not wrap again. Reset to null in destroy() (the wrapped context is discarded).
+  private rawGetUniformLocation: GetUniformLocationFn | null = null;
   private vao: WebGLVertexArrayObject | null = null;
   private quadBuffer: WebGLBuffer | null = null;
   private programs = new Map<string, WebGLProgram>();
@@ -172,6 +212,26 @@ export class GpuPreviewPipeline {
       this.presentProgram = this.buildProgram(gl, VERT_PRESENT, FRAG_PRESENT);
       if (!this.presentProgram) {
         logger.warn('[GPU-PIPELINE] present program failed to compile — present() will be a no-op');
+      }
+
+      // ── Memoize getUniformLocation on THIS pipeline's private context ──────────
+      // All programs are compiled and never relinked, so uniform locations are stable
+      // for the context's lifetime. Wrapping getUniformLocation here makes EVERY caller
+      // (the shared setters in uniforms.ts, the present-uniform caching below, render(),
+      // runSubPasses()) hit a cache instead of a per-frame driver round-trip — without
+      // touching the shared setter API. This context is private to the pipeline, so the
+      // wrap cannot affect any other WebGL context in the app.
+      //
+      // Double-wrap guard: only wrap if not already wrapped. After destroy() a fresh
+      // context is created and rawGetUniformLocation is null, so a subsequent attach()
+      // correctly wraps the NEW context (StrictMode double-mount safe). If attach() ran
+      // twice on the same context (shouldn't happen — guarded by `this.attached`), the
+      // non-null flag prevents wrapping the already-memoized method.
+      if (!this.rawGetUniformLocation) {
+        const raw = gl.getUniformLocation.bind(gl) as GetUniformLocationFn;
+        this.rawGetUniformLocation = raw;
+        (gl as { getUniformLocation: GetUniformLocationFn }).getUniformLocation =
+          memoizeUniformLocation(raw);
       }
 
       // Fullscreen-quad VAO (TRIANGLE_STRIP of 4 verts), mirrors WebGLImageProcessor.
@@ -686,6 +746,9 @@ export class GpuPreviewPipeline {
     this.vao = null;
     this.quadBuffer = null;
     this.gl = null;
+    // The wrapped context is discarded with this.gl; clearing the guard lets a fresh
+    // attach() wrap the NEW context it creates. No un-wrapping needed.
+    this.rawGetUniformLocation = null;
     this.attached = false;
     this.width = 0;
     this.height = 0;
