@@ -4,7 +4,7 @@ A **desktop RAW photo editor** built with Electron + React, featuring a WebGL2/C
 processing pipeline, native LibRaw demosaicing, colour-managed export, and
 non-destructive local adjustments.
 
-![Version](https://img.shields.io/badge/Version-1.7.0-blue)
+![Version](https://img.shields.io/badge/Version-1.7.1-blue)
 ![TypeScript](https://img.shields.io/badge/TypeScript-0_errors-blue)
 ![Tests](https://img.shields.io/badge/Tests-1027_passing-brightgreen)
 ![Lint](https://img.shields.io/badge/Lint-clean-brightgreen)
@@ -95,7 +95,7 @@ pnpm run electron-dev   # Vite dev server + Electron
 ### Build a Windows release
 ```bash
 npm run build:win       # clean dist + release -> tsc + vite build -> NSIS installer + portable (x64)
-# Output: release/Photo Editor Pro Setup 1.7.0.exe  and  release/Photo Editor Pro 1.7.0.exe
+# Output: release/Photo Editor Pro Setup 1.7.1.exe  and  release/Photo Editor Pro 1.7.1.exe
 npm run build:win:dir   # fast unpacked build (no installer)
 npm run dist            # electron-builder for the current platform
 ```
@@ -129,7 +129,7 @@ npm run dev          # dev server (vite) + Electron via scripts/dev.cjs
 npm run build        # tsc + vite build
 npm run typecheck    # tsc --noEmit
 npm run lint         # eslint (0 problems)
-npm run test         # jest (777 tests)
+npm run test         # jest (1027 tests)
 npm run test:e2e     # Playwright end-to-end tests
 ```
 

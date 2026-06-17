@@ -763,7 +763,7 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
   // Present the resident GPU result to the GL canvas. Runs in gpu mode on every:
   //   - gpuResultVersion change (a new GPU render completed)
   //   - viewport change (zoom / pan)
-  //   - showOriginal change (before/after split toggle)
+  //   - showOriginal change (the layout resizes the GL canvas, so re-present at new size)
   // No GPU→CPU readback — present() blits the resident result texture directly.
   useEffect(() => {
     if (renderMode !== 'gpu' || !glAvailable) return;
@@ -773,11 +773,41 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
       zoom: viewport.zoom,
       panX: viewport.panX,
       panY: viewport.panY,
-      // Before/after split shows the original on the left half (canvas drawing-buffer
-      // pixels). -1 disables the split.
-      splitX: showOriginal ? glCanvas.width / 2 : -1,
+      // Before/After is rendered by the dedicated <OriginalPane/> (App.tsx) — a separate
+      // 50% pane that draws the PRISTINE imageService.getOriginalImage() snapshot — in
+      // BOTH cpu and gpu modes. The GPU present split sampled srcTexture, which is the
+      // editing BASE (= currentImage.data, mutated in place by rotate/flip/Auto-All via
+      // updateCurrentImageData), so it could show an EDITED "before". Disable the GPU
+      // split (always -1) and let the pristine OriginalPane be the single source of truth.
+      splitX: -1,
     });
   }, [renderMode, gpuResultVersion, viewport, showOriginal]);
+
+  // Re-present after the window regains visibility/focus. Even with preserveDrawingBuffer
+  // the compositor can drop the GL canvas's contents on some minimize/restore paths; the
+  // present() deps above don't change on restore, so without this the canvas would stay
+  // blank. Reads live store state to avoid stale-closure viewport values.
+  useEffect(() => {
+    if (!glAvailable) return;
+    const repaint = () => {
+      const st = useAppStore.getState();
+      if (st.renderMode !== 'gpu' || document.hidden) return;
+      const glCanvas = glCanvasRef.current;
+      if (!glCanvas) return;
+      gpuPreviewPipeline.present({
+        zoom: st.viewport.zoom,
+        panX: st.viewport.panX,
+        panY: st.viewport.panY,
+        splitX: -1,
+      });
+    };
+    window.addEventListener('focus', repaint);
+    document.addEventListener('visibilitychange', repaint);
+    return () => {
+      window.removeEventListener('focus', repaint);
+      document.removeEventListener('visibilitychange', repaint);
+    };
+  }, [glAvailable]);
 
   // Get crop module from pipeline
   useEffect(() => {

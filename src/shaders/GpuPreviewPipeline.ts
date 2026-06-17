@@ -199,7 +199,18 @@ export class GpuPreviewPipeline {
         if (typeof document === 'undefined') return false;
         target = document.createElement('canvas');
       }
-      const gl = target.getContext('webgl2', { premultipliedAlpha: false, antialias: false });
+      // preserveDrawingBuffer:true — this is a PRESENT-ON-DEMAND canvas (present() runs on
+      // edit/viewport/before-after changes, not every rAF). With the default (false) Chromium
+      // clears the volatile drawing buffer after each composite, so any composite not
+      // immediately followed by a present() (window minimize → restore, or layout thrash
+      // during the first image load) leaves the canvas BLACK or showing a half-composited
+      // frame. Preserving the buffer keeps the last presented frame visible until the next
+      // present(), at a small (acceptable) perf cost.
+      const gl = target.getContext('webgl2', {
+        premultipliedAlpha: false,
+        antialias: false,
+        preserveDrawingBuffer: true,
+      });
       if (!gl || typeof gl.getExtension !== 'function' || !gl.getExtension('EXT_color_buffer_float')) {
         logger.info('[GPU-PIPELINE] WebGL2 / float render targets unavailable — pipeline disabled');
         return false;
@@ -804,6 +815,16 @@ export class GpuPreviewPipeline {
 
     const canvasW = (gl.canvas as HTMLCanvasElement).width;
     const canvasH = (gl.canvas as HTMLCanvasElement).height;
+
+    // Guard a not-yet-sized drawing buffer. On the very first GPU frame the present()
+    // effect can run before redrawCanvas() has synced glCanvas.width/height (default 0).
+    // Dividing by a 0 canvas dimension below yields NaN/Infinity in the dest-rect →
+    // NaN gl_Position → a degenerate, garbage ("red and black") frame. Skip; the
+    // redrawCanvas sizing + resulting effect re-run will present again at the right size.
+    if (canvasW <= 0 || canvasH <= 0) {
+      logger.warn('[GPU-PIPELINE] present() called before the GL canvas was sized — skipping this frame');
+      return;
+    }
 
     // ── Destination rect in canvas pixels (same formula as Canvas.tsx ~574-577) ──
     const scaledW = canvasW * opts.zoom;

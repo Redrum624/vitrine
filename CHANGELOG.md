@@ -4,6 +4,33 @@ All notable changes to **Photo Editor Pro** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.7.1] - 2026-06-16
+
+### Fixed
+- **Every image rendered upside-down on the GPU canvas.** Cause: the present vertex
+  shader applied an extra vertical flip (`v_uv.y = 1.0 - unit.y`), but the source upload
+  doesn't flip Y and the render+readback path preserves orientation (so the GPU-vs-CPU
+  self-tests, which exercise render+readback and not `present()`, still passed). Fix: the
+  present pass now samples `v_uv = vec2(unit.x, unit.y)`, matching the render/readback
+  convention. Affects: `src/shaders/sources.ts`.
+- **GL canvas went black after minimizing and restoring the window.** Cause: the GPU
+  canvas is presented on demand (not every frame), but its WebGL2 context was created
+  without `preserveDrawingBuffer`, so Chromium cleared the volatile drawing buffer after
+  any composite that wasn't immediately followed by a `present()`. Fix: create the context
+  with `preserveDrawingBuffer: true` and re-present when the window regains focus /
+  visibility. Affects: `src/shaders/GpuPreviewPipeline.ts`, `src/components/Layout/Canvas.tsx`.
+- **First image of a session rendered as red-and-black garbage.** Cause: on the very first
+  GPU frame `present()` could run before the GL canvas drawing-buffer was sized (width/
+  height still 0), so the destination-rect math divided by zero → `NaN` clip coordinates →
+  a degenerate frame. Fix: `present()` now skips a frame when the canvas is not yet sized;
+  the sizing pass then triggers a correct re-present. Affects: `src/shaders/GpuPreviewPipeline.ts`.
+- **"Before / After" showed an edited "before" after switching images and returning.**
+  Cause: the GPU before/after split sampled the editing *base* texture (`currentImage.data`,
+  which rotate/flip/Auto-All bake in place via `updateCurrentImageData`) instead of the
+  pristine original. Fix: disable the GPU split and rely on the dedicated `OriginalPane`,
+  which draws the pristine `imageService.getOriginalImage()` snapshot in both CPU and GPU
+  modes — a single source of truth for the "before" half. Affects: `src/components/Layout/Canvas.tsx`.
+
 ## [1.7.0] - 2026-06-16
 
 ### Added

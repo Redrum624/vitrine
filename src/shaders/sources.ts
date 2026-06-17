@@ -423,12 +423,15 @@ out vec2 v_uv;
 void main() {
   // Map a_pos from [-1,1]^2 (clip quad) to [0,1]^2 (unit quad) for texcoords.
   vec2 unit = a_pos * 0.5 + 0.5;         // [0,1]
-  // Texcoord: u goes left→right, v goes bottom→top in OpenGL convention.
-  // The source texture was uploaded row-0-first (top of image = row 0 = low address).
-  // texImage2D places row 0 at the BOTTOM of the texture in OpenGL (default framebuffer
-  // is also bottom-origin). A naive v=unit.y would therefore show the image flipped.
-  // Flip v so the image top (texture row 0) appears at the visual top of the quad.
-  v_uv = vec2(unit.x, 1.0 - unit.y);
+  // Texcoord. Source data is uploaded row-0-first (image top = data row 0) and
+  // texImage2D maps data row 0 to texture t=0 — there is NO implicit flip. The present
+  // dest-rect is built so unit.y=0 → canvas TOP (presentDestRect[1] is the top edge in
+  // NDC), so v=unit.y places the image top (t=0) at the canvas top. This matches the
+  // render() ping-pong + readback path, which is self-test-verified to preserve
+  // orientation — present MUST use the same convention; an extra (1.0 - unit.y) flip
+  // here renders every image upside-down even though the self-tests still pass (they
+  // exercise render+readback, not present).
+  v_uv = vec2(unit.x, unit.y);
   // Map the unit quad to the dest rect in clip space.
   vec2 clipPos = mix(u_destRect.xy, u_destRect.zw, unit);
   gl_Position = vec4(clipPos, 0.0, 1.0);
