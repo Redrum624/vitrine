@@ -4,6 +4,49 @@ All notable changes to **Photo Editor Pro** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.7.2] - 2026-06-23
+
+### Fixed
+- **First image (and intermittent later loads) rendered black on the GPU canvas.** Cause:
+  `present()` depended on a *separate* effect having sized the GL drawing buffer; when it
+  ran first (canvas still 0×0) the v1.7.1 guard skipped the frame and nothing ever
+  re-presented, so it stayed black. A second trigger: the ~150 ms histogram readback
+  resized — and therefore cleared — the buffer with no re-present. Fix: `present()` now
+  owns the drawing-buffer size (sized from the resident result dimensions, assigned only
+  when it differs), and `redrawCanvas()` no longer writes the GL drawing buffer in GPU
+  mode, eliminating the resize-fight. Affects: `src/shaders/GpuPreviewPipeline.ts`,
+  `src/components/Layout/Canvas.tsx`.
+- **Tone-curve-edited images rendered as a red gradient.** Cause: in the GPU render loop
+  the tone-curve LUT upload called `uploadLut()` (which binds + `texImage2D`s on the
+  *active* texture unit) **before** selecting the LUT's unit — while unit 0 still held the
+  input image — so creating the LUT clobbered unit 0 and the shader's `u_image` sampled an
+  R32F LUT instead of the photo. Fix: select the LUT's texture unit before uploading, so
+  unit 0 stays the image. Affects: `src/shaders/GpuPreviewPipeline.ts`.
+- **A faulty GPU shader corrupted the preview instead of falling back.** Cause: the
+  GPU-vs-CPU self-test detected mismatched shaders but its result was only logged
+  (dev-only) and never acted on. Fix: the self-test now runs in dev **and** production and
+  reports the failing module IDs; `buildPassList` routes those to the CPU bridge, so any
+  GPU pass that doesn't match its CPU reference (e.g. local adjustments) falls back to the
+  proven CPU path rather than shipping a corrupted frame. Affects:
+  `src/shaders/GpuPreviewPipeline.ts`, `src/shaders/passDescriptors.ts`, `src/App.tsx`.
+- **Star ratings didn't persist across sessions.** Cause: ratings were written to the file
+  (`xmp:Rating`) but never read back — the in-memory store reset to empty on load. Fix:
+  added a `read-image-rating` IPC (embedded XMP for standard formats, sidecar `.xmp` for
+  RAW) and seed each thumbnail's rating from the file on load. Affects: `electron/main.cjs`,
+  `electron/imageWriter.cjs`, `electron/preload.cjs`, `src/types/electron.ts`,
+  `src/components/Panels/ThumbnailPanel.tsx`.
+- **RAW thumbnails showed in the wrong orientation.** Cause: the embedded-preview JPEG was
+  handed to sharp with no auto-orient, and for Olympus ORF the orientation lives in the RAW
+  container's IFD0, not the preview's EXIF. Fix: auto-orient from the preview's own EXIF
+  when present, otherwise apply the container's IFD0 Orientation (tag 0x0112); the DNG
+  fallback is auto-oriented too. Affects: `electron/main.cjs`, `electron/embeddedPreview.cjs`.
+
+### Changed
+- **Export diagnostics.** The export path already re-decodes the original and re-applies the
+  full module pipeline (confirmed by a new regression test); added logging that reports how
+  many modules are active per export so any "missing edits" report can be traced to module
+  state rather than guessed. Affects: `src/components/Dialogs/ExportDialog.tsx`.
+
 ## [1.7.1] - 2026-06-16
 
 ### Fixed

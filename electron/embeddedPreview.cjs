@@ -104,4 +104,34 @@ function rawDataStart(buf) {
   return compression === 1 ? stripOffset : 0; // only meaningful for an uncompressed main image
 }
 
-module.exports = { jpegEnd, findEmbeddedJpegs, rawDataStart };
+/**
+ * Read the EXIF/TIFF Orientation (tag 0x0112) from a RAW container's IFD0. This is where
+ * Olympus ORF (and other TIFF-based RAWs) record orientation — their embedded preview JPEG
+ * typically carries NO orientation tag of its own, so the thumbnail path needs this to
+ * rotate portrait shots upright.
+ * @param {Buffer} buf  a small header read (must cover IFD0)
+ * @returns {number} EXIF orientation 1-8, or 1 (no rotation) if absent/unparseable
+ */
+function readOrientation(buf) {
+  if (!buf || buf.length < 8) return 1;
+  const order = buf.toString('ascii', 0, 2);
+  const le = order === 'II' ? true : order === 'MM' ? false : null;
+  if (le === null) return 1;
+  const rU16 = (o) => (o + 2 > buf.length ? 0 : le ? buf.readUInt16LE(o) : buf.readUInt16BE(o));
+  const rU32 = (o) => (o + 4 > buf.length ? 0 : le ? buf.readUInt32LE(o) : buf.readUInt32BE(o));
+  const ifd = rU32(4);
+  if (ifd < 8 || ifd + 2 > buf.length) return 1;
+  const count = rU16(ifd);
+  if (count <= 0 || count > 512) return 1;
+  for (let i = 0; i < count; i++) {
+    const e = ifd + 2 + i * 12;
+    if (e + 12 > buf.length) break;
+    if (rU16(e) === 0x0112) {
+      const v = rU16(e + 8); // SHORT value packed into the first 2 bytes of the value field
+      return v >= 1 && v <= 8 ? v : 1;
+    }
+  }
+  return 1;
+}
+
+module.exports = { jpegEnd, findEmbeddedJpegs, rawDataStart, readOrientation };

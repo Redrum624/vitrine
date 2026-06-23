@@ -35,6 +35,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   readImageMetadata: (filePath) => ipcRenderer.invoke('read-image-metadata', filePath),
   writeImageMetadata: (filePath, metadata) => ipcRenderer.invoke('write-image-metadata', filePath, metadata),
   writeImageRating: (filePath, rating) => ipcRenderer.invoke('write-image-rating', filePath, rating),
+  readImageRating: (filePath) => ipcRenderer.invoke('read-image-rating', filePath),
 
   // Generic durable JSON store (userData; survives app updates)
   storeGet: (key) => ipcRenderer.invoke('store-get', key),

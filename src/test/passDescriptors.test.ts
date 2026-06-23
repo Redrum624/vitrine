@@ -1,4 +1,4 @@
-import { buildPassList, buildLocalAdjustmentsPass, computeWBGains, GPU_MODULE_IDS, OPT_IN_GPU_MODULE_IDS } from '../shaders/passDescriptors';
+import { buildPassList, buildLocalAdjustmentsPass, computeWBGains, GPU_MODULE_IDS, OPT_IN_GPU_MODULE_IDS, setGpuUnsafeModuleIds, getGpuUnsafeModuleIds } from '../shaders/passDescriptors';
 import type { MaskUpload } from '../shaders/passDescriptors';
 import { LocalAdjustmentsModule } from '../modules/LocalAdjustmentsModule';
 import { computeGaussianKernel } from '../shaders/uniforms';
@@ -56,6 +56,42 @@ test('GPU_MODULE_IDS contains shadowshighlights', () => {
 test('OPT_IN_GPU_MODULE_IDS contains noise-reduction and not huecurves', () => {
   expect(OPT_IN_GPU_MODULE_IDS).toContain('noise-reduction');
   expect(OPT_IN_GPU_MODULE_IDS).not.toContain('huecurves');
+});
+
+// ---------------------------------------------------------------------------
+// GPU self-test gating — a module whose shader failed the self-test must run on
+// the CPU (regression for the broken tonecurve GPU pass rendering images red).
+// ---------------------------------------------------------------------------
+
+describe('GPU self-test gating', () => {
+  afterEach(() => setGpuUnsafeModuleIds([])); // never leak gating state across tests
+
+  test('an enabled, edited tonecurve normally produces a GPU pass', () => {
+    const tc = fakeModule('tonecurve', true, { lookupTable: new Float32Array(65536).fill(0.5) });
+    const { passes, cpuBridges } = buildPassList([tc], DEFAULT_RT);
+    expect(passes.map((p) => p.id)).toContain('tonecurve');
+    expect(cpuBridges).not.toContain('tonecurve');
+  });
+
+  test('a self-test-failed module is routed to cpuBridges instead of a GPU pass', () => {
+    setGpuUnsafeModuleIds(['tonecurve']);
+    expect(getGpuUnsafeModuleIds().has('tonecurve')).toBe(true);
+    const tc = fakeModule('tonecurve', true, { lookupTable: new Float32Array(65536).fill(0.5) });
+    const basic = fakeModule('basicadj', true, { exposure: 0.5 });
+    const { passes, cpuBridges } = buildPassList([basic, tc], DEFAULT_RT);
+    // tonecurve falls back to CPU; the unaffected basicadj still runs on the GPU.
+    expect(cpuBridges).toContain('tonecurve');
+    expect(passes.map((p) => p.id)).not.toContain('tonecurve');
+    expect(passes.map((p) => p.id)).toContain('basicadj');
+  });
+
+  test('clearing the unsafe set restores the GPU pass', () => {
+    setGpuUnsafeModuleIds(['tonecurve']);
+    setGpuUnsafeModuleIds([]);
+    const tc = fakeModule('tonecurve', true, { lookupTable: new Float32Array(65536).fill(0.5) });
+    const { passes } = buildPassList([tc], DEFAULT_RT);
+    expect(passes.map((p) => p.id)).toContain('tonecurve');
+  });
 });
 
 // ---------------------------------------------------------------------------

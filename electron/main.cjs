@@ -582,15 +582,33 @@ ipcMain.handle('read-image-as-data-url', async (event, filePath) => {
           const head = Buffer.allocUnsafe(headSize);
           await fd.read(head, 0, headSize, 0);
 
-          const { findEmbeddedJpegs, rawDataStart } = require('./embeddedPreview.cjs');
+          const { findEmbeddedJpegs, rawDataStart, readOrientation } = require('./embeddedPreview.cjs');
           const cap = rawDataStart(head) || 8 * 1024 * 1024;
           const scanSize = Math.min(stat.size, cap, 12 * 1024 * 1024);
           const buf = Buffer.allocUnsafe(scanSize);
           await fd.read(buf, 0, scanSize, 0);
 
+          // Orientation source: the RAW container's IFD0 Orientation tag (0x0112). Used
+          // for previews (ORF) whose embedded JPEG has no orientation of its own.
+          const containerOrientation = readOrientation(head);
+
           for (const c of findEmbeddedJpegs(buf)) {
             try {
-              const out = await sharp(buf.subarray(c.offset, c.offset + c.length), { failOn: 'none' })
+              const jpegBuf = buf.subarray(c.offset, c.offset + c.length);
+              // Orient the thumbnail (the bytes are baked into the data URL; the filmstrip
+              // <img> does not CSS-rotate). Prefer the embedded JPEG's OWN EXIF orientation
+              // (Canon/Nikon/Sony previews carry it) via sharp's auto-orient; otherwise
+              // fall back to the container orientation (Olympus ORF). sharp never
+              // auto-orients unless asked — that omission is why RAW thumbs were sideways.
+              const previewOri = await sharp(jpegBuf, { failOn: 'none' })
+                .metadata().then((m) => m.orientation || 0).catch(() => 0);
+              let pipe = sharp(jpegBuf, { failOn: 'none' });
+              if (previewOri > 1) {
+                pipe = pipe.rotate(); // auto-orient from the preview's own EXIF
+              } else if (containerOrientation > 1) {
+                pipe = applyExifOrientation(pipe, containerOrientation);
+              }
+              const out = await pipe
                 .resize(300, 200, { fit: 'inside', withoutEnlargement: true })
                 .jpeg({ quality: 80 })
                 .toBuffer();
@@ -609,8 +627,10 @@ ipcMain.handle('read-image-as-data-url', async (event, filePath) => {
       }
 
       // 2) Fallback: sharp directly (DNG and the few RAWs libvips can decode natively).
+      //    .rotate() auto-orients from the file's own EXIF so DNG thumbs aren't sideways.
       try {
         const out = await sharp(filePath, { failOn: 'none' })
+          .rotate()
           .resize(300, 200, { fit: 'inside', withoutEnlargement: true })
           .jpeg({ quality: 80 })
           .toBuffer();
@@ -658,6 +678,24 @@ function getMimeType(filePath) {
     '.dng': 'image/x-adobe-dng'
   };
   return mimeTypes[ext] || 'application/octet-stream';
+}
+
+// Apply an EXIF orientation (1-8) to a sharp pipeline explicitly. Used for RAW previews
+// whose embedded JPEG carries NO orientation tag (e.g. Olympus ORF, where orientation
+// lives in the RAW container's IFD0), so sharp's .rotate() auto-orient can't help. sharp
+// .rotate(deg) is clockwise; .flip() is vertical, .flop() is horizontal. 5/7 (transpose/
+// transverse) are best-effort — real cameras only emit 1/3/6/8 (and rarely 2).
+function applyExifOrientation(pipe, ori) {
+  switch (ori) {
+    case 2: return pipe.flop();
+    case 3: return pipe.rotate(180);
+    case 4: return pipe.flip();
+    case 5: return pipe.rotate(90).flop();
+    case 6: return pipe.rotate(90);
+    case 7: return pipe.rotate(270).flop();
+    case 8: return pipe.rotate(270);
+    default: return pipe; // 1 (none) or unknown
+  }
 }
 
 ipcMain.handle('write-file', async (event, filePath, data) => {
@@ -760,6 +798,31 @@ ipcMain.handle('write-image-rating', async (event, filePath, rating) => {
   } catch (error) {
     console.warn('Failed to write image rating:', error.message);
     return { ok: false, error: error.message };
+  }
+});
+
+// Read the star rating (xmp:Rating 0-5) back FROM a file so it survives app restarts and
+// shows up the way the user set it. RAW → read the sibling sidecar .xmp; everything else →
+// read the embedded XMP packet via sharp. Returns the rating (0-5) or null when none.
+ipcMain.handle('read-image-rating', async (event, filePath) => {
+  try {
+    const sharp = require('sharp');
+    const { parseXmpRating } = require('./imageWriter.cjs');
+    const ext = path.extname(filePath).toLowerCase();
+    const rawFormats = ['.cr2', '.cr3', '.nef', '.nrw', '.arw', '.sr2', '.srf', '.orf', '.dng', '.raf', '.rw2', '.pef', '.srw', '.x3f'];
+    if (rawFormats.includes(ext)) {
+      const sidecar = filePath.slice(0, -ext.length) + '.xmp';
+      try {
+        return parseXmpRating(await fs.promises.readFile(sidecar, 'utf8'));
+      } catch {
+        return null; // no sidecar
+      }
+    }
+    const meta = await sharp(filePath, { failOn: 'none' }).metadata();
+    return parseXmpRating(meta.xmp);
+  } catch (error) {
+    console.warn('Failed to read image rating:', error.message);
+    return null;
   }
 });
 

@@ -23,6 +23,7 @@ import { PerformanceMonitor } from './components/Debug/PerformanceMonitor';
 import { keyboardShortcutsService, createDefaultShortcuts, createRatingShortcuts } from './services/KeyboardShortcutsService';
 import { webGLImageProcessor } from './services/WebGLImageProcessor';
 import { GpuPreviewPipeline } from './shaders/GpuPreviewPipeline';
+import { setGpuUnsafeModuleIds } from './shaders/passDescriptors';
 import { electronService } from './services/ElectronService';
 import { imageService } from './services/ImageService';
 import { ImageFileInfo, fileSystemService } from './services/FileSystemService';
@@ -902,24 +903,30 @@ function App() {
       `GPU=${r.gpuMs != null ? r.gpuMs.toFixed(1) + 'ms' : 'n/a'} CPU=${r.cpuMs.toFixed(1)}ms maxDiff=${r.maxDiff.toExponential(1)}`
     );
 
-    // [GPU-PIPELINE] Resident-texture ping-pong self-test: render a basicadj pass
-    // through a THROWAWAY GpuPreviewPipeline instance and compare the readback to
-    // the WebGLImageProcessor reference. Uses a fresh instance (not the singleton)
-    // so the singleton is never left attached to a throwaway canvas or holding stale
-    // test data — which would collide when Task 6 attaches it to the real canvas.
-    // Guarded to DEV builds only; no-ops in production.
-    if (process.env.NODE_ENV === 'development') {
+    // [GPU-PIPELINE] Resident-texture ping-pong self-test: render each module pass through
+    // a THROWAWAY GpuPreviewPipeline instance and compare the readback to the CPU reference.
+    // A fresh instance (not the singleton) keeps the singleton from holding stale test data
+    // / a throwaway canvas. Runs in BOTH dev AND production: its result GATES the GPU path —
+    // any module whose shader fails the self-test is routed to the CPU bridge by
+    // buildPassList (setGpuUnsafeModuleIds), so a broken GPU shader (e.g. the tonecurve LUT
+    // pass rendering an image red) falls back to the proven CPU pipeline instead of shipping
+    // a corrupted preview to the user.
+    {
       const probe = new GpuPreviewPipeline();
       try {
         if (probe.attach()) {
           const st = probe.selfTest();
-          logger.info(`[GPU-PIPELINE] self-test maxDiff=${st.maxDiff.toExponential(2)} ${st.ok ? 'PASS' : 'FAIL'}`);
-          // present() self-test: call with identity zoom/pan on the same data left by
-          // selfTest(), check that no GL errors were issued. Visual correctness is
-          // deferred to the Task 6 Electron smoke test.
-          probe.present({ zoom: 1, panX: 0, panY: 0 });
-          const presentErr = probe.glError();
-          logger.info(`[GPU-PIPELINE] present glError=${presentErr}${presentErr === 0 ? ' (OK)' : ' (UNEXPECTED ERROR)'}`);
+          setGpuUnsafeModuleIds(st.unsafe);
+          logger.info(
+            `[GPU-PIPELINE] self-test maxDiff=${st.maxDiff.toExponential(2)} ${st.ok ? 'PASS' : 'FAIL'}` +
+            (st.unsafe.length ? ` — CPU fallback for: ${st.unsafe.join(', ')}` : ''),
+          );
+          if (process.env.NODE_ENV === 'development') {
+            // present() smoke check (dev only): no GL errors on the data left by selfTest().
+            probe.present({ zoom: 1, panX: 0, panY: 0 });
+            const presentErr = probe.glError();
+            logger.info(`[GPU-PIPELINE] present glError=${presentErr}${presentErr === 0 ? ' (OK)' : ' (UNEXPECTED ERROR)'}`);
+          }
         } else {
           logger.info('[GPU-PIPELINE] self-test skipped — WebGL2/float unavailable');
         }

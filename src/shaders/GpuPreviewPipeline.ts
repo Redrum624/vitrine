@@ -151,6 +151,10 @@ export class GpuPreviewPipeline {
   // Reusable 4-element buffer for the u_destRect uniform — avoids per-call allocation.
   private presentDestRect = new Float32Array(4);
 
+  // Diagnostic: count present() calls so we can log the first few (with full state) and any
+  // GL error WITHOUT spamming the console on every viewport change. Reset on destroy().
+  private presentFrames = 0;
+
   private srcTexture: WebGLTexture | null = null;
   private srcData: Float32Array | null = null;
   private width = 0;
@@ -412,6 +416,16 @@ export class GpuPreviewPipeline {
     this.width = width;
     this.height = height;
     this.resultTexture = this.srcTexture; // identity until render() runs
+
+    // Diagnostic: confirm the uploaded buffer is real image data (not all-zero / wrong
+    // length / a single-channel ramp), which would explain a red/garbage present.
+    const expected = width * height * 4;
+    const c = Math.min(data.length, expected) >> 1; // a mid-buffer pixel offset (×4-aligned below)
+    const p = (c >> 2) << 2;
+    logger.info(
+      `[GPU-PIPELINE] setSource ${width}x${height} len=${data.length}/${expected} ` +
+      `mid-rgba=[${data[p]?.toFixed(3)},${data[p + 1]?.toFixed(3)},${data[p + 2]?.toFixed(3)},${data[p + 3]?.toFixed(3)}]`,
+    );
   }
 
   /**
@@ -544,8 +558,15 @@ export class GpuPreviewPipeline {
           const lut = pass.luts![name.replace('u_', '') as 'master' | 'red' | 'green' | 'blue'];
           if (!lut) return;
           const unit = i + 1;
-          const tex = this.uploadLut(gl, lut);
+          // Select this LUT's texture unit BEFORE uploadLut(). On a cache MISS uploadLut()
+          // runs bindTexture()+texImage2D() on the ACTIVE unit — and unit 0 is still active
+          // here, holding the input image (bound just above). Creating the LUT before
+          // switching units would clobber unit 0 → the shader's u_image (unit 0) would then
+          // sample an R32F LUT instead of the image → garbage/red output (this was the
+          // tonecurve self-test FAIL maxDiff~0.975). Selecting the unit first makes the
+          // upload land on units 1..4, leaving unit 0 = image intact.
           gl.activeTexture(gl.TEXTURE0 + unit);
+          const tex = this.uploadLut(gl, lut);
           gl.bindTexture(gl.TEXTURE_2D, tex);
           gl.uniform1i(gl.getUniformLocation(prog, name), unit);
         });
@@ -763,6 +784,7 @@ export class GpuPreviewPipeline {
     this.attached = false;
     this.width = 0;
     this.height = 0;
+    this.presentFrames = 0;
   }
 
   /**
@@ -786,14 +808,12 @@ export class GpuPreviewPipeline {
    *   x = (canvasW - scaledW)/2 + panX   (left edge, in canvas pixels)
    *   y = (canvasH - scaledH)/2 + panY   (top  edge, in canvas pixels)
    *
-   * Y-flip reasoning (see VERT_PRESENT for the authoritative comment):
-   *   texImage2D stores row 0 of the Float32Array at the BOTTOM of the OpenGL texture
-   *   (bottom-left origin). The default framebuffer is also bottom-left origin. So a
-   *   naive v = unit.y would render the image upside-down (row 0 at bottom of quad =
-   *   bottom of canvas = bottom of screen). We flip to v = 1-unit.y so row 0 of the
-   *   texture (the top of the image) lands at the TOP of the quad on screen. This
-   *   matches the 2D-canvas path (putImageData which is top-left-origin). The flip is
-   *   in VERT_PRESENT; this method needs no additional inversion.
+   * Orientation (see VERT_PRESENT for the authoritative comment):
+   *   makeTexture uploads with UNPACK_FLIP_Y_WEBGL=false, so Float32Array row 0 (the
+   *   TOP of the image) maps to texture t=0. VERT_PRESENT therefore samples v = unit.y
+   *   directly (NO inversion) so the image top lands at the top of the screen — matching
+   *   the 2D-canvas putImageData path. (A previous v = 1-unit.y flip here rendered every
+   *   image upside-down; removed in v1.7.1.) This method needs no additional inversion.
    *
    * Before/after split: fragments with canvas-pixel x < splitX sample srcTexture
    * (original); others sample resultTexture (processed). Pass splitX < 0 to disable.
@@ -813,16 +833,29 @@ export class GpuPreviewPipeline {
       return;
     }
 
-    const canvasW = (gl.canvas as HTMLCanvasElement).width;
-    const canvasH = (gl.canvas as HTMLCanvasElement).height;
-
-    // Guard a not-yet-sized drawing buffer. On the very first GPU frame the present()
-    // effect can run before redrawCanvas() has synced glCanvas.width/height (default 0).
-    // Dividing by a 0 canvas dimension below yields NaN/Infinity in the dest-rect →
-    // NaN gl_Position → a degenerate, garbage ("red and black") frame. Skip; the
-    // redrawCanvas sizing + resulting effect re-run will present again at the right size.
+    // The dest-rect math below divides by the drawing-buffer size, so it must equal the
+    // resident result resolution (this.width/height, set by setSource()). present() OWNS
+    // that size: size the GL drawing buffer from the resident result HERE rather than
+    // depending on Canvas.redrawCanvas() to have sized it first. The old code instead
+    // SKIPPED any frame where the canvas was still 0×0 (first GPU frame, or the ~150ms
+    // histogram-readback resize) — but nothing re-presents afterwards (the present-effect
+    // deps don't change again), so the canvas stayed BLACK until an unrelated event fired
+    // a new present (the "first image black" + "sometimes loads black" reports). A 0-sized
+    // buffer also divides by zero → NaN gl_Position → a garbage red/black frame.
+    // Only assign when the size actually differs: assigning canvas.width/height ALWAYS
+    // clears the drawing buffer, which on a viewport-only present would needlessly drop the
+    // frame. (redrawCanvas no longer touches the GL drawing buffer in gpu mode — it owns
+    // only the CSS display size — so there is no resize fight.)
+    const canvasEl = gl.canvas as HTMLCanvasElement;
+    if (this.width > 0 && this.height > 0 &&
+        (canvasEl.width !== this.width || canvasEl.height !== this.height)) {
+      canvasEl.width = this.width;
+      canvasEl.height = this.height;
+    }
+    const canvasW = canvasEl.width;
+    const canvasH = canvasEl.height;
     if (canvasW <= 0 || canvasH <= 0) {
-      logger.warn('[GPU-PIPELINE] present() called before the GL canvas was sized — skipping this frame');
+      logger.warn('[GPU-PIPELINE] present(): resident result has no size yet — no-op');
       return;
     }
 
@@ -884,6 +917,19 @@ export class GpuPreviewPipeline {
 
     // Restore the conventional default texture unit so subsequent code isn't surprised.
     gl.activeTexture(gl.TEXTURE0);
+
+    // ── Diagnostic (first 6 frames + any GL error) ──────────────────────────────────
+    // A red/garbage canvas means present() drew a bad texture; this surfaces exactly what
+    // it drew: buffer size, resident result dims, whether the result is the raw source
+    // (passthrough = no edits ran), and any GL error from the draw.
+    const err = gl.getError();
+    if (this.presentFrames < 6 || err !== 0) {
+      logger.info(
+        `[GPU-PIPELINE] present #${this.presentFrames}: canvas=${canvasW}x${canvasH} result=${this.width}x${this.height} ` +
+        `zoom=${opts.zoom.toFixed(2)} passthrough=${this.resultTexture === this.srcTexture} splitX=${opts.splitX ?? -1} glError=${err}`,
+      );
+    }
+    this.presentFrames++;
   }
 
   /**
@@ -894,10 +940,11 @@ export class GpuPreviewPipeline {
    *
    * Requires a real WebGL2 context — runs in the Electron app, NOT Jest.
    */
-  selfTest(): { ok: boolean; maxDiff: number } {
+  selfTest(): { ok: boolean; maxDiff: number; unsafe: string[] } {
     if (!this.gl) {
       logger.warn('[GPU-PIPELINE] selfTest: not attached / WebGL2 unavailable');
-      return { ok: false, maxDiff: Infinity };
+      // No GL → the GPU path won't be used at all (renderMode stays 'cpu'); nothing to gate.
+      return { ok: false, maxDiff: Infinity, unsafe: [] };
     }
     try {
       // 16x16 RGBA Float32 gradient (same data for both sub-tests).
@@ -1239,10 +1286,32 @@ export class GpuPreviewPipeline {
 
       const ok = basicAdjOk && exposureOk && shOk && sharpenOk && laOk && wbOk && tcOk && cbOk && vigOk;
       const maxDiff = Math.max(basicAdjMaxDiff, exposureMaxDiff, shMaxDiff, sharpenMaxDiff, laMaxDiff, wbMaxDiff, tcMaxDiff, cbMaxDiff, vigMaxDiff);
-      return { ok, maxDiff };
+
+      // Map each failed sub-test to the MODULE ID buildPassList uses, so a broken GPU shader
+      // is routed to the CPU bridge (proven path) instead of corrupting the image (e.g. the
+      // tonecurve LUT pass rendering red). 'temperature' = WhiteBalanceModule.getId();
+      // 'lenscorrections' covers the vignette/distortion/CA sub-passes.
+      const unsafe: string[] = [];
+      if (!basicAdjOk) unsafe.push('basicadj');
+      if (!exposureOk) unsafe.push('exposure');
+      if (!shOk) unsafe.push('shadowshighlights');
+      if (!sharpenOk) unsafe.push('sharpen');
+      if (!laOk) unsafe.push('localadjustments');
+      if (!wbOk) unsafe.push('temperature');
+      if (!tcOk) unsafe.push('tonecurve');
+      if (!cbOk) unsafe.push('colorbalance');
+      if (!vigOk) unsafe.push('lenscorrections');
+
+      return { ok, maxDiff, unsafe };
     } catch (e) {
       logger.warn('[GPU-PIPELINE] selfTest error:', e instanceof Error ? e.message : String(e));
-      return { ok: false, maxDiff: Infinity };
+      // A thrown self-test means the GPU path is unreliable end-to-end — mark every GPU
+      // module unsafe so the whole pipeline falls back to CPU rather than risking garbage.
+      return {
+        ok: false,
+        maxDiff: Infinity,
+        unsafe: ['basicadj', 'exposure', 'shadowshighlights', 'sharpen', 'localadjustments', 'temperature', 'tonecurve', 'colorbalance', 'lenscorrections'],
+      };
     }
   }
 }

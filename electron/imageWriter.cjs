@@ -447,11 +447,28 @@ async function writeImageMetadata(filePath, metadata) {
   return true;
 }
 
+/**
+ * Parse the star rating (0-5) out of an XMP packet. Handles both the element form we write
+ * (`<xmp:Rating>N</xmp:Rating>`) and the attribute form other apps use (`xmp:Rating="N"`).
+ * @param {Buffer|string|null|undefined} xmp  raw XMP packet (embedded metadata or a sidecar)
+ * @returns {number|null} rating 0-5, or null when no valid rating is present
+ */
+function parseXmpRating(xmp) {
+  if (xmp == null) return null;
+  const s = Buffer.isBuffer(xmp) ? xmp.toString('utf8') : String(xmp);
+  let m = s.match(/<xmp:Rating>\s*(-?\d+(?:\.\d+)?)\s*<\/xmp:Rating>/i);
+  if (!m) m = s.match(/xmp:Rating\s*=\s*["'](-?\d+(?:\.\d+)?)["']/i);
+  if (!m) return null;
+  const r = Math.round(parseFloat(m[1]));
+  return r >= 0 && r <= 5 ? r : null;
+}
+
 module.exports = {
   writeImageFile,
   writeImageMetadata,
   toArrayBuffer,
   buildXmpPacket,
+  parseXmpRating,
   xmlEscape,
   mapExifIfd0
 };

@@ -81,6 +81,9 @@ export function ThumbnailPanel({
   // thumbnail was already loaded or in flight.
   const thumbnailsRef = useRef<Map<string, string>>(new Map());
   const loadingRef = useRef<Set<string>>(new Set());
+  // Image ids whose on-disk rating we've already fetched, so we read each file's
+  // xmp:Rating at most once even as scroll re-requests the same visible thumbnails.
+  const ratingsFetchedRef = useRef<Set<string>>(new Set());
   const [ratingFilter, setRatingFilter] = useState<number>(0); // 0 = show all
   const [collapsed, setCollapsed] = useState(false); // filmstrip hidden/shown via the arrow toggle
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -96,6 +99,20 @@ export function ThumbnailPanel({
 
   // Load thumbnail for an image
   const loadThumbnail = useCallback(async (image: ImageFileInfo) => {
+    // Seed the star rating from the file's metadata (embedded xmp:Rating, or a sidecar
+    // .xmp for RAW) the first time we touch this image. The store starts empty on load,
+    // so without this read-back a rating written to a file never reappears (the write
+    // path already persists it). Independent of the thumbnail re-entrancy guard below
+    // and deduped via its own ref so scroll re-requests don't re-issue the IPC.
+    if (!ratingsFetchedRef.current.has(image.id) && window.electronAPI?.readImageRating) {
+      ratingsFetchedRef.current.add(image.id);
+      window.electronAPI.readImageRating(image.path)
+        .then((r) => {
+          if (typeof r === 'number' && r > 0) useAppStore.getState().setImageRating(image.id, r);
+        })
+        .catch(() => { /* no rating / unreadable — leave unrated */ });
+    }
+
     // Synchronous re-entrancy guard: skip if already loaded or in flight.
     if (thumbnailsRef.current.has(image.id) || loadingRef.current.has(image.id)) {
       return;

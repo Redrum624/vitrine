@@ -273,11 +273,14 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
     canvas.width = Math.floor(canvasWidth);
     canvas.height = Math.floor(canvasHeight);
 
-    // Mirror the GL canvas's internal (drawing-buffer) size to the 2D canvas so the
-    // present() dest-rect math (which uses gl.canvas.width/height) places the image
-    // identically and the shared overlays align with either canvas.
+    // GL drawing-buffer size: in GPU mode, present() OWNS it (it sizes the buffer to the
+    // resident result resolution, which is the downsampled preview size — NOT this 2D
+    // canvas's full-res size). If we also wrote glCanvas.width here it would (a) fight
+    // present() over the size and (b) clear the buffer on the ~150ms histogram readback
+    // with no re-present → a black frame. So only mirror the buffer size in CPU mode.
+    // The CSS display size is mirrored unconditionally below so overlays always align.
     const glCanvas = glCanvasRef.current;
-    if (glCanvas) {
+    if (glCanvas && !(renderMode === 'gpu' && glAvailable)) {
       glCanvas.width = canvas.width;
       glCanvas.height = canvas.height;
     }

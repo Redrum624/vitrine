@@ -226,6 +226,16 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
 
         const pipeline = imageService.getProcessingPipeline();
         if (pipeline) {
+          // Diagnostic: surface WHICH modules will actually run for this export. processImage
+          // skips modules that are disabled OR at identity params, so a "no edits in the
+          // export" report shows up here as "0/N modules active" — distinguishing a module
+          // STATE problem (e.g. edits not restored/enabled) from the export wiring (proven
+          // correct by src/test/exportAppliesEdits.test.ts).
+          try {
+            const order = pipeline.getOrderedModules();
+            const active = order.filter((m) => pipeline.isModuleActive(m.getId()));
+            logger.info(`[Export] ${exportName}: pipeline connected, ${active.length}/${order.length} modules active: [${active.map((m) => m.getId()).join(', ')}]`);
+          } catch { /* diagnostic only — never block an export */ }
           const context = { width: fullResImageData.width, height: fullResImageData.height, channels: 4 };
           // Force main-thread processing for exports (web workers may produce
           // different results). The onProgress hook yields between modules.
@@ -249,11 +259,13 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
             exportWidth = fullResImageData.width;
             exportHeight = fullResImageData.height;
           } else {
+            logger.warn('[Export] processImage returned an unusable buffer — exporting the ORIGINAL pixels (edits will be missing)');
             exportImageData = fullResImageData.data;
             exportWidth = fullResImageData.width;
             exportHeight = fullResImageData.height;
           }
         } else {
+          logger.warn('[Export] no processing pipeline connected — exporting the ORIGINAL pixels (edits will be missing)');
           exportImageData = fullResImageData.data;
           exportWidth = fullResImageData.width;
           exportHeight = fullResImageData.height;

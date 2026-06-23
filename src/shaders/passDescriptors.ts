@@ -70,6 +70,24 @@ export const OPT_IN_GPU_MODULE_IDS: readonly string[] = [
   'noise-reduction',
 ];
 
+// ── GPU self-test gating ─────────────────────────────────────────────────────────
+// Module IDs whose GPU shader FAILED its runtime self-test (output didn't match the CPU
+// reference within tolerance). Populated once at startup from GpuPreviewPipeline.selfTest()
+// via setGpuUnsafeModuleIds(). buildPassList routes these to cpuBridges so a broken GPU
+// shader falls back to the proven CPU path instead of corrupting the preview (e.g. the
+// tonecurve LUT pass rendering an image red). Empty until the self-test runs.
+let gpuUnsafeModuleIds: ReadonlySet<string> = new Set();
+
+/** Register the module IDs whose GPU self-test failed (called once after selfTest()). */
+export function setGpuUnsafeModuleIds(ids: Iterable<string>): void {
+  gpuUnsafeModuleIds = new Set(ids);
+}
+
+/** The currently-registered GPU-unsafe module IDs (mainly for tests/diagnostics). */
+export function getGpuUnsafeModuleIds(): ReadonlySet<string> {
+  return gpuUnsafeModuleIds;
+}
+
 // ── Runtime context ────────────────────────────────────────────────────────────
 
 /**
@@ -716,6 +734,14 @@ export function buildPassList(modules: MinimalModule[], opts?: BuildPassOpts): P
     const enabled = module.isEnabled !== false; // treat missing isEnabled as true
 
     if (!enabled) {
+      cpuBridges.push(id);
+      continue;
+    }
+
+    // GPU self-test failed for this module's shader → run it on the CPU instead of
+    // drawing a broken result. When this module is actually active, the CPU-bridge makes
+    // choosePreviewPath fall the whole frame back to the proven CPU pipeline.
+    if (gpuUnsafeModuleIds.has(id)) {
       cpuBridges.push(id);
       continue;
     }
