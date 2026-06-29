@@ -17,4 +17,15 @@ describe('lanczosResizeLinear', () => {
     expect(out.data[0]).toBeCloseTo(0.2, 3); expect(out.data[1]).toBeCloseTo(0.6, 3);
     expect(out.data[2]).toBeCloseTo(0.8, 3); expect(out.data[3]).toBeCloseTo(1, 3);
   });
+  it('downscales to exact target dimensions and preserves a flat color', () => {
+    const out = lanczosResizeLinear(flat(8, 8, [0.2, 0.6, 0.8]), 8, 8, 4, 4);
+    expect(out.width).toBe(4); expect(out.height).toBe(4); expect(out.data.length).toBe(4*4*4);
+    expect(out.data[0]).toBeCloseTo(0.2, 3); expect(out.data[1]).toBeCloseTo(0.6, 3); expect(out.data[2]).toBeCloseTo(0.8, 3);
+  });
+  it('resamples a non-unit alpha (does not force alpha to 1)', () => {
+    const d = new Float32Array(4*4*4);
+    for (let i = 0; i < 4*4; i++) { d[i*4]=0.5; d[i*4+1]=0.5; d[i*4+2]=0.5; d[i*4+3]=0.5; }
+    const out = lanczosResizeLinear(d, 4, 4, 8, 8);
+    expect(out.data[3]).toBeCloseTo(0.5, 3);
+  });
 });
