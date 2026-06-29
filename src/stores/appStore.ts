@@ -217,7 +217,7 @@ export const useAppStore = create<AppStore>((set) => ({
       shadowsHighlights: {},
       localAdjustments: {},
       noiseReduction: {},
-      sharpening: {},
+      enhance: {},
       colorGrading: {},
       export: {}
     };

@@ -55,7 +55,7 @@ if (process.env.NODE_ENV === 'development') {
   });
 }
 
-const MODULE_IDS = new Set(['crop', 'basicadj', 'whitebalance', 'tonecurve', 'noisereduction', 'sharpen', 'shadowshighlights', 'colorbalance', 'localadjustments', 'lenscorrections']);
+const MODULE_IDS = new Set(['crop', 'basicadj', 'whitebalance', 'tonecurve', 'noisereduction', 'enhance', 'shadowshighlights', 'colorbalance', 'localadjustments', 'lenscorrections']);
 const isModuleTool = (tool: string) => MODULE_IDS.has(tool);
 
 /** Renders the cached original image for the Before/After split view. */

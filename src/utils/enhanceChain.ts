@@ -7,6 +7,7 @@ export interface EnhanceParams {
   enabled: boolean; sharpen: boolean; upscale: boolean; scale: 2 | 4;
   denoiseStrength: number; psfSigma: number; rlIters: number;
   alpha: number; hpSigma: number; sharpness: number; chromaClean: boolean;
+  [key: string]: unknown; // Index signature for Record<string, unknown> compatibility
 }
 export const DEFAULT_ENHANCE_PARAMS: EnhanceParams = {
   enabled: true, sharpen: true, upscale: false, scale: 2,

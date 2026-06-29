@@ -8,7 +8,7 @@ import { CropPipelineModule } from '../../modules/CropPipelineModule';
 import { LocalAdjustmentsPipelineModule } from '../../modules/LocalAdjustmentsPipelineModule';
 import { LensCorrectionsPipelineModule } from '../../modules/LensCorrectionsPipelineModule';
 import { NoiseReductionModule } from '../../modules/NoiseReductionModule';
-import { SharpenModule } from '../../modules/SharpenModule';
+import { EnhanceModule } from '../../modules/EnhanceModule';
 import { BasicAdjustmentsModuleComponent } from '../Modules/BasicAdjustmentsModuleComponent';
 import { WhiteBalanceModuleComponent } from '../Modules/WhiteBalanceModuleComponent';
 import { ToneCurveModuleComponent } from '../Modules/ToneCurveModuleComponent';
@@ -19,7 +19,7 @@ import { LocalAdjustmentsModuleComponent } from '../Modules/LocalAdjustmentsModu
 import { LensCorrectionsModuleComponent } from '../Modules/LensCorrectionsModuleComponent';
 import { HistoryPanel } from './HistoryPanel';
 import { NoiseReductionModuleComponent } from '../Modules/NoiseReductionModuleComponent';
-import { SharpenModuleComponent } from '../Modules/SharpenModuleComponent';
+import EnhanceModuleComponent from '../Modules/EnhanceModuleComponent';
 import { imageProcessingPipeline } from '../../services/ImageProcessingPipeline';
 import { imageService } from '../../services/ImageService';
 import { progressivePreviewService } from '../../services/ProgressivePreviewService';
@@ -90,7 +90,7 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
   const shadowsHighlightsModule = imageProcessingPipeline.getModule<ShadowsHighlightsPipelineModule>('shadowshighlights');
   const localAdjustmentsModule = imageProcessingPipeline.getModule<LocalAdjustmentsPipelineModule>('localadjustments');
   const noiseReductionModule = imageProcessingPipeline.getModule<NoiseReductionModule>('noise-reduction');
-  const sharpenModule = imageProcessingPipeline.getModule<SharpenModule>('sharpen');
+  const enhanceModuleInstance = imageProcessingPipeline.getModule<EnhanceModule>('enhance');
 
   const processCurrentImageRealTime = useCallback(async () => {
     const currentImage = imageService.getCurrentImage();
@@ -629,7 +629,7 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
       whitebalance: 'White Balance',
       tonecurve: 'Tone Curve',
       noisereduction: 'Noise Reduction',
-      sharpen: 'Sharpen',
+      enhance: 'Enhance',
       shadowshighlights: 'Shadows & Highlights',
       colorbalance: 'Color Balance',
       localadjustments: 'Local Adjustments',
@@ -742,13 +742,13 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
           </div>
         )}
 
-        {/* Sharpen Module */}
-        {sharpenModule && selectedModule === 'sharpen' && (
+        {/* Enhance Module */}
+        {enhanceModuleInstance && selectedModule === 'enhance' && (
           <div className="px-5 pt-4">
-            <SharpenModuleComponent
-              key={`sharpen-${paramSync}`}
-              module={sharpenModule}
-              onParamsChange={(params) => handleModuleParamsChange('sharpen', params)}
+            <EnhanceModuleComponent
+              key={`enhance-${paramSync}`}
+              module={enhanceModuleInstance}
+              onParamsChange={(params) => handleModuleParamsChange('enhance', params)}
             />
           </div>
         )}
@@ -885,14 +885,6 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
             <HistoryPanel />
           </div>
         )}
-
-        {/* Processing Stats */}
-        <div className="p-3 text-xs" style={{backgroundColor: 'var(--gray-850)', color: 'var(--gray-400)'}}>
-          <div className="space-y-1">
-            <div>Pipeline: {imageProcessingPipeline.getStats().enabledModules} modules active</div>
-            <div>Real-time: 100ms debounce, 4x downscaled preview (main thread)</div>
-          </div>
-        </div>
       </div>
     </div>
   );
