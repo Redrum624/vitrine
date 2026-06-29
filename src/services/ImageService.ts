@@ -330,6 +330,15 @@ export class ImageService {
   }
 
   /**
+   * Overwrite the original snapshot used by getOriginalImage() for Before/After comparison.
+   * Called by EnhanceService after an upscale so the "Before" side reflects the
+   * clean-resize base at the new larger dimensions rather than the original load.
+   */
+  setOriginalImage(data: Float32Array, width: number, height: number): void {
+    this.originalImageData = { data, width, height };
+  }
+
+  /**
    * Update the current image data with processed data.
    * Used when applying crop/transform changes permanently.
    */
