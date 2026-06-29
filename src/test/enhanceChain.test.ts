@@ -19,4 +19,14 @@ describe('enhanceImage', () => {
     for (let i = 3; i < r.enhanced.length; i += 4) expect(r.enhanced[i]).toBeCloseTo(1, 5);
     for (const v of r.enhanced) expect(Number.isNaN(v)).toBe(false);
   });
+  it('upscale base is the clean resize, distinct from the enhanced result', () => {
+    const r = enhanceImage(img(), W, H, P({ upscale: true, scale: 2 }));
+    let diff = 0; for (let i = 0; i < r.enhanced.length; i++) diff += Math.abs(r.enhanced[i] - r.base[i]);
+    expect(diff).toBeGreaterThan(0); // base = clean Lanczos; enhanced has CAS/chroma applied
+  });
+  it('bypasses denoise and deblur when their params are zero (no NaN, dims unchanged)', () => {
+    const r = enhanceImage(img(), W, H, P({ denoiseStrength: 0, rlIters: 0, upscale: false }));
+    expect(r.width).toBe(W); expect(r.height).toBe(H);
+    for (const v of r.enhanced) expect(Number.isNaN(v)).toBe(false);
+  });
 });

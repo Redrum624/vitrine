@@ -37,6 +37,12 @@ export function enhanceImage(rgba: Float32Array, w: number, h: number, p: Enhanc
     base = cur.slice();
   }
 
+  // NOTE: `sharpen`/`upscale` in EnhanceParams are CALLER-level toggles, not gates here.
+  // EnhanceModule.process() only invokes enhanceImage for the same-resolution sharpen path
+  // (passing upscale:false); EnhanceService forces sharpen:true for the upscale path.
+  // enhanceImage ALWAYS applies the finishing CAS + chroma cleanup — per spec, the finish
+  // is always-on regardless of toggles.
+
   // 3 finish: CAS on luma + chroma clean at final res
   const fin = rgbaToYCrCb(cur);
   const fy = cas(fin.y, cw, ch, p.sharpness);
