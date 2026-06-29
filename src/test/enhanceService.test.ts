@@ -14,6 +14,8 @@ jest.mock('../stores/appStore', () => ({ useAppStore: { getState: () => ({ setIs
 
 import { enhanceService } from '../services/EnhanceService';
 import { imageService } from '../services/ImageService';
+import { imageProcessingPipeline } from '../services/ImageProcessingPipeline';
+import { editPersistenceService } from '../services/EditPersistenceService';
 import { checkpointService } from '../services/CheckpointService';
 import { DEFAULT_ENHANCE_PARAMS } from '../utils/enhanceChain';
 
@@ -33,5 +35,26 @@ describe('EnhanceService.applyUpscale', () => {
   it('rejects when the upscaled size exceeds the guard', async () => {
     (imageService.getOriginalImage as jest.Mock).mockReturnValueOnce({ data: new Float32Array(4), width: 10000, height: 10000 });
     await expect(enhanceService.applyUpscale({ ...DEFAULT_ENHANCE_PARAMS, upscale: true, scale: 4 })).rejects.toThrow(/too large/);
+  });
+});
+
+describe('EnhanceService.revert', () => {
+  it('restores the pre-upscale image + edit state and clears the restore point', async () => {
+    await enhanceService.applyUpscale({ ...DEFAULT_ENHANCE_PARAMS, upscale: true, scale: 2 });
+    expect(enhanceService.canRevert()).toBe(true);
+    jest.clearAllMocks();
+    enhanceService.revert();
+    expect(imageProcessingPipeline.resetAllModules).toHaveBeenCalled();
+    expect(imageService.updateCurrentImageData).toHaveBeenCalledWith(expect.any(Float32Array), 4, 4);
+    expect(imageService.setOriginalImage).toHaveBeenCalledWith(expect.any(Float32Array), 4, 4);
+    expect(editPersistenceService.restore).toHaveBeenCalled();
+    expect(enhanceService.canRevert()).toBe(false);
+  });
+  it('is a no-op when there is no restore point', () => {
+    enhanceService.revert();            // ensure cleared (idempotent)
+    jest.clearAllMocks();
+    enhanceService.revert();
+    expect(imageService.updateCurrentImageData).not.toHaveBeenCalled();
+    expect(editPersistenceService.restore).not.toHaveBeenCalled();
   });
 });

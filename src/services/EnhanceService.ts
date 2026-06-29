@@ -17,12 +17,15 @@ interface RestorePoint {
 
 class EnhanceService {
   private restorePoint: RestorePoint | null = null;
+  private inFlight = false;
 
   canRevert(): boolean {
     return this.restorePoint !== null;
   }
 
   async applyUpscale(params: EnhanceParams): Promise<void> {
+    if (this.inFlight) return;
+
     const original = imageService.getOriginalImage();
     if (!original) throw new Error('No image loaded');
 
@@ -35,6 +38,7 @@ class EnhanceService {
     }
 
     const store = useAppStore.getState();
+    this.inFlight = true;
     store.setIsProcessing(true);
     try {
       const edited = await imageProcessingPipeline.processImage(
@@ -43,19 +47,17 @@ class EnhanceService {
         true,
       );
 
-      this.restorePoint = {
-        data: new Float32Array(original.data),
-        width,
-        height,
-        editState: editPersistenceService.serialize(),
-      };
-
+      // Capture snapshot before the worker call (cheap), but do not commit it yet.
+      const restoreData = new Float32Array(original.data);
+      const editState = editPersistenceService.serialize();
       const r = await enhanceWorkerClient.run(
         new Float32Array(edited),
         width,
         height,
         { ...params, sharpen: true, upscale: true },
       );
+      // Worker succeeded — now safe to commit the restore point and mutate.
+      this.restorePoint = { data: restoreData, width, height, editState };
 
       imageProcessingPipeline.resetAllModules();
       imageService.updateCurrentImageData(r.enhanced, r.width, r.height);
@@ -64,6 +66,7 @@ class EnhanceService {
       store.notifyExternalParamsChange();
       store.triggerReprocessing();
     } finally {
+      this.inFlight = false;
       store.setIsProcessing(false);
     }
   }
