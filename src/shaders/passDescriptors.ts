@@ -26,12 +26,8 @@ import {
   lateralCAUniforms,
   vignetteUniforms,
   shadowsHighlightsUniforms,
-  blurUniforms,
-  unsharpUniforms,
-  computeGaussianKernel,
   layerBlendUniforms,
 } from './uniforms';
-import { MAX_BLUR_TAPS } from './sources';
 import type { ShadowsHighlightsUniformParams } from './uniforms';
 import type { BasicAdjustmentsParams, DehazeState } from '../services/WebGLImageProcessor';
 import { computeWBGains } from '../modules/WhiteBalanceModule';
@@ -59,7 +55,6 @@ export const GPU_MODULE_IDS: readonly string[] = [
   'colorbalance',
   'lenscorrections',
   'shadowshighlights',
-  'sharpen',
 ];
 
 /**
@@ -128,7 +123,7 @@ export interface PassDescriptor {
   luts?: Record<string, Float32Array>;
   /**
    * Optional ordered list of sub-passes that together form ONE logical module step
-   * (multi-pass module, e.g. sharpen's blur-H → blur-V → unsharp-combine).
+   * (multi-pass module).
    *
    * When present, the pipeline executes the sub-passes instead of the top-level
    * programKey/setUniforms (those are ignored for sub-passed descriptors). The
@@ -166,11 +161,6 @@ export interface PassDescriptor {
  *     - 'pingpong' (default) — write to the active ping-pong FBO (advances the chain).
  *     - 'scratch'            — write to the scratch FBO (intermediate not yet the chain output).
  *
- * Sharpen wiring:
- *   1. blurH:  bindings [{texture:'prev',sampler:'u_image'}]                                      → target 'scratch'
- *   2. blurV:  bindings [{texture:'scratch',sampler:'u_image'}]                                   → target 'pingpong'
- *   3. unsharp:bindings [{texture:'chainInput',sampler:'u_image'},{texture:'prev',sampler:'u_blur'}] → target 'pingpong'
- *      where 'prev' for step 3 is step 2's ping-pong output (the fully blurred image).
  */
 
 /**
@@ -410,70 +400,6 @@ function buildShadowsHighlightsPass(params: Record<string, unknown>): PassDescri
     programKey: 'shadowshighlights',
     // does not depend on rt (per-pixel analytic, no dimension/dehaze)
     setUniforms: (gl, prog, _rt) => shadowsHighlightsUniforms(p)(gl, prog),
-  };
-}
-
-/**
- * Sharpen → a single PassDescriptor with THREE sub-passes (separable unsharp mask),
- * matching SharpenModule.process() exactly:
- *   1. blurH  — horizontal Gaussian of chainInput → scratch
- *   2. blurV  — vertical Gaussian of scratch → ping-pong (fully blurred image)
- *   3. unsharp— combine chainInput (original) + the blurred ping-pong → ping-pong (result)
- *
- * Params (SharpenModule.getParams()): { enabled, amount, radius, detail }.
- *   strength  = amount / 100
- *   threshold = (detail / 100) * 0.1
- *   kernel    = createGaussianKernel(radius) replicated via computeGaussianKernel.
- *
- * Returns null when identity (disabled or amount<=0) so buildPassList emits no pass —
- * consistent with the other modules' identity handling.
- */
-function buildSharpenPass(params: Record<string, unknown>): PassDescriptor | null {
-  const enabled = params.enabled !== false;
-  const amount = typeof params.amount === 'number' ? params.amount : 0;
-  if (!enabled || amount <= 0) return null;
-
-  const radius = typeof params.radius === 'number' ? params.radius : 1.0;
-  const strength = amount / 100;
-  const threshold = (typeof params.detail === 'number' ? params.detail : 25) / 100 * 0.1;
-  const { weights, taps } = computeGaussianKernel(radius, MAX_BLUR_TAPS);
-
-  const subPasses: SubPass[] = [
-    {
-      // H-blur of the module input (prev == chainInput for the first sub-pass) → scratch.
-      id: 'sharpen:blurH',
-      programKey: 'blur_h',
-      bindings: [{ texture: 'prev', sampler: 'u_image' }],
-      target: 'scratch',
-      setUniforms: (gl, prog, rt) => blurUniforms(rt.width, rt.height, weights, taps)(gl, prog),
-    },
-    {
-      // V-blur of the scratch (H-blur result) → ping-pong (fully blurred image).
-      id: 'sharpen:blurV',
-      programKey: 'blur_v',
-      bindings: [{ texture: 'scratch', sampler: 'u_image' }],
-      target: 'pingpong',
-      setUniforms: (gl, prog, rt) => blurUniforms(rt.width, rt.height, weights, taps)(gl, prog),
-    },
-    {
-      // Combine ORIGINAL (chainInput) on unit 0 + the blurred ping-pong (prev) on unit 1.
-      id: 'sharpen:unsharp',
-      programKey: 'unsharp',
-      bindings: [
-        { texture: 'chainInput', sampler: 'u_image' },
-        { texture: 'prev',       sampler: 'u_blur'  },
-      ],
-      target: 'pingpong',
-      setUniforms: (gl, prog, _rt) => unsharpUniforms(strength, threshold)(gl, prog),
-    },
-  ];
-
-  // programKey is ignored when subPasses is present — the pipeline runs sub-passes directly.
-  return {
-    id: 'sharpen',
-    programKey: 'sharpen:multi',
-    setUniforms: () => undefined, // ignored when subPasses present
-    subPasses,
   };
 }
 
@@ -796,13 +722,6 @@ export function buildPassList(modules: MinimalModule[], opts?: BuildPassOpts): P
         // null → maskBlur>0 / bilateralFilter: cross-pixel ops the shader can't match → CPU.
         const shPass = buildShadowsHighlightsPass(params);
         if (shPass) passes.push(shPass);
-        else cpuBridges.push(id);
-        break;
-      }
-      case 'sharpen': {
-        // null → identity (disabled or amount<=0): nothing for GPU to do.
-        const sharpenPass = buildSharpenPass(params);
-        if (sharpenPass) passes.push(sharpenPass);
         else cpuBridges.push(id);
         break;
       }

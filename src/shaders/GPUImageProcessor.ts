@@ -14,7 +14,6 @@ import { toneCurveFragmentShader } from './tonecurve.frag';
 import { colorBalanceFragmentShader } from './colorbalance.frag';
 import { denoiseFragmentShader } from './denoise.frag';
 import { saturationFragmentShader } from './saturation.frag';
-import { sharpenFragmentShader } from './sharpen.frag';
 
 export interface GPUProcessingResult {
   success: boolean;
@@ -123,8 +122,7 @@ export class GPUImageProcessor {
       { name: 'tonecurve', frag: toneCurveFragmentShader },
       { name: 'colorbalance', frag: colorBalanceFragmentShader },
       { name: 'denoise', frag: denoiseFragmentShader },
-      { name: 'saturation', frag: saturationFragmentShader },
-      { name: 'sharpen', frag: sharpenFragmentShader }
+      { name: 'saturation', frag: saturationFragmentShader }
     ];
 
     for (const shader of shaders) {

@@ -30,15 +30,11 @@ import {
   FRAG_VIGNETTE,
   FRAG_PRESENT,
   FRAG_SHADOWSHIGHLIGHTS,
-  FRAG_BLUR_H,
-  FRAG_BLUR_V,
-  FRAG_UNSHARP,
   FRAG_LAYER_BLEND,
 } from './sources';
 import type { PassDescriptor, PassRuntime, SubPassTexture, MaskUpload } from './passDescriptors';
 import { buildPassList, buildLocalAdjustmentsPass } from './passDescriptors';
 import { basicAdjUniforms, exposureUniforms, shadowsHighlightsUniforms, gainsUniforms, colorBalanceUniforms, vignetteUniforms } from './uniforms';
-import { SharpenModule } from '../modules/SharpenModule';
 import type { ShadowsHighlightsUniformParams } from './uniforms';
 import type { DehazeState } from '../services/WebGLImageProcessor';
 import { webGLImageProcessor } from '../services/WebGLImageProcessor';
@@ -75,9 +71,6 @@ const PROGRAM_SOURCES: Record<string, string> = {
   lateralca: FRAG_LATERALCA,
   vignette: FRAG_VIGNETTE,
   shadowshighlights: FRAG_SHADOWSHIGHLIGHTS,
-  blur_h: FRAG_BLUR_H,
-  blur_v: FRAG_BLUR_V,
-  unsharp: FRAG_UNSHARP,
   layerblend: FRAG_LAYER_BLEND,
 };
 
@@ -163,8 +156,8 @@ export class GpuPreviewPipeline {
   // Two ping-pong FBO+texture pairs, reallocated only on size change.
   private ping: [PingPong | null, PingPong | null] = [null, null];
 
-  // Extra scratch FBO+texture for multi-pass (subPasses) module steps — e.g. sharpen's
-  // intermediate H-blur result. Allocated lazily (only when a subPasses pass runs),
+  // Extra scratch FBO+texture for multi-pass (subPasses) module steps.
+  // Allocated lazily (only when a subPasses pass runs),
   // resized with the ping-pong pair, freed in destroy(). NOT used by single-pass passes.
   private scratch: PingPong | null = null;
 
@@ -1049,31 +1042,7 @@ export class GpuPreviewPipeline {
       const shOk = shMaxDiff < 0.02;
       logger.info(`[GPU-PIPELINE] s/h self-test maxDiff=${shMaxDiff.toExponential(2)} ${shOk ? 'PASS' : 'FAIL'}`);
 
-      // ── 4. sharpen sub-test (multi-pass subPasses) ──────────────────────────
-      // Non-trivial unsharp mask. Builds the REAL sharpen PassDescriptor (subPasses =
-      // blurH→blurV→unsharp) via buildPassList, renders it through the multi-pass path,
-      // and compares to SharpenModule.process() (single source of truth for the kernel +
-      // threshold math). Tolerance: the GPU uses the SAME precomputed kernel and clamps
-      // edges identically (CLAMP_TO_EDGE ↔ CPU min/max), so divergence is float-precision
-      // only — 1e-3 is comfortably achievable.
-      const sharpenMod = new SharpenModule();
-      sharpenMod.setParams({ enabled: true, amount: 80, radius: 2.0, detail: 20 });
-      const sharpenPasses = buildPassList([sharpenMod]).passes;
-
-      this.setSource(data, w, h);
-      this.render(sharpenPasses);
-      const gpuSharpen = this.readback();
-
-      const refSharpen = sharpenMod.process(new Float32Array(data), { width: w, height: h, channels: 4 });
-
-      let sharpenMaxDiff = 0;
-      for (let i = 0; i < refSharpen.length; i++) {
-        sharpenMaxDiff = Math.max(sharpenMaxDiff, Math.abs(gpuSharpen[i] - refSharpen[i]));
-      }
-      const sharpenOk = sharpenMaxDiff < 1e-3;
-      logger.info(`[GPU-PIPELINE] sharpen self-test maxDiff=${sharpenMaxDiff.toExponential(2)} ${sharpenOk ? 'PASS' : 'FAIL'}`);
-
-      // ── 5. local-adjustments sub-test (masks + sequential blend) ────────────
+      // ── 4. local-adjustments sub-test (masks + sequential blend) ────────────
       // The hard one: build a real LA module with TWO enabled radial-mask layers, each
       // with a non-trivial basicAdj, then render through the multi-pass LA descriptor
       // (basicadj→scratch + blend→pingpong PER LAYER) and compare to the CPU
@@ -1284,8 +1253,8 @@ export class GpuPreviewPipeline {
       const vigOk = vigMaxDiff < 1e-3;
       logger.info(`[GPU-PIPELINE] vignette self-test maxDiff=${vigMaxDiff.toExponential(2)} ${vigOk ? 'PASS' : 'FAIL'}`);
 
-      const ok = basicAdjOk && exposureOk && shOk && sharpenOk && laOk && wbOk && tcOk && cbOk && vigOk;
-      const maxDiff = Math.max(basicAdjMaxDiff, exposureMaxDiff, shMaxDiff, sharpenMaxDiff, laMaxDiff, wbMaxDiff, tcMaxDiff, cbMaxDiff, vigMaxDiff);
+      const ok = basicAdjOk && exposureOk && shOk && laOk && wbOk && tcOk && cbOk && vigOk;
+      const maxDiff = Math.max(basicAdjMaxDiff, exposureMaxDiff, shMaxDiff, laMaxDiff, wbMaxDiff, tcMaxDiff, cbMaxDiff, vigMaxDiff);
 
       // Map each failed sub-test to the MODULE ID buildPassList uses, so a broken GPU shader
       // is routed to the CPU bridge (proven path) instead of corrupting the image (e.g. the
@@ -1295,7 +1264,6 @@ export class GpuPreviewPipeline {
       if (!basicAdjOk) unsafe.push('basicadj');
       if (!exposureOk) unsafe.push('exposure');
       if (!shOk) unsafe.push('shadowshighlights');
-      if (!sharpenOk) unsafe.push('sharpen');
       if (!laOk) unsafe.push('localadjustments');
       if (!wbOk) unsafe.push('temperature');
       if (!tcOk) unsafe.push('tonecurve');
@@ -1310,7 +1278,7 @@ export class GpuPreviewPipeline {
       return {
         ok: false,
         maxDiff: Infinity,
-        unsafe: ['basicadj', 'exposure', 'shadowshighlights', 'sharpen', 'localadjustments', 'temperature', 'tonecurve', 'colorbalance', 'lenscorrections'],
+        unsafe: ['basicadj', 'exposure', 'shadowshighlights', 'localadjustments', 'temperature', 'tonecurve', 'colorbalance', 'lenscorrections'],
       };
     }
   }

@@ -29,10 +29,6 @@ import {
   FRAG_LATERALCA,
   FRAG_BASICADJ,
   FRAG_SHADOWSHIGHLIGHTS,
-  FRAG_BLUR_H,
-  FRAG_BLUR_V,
-  FRAG_UNSHARP,
-  MAX_BLUR_TAPS,
 } from '../shaders/sources';
 import {
   exposureUniforms,
@@ -46,12 +42,8 @@ import {
   hueCurvesUniforms,
   denoiseUniforms,
   shadowsHighlightsUniforms,
-  blurUniforms,
-  unsharpUniforms,
-  computeGaussianKernel,
 } from '../shaders/uniforms';
 import { ShadowsHighlightsModule, ShadowsHighlightsParams } from '../modules/ShadowsHighlightsModule';
-import { SharpenModule } from '../modules/SharpenModule';
 
 export interface BasicAdjustmentsParams {
   black_point: number;
@@ -142,10 +134,6 @@ class WebGLImageProcessor {
   private lateralCAVerified: boolean | null = null;
   private shadowsHighlightsProgram: WebGLProgram | null = null;
   private shadowsHighlightsVerified: boolean | null = null;
-  private blurHProgram: WebGLProgram | null = null;
-  private blurVProgram: WebGLProgram | null = null;
-  private unsharpProgram: WebGLProgram | null = null;
-  private sharpenVerified: boolean | null = null;
   private vao: WebGLVertexArrayObject | null = null;
   private initTried = false;
 
@@ -198,10 +186,6 @@ class WebGLImageProcessor {
       // Optional program: shadows/highlights. Built without gating the context so a
       // compile failure leaves only S/H on the CPU, not the whole GPU path.
       this.shadowsHighlightsProgram = this.buildProgram(gl, VERT_SRC, FRAG_SHADOWSHIGHLIGHTS);
-      // Optional programs: sharpen (3-pass unsharp mask). Built without gating the context.
-      this.blurHProgram = this.buildProgram(gl, VERT_SRC, FRAG_BLUR_H);
-      this.blurVProgram = this.buildProgram(gl, VERT_SRC, FRAG_BLUR_V);
-      this.unsharpProgram = this.buildProgram(gl, VERT_SRC, FRAG_UNSHARP);
       this.vao = vao;
 
       // Self-check: only trust the GPU basic-adjustments path if it matches the CPU
@@ -805,122 +789,6 @@ class WebGLImageProcessor {
       }
     }
     return out;
-  }
-
-  /**
-   * Apply Sharpen (3-pass unsharp mask: blur-H → blur-V → unsharp combine).
-   * GPU when verified, else CPU (SharpenModule reference). amount/radius/detail are the
-   * raw SharpenModule params; strength = amount/100, threshold = detail/100*0.1.
-   */
-  applySharpen(
-    data: Float32Array, width: number, height: number,
-    amount: number, radius: number, detail: number
-  ): Float32Array {
-    const gl = this.ensureContext();
-    if (gl && this.blurHProgram && this.blurVProgram && this.unsharpProgram && this.vao && this.verifySharpen()) {
-      try { return this.runSharpenGPU(gl, data, width, height, amount, radius, detail); }
-      catch (e) { logger.warn('[GPU] sharpen failed — CPU:', e instanceof Error ? e.message : String(e)); }
-    }
-    return this.sharpenCPU(data, width, height, amount, radius, detail);
-  }
-
-  /**
-   * GPU unsharp mask: blur-H of source → scratch A, blur-V of A → scratch B (fully blurred),
-   * unsharp combine of source + B → output. Uses the SAME precomputed Gaussian kernel the
-   * CPU uses (computeGaussianKernel ≡ ImageFilters.createGaussianKernel) so GPU ≡ CPU.
-   */
-  private runSharpenGPU(
-    gl: WebGL2RenderingContext, data: Float32Array, width: number, height: number,
-    amount: number, radius: number, detail: number
-  ): Float32Array {
-    if (!this.maxTextureSize) this.maxTextureSize = gl.getParameter(gl.MAX_TEXTURE_SIZE) || 4096;
-    const safeDim = Math.min(this.maxTextureSize, 4096);
-    if (width > safeDim || height > safeDim) {
-      throw new Error(`[GPU] ${width}x${height} exceeds safe GPU size ${safeDim} — using CPU`);
-    }
-
-    const strength = amount / 100;
-    const threshold = (detail / 100) * 0.1;
-    const { weights, taps } = computeGaussianKernel(radius, MAX_BLUR_TAPS);
-
-    const srcTex = this.makeTexture(gl, width, height, data)!;
-    const blurTexA = this.makeTexture(gl, width, height, null)!; // H-blur result
-    const blurTexB = this.makeTexture(gl, width, height, null)!; // V-blur result (fully blurred)
-    const outTex = this.makeTexture(gl, width, height, null)!;   // unsharp result
-    const fbo = gl.createFramebuffer();
-
-    const drawInto = (
-      target: WebGLTexture, prog: WebGLProgram,
-      bindings: Array<{ tex: WebGLTexture; sampler: string }>,
-      setUniforms: (gl: WebGL2RenderingContext, p: WebGLProgram) => void
-    ) => {
-      gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
-      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, target, 0);
-      if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
-        throw new Error('framebuffer incomplete');
-      }
-      gl.viewport(0, 0, width, height);
-      gl.useProgram(prog);
-      bindings.forEach((b, u) => {
-        gl.activeTexture(gl.TEXTURE0 + u);
-        gl.bindTexture(gl.TEXTURE_2D, b.tex);
-        gl.uniform1i(gl.getUniformLocation(prog, b.sampler), u);
-      });
-      setUniforms(gl, prog);
-      gl.bindVertexArray(this.vao);
-      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-      gl.bindVertexArray(null);
-      gl.activeTexture(gl.TEXTURE0);
-    };
-
-    try {
-      drawInto(blurTexA, this.blurHProgram!, [{ tex: srcTex, sampler: 'u_image' }],
-        blurUniforms(width, height, weights, taps));
-      drawInto(blurTexB, this.blurVProgram!, [{ tex: blurTexA, sampler: 'u_image' }],
-        blurUniforms(width, height, weights, taps));
-      drawInto(outTex, this.unsharpProgram!,
-        [{ tex: srcTex, sampler: 'u_image' }, { tex: blurTexB, sampler: 'u_blur' }],
-        unsharpUniforms(strength, threshold));
-
-      const out = new Float32Array(width * height * 4);
-      gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
-      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, outTex, 0);
-      gl.readPixels(0, 0, width, height, gl.RGBA, gl.FLOAT, out);
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-      return out;
-    } finally {
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-      if (fbo) gl.deleteFramebuffer(fbo);
-      gl.deleteTexture(srcTex); gl.deleteTexture(blurTexA);
-      gl.deleteTexture(blurTexB); gl.deleteTexture(outTex);
-    }
-  }
-
-  private verifySharpen(): boolean {
-    if (this.sharpenVerified !== null) return this.sharpenVerified;
-    let ok = false;
-    try {
-      const { data, w, h } = CB_SELFTEST;
-      const a = this.runSharpenGPU(this.gl!, data, w, h, 80, 2.0, 20);
-      const c = this.sharpenCPU(data, w, h, 80, 2.0, 20);
-      let maxDiff = 0;
-      for (let i = 0; i < c.length; i++) maxDiff = Math.max(maxDiff, Math.abs(a[i] - c[i]));
-      // Same precomputed kernel + identical edge clamp → float-precision divergence only.
-      ok = maxDiff < 1e-3;
-      logger.info(`[GPU] sharpen self-check maxDiff=${maxDiff.toExponential(2)} -> ${ok ? 'GPU' : 'CPU fallback'}`);
-    } catch (e) { logger.warn('[GPU] sharpen self-check error:', e instanceof Error ? e.message : String(e)); }
-    this.sharpenVerified = ok;
-    return ok;
-  }
-
-  /** CPU reference — delegates to the real SharpenModule (single source of truth). */
-  sharpenCPU(
-    data: Float32Array, width: number, height: number,
-    amount: number, radius: number, detail: number
-  ): Float32Array {
-    const mod = new SharpenModule();
-    mod.setParams({ enabled: true, amount, radius, detail });
-    return mod.process(new Float32Array(data), { width, height, channels: 4 });
   }
 
   /** Generic single-pass shader run: source texture → program → float readback. */

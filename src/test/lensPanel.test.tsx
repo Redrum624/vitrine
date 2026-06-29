@@ -1,37 +1,13 @@
 /**
- * Mount-smoke + wiring tests for the two UI surfaces added/changed in this work:
- *  - the new Sharpen develop panel (sidebar, under Noise Reduction)
- *  - the Blur + Film Grain sections added to the Lens Corrections panel
+ * Mount-smoke + wiring tests for the Blur + Film Grain sections added to the
+ * Lens Corrections panel.
  *
  * These exercise the real React render path (which tsc/build cannot) and confirm
- * the slider/checkbox callbacks reach the module + the onChange props.
+ * the checkbox callbacks reach the module + the onChange props.
  */
 import { render, screen, fireEvent } from '@testing-library/react';
-import { SharpenModule } from '../modules/SharpenModule';
-import { SharpenModuleComponent } from '../components/Modules/SharpenModuleComponent';
 import { LensCorrectionsModule } from '../modules/LensCorrectionsModule';
 import { LensCorrectionsModuleComponent } from '../components/Modules/LensCorrectionsModuleComponent';
-
-describe('SharpenModuleComponent', () => {
-  it('mounts and live-updates the module + reports changes when a slider moves', () => {
-    const module = new SharpenModule();
-    const onParamsChange = jest.fn();
-    render(<SharpenModuleComponent module={module} onParamsChange={onParamsChange} />);
-
-    expect(screen.getByText('Sharpen')).toBeInTheDocument();
-
-    const sliders = screen.getAllByRole('slider'); // [amount, radius, detail]
-    expect(sliders).toHaveLength(3);
-
-    fireEvent.input(sliders[0], { target: { value: '100' } });
-
-    expect(onParamsChange).toHaveBeenCalled();
-    const p = module.getParams();
-    expect(p.amount).toBe(100);
-    expect(p.enabled).toBe(true);
-    expect(module.isIdentity()).toBe(false);
-  });
-});
 
 describe('LensCorrectionsModuleComponent — Blur + Film Grain', () => {
   it('renders the Blur and Film Grain sections and toggling Blur reports it', () => {

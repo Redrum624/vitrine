@@ -1,14 +1,11 @@
 import { buildPassList, buildLocalAdjustmentsPass, computeWBGains, GPU_MODULE_IDS, OPT_IN_GPU_MODULE_IDS, setGpuUnsafeModuleIds, getGpuUnsafeModuleIds } from '../shaders/passDescriptors';
 import type { MaskUpload } from '../shaders/passDescriptors';
 import { LocalAdjustmentsModule } from '../modules/LocalAdjustmentsModule';
-import { computeGaussianKernel } from '../shaders/uniforms';
-import { MAX_BLUR_TAPS } from '../shaders/sources';
 import { WhiteBalanceModule } from '../modules/WhiteBalanceModule';
 import { BasicAdjustmentsModule } from '../modules/BasicAdjustmentsModule';
 import { ToneCurvePipelineModule } from '../modules/ToneCurvePipelineModule';
 import { ExposureModule } from '../modules/ExposureModule';
 import { ShadowsHighlightsModule } from '../modules/ShadowsHighlightsModule';
-import { SharpenModule } from '../modules/SharpenModule';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -188,12 +185,10 @@ test('cpu-only modules always go to cpuBridges', () => {
   const modules = [
     fakeModule('crop', true, {}),
     fakeModule('noise-reduction', true, {}),
-    // sharpen with no amount (identity) → cpuBridges, like the other identity modules.
-    fakeModule('sharpen', true, { enabled: true, amount: 0, radius: 1, detail: 25 }),
   ];
   const { passes, cpuBridges } = buildPassList(modules);
   expect(passes).toHaveLength(0);
-  expect(cpuBridges).toEqual(['crop', 'noise-reduction', 'sharpen']);
+  expect(cpuBridges).toEqual(['crop', 'noise-reduction']);
 });
 
 // ---------------------------------------------------------------------------
@@ -497,77 +492,6 @@ test('shadows/highlights analytic shader math matches CPU module (maskBlur:0)', 
   expect(maxDiff).toBeLessThan(0.02);
 });
 
-// ---------------------------------------------------------------------------
-// Sharpen pass descriptor tests (Task 8 — multi-pass subPasses)
-// ---------------------------------------------------------------------------
-
-test('GPU_MODULE_IDS contains sharpen', () => {
-  expect(GPU_MODULE_IDS).toContain('sharpen');
-});
-
-test('real SharpenModule id is in the GPU set', () => {
-  expect(GPU_MODULE_IDS).toContain(new SharpenModule().getId());
-});
-
-test('non-identity sharpen yields a pass with 3 subPasses (blurH, blurV, unsharp)', () => {
-  const modules = [fakeModule('sharpen', true, { enabled: true, amount: 80, radius: 2.0, detail: 20 })];
-  const { passes, cpuBridges } = buildPassList(modules);
-  expect(passes).toHaveLength(1);
-  expect(passes[0].id).toBe('sharpen');
-  expect(passes[0].subPasses).toBeDefined();
-  expect(passes[0].subPasses!).toHaveLength(3);
-  expect(passes[0].subPasses!.map(sp => sp.programKey)).toEqual(['blur_h', 'blur_v', 'unsharp']);
-  expect(cpuBridges).not.toContain('sharpen');
-});
-
-test('sharpen subPasses declare the correct multi-input binding for the unsharp combine', () => {
-  const modules = [fakeModule('sharpen', true, { enabled: true, amount: 80, radius: 2.0, detail: 20 })];
-  const { passes } = buildPassList(modules);
-  const sub = passes[0].subPasses!;
-  // blurH: prev → scratch
-  expect(sub[0].bindings).toEqual([{ texture: 'prev', sampler: 'u_image' }]);
-  expect(sub[0].target).toBe('scratch');
-  // blurV: scratch → pingpong
-  expect(sub[1].bindings).toEqual([{ texture: 'scratch', sampler: 'u_image' }]);
-  expect(sub[1].target).toBe('pingpong');
-  // unsharp: reads chainInput (original) + prev (blurred), via u_image + u_blur, → pingpong
-  expect(sub[2].bindings).toEqual([
-    { texture: 'chainInput', sampler: 'u_image' },
-    { texture: 'prev',       sampler: 'u_blur'  },
-  ]);
-  expect(sub[2].target).toBe('pingpong');
-});
-
-test('sharpen subPass setUniforms have arity 3 and do not throw with the no-op GL mock', () => {
-  const modules = [fakeModule('sharpen', true, { enabled: true, amount: 80, radius: 2.0, detail: 20 })];
-  const { passes } = buildPassList(modules);
-  for (const sp of passes[0].subPasses!) {
-    expect(() => sp.setUniforms(makeGl(), DUMMY_PROG, DEFAULT_RT)).not.toThrow();
-  }
-});
-
-test('identity sharpen (amount 0) yields no pass → cpuBridges', () => {
-  const modules = [fakeModule('sharpen', true, { enabled: true, amount: 0, radius: 1.0, detail: 25 })];
-  const { passes, cpuBridges } = buildPassList(modules);
-  expect(passes).toHaveLength(0);
-  expect(cpuBridges).toContain('sharpen');
-});
-
-test('disabled sharpen yields no pass → cpuBridges', () => {
-  const modules = [fakeModule('sharpen', false, { enabled: true, amount: 80, radius: 2.0, detail: 20 })];
-  const { passes, cpuBridges } = buildPassList(modules);
-  expect(passes).toHaveLength(0);
-  expect(cpuBridges).toContain('sharpen');
-});
-
-test('real SharpenModule with non-default amount produces a 3-subPass pass', () => {
-  const mod = new SharpenModule();
-  mod.setParams({ enabled: true, amount: 75, radius: 1.5, detail: 30 });
-  const { passes } = buildPassList([mod]);
-  expect(passes).toHaveLength(1);
-  expect(passes[0].subPasses!).toHaveLength(3);
-});
-
 test('single-pass descriptors have NO subPasses (additive branch does not regress them)', () => {
   const modules = [
     fakeModule('temperature', true, { temperature: 6500, tint: 0 }),
@@ -577,62 +501,6 @@ test('single-pass descriptors have NO subPasses (additive branch does not regres
   const { passes } = buildPassList(modules);
   expect(passes).toHaveLength(3);
   for (const p of passes) expect(p.subPasses).toBeUndefined();
-});
-
-// Pure-math correctness: replicate the separable Gaussian + unsharp on the CPU using the
-// EXACT shared kernel (computeGaussianKernel) with CLAMP_TO_EDGE sampling, and compare to
-// the real SharpenModule.process(). This locks the GPU kernel/threshold math against the
-// CPU at the unit level (the runtime GL selfTest is the second gate). No GL needed.
-test('sharpen separable-blur + unsharp math matches SharpenModule (shared kernel, clamp edges)', () => {
-  const w = 8, h = 8;
-  const data = new Float32Array(w * h * 4);
-  for (let i = 0; i < w * h; i++) {
-    data[i * 4] = (i % 8) / 8; data[i * 4 + 1] = ((i * 5) % 8) / 8; data[i * 4 + 2] = ((i * 3) % 8) / 8; data[i * 4 + 3] = 1;
-  }
-  const amount = 80, radius = 2.0, detail = 20;
-  const strength = amount / 100;
-  const threshold = (detail / 100) * 0.1;
-  const { weights, taps } = computeGaussianKernel(radius, MAX_BLUR_TAPS);
-  const half = Math.floor(taps / 2);
-  const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
-
-  // Separable blur with CLAMP_TO_EDGE (mirrors the GPU shader's u_texel-offset sampling).
-  const tmp = new Float32Array(data); // H pass
-  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-    for (let c = 0; c < 3; c++) {
-      let acc = 0;
-      for (let k = 0; k < taps; k++) {
-        const sx = clamp(x + k - half, 0, w - 1);
-        acc += data[(y * w + sx) * 4 + c] * weights[k];
-      }
-      tmp[(y * w + x) * 4 + c] = acc;
-    }
-  }
-  const blur = new Float32Array(tmp); // V pass
-  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-    for (let c = 0; c < 3; c++) {
-      let acc = 0;
-      for (let k = 0; k < taps; k++) {
-        const sy = clamp(y + k - half, 0, h - 1);
-        acc += tmp[(sy * w + x) * 4 + c] * weights[k];
-      }
-      blur[(y * w + x) * 4 + c] = acc;
-    }
-  }
-  const gpu = new Float32Array(data);
-  for (let i = 0; i < data.length; i += 4) for (let c = 0; c < 3; c++) {
-    let d = data[i + c] - blur[i + c];
-    if (Math.abs(d) < threshold) d = 0;
-    gpu[i + c] = clamp(data[i + c] + d * strength, 0, 1);
-  }
-
-  const mod = new SharpenModule();
-  mod.setParams({ enabled: true, amount, radius, detail });
-  const cpu = mod.process(new Float32Array(data), { width: w, height: h, channels: 4 });
-
-  let maxDiff = 0;
-  for (let i = 0; i < data.length; i++) maxDiff = Math.max(maxDiff, Math.abs(gpu[i] - cpu[i]));
-  expect(maxDiff).toBeLessThan(1e-6);
 });
 
 // ---------------------------------------------------------------------------

@@ -142,19 +142,17 @@ describe('isModuleActive() + activeCpuBridges gate (faithful to the CPU processI
     const ordered = imageProcessingPipeline.getOrderedModules();
     const { cpuBridges } = buildPassList(ordered);
     // buildPassList maps by id, so the inactive CPU-only modules are present regardless.
-    expect(cpuBridges).toEqual(expect.arrayContaining(['sharpen', 'noise-reduction']));
+    expect(cpuBridges).toEqual(expect.arrayContaining(['noise-reduction']));
   });
 
   it('inactive CPU-only modules are filtered OUT of the active cpu bridges', () => {
-    // sharpen (amount 0) and noise-reduction (enabled:false) and localadjustments (no
-    // layers) are all inactive by default → must not appear in the active set.
-    expect(imageProcessingPipeline.isModuleActive('sharpen')).toBe(false);
+    // noise-reduction (enabled:false) and localadjustments (no layers) are all inactive
+    // by default → must not appear in the active set.
     expect(imageProcessingPipeline.isModuleActive('noise-reduction')).toBe(false);
     expect(imageProcessingPipeline.isModuleActive('localadjustments')).toBe(false);
 
     const { cpuBridges } = buildPassList(imageProcessingPipeline.getOrderedModules());
     const activeCpuBridges = cpuBridges.filter((id) => imageProcessingPipeline.isModuleActive(id));
-    expect(activeCpuBridges).not.toContain('sharpen');
     expect(activeCpuBridges).not.toContain('noise-reduction');
     expect(activeCpuBridges).not.toContain('localadjustments');
   });

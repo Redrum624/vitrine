@@ -225,12 +225,12 @@ export class ImageProcessingPipeline {
    * decision the plan specifies — WITHOUT reaching into private fields.
    *
    * This is the load-bearing fix for the GPU live path: `buildPassList()` maps every
-   * CPU-only module id (crop, exposure, sharpen, shadowshighlights, localadjustments,
+   * CPU-only module id (crop, exposure, enhance, shadowshighlights, localadjustments,
    * noise-reduction) to `cpuBridges` purely by id, even when that module is at its
    * default/identity state. With all 11 modules registered, `cpuBridges` would never be
    * empty and the GPU path would never fire. AdjustmentPanel filters the cpuBridges
    * through this predicate so only modules that are genuinely doing CPU-only work block
-   * the GPU path — an inactive (identity) crop/sharpen/etc. does not.
+   * the GPU path — an inactive (identity) crop/enhance/etc. does not.
    *
    * Unknown module id → false (not active).
    */
@@ -695,7 +695,7 @@ export class ImageProcessingPipeline {
    * Setter shapes mirror getModuleParams' getter shapes:
    *  - setParams(params)        → temperature(WB), basicadj, tonecurve(adapter),
    *                               colorbalance(adapter), shadowshighlights(adapter),
-   *                               noisereduction, sharpen, crop(adapter)
+   *                               noisereduction, enhance, crop(adapter)
    *  - setCurrentParams(params) → exposure
    *  - setParameters(params)    → lenscorrections, localadjustments
    * Each module also gets its enabled flag set via setEnabled(b) when present, else
