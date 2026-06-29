@@ -10,7 +10,7 @@ export interface EnhanceParams {
   [key: string]: unknown; // Index signature for Record<string, unknown> compatibility
 }
 export const DEFAULT_ENHANCE_PARAMS: EnhanceParams = {
-  enabled: true, sharpen: true, upscale: false, scale: 2,
+  enabled: false, sharpen: true, upscale: false, scale: 2,
   denoiseStrength: 3, psfSigma: 1.0, rlIters: 12,
   alpha: 0.8, hpSigma: 1.2, sharpness: 0.4, chromaClean: true,
 };
