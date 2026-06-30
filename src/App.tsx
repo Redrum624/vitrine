@@ -55,7 +55,7 @@ if (process.env.NODE_ENV === 'development') {
   });
 }
 
-const MODULE_IDS = new Set(['crop', 'basicadj', 'whitebalance', 'tonecurve', 'noisereduction', 'enhance', 'shadowshighlights', 'colorbalance', 'localadjustments', 'lenscorrections']);
+const MODULE_IDS = new Set(['crop', 'basicadj', 'whitebalance', 'tonecurve', 'enhance', 'shadowshighlights', 'colorbalance', 'localadjustments', 'lenscorrections']);
 const isModuleTool = (tool: string) => MODULE_IDS.has(tool);
 
 /** Renders the cached original image for the Before/After split view. */
@@ -947,7 +947,7 @@ function App() {
     // and the load-triggered reprocess records nothing new.
     const TOOL_LABELS: Record<string, string> = {
       crop: 'Crop & Transform', basicadj: 'Basic Adjustments', whitebalance: 'White Balance',
-      tonecurve: 'Tone Curve', noisereduction: 'Noise Reduction', colorbalance: 'Color Balance',
+      tonecurve: 'Tone Curve', colorbalance: 'Color Balance',
       lenscorrections: 'Lens Corrections', localadjustments: 'Local Adjustments',
     };
     const tool = useAppStore.getState().selectedTool;

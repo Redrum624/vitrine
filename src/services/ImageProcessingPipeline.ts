@@ -695,7 +695,7 @@ export class ImageProcessingPipeline {
    * Setter shapes mirror getModuleParams' getter shapes:
    *  - setParams(params)        → temperature(WB), basicadj, tonecurve(adapter),
    *                               colorbalance(adapter), shadowshighlights(adapter),
-   *                               noisereduction, enhance, crop(adapter)
+   *                               noise-reduction, enhance, crop(adapter)
    *  - setCurrentParams(params) → exposure
    *  - setParameters(params)    → lenscorrections, localadjustments
    * Each module also gets its enabled flag set via setEnabled(b) when present, else

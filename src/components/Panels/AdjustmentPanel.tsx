@@ -18,7 +18,6 @@ import { CropModuleComponent } from '../Modules/CropModuleComponent';
 import { LocalAdjustmentsModuleComponent } from '../Modules/LocalAdjustmentsModuleComponent';
 import { LensCorrectionsModuleComponent } from '../Modules/LensCorrectionsModuleComponent';
 import { HistoryPanel } from './HistoryPanel';
-import { NoiseReductionModuleComponent } from '../Modules/NoiseReductionModuleComponent';
 import EnhanceModuleComponent from '../Modules/EnhanceModuleComponent';
 import { imageProcessingPipeline } from '../../services/ImageProcessingPipeline';
 import { imageService } from '../../services/ImageService';
@@ -628,7 +627,6 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
       basicadj: 'Basic Adjustments',
       whitebalance: 'White Balance',
       tonecurve: 'Tone Curve',
-      noisereduction: 'Noise Reduction',
       enhance: 'Enhance',
       shadowshighlights: 'Shadows & Highlights',
       colorbalance: 'Color Balance',
@@ -727,17 +725,6 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
               key={`tonecurve-${paramSync}`}
               module={toneCurveModule.getToneCurveModule()}
               onParamsChange={(params) => handleModuleParamsChange('tonecurve', params)}
-            />
-          </div>
-        )}
-
-        {/* Noise Reduction Module */}
-        {noiseReductionModule && selectedModule === 'noisereduction' && (
-          <div className="px-5 pt-4">
-            <NoiseReductionModuleComponent
-              key={`noisereduction-${paramSync}`}
-              module={noiseReductionModule}
-              onParamsChange={(params) => handleModuleParamsChange('noisereduction', params)}
             />
           </div>
         )}

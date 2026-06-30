@@ -48,7 +48,6 @@ const moduleCategories: ModuleCategory[] = [
     name: 'ADVANCED',
     modules: [
       { id: 'localadjustments', name: 'Local Adjustments', icon: '▨' },
-      { id: 'noisereduction', name: 'Noise Reduction', icon: '◫' },
     ]
   }
 ];
