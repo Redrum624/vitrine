@@ -11,9 +11,14 @@ jest.mock('../services/ImageProcessingPipeline', () => ({ imageProcessingPipelin
 jest.mock('../services/EnhanceWorkerClient', () => ({ enhanceWorkerClient: {
   run: jest.fn(async () => ({ enhanced: new Float32Array(8*8*4), base: new Float32Array(8*8*4), width: 8, height: 8 })),
 } }));
+// AI unavailable here so these tests exercise the deterministic ('Standard') path. The AI route
+// has its own suite in enhanceAiRouting.test.ts.
+jest.mock('../services/AiUpscaleClient', () => ({ aiUpscaleClient: {
+  isAvailable: jest.fn(async () => false), run: jest.fn(),
+} }));
 jest.mock('../services/CheckpointService', () => ({ checkpointService: { record: jest.fn(), recordLabeled: jest.fn(), setBakeBridge: jest.fn() } }));
 jest.mock('../services/EditPersistenceService', () => ({ editPersistenceService: { serialize: jest.fn(() => ({})), restore: jest.fn() } }));
-jest.mock('../stores/appStore', () => ({ useAppStore: { getState: () => ({ setIsProcessing: jest.fn(), notifyExternalParamsChange: jest.fn(), triggerReprocessing: jest.fn() }) } }));
+jest.mock('../stores/appStore', () => ({ useAppStore: { getState: () => ({ setIsProcessing: jest.fn(), setUpscaleProgress: jest.fn(), setUpscaleMode: jest.fn(), notifyExternalParamsChange: jest.fn(), triggerReprocessing: jest.fn() }) } }));
 
 import { enhanceService } from '../services/EnhanceService';
 import { imageService } from '../services/ImageService';
@@ -35,7 +40,7 @@ describe('EnhanceService.applyUpscale', () => {
     await enhanceService.applyUpscale({ ...DEFAULT_ENHANCE_PARAMS, upscale: true, scale: 2 });
     expect(imageService.updateCurrentImageData).toHaveBeenCalledWith(expect.any(Float32Array), 8, 8);
     expect(imageService.setOriginalImage).toHaveBeenCalledWith(expect.any(Float32Array), 8, 8);
-    expect(checkpointService.recordLabeled).toHaveBeenCalledWith('Enhanced ×2', 1);
+    expect(checkpointService.recordLabeled).toHaveBeenCalledWith('Enhanced ×2 (Standard)', 1);
     expect(enhanceService.canRevert()).toBe(true);
   });
 

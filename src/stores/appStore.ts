@@ -29,6 +29,12 @@ interface AppStore extends AppState {
   // processed image lands (setProcessedImageData).
   isProcessing: boolean;
   setIsProcessing: (v: boolean) => void;
+  // AI upscale: determinate progress 0..1 while tiles run (null when idle), and which
+  // path the last/current Enhance upscale used so the panel can badge AI vs Standard.
+  upscaleProgress: number | null;
+  setUpscaleProgress: (v: number | null) => void;
+  upscaleMode: 'ai' | 'standard' | null;
+  setUpscaleMode: (v: 'ai' | 'standard' | null) => void;
   // Which display path the Canvas should use:
   //  'gpu' → present the resident-texture GPU result on the WebGL2 canvas (zero readback)
   //  'cpu' → blit `processedImageData` to the 2D canvas (the proven path)
@@ -91,6 +97,8 @@ export const useAppStore = create<AppStore>((set) => ({
   processingVersion: 0,
   externalParamsVersion: 0,
   isProcessing: false,
+  upscaleProgress: null,
+  upscaleMode: null,
   renderMode: 'cpu',
   gpuResultVersion: 0,
   lastProcessingTimeMs: 0,
@@ -116,6 +124,8 @@ export const useAppStore = create<AppStore>((set) => ({
   })),
 
   setIsProcessing: (v) => set({ isProcessing: v }),
+  setUpscaleProgress: (v) => set({ upscaleProgress: v }),
+  setUpscaleMode: (v) => set({ upscaleMode: v }),
 
   setRenderMode: (mode) => set({ renderMode: mode }),
 

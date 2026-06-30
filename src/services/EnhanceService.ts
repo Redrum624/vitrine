@@ -1,10 +1,28 @@
 import { imageService } from './ImageService';
 import { imageProcessingPipeline } from './ImageProcessingPipeline';
 import { enhanceWorkerClient } from './EnhanceWorkerClient';
+import { aiUpscaleClient } from './AiUpscaleClient';
 import { checkpointService } from './CheckpointService';
 import { editPersistenceService } from './EditPersistenceService';
 import { useAppStore } from '../stores/appStore';
 import { EnhanceParams } from '../utils/enhanceChain';
+
+/** Float32 RGBA 0..1 (pipeline domain) → Uint8 RGBA 0..255 (AI IPC domain). */
+function float32ToUint8Rgba(f: Float32Array): Uint8Array {
+  const out = new Uint8Array(f.length);
+  for (let i = 0; i < f.length; i++) {
+    const v = Math.round(f[i] * 255);
+    out[i] = v < 0 ? 0 : v > 255 ? 255 : v;
+  }
+  return out;
+}
+
+/** Uint8 RGBA 0..255 (AI IPC domain) → Float32 RGBA 0..1 (pipeline domain). */
+function uint8ToFloat32Rgba(u: Uint8Array): Float32Array {
+  const out = new Float32Array(u.length);
+  for (let i = 0; i < u.length; i++) out[i] = u[i] / 255;
+  return out;
+}
 
 // Upscale produces two full Float32 RGBA buffers (enhanced + base) at the output
 // resolution plus working temporaries — peak memory ≈ 56 bytes/output-pixel. 160 MP
@@ -66,6 +84,7 @@ class EnhanceService {
     const store = useAppStore.getState();
     this.inFlight = true;
     store.setIsProcessing(true);
+    store.setUpscaleProgress(null);
     try {
       const edited = await imageProcessingPipeline.processImage(
         new Float32Array(original.data),
@@ -73,30 +92,72 @@ class EnhanceService {
         true,
       );
 
-      // Capture snapshot before the worker call (cheap), but do not commit it yet.
+      // Capture snapshot before the (AI or worker) call (cheap), but do not commit it yet.
       // The restore point stores the NATIVE (pre-crop) buffer and dims so that revert
       // can fully restore both the pixels and the edit state (including crop params).
       const restoreData = new Float32Array(original.data);
       const editState = editPersistenceService.serialize();
-      const r = await enhanceWorkerClient.run(
-        new Float32Array(edited),
-        procW,
-        procH,
-        { ...params, sharpen: true, upscale: true },
-      );
-      // Worker succeeded — now safe to push the restore point and mutate.
+
+      // Route: AI super-resolution when a GPU+model are available, else the deterministic
+      // Lanczos worker. If the AI run fails mid-way, fall back to deterministic so the user
+      // still gets a result. `enhanced` is the displayed image; `base` is the new editable canvas.
+      let enhanced!: Float32Array;
+      let base!: Float32Array;
+      let outWidth!: number;
+      let outHeight!: number;
+      let mode: 'ai' | 'standard' = 'standard';
+
+      let usedAi = false;
+      if (await aiUpscaleClient.isAvailable()) {
+        try {
+          store.setUpscaleProgress(0);
+          const ai = await aiUpscaleClient.run(
+            float32ToUint8Rgba(edited),
+            procW,
+            procH,
+            params.scale as 2 | 4,
+            (p) => { if (p.total > 0) store.setUpscaleProgress(p.done / p.total); },
+          );
+          enhanced = uint8ToFloat32Rgba(ai.data);
+          base = new Float32Array(enhanced); // distinct editable canvas (avoid aliasing)
+          outWidth = ai.width;
+          outHeight = ai.height;
+          mode = 'ai';
+          usedAi = true;
+        } catch {
+          usedAi = false; // fall through to the deterministic path below
+        }
+      }
+      if (!usedAi) {
+        store.setUpscaleProgress(null);
+        const r = await enhanceWorkerClient.run(
+          new Float32Array(edited),
+          procW,
+          procH,
+          { ...params, sharpen: true, upscale: true },
+        );
+        enhanced = r.enhanced;
+        base = r.base;
+        outWidth = r.width;
+        outHeight = r.height;
+        mode = 'standard';
+      }
+
+      // Result obtained — now safe to push the restore point and mutate.
+      store.setUpscaleMode(mode);
       this.restoreStack.push({ data: restoreData, width, height, scale: params.scale, editState });
 
       imageProcessingPipeline.resetAllModules();
-      imageService.updateCurrentImageData(r.enhanced, r.width, r.height);
-      imageService.setOriginalImage(r.base, r.width, r.height);
+      imageService.updateCurrentImageData(enhanced, outWidth, outHeight);
+      imageService.setOriginalImage(base, outWidth, outHeight);
       imageService.setBakedUpscale({ scale: params.scale, nativeWidth: procW, nativeHeight: procH });
-      checkpointService.recordLabeled(`Enhanced ×${params.scale}`, this.getRestoreDepth());
+      checkpointService.recordLabeled(`Enhanced ×${params.scale} (${mode === 'ai' ? 'AI' : 'Standard'})`, this.getRestoreDepth());
       store.notifyExternalParamsChange();
       store.triggerReprocessing();
     } finally {
       this.inFlight = false;
       store.setIsProcessing(false);
+      store.setUpscaleProgress(null);
     }
   }
 
