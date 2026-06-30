@@ -43,7 +43,7 @@ try {
 header('ONNXRUNTIME-NODE INFO');
 try {
   line('ort version = ' + require('onnxruntime-node/package.json').version);
-} catch (_) {}
+} catch (_) { /* best-effort diagnostic */ }
 
 // Supported backends (the real evidence for DML availability at runtime).
 header('SUPPORTED BACKENDS (runtime evidence for DirectML)');
@@ -129,7 +129,7 @@ const MODEL_PATH = path.join(__dirname, '..', 'resources', 'models', 'RealESRGAN
     if (im) line('inputMetadata = ' + JSON.stringify(im));
     const om = session.outputMetadata || (session.handler && session.handler.outputMetadata);
     if (om) line('outputMetadata = ' + JSON.stringify(om));
-  } catch (_) {}
+  } catch (_) { /* best-effort diagnostic */ }
 
   // Determine the input spatial dims. Some exports are DYNAMIC (-1) -> we pick 64;
   // some (e.g. the Qualcomm export) are FIXED (e.g. 128) -> we MUST match them.
@@ -145,7 +145,7 @@ const MODEL_PATH = path.join(__dirname, '..', 'resources', 'models', 'RealESRGAN
       line('input spatial dims from metadata: H=' + (Number.isFinite(sh) && sh > 0 ? sh : 'dynamic') +
            ' W=' + (Number.isFinite(sw) && sw > 0 ? sw : 'dynamic') + ' -> using ' + W + 'x' + H);
     }
-  } catch (_) {}
+  } catch (_) { /* best-effort diagnostic */ }
 
   // NCHW float32 0..1 gradient input (RealESRGAN x4plus convention).
   header('INFERENCE ' + W + 'x' + H + ' -> expect ' + (W * 4) + 'x' + (H * 4));

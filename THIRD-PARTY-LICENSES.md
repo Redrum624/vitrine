@@ -5,7 +5,7 @@ Photo Editor Pro bundles the third-party components below. Each is licensed unde
 
 ---
 
-## npm Production Dependencies (15 packages)
+## npm Production Dependencies (17 packages)
 
 Source: `pnpm licenses list --prod` — full transitive production closure.
 
@@ -20,6 +20,8 @@ Source: `pnpm licenses list --prod` — full transitive production closure.
 | exifreader | 4.39.1 | MPL-2.0 | https://github.com/mattiasw/ExifReader#readme |
 | libraw-wasm | 1.1.2 | ISC | https://github.com/ybouane/libraw-wasm |
 | lucide-react | 0.562.0 | ISC | https://lucide.dev |
+| onnxruntime-common | 1.27.0 | MIT | https://github.com/microsoft/onnxruntime |
+| onnxruntime-node | 1.27.0 | MIT | https://github.com/microsoft/onnxruntime |
 | react | 19.2.6 | MIT | https://react.dev/ |
 | react-dom | 19.2.6 | MIT | https://react.dev/ |
 | scheduler | 0.27.0 | MIT | https://react.dev/ |
@@ -50,6 +52,28 @@ with a compatible build. Source for libvips is available at https://github.com/l
 ---
 
 ## Native / Bundled Binaries (not in npm scan)
+
+### Real-ESRGAN x4plus AI model (`resources/models/RealESRGAN_x4plus.onnx`, `…/real_esrgan_x4plus.data`)
+
+- **Use:** AI super-resolution upscale in the Enhance module (run via onnxruntime-node + DirectML).
+- **License:** BSD 3-Clause — **Copyright (c) 2021, Xintao Wang** (the Real-ESRGAN project).
+- **Source:** https://github.com/xinntao/Real-ESRGAN (ONNX export via the Qualcomm AI Hub model
+  `qualcomm/Real-ESRGAN-x4plus`, which inherits the upstream BSD-3-Clause license).
+- **Obligation (BSD-3-Clause):** This binary redistribution reproduces the copyright notice, the
+  list of conditions, and the disclaimer (below). The author's name is not used to endorse or
+  promote this product.
+
+  > Redistribution and use in source and binary forms, with or without modification, are permitted
+  > provided that the following conditions are met: (1) Redistributions of source code must retain
+  > the above copyright notice, this list of conditions and the following disclaimer. (2)
+  > Redistributions in binary form must reproduce the above copyright notice, this list of
+  > conditions and the following disclaimer in the documentation and/or other materials provided
+  > with the distribution. (3) Neither the name of the copyright holder nor the names of its
+  > contributors may be used to endorse or promote products derived from this software without
+  > specific prior written permission. THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND
+  > CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES ARE DISCLAIMED. IN NO EVENT SHALL
+  > THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DAMAGES ARISING IN ANY WAY OUT OF THE
+  > USE OF THIS SOFTWARE.
 
 ### LibRaw (`vendor/libraw/dcraw_emu.exe`, `vendor/libraw/libraw.dll`)
 
