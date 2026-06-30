@@ -177,6 +177,11 @@ cache/
 processed/
 temp-images/
 
+# Bundled AI model weights — too large for git (~64MB); kept locally and bundled into the
+# installer via electron-builder extraResources. See resources/models/README.md to obtain them.
+resources/models/*.onnx
+resources/models/*.data
+
 # Test files and coverage
 test-results/
 coverage/
