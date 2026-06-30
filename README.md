@@ -134,7 +134,14 @@ npm run test:e2e     # Playwright end-to-end tests
 
 ## 📄 License
 
-MIT.
+**Source-available, non-commercial.** Photo Editor Pro is licensed under the
+[PolyForm Noncommercial License 1.0.0](LICENSE) — free to use, modify, and share for
+non-commercial purposes. Commercial use of this project or its derivatives is not permitted.
+This is **not** an OSI-approved open-source license.
+
+Bundled third-party components (npm packages, LibRaw, libvips, Electron/Chromium) retain their
+own licenses and are unaffected by the project license. See [THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md)
+for the full attribution list and per-license obligations.
 
 ## 🙏 Acknowledgments
 
