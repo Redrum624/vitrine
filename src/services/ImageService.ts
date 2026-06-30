@@ -21,6 +21,12 @@ export interface ImageData {
   autoAdjustmentResult?: RAWDetectionResult;
 }
 
+export interface BakedUpscaleInfo {
+  scale: number;
+  nativeWidth: number;
+  nativeHeight: number;
+}
+
 export class ImageService {
   private static instance: ImageService;
   private currentImage: ImageData | null = null;
@@ -28,6 +34,7 @@ export class ImageService {
   private imageLoadListeners: (() => void)[] = [];
   private processingPipeline: ImageProcessingPipeline | null = null;
   private loadGeneration = 0;
+  private bakedUpscale: BakedUpscaleInfo | null = null;
 
   static getInstance(): ImageService {
     if (!ImageService.instance) {
@@ -90,6 +97,7 @@ export class ImageService {
 
   async loadImage(filePath: string): Promise<ImageData> {
     const thisGeneration = ++this.loadGeneration;
+    this.bakedUpscale = null; // Clear baked marker on any fresh image load
 
     const result = await errorHandlingService.withErrorHandling(
       async () => {
@@ -484,6 +492,35 @@ export class ImageService {
   clearImage(): void {
     this.currentImage = null;
     logger.info('Image cleared');
+  }
+
+  /**
+   * Mark the current working image as a baked upscale result.
+   * Stores scale factor and the native (pre-upscale) dimensions.
+   */
+  setBakedUpscale(info: BakedUpscaleInfo): void {
+    this.bakedUpscale = info;
+  }
+
+  /**
+   * Clear the baked upscale marker.
+   */
+  clearBakedUpscale(): void {
+    this.bakedUpscale = null;
+  }
+
+  /**
+   * Check if the current working image is a baked upscale result.
+   */
+  isBakedUpscaleActive(): boolean {
+    return this.bakedUpscale !== null;
+  }
+
+  /**
+   * Retrieve the baked upscale info (scale + native dimensions).
+   */
+  getBakedUpscale(): BakedUpscaleInfo | null {
+    return this.bakedUpscale;
   }
 }
 
