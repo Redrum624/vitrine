@@ -4,6 +4,11 @@ All notable changes to **Photo Editor Pro** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.9.2] - 2026-06-30
+
+### Fixed
+- **Upscale no longer blocks normal photos.** A ~20 MP image at ×2 (≈81 MP output) was rejected by an over-conservative memory guard. Raised the cap from 40 MP to 160 MP — covering ×2 of cameras up to ~40 MP — while still blocking the genuinely dangerous cases (e.g. ×4 of a 20 MP image ≈ 22 GB). The error message now reports the size in megapixels. Affects: `src/services/EnhanceService.ts`.
+
 ## [1.9.1] - 2026-06-30
 
 ### Fixed
