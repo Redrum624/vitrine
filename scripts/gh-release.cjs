@@ -52,7 +52,6 @@ console.log(`[gh-release] Targeting release ${TAG}`);
 // ---------------------------------------------------------------------------
 const CANDIDATES = [
   `Photo Editor Pro Setup ${VERSION}.exe`,
-  `Photo Editor Pro ${VERSION}.exe`,
   `Photo Editor Pro ${VERSION} README.txt`,
   'LICENSE',
   'THIRD-PARTY-LICENSES.md',

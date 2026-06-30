@@ -164,6 +164,7 @@ tramp
 # Electron-specific
 dist-electron/
 release/
+installer/
 
 # LibRaw and native binaries
 *.so
