@@ -12,7 +12,7 @@ describe('EditPersistenceService – Baked upscale guard', () => {
   beforeEach(() => {
     // Mock window.electronAPI.storeSet
     storeSetMock = jest.fn();
-    (window as any).electronAPI = {
+    (window as unknown as { electronAPI: unknown }).electronAPI = {
       storeSet: storeSetMock,
       storeGet: jest.fn(),
     };
@@ -24,7 +24,7 @@ describe('EditPersistenceService – Baked upscale guard', () => {
       width: 100,
       height: 100,
       bitDepth: 8,
-    } as any);
+    } as unknown as ReturnType<typeof imageService.getCurrentImage>);
     mockImageService.isBakedUpscaleActive.mockReturnValue(false);
   });
 
