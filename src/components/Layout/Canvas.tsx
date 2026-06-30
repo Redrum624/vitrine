@@ -228,7 +228,11 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
 
     let canvasWidth, canvasHeight;
 
-    if (currentImageData && displayImage) {
+    // Sizing only needs currentImageData (the loaded pixels). displayImage is NOT required
+    // here — when a file is opened via IPC (electron-file-open) imageService has the data
+    // before Canvas.loadImage() runs and sets displayImage. Using displayImage as a guard
+    // caused the fit-rect to fall back to container size, stretching landscape images.
+    if (currentImageData) {
       // CRITICAL FIX: Set canvas internal resolution to match the data we're actually drawing
       // This prevents browser from stretching the image
       let dataWidth = currentImageData.width;
@@ -791,7 +795,7 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
       // split (always -1) and let the pristine OriginalPane be the single source of truth.
       splitX: -1,
     });
-  }, [renderMode, gpuResultVersion, viewport, showOriginal]);
+  }, [renderMode, gpuResultVersion, viewport, showOriginal, canvasDimensions]);
 
   // Re-present after the window regains visibility/focus. Even with preserveDrawingBuffer
   // the compositor can drop the GL canvas's contents on some minimize/restore paths; the
@@ -1029,6 +1033,12 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
                 position: 'absolute',
                 top: 0,
                 left: 0,
+                // Declarative CSS size mirrors canvasDimensions (the aspect-correct fit-rect)
+                // so the GL canvas is always the right shape even before the imperative
+                // glCanvas.style.width/height in redrawCanvas() runs. This eliminates the
+                // timing gap on first GPU frame (landscape-from-start stretch, symptom A).
+                width: canvasDimensions.width > 0 ? `${canvasDimensions.width}px` : undefined,
+                height: canvasDimensions.height > 0 ? `${canvasDimensions.height}px` : undefined,
                 display: renderMode === 'gpu' && glAvailable ? 'block' : 'none'
               }}
             />
