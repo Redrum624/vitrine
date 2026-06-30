@@ -53,6 +53,13 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
   const [isCropHandleDragging, setIsCropHandleDragging] = useState(false);
   const [hasPendingCropChanges, setHasPendingCropChanges] = useState(false);
   const prevShowCropOverlay = useRef(showCropOverlay);
+  // Refs to let the wheel handler read current state without stale closure
+  const viewportRef = useRef(viewport);
+  const isCropHandleDraggingRef = useRef(isCropHandleDragging);
+  // Keep refs in sync with state so wheel handler never reads stale values
+  viewportRef.current = viewport;
+  isCropHandleDraggingRef.current = isCropHandleDragging;
+
   // Local state for crop params during dragging (for real-time visual feedback)
   const [liveCropParams, setLiveCropParams] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
 
@@ -949,24 +956,35 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
     setIsDragging(false);
   };
 
-  const handleWheel = (e: React.WheelEvent) => {
-    e.preventDefault();
+  // Attach wheel as a non-passive native listener so e.preventDefault() is honoured.
+  // React's onWheel is passive in modern browsers, which silently ignores preventDefault
+  // and produces "Unable to preventDefault inside passive event listener" warnings.
+  // Reads viewport and isCropHandleDragging via refs to avoid stale closures without
+  // re-binding the listener on every state change.
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
 
-    // Don't zoom when crop handles are being used
-    if (isCropHandleDragging) {
-      return;
-    }
+      // Don't zoom when crop handles are being used
+      if (isCropHandleDraggingRef.current) {
+        return;
+      }
 
-    const delta = e.deltaY > 0 ? -0.1 : 0.1;
-    const newZoom = Math.max(0.1, Math.min(5, viewport.zoom + delta));
+      const delta = e.deltaY > 0 ? -0.1 : 0.1;
+      const newZoom = Math.max(0.1, Math.min(5, viewportRef.current.zoom + delta));
 
-    // Reset pan to center when zooming out to fit or less
-    if (newZoom <= 1.0) {
-      setViewport({ zoom: newZoom, panX: 0, panY: 0 });
-    } else {
-      setViewport({ zoom: newZoom });
-    }
-  };
+      // Reset pan to center when zooming out to fit or less
+      if (newZoom <= 1.0) {
+        setViewport({ zoom: newZoom, panX: 0, panY: 0 });
+      } else {
+        setViewport({ zoom: newZoom });
+      }
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [setViewport]);
 
   return (
     <div className="h-full bg-dark-900">
@@ -978,7 +996,6 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
-        onWheel={handleWheel}
       >
         {/* Aspect ratio preserving canvas container */}
         <div className="flex items-center justify-center w-full h-full">
