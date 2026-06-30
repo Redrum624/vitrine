@@ -709,6 +709,11 @@ export class GpuPreviewPipeline {
     return webGLImageProcessor.computeDehazeState(this.srcData, this.width, this.height, this.dehazeParam);
   }
 
+  /** Current render dimensions (set by setSource; 0 before first setSource call). */
+  getSize(): { width: number; height: number } {
+    return { width: this.width, height: this.height };
+  }
+
   /** Read back resultTexture once as RGBA Float32. Call after render(). */
   readback(): Float32Array {
     const gl = this.gl;

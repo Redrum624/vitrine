@@ -1,6 +1,7 @@
-import { useMemo, useEffect, useState } from 'react';
+import { useMemo, useEffect, useRef, useState } from 'react';
 import { imageService } from '../../services/ImageService';
 import { useAppStore } from '../../stores/appStore';
+import { gpuPreviewPipeline } from '../../shaders/GpuPreviewPipeline';
 
 interface HistogramData {
   red: number[];
@@ -40,48 +41,81 @@ const computeHistogram = (imageData: Float32Array, width: number, height: number
 };
 
 export function HistogramPanel() {
-  const { processedImageData } = useAppStore();
+  const { processedImageData, gpuResultVersion, renderMode } = useAppStore();
   const [histogram, setHistogram] = useState<HistogramData>({
     red: new Array(256).fill(0),
     green: new Array(256).fill(0),
     blue: new Array(256).fill(0),
     luminance: new Array(256).fill(0)
   });
+  const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Compute histogram from processed image or current image
+  // Compute histogram from processed image or current image.
+  // In GPU mode we read back the result texture directly so the histogram
+  // reflects the live edit independent of the laggy shared CPU readback.
   useEffect(() => {
     const computeFromImage = () => {
-      // Use processed image if available, otherwise use current image
+      if (renderMode === 'gpu') {
+        try {
+          const pixels = gpuPreviewPipeline.readback();
+          const { width, height } = gpuPreviewPipeline.getSize();
+          if (pixels && width > 0 && height > 0) {
+            setHistogram(computeHistogram(pixels, width, height));
+            return;
+          }
+        } catch {
+          // GPU not ready — fall through to CPU path below
+        }
+      }
+
+      // CPU mode (or GPU fallback)
       if (processedImageData && typeof processedImageData === 'object' && 'data' in processedImageData) {
-        // ProcessedImageData type
-        const newHistogram = computeHistogram(
+        setHistogram(computeHistogram(
           processedImageData.data,
           processedImageData.width,
           processedImageData.height
-        );
-        setHistogram(newHistogram);
+        ));
       } else {
         const currentImage = imageService.getCurrentImage();
         if (currentImage) {
-          const newHistogram = computeHistogram(
+          setHistogram(computeHistogram(
             currentImage.data,
             currentImage.width,
             currentImage.height
-          );
-          setHistogram(newHistogram);
+          ));
         }
       }
     };
 
-    computeFromImage();
+    // Debounce GPU readbacks so a fast slider drag doesn't force a readback every frame.
+    // CPU mode is cheap enough to run immediately (no extra readPixels call).
+    const scheduleCompute = () => {
+      if (debounceTimer.current !== null) clearTimeout(debounceTimer.current);
+      if (renderMode === 'gpu') {
+        debounceTimer.current = setTimeout(() => {
+          debounceTimer.current = null;
+          computeFromImage();
+        }, 120);
+      } else {
+        computeFromImage();
+      }
+    };
 
-    // Listen for image changes
+    scheduleCompute();
+
+    // Listen for image load/switch events
     const cleanup = imageService.addImageLoadListener(() => {
-      computeFromImage();
+      scheduleCompute();
     });
 
-    return cleanup;
-  }, [processedImageData]);
+    return () => {
+      cleanup();
+      if (debounceTimer.current !== null) {
+        clearTimeout(debounceTimer.current);
+        debounceTimer.current = null;
+      }
+    };
+  }, [processedImageData, gpuResultVersion, renderMode]);
 
   const maxValue = Math.max(...histogram.luminance);
 
