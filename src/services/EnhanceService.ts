@@ -112,8 +112,9 @@ class EnhanceService {
    * Consumed by CheckpointService (Task 6) when a history restore crosses an upscale boundary.
    */
   unwindToDepth(depth: number): void {
+    const target = Math.max(0, Math.min(depth, this.restoreStack.length));
     let changed = false;
-    while (this.restoreStack.length > depth) {
+    while (this.restoreStack.length > target) {
       this._popAndRestore();
       changed = true;
     }

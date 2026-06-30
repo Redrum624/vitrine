@@ -1,6 +1,7 @@
+let curOrig = { data: new Float32Array(4*4*4), width: 4, height: 4 };
 jest.mock('../services/ImageService', () => ({ imageService: {
-  getOriginalImage: jest.fn(() => ({ data: new Float32Array(4*4*4), width: 4, height: 4 })),
-  updateCurrentImageData: jest.fn(), setOriginalImage: jest.fn(),
+  getOriginalImage: jest.fn(() => curOrig),
+  updateCurrentImageData: jest.fn(), setOriginalImage: jest.fn((data, width, height) => { curOrig = { data, width, height }; }),
   setBakedUpscale: jest.fn(), clearBakedUpscale: jest.fn(),
 } }));
 jest.mock('../services/ImageProcessingPipeline', () => ({ imageProcessingPipeline: {
@@ -24,6 +25,7 @@ import { DEFAULT_ENHANCE_PARAMS } from '../utils/enhanceChain';
 beforeEach(() => {
   while (enhanceService.canRevert()) enhanceService.revert();
   jest.clearAllMocks();
+  curOrig = { data: new Float32Array(4*4*4), width: 4, height: 4 };
 });
 
 describe('EnhanceService.applyUpscale', () => {
@@ -90,7 +92,7 @@ describe('EnhanceService — two successive upscales then two reverts', () => {
     // First revert: pops top level — baked marker must be updated (not cleared)
     jest.clearAllMocks();
     enhanceService.revert();
-    expect(imageService.updateCurrentImageData).toHaveBeenCalledWith(expect.any(Float32Array), 4, 4);
+    expect(imageService.updateCurrentImageData).toHaveBeenCalledWith(expect.any(Float32Array), 8, 8);
     expect(imageService.clearBakedUpscale).not.toHaveBeenCalled();
     expect(imageService.setBakedUpscale).toHaveBeenCalled(); // marker updated to remaining level
     expect(enhanceService.getRestoreDepth()).toBe(1);
