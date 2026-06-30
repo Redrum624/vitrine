@@ -4,6 +4,17 @@ All notable changes to **Photo Editor Pro** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.9.1] - 2026-06-30
+
+### Fixed
+- **Histogram now reflects live edits.** Cause: it read a CPU buffer only refreshed by a delayed GPU→CPU readback, so in GPU mode it kept showing the original. Fix: it now recomputes on each GPU result (`gpuResultVersion`) via a throttled fresh readback. Affects: `src/components/Panels/HistogramPanel.tsx`.
+- **Image aspect ratio preserved.** Landscape images no longer stretch on load, and the image keeps its ratio when the right panel is closed. Cause: the fit-rect fell back to container size before the image fully loaded, and the GPU present didn't re-run on container resize. Affects: `src/components/Layout/Canvas.tsx`.
+
+### Changed
+- **Removed fabricated "CUDA / RTX / Tensor / VRAM" acceleration services and logs.** They performed no real work (the genuine acceleration is the WebGL2 pipeline); the fake startup claims and ~3,800 lines of unused scaffolding are gone.
+- **Security hardening:** tightened CSP (`script-src` no longer allows inline scripts), pinned navigation (`will-navigate`), added an `openExternal` scheme allowlist, enabled `sandbox`, and added write-path validation on file IPC handlers.
+- **Licensing & repo hygiene for public release:** PolyForm Noncommercial license + complete third-party attribution; build toolchain moved out of shipped dependencies; removed fabricated performance docs and personal paths.
+
 ## [1.9.0] - 2026-06-30
 
 ### Added
