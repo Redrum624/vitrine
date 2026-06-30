@@ -6,21 +6,26 @@ import { editPersistenceService } from './EditPersistenceService';
 import { useAppStore } from '../stores/appStore';
 import { EnhanceParams } from '../utils/enhanceChain';
 
-const MAX_OUTPUT_PIXELS = 80_000_000;
+const MAX_OUTPUT_PIXELS = 40_000_000;
 
 interface RestorePoint {
   data: Float32Array;
   width: number;
   height: number;
+  scale: number;
   editState: ReturnType<typeof editPersistenceService.serialize>;
 }
 
 class EnhanceService {
-  private restorePoint: RestorePoint | null = null;
+  private restoreStack: RestorePoint[] = [];
   private inFlight = false;
 
   canRevert(): boolean {
-    return this.restorePoint !== null;
+    return this.restoreStack.length > 0;
+  }
+
+  getRestoreDepth(): number {
+    return this.restoreStack.length;
   }
 
   async applyUpscale(params: EnhanceParams): Promise<void> {
@@ -56,12 +61,13 @@ class EnhanceService {
         height,
         { ...params, sharpen: true, upscale: true },
       );
-      // Worker succeeded — now safe to commit the restore point and mutate.
-      this.restorePoint = { data: restoreData, width, height, editState };
+      // Worker succeeded — now safe to push the restore point and mutate.
+      this.restoreStack.push({ data: restoreData, width, height, scale: params.scale, editState });
 
       imageProcessingPipeline.resetAllModules();
       imageService.updateCurrentImageData(r.enhanced, r.width, r.height);
       imageService.setOriginalImage(r.base, r.width, r.height);
+      imageService.setBakedUpscale({ scale: params.scale, nativeWidth: width, nativeHeight: height });
       checkpointService.record(`Enhanced ×${params.scale}`);
       store.notifyExternalParamsChange();
       store.triggerReprocessing();
@@ -71,19 +77,51 @@ class EnhanceService {
     }
   }
 
-  revert(): void {
-    const rp = this.restorePoint;
-    if (!rp) return;
+  /** Pop the top restore point and apply it. Returns false if the stack was empty. */
+  private _popAndRestore(): boolean {
+    const rp = this.restoreStack.pop();
+    if (!rp) return false;
 
     imageProcessingPipeline.resetAllModules();
     imageService.updateCurrentImageData(new Float32Array(rp.data), rp.width, rp.height);
     imageService.setOriginalImage(new Float32Array(rp.data), rp.width, rp.height);
     editPersistenceService.restore(rp.editState, rp.width, rp.height);
-    this.restorePoint = null;
+
+    if (this.restoreStack.length === 0) {
+      imageService.clearBakedUpscale();
+    } else {
+      // Update the baked marker to reflect the now-current (remaining) top level.
+      // Each RestorePoint stores the pre-bake dims and scale for the upscale it captured,
+      // so the remaining top describes the active baked level after this pop.
+      const top = this.restoreStack[this.restoreStack.length - 1];
+      imageService.setBakedUpscale({ scale: top.scale, nativeWidth: top.width, nativeHeight: top.height });
+    }
+    return true;
+  }
+
+  revert(): void {
+    if (!this._popAndRestore()) return;
 
     const store = useAppStore.getState();
     store.notifyExternalParamsChange();
     store.triggerReprocessing();
+  }
+
+  /**
+   * Unwind the restore stack to the given depth, restoring image + edit state at each level.
+   * Consumed by CheckpointService (Task 6) when a history restore crosses an upscale boundary.
+   */
+  unwindToDepth(depth: number): void {
+    let changed = false;
+    while (this.restoreStack.length > depth) {
+      this._popAndRestore();
+      changed = true;
+    }
+    if (changed) {
+      const store = useAppStore.getState();
+      store.notifyExternalParamsChange();
+      store.triggerReprocessing();
+    }
   }
 }
 
