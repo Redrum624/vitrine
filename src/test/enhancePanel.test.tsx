@@ -10,6 +10,7 @@ import { NoiseReductionModule } from '../modules/NoiseReductionModule';
 
 function makeNrModule() {
   const m = new NoiseReductionModule();
+  jest.spyOn(m, 'setParams');
   return m;
 }
 
@@ -37,24 +38,27 @@ describe('EnhanceModuleComponent', () => {
     expect(enhanceService.applyUpscale).toHaveBeenCalledWith(expect.objectContaining({ upscale: true }));
   });
 
-  it('toggling NR on then Apply calls onNoiseReductionChange with enabled:true', async () => {
+  it('toggling NR on then Apply calls noiseReductionModule.setParams and onNoiseReductionChange with enabled:true', async () => {
     const onNR = jest.fn();
-    render(<EnhanceModuleComponent module={enhanceModule} noiseReductionModule={makeNrModule()} onNoiseReductionChange={onNR} />);
+    const nrMod = makeNrModule();
+    render(<EnhanceModuleComponent module={enhanceModule} noiseReductionModule={nrMod} onNoiseReductionChange={onNR} />);
     // NR starts disabled (NoiseReductionModule default enabled:false)
     fireEvent.click(screen.getByRole('button', { name: /noise.?reduction/i }));
     // Now NR is on; click Apply
     fireEvent.click(screen.getByText('Apply Enhance'));
-    expect(onNR).toHaveBeenCalledWith(expect.objectContaining({ enabled: true }));
+    expect(nrMod.setParams).toHaveBeenCalledWith({ enabled: true, strength: expect.any(Number), method: 'auto' });
+    expect(onNR).toHaveBeenCalledWith({ enabled: true, strength: expect.any(Number), method: 'auto' });
   });
 
-  it('NR off: Apply calls onNoiseReductionChange with enabled:false', async () => {
+  it('NR off: Apply calls noiseReductionModule.setParams with enabled:false and onNoiseReductionChange with enabled:false', async () => {
     const onNR = jest.fn();
     const nrMod = makeNrModule();
-    nrMod.setParams({ enabled: false });
+    // NR module defaults to enabled:false — no setup call needed
     render(<EnhanceModuleComponent module={enhanceModule} noiseReductionModule={nrMod} onNoiseReductionChange={onNR} />);
     // NR starts off; don't toggle; click Apply
     fireEvent.click(screen.getByText('Apply Enhance'));
-    expect(onNR).toHaveBeenCalledWith(expect.objectContaining({ enabled: false }));
+    expect(nrMod.setParams).toHaveBeenCalledWith({ enabled: false });
+    expect(onNR).toHaveBeenCalledWith({ enabled: false });
   });
 
   it('Detail & quality section is collapsed by default and shows sliders when expanded', () => {

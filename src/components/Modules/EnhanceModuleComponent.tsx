@@ -33,6 +33,7 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
     update({
       sharpness: DEFAULT_ENHANCE_PARAMS.sharpness,
       alpha: DEFAULT_ENHANCE_PARAMS.alpha,
+      hpSigma: DEFAULT_ENHANCE_PARAMS.hpSigma,
       psfSigma: DEFAULT_ENHANCE_PARAMS.psfSigma,
       rlIters: DEFAULT_ENHANCE_PARAMS.rlIters,
       chromaClean: DEFAULT_ENHANCE_PARAMS.chromaClean,
@@ -43,9 +44,13 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
     setBusy(true); setError(null);
     try {
       if (nrEnabled) {
-        onNoiseReductionChange?.({ enabled: true, strength: nrStrength, method: 'auto' });
+        const nrParams = { enabled: true, strength: nrStrength, method: 'auto' as const };
+        noiseReductionModule.setParams(nrParams);
+        onNoiseReductionChange?.(nrParams);
       } else {
-        onNoiseReductionChange?.({ enabled: false });
+        const nrParams = { enabled: false };
+        noiseReductionModule.setParams(nrParams);
+        onNoiseReductionChange?.(nrParams);
       }
       if (paramsRef.current.upscale) {
         await enhanceService.applyUpscale({ ...paramsRef.current, upscale: true });
