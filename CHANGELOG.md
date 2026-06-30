@@ -4,6 +4,11 @@ All notable changes to **Photo Editor Pro** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.10.0] - 2026-06-30
+
+### Added
+- **AI super-resolution upscale (Real-ESRGAN x4plus).** The Enhance → Upscale path now auto-routes to a GPU AI upscaler when a DirectML-capable GPU is available, producing far sharper, more detailed enlargements than the deterministic Lanczos path; it falls back to the deterministic path (and on any AI failure mid-run) otherwise. Why: the deterministic upscale was inherently soft and slow. How to use: open **Enhance → Upscale**, pick ×2/×4, **Apply Enhance** — a determinate "Enhancing… NN%" and an **AI**/**Standard** badge show which path ran; History records `Enhanced ×N (AI|Standard)`. Inference runs in the Electron main process (onnxruntime-node + DirectML) over tiled 128×128 windows with feathered seam blending; the ×4 model serves ×2 by downscaling each tile before compositing (bounded memory). The model (`RealESRGAN_x4plus.onnx`, BSD-3-Clause © 2021 Xintao Wang) is bundled. Affects: `electron/aiUpscaler.cjs`, `src/utils/tilePlan.ts`, `src/services/AiUpscaleClient.ts`, `src/services/EnhanceService.ts`, `src/components/Modules/EnhanceModuleComponent.tsx`, IPC in `electron/main.cjs`/`preload.cjs`, packaging in `package.json`.
+
 ## [1.9.2] - 2026-06-30
 
 ### Fixed

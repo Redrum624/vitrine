@@ -1,8 +1,8 @@
 # Photo Editor Pro
 
-![Version](https://img.shields.io/badge/Version-1.9.2-blue)
+![Version](https://img.shields.io/badge/Version-1.10.0-blue)
 ![TypeScript](https://img.shields.io/badge/TypeScript-0_errors-blue)
-![Tests](https://img.shields.io/badge/Tests-1087_passing-brightgreen)
+![Tests](https://img.shields.io/badge/Tests-1111_passing-brightgreen)
 ![Lint](https://img.shields.io/badge/Lint-clean-brightgreen)
 ![GPU](https://img.shields.io/badge/GPU-WebGL2_accelerated-success)
 
@@ -49,7 +49,7 @@ The app opens automatically once the Vite dev server is ready (port 3005).
 
 ```bash
 npm run build:win       # clean dist + release -> tsc + vite build -> NSIS installer + portable (x64)
-# Output: release/Photo Editor Pro Setup 1.9.0.exe  and  release/Photo Editor Pro 1.9.0.exe
+# Output: release/Photo Editor Pro Setup 1.10.0.exe  and  release/Photo Editor Pro 1.10.0.exe
 npm run build:win:dir   # fast unpacked build (no installer, quick iteration)
 npm run dist            # electron-builder for the current platform
 ```
@@ -66,7 +66,7 @@ written there beside the installer for offline reference.
 - **White Balance** — temperature and tint sliders with one-click median gray-world auto-neutralisation.
 - **Color Balance** — per-channel hue shifts in shadows, midtones, and highlights.
 - **Tone Curve** — master and per-channel RGB curves with auto-levels.
-- **Enhance** — Noise Reduction (GPU Non-Local-Means), Sharpening (FidelityFX CAS + Richardson–Lucy deblur), and ×2/×4 Lanczos upscale in a single panel; one **Apply Enhance** button drives all three.
+- **Enhance** — Noise Reduction (GPU Non-Local-Means), Sharpening (FidelityFX CAS + Richardson–Lucy deblur), and ×2/×4 upscale (AI super-resolution on GPU, else Lanczos) in a single panel; one **Apply Enhance** button drives all three.
 - **Lens Corrections** — Distortion, Vignetting, Chromatic Aberration, creative Blur, and Film Grain in collapsible accordion sections.
 - **History** — per-image checkpoint timeline; click any checkpoint to restore that state; persists across sessions separately from Ctrl+Z undo.
 - **Histogram** — live RGB and luminosity tone-distribution display.
@@ -76,6 +76,7 @@ written there beside the installer for offline reference.
 
 - **RAW processing** — native LibRaw (`dcraw_emu`) Bayer demosaic in the Electron main process for 15+ formats (CR2/CR3, NEF, ARW, ORF, DNG, RW2, PEF, …); `libraw-wasm` and embedded-JPEG fallbacks ensure every RAW opens.
 - **GPU-accelerated preview** — resident-texture WebGL2 pipeline: image uploaded to the GPU once, all modules run as fragment-shader passes with zero GPU→CPU readback; CPU/Web-Worker fallback runs off the main thread when WebGL2 is unavailable.
+- **AI super-resolution upscale** — Real-ESRGAN x4plus (onnxruntime-node + DirectML) runs in the main process for sharper ×2/×4 enlargements when a GPU is available, with tiled bounded-memory inference, live progress, an AI/Standard badge, and automatic fallback to the deterministic Lanczos path.
 - **Export** — JPEG, PNG, TIFF, or WebP in 8-bit or 16-bit; sRGB or wide-gamut (Adobe RGB, ProPhoto, Rec.2020) with generated ICC profiles; EXIF/XMP metadata embedded; Enhance output (sharpen/upscale) baked in automatically.
 - **Multi-export** — select any number of filmstrip photos (Ctrl/Shift+click) and export them all with one settings pass, each using its own saved edits, into a chosen folder with auto-suffixed filenames.
 - **Batch processing** — apply a fixed adjustment preset to a folder of images in one operation.
@@ -101,7 +102,8 @@ written there beside the installer for offline reference.
 - **Styling**: Tailwind CSS 4
 - **Processing**: resident-texture WebGL2 GPU pipeline (zero-readback, presents to
   canvas) with a CPU fallback that runs in a Web Worker; native LibRaw (`dcraw_emu`) and
-  `libraw-wasm` for RAW; **sharp** for export resize + encode/ICC/metadata
+  `libraw-wasm` for RAW; **sharp** for export resize + encode/ICC/metadata;
+  **onnxruntime-node** + DirectML for AI super-resolution (Real-ESRGAN x4plus) in the main process
 - **Build**: Vite + `tsc` + ESLint; packaging via electron-builder
 
 ### Core services
