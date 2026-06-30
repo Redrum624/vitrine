@@ -743,12 +743,14 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
         )}
 
         {/* Enhance Module */}
-        {enhanceModuleInstance && selectedModule === 'enhance' && (
+        {enhanceModuleInstance && noiseReductionModule && selectedModule === 'enhance' && (
           <div className="px-5 pt-4">
             <EnhanceModuleComponent
               key={`enhance-${paramSync}`}
               module={enhanceModuleInstance}
+              noiseReductionModule={noiseReductionModule}
               onParamsChange={(params) => handleModuleParamsChange('enhance', params)}
+              onNoiseReductionChange={(p) => handleModuleParamsChange('noise-reduction', p)}
             />
           </div>
         )}

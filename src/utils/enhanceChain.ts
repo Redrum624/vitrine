@@ -11,7 +11,7 @@ export interface EnhanceParams {
 }
 export const DEFAULT_ENHANCE_PARAMS: EnhanceParams = {
   enabled: false, sharpen: true, upscale: false, scale: 2,
-  denoiseStrength: 3, psfSigma: 1.0, rlIters: 12,
+  denoiseStrength: 0, psfSigma: 1.0, rlIters: 12,
   alpha: 0.8, hpSigma: 1.2, sharpness: 0.4, chromaClean: true,
 };
 export interface EnhanceResult { enhanced: Float32Array; base: Float32Array; width: number; height: number; }
