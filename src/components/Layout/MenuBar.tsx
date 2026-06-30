@@ -42,6 +42,21 @@ interface MenuBarProps {
   hasImage?: boolean;
 }
 
+interface AppInfo {
+  name: string;
+  version: string;
+  description: string;
+  author: string;
+  license: string;
+  repository: string;
+  electron: string;
+  chrome: string;
+  node: string;
+  v8: string;
+  platform: string;
+  arch: string;
+}
+
 export function MenuBar({
   onFileOpen,
   onFileImport,
@@ -81,6 +96,8 @@ export function MenuBar({
 }: MenuBarProps) {
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
   const [isMaximized, setIsMaximized] = useState(false);
+  const [aboutOpen, setAboutOpen] = useState(false);
+  const [appInfo, setAppInfo] = useState<AppInfo | null>(null);
 
   // Check if window is maximized on mount and update state
   useEffect(() => {
@@ -120,7 +137,24 @@ export function MenuBar({
     setActiveMenu(null);
   };
 
+  const openAbout = async () => {
+    setActiveMenu(null);
+    setAboutOpen(true);
+    if (!appInfo && window.electronAPI?.getAppInfo) {
+      try {
+        setAppInfo(await window.electronAPI.getAppInfo());
+      } catch {
+        // leave appInfo null; the dialog shows what it can
+      }
+    }
+  };
+
+  const openExternal = (url: string) => {
+    window.electronAPI?.openExternalUrl?.(url);
+  };
+
   return (
+    <>
     <div
       className="flex items-center h-9 border-b bg-black relative z-50"
       style={{
@@ -458,6 +492,43 @@ export function MenuBar({
           </div>
         )}
       </div>
+
+      {/* Help Menu ("?") */}
+      <div className="relative">
+        <button
+          aria-label="Help"
+          className="bg-transparent border-0 cursor-pointer text-dark-200 hover:text-white"
+          style={{padding: '8px 14px', fontSize: '12px', transition: 'var(--transition-fast)', backgroundColor: activeMenu === 'help' ? 'var(--gray-850)' : 'transparent'}}
+          onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'var(--gray-850)'}
+          onMouseLeave={(e) => e.currentTarget.style.backgroundColor = activeMenu === 'help' ? 'var(--gray-850)' : 'transparent'}
+          onClick={() => handleMenuClick('help')}
+        >
+          ?
+        </button>
+        {activeMenu === 'help' && (
+          <div className="absolute top-full left-0 mt-0.5 border min-w-[180px] py-1 z-50" style={{backgroundColor: 'var(--gray-800)', borderColor: 'var(--border)', boxShadow: 'var(--shadow-lg)', borderRadius: '0'}}>
+            <button
+              className="w-full text-left px-4 py-1.5 text-xs text-dark-200 hover:bg-dark-700 bg-transparent border-0 cursor-pointer"
+              onClick={() => handleMenuItemClick(onWindowHelp)}
+            >
+              Keyboard Shortcuts <span className="float-right text-dark-400">F1</span>
+            </button>
+            <button
+              className="w-full text-left px-4 py-1.5 text-xs text-dark-200 hover:bg-dark-700 bg-transparent border-0 cursor-pointer"
+              onClick={() => openExternal('https://github.com/Redrum624/photo_app')}
+            >
+              View on GitHub
+            </button>
+            <div className="h-px bg-dark-700 my-1"></div>
+            <button
+              className="w-full text-left px-4 py-1.5 text-xs text-dark-200 hover:bg-dark-700 bg-transparent border-0 cursor-pointer"
+              onClick={openAbout}
+            >
+              About Photo Editor Pro
+            </button>
+          </div>
+        )}
+      </div>
       </div>
 
       {/* Spacer to push window controls to the right */}
@@ -494,5 +565,113 @@ export function MenuBar({
         </button>
       </div>
     </div>
+
+    {/* About dialog */}
+    {aboutOpen && (
+      <div
+        className="fixed inset-0 z-[1000] flex items-center justify-center"
+        style={{
+          backgroundColor: 'rgba(0,0,0,0.6)',
+          // @ts-expect-error - WebkitAppRegion is a non-standard CSS property for Electron
+          WebkitAppRegion: 'no-drag',
+        }}
+        onClick={() => setAboutOpen(false)}
+      >
+        <div
+          role="dialog"
+          aria-label="About Photo Editor Pro"
+          className="relative border"
+          style={{
+            width: 460, maxWidth: '92vw', backgroundColor: 'var(--gray-900)', borderColor: 'var(--border)',
+            borderRadius: 12, boxShadow: 'var(--shadow-lg)', padding: '22px 24px', color: 'var(--gray-200)',
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            aria-label="Close"
+            onClick={() => setAboutOpen(false)}
+            className="absolute bg-transparent border-0 cursor-pointer text-dark-400 hover:text-white"
+            style={{ top: 12, right: 12, padding: 4 }}
+          >
+            <X size={16} />
+          </button>
+
+          {/* Header: logo + name + version */}
+          <div className="flex items-center" style={{ gap: 14, marginBottom: 16 }}>
+            <svg viewBox="0 0 256 256" width="44" height="44">
+              <defs>
+                <linearGradient id="aboutBgGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" style={{ stopColor: '#1a1a1a' }} />
+                  <stop offset="100%" style={{ stopColor: '#0d0d0d' }} />
+                </linearGradient>
+                <linearGradient id="aboutBladeGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" style={{ stopColor: '#b0b0b0' }} />
+                  <stop offset="100%" style={{ stopColor: '#505050' }} />
+                </linearGradient>
+              </defs>
+              <rect x="0" y="0" width="256" height="256" rx="40" ry="40" fill="url(#aboutBgGradient)" />
+              <circle cx="128" cy="128" r="93" fill="none" stroke="#454545" strokeWidth="5" />
+              <circle cx="128" cy="128" r="85" fill="#0a0a0a" />
+              <g fill="url(#aboutBladeGradient)" stroke="#252525" strokeWidth="1">
+                {[0, 45, 90, 135, 180, 225, 270, 315].map((deg) => (
+                  <path key={deg} d="M98,46 A85,85 0 0,1 158,46 L128,75 L98,105 Z" transform={`rotate(${deg}, 128, 128)`} />
+                ))}
+              </g>
+              <circle cx="128" cy="128" r="25" fill="#0a0a0a" />
+            </svg>
+            <div>
+              <div className="font-semibold text-white" style={{ fontSize: 18, letterSpacing: '0.3px' }}>
+                {appInfo?.name || 'Photo Editor Pro'}
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--gray-400)', marginTop: 2 }}>
+                Version {appInfo?.version || '…'}
+              </div>
+            </div>
+          </div>
+
+          {appInfo?.description && (
+            <p style={{ fontSize: 12.5, color: 'var(--gray-300)', lineHeight: 1.5, margin: '0 0 16px' }}>
+              {appInfo.description}
+            </p>
+          )}
+
+          {/* Info grid */}
+          <div
+            style={{
+              display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '7px 16px',
+              fontSize: 12, borderTop: '1px solid var(--border)', paddingTop: 14,
+            }}
+          >
+            <span style={{ color: 'var(--gray-400)' }}>License</span>
+            <span>{appInfo?.license || 'PolyForm Noncommercial 1.0.0'}</span>
+            <span style={{ color: 'var(--gray-400)' }}>Author</span>
+            <span>{appInfo?.author || 'Redrum624'}</span>
+            <span style={{ color: 'var(--gray-400)' }}>Engine</span>
+            <span>
+              Electron {appInfo?.electron || '—'} · Chromium {appInfo?.chrome || '—'} · Node {appInfo?.node || '—'}
+            </span>
+            <span style={{ color: 'var(--gray-400)' }}>Platform</span>
+            <span>{appInfo ? `${appInfo.platform} · ${appInfo.arch}` : '—'}</span>
+            {appInfo?.repository && (
+              <>
+                <span style={{ color: 'var(--gray-400)' }}>Project</span>
+                <button
+                  onClick={() => openExternal(appInfo.repository)}
+                  className="text-left bg-transparent border-0 cursor-pointer"
+                  style={{ color: '#9ec1ff', padding: 0, fontSize: 12, textDecoration: 'underline' }}
+                >
+                  {appInfo.repository.replace(/^https?:\/\//, '')}
+                </button>
+              </>
+            )}
+          </div>
+
+          <div style={{ fontSize: 11, color: 'var(--gray-500)', marginTop: 16, lineHeight: 1.5 }}>
+            Source-available, non-commercial. Bundled third-party components retain their own licenses.
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   );
 }

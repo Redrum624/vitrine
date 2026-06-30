@@ -74,6 +74,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   splashProgress: (progress, message) => ipcRenderer.invoke('splash-progress', progress, message),
   appReady: () => ipcRenderer.invoke('app-ready'),
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
+  getAppInfo: () => ipcRenderer.invoke('get-app-info'),
+  openExternalUrl: (url) => ipcRenderer.invoke('open-external-url', url),
   onSplashProgress: (callback) => ipcRenderer.on('splash-progress', (event, data) => callback(data)),
 
   // AI super-resolution upscale

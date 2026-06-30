@@ -188,6 +188,21 @@ export interface ElectronAPI {
   splashProgress: (progress: number, message: string) => Promise<void>;
   appReady: () => Promise<void>;
   getAppVersion: () => Promise<string>;
+  getAppInfo: () => Promise<{
+    name: string;
+    version: string;
+    description: string;
+    author: string;
+    license: string;
+    repository: string;
+    electron: string;
+    chrome: string;
+    node: string;
+    v8: string;
+    platform: string;
+    arch: string;
+  }>;
+  openExternalUrl: (url: string) => Promise<boolean>;
   onSplashProgress: (callback: (data: { progress?: number; message?: string; error?: string }) => void) => void;
 
   // AI super-resolution upscale

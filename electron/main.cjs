@@ -365,6 +365,41 @@ ipcMain.handle('get-app-version', () => {
   return packageJson.version;
 });
 
+// Rich app metadata for the About dialog (version + runtime versions + project info).
+ipcMain.handle('get-app-info', () => {
+  const pkg = require('../package.json');
+  const repoUrl = (pkg.repository && (typeof pkg.repository === 'string' ? pkg.repository : pkg.repository.url) || '')
+    .replace(/^git\+/, '').replace(/\.git$/, '');
+  return {
+    name: (pkg.build && pkg.build.productName) || pkg.productName || pkg.name || 'Photo Editor Pro',
+    version: pkg.version,
+    description: pkg.description || '',
+    author: typeof pkg.author === 'string' ? pkg.author : (pkg.author && pkg.author.name) || '',
+    license: pkg.license || '',
+    repository: repoUrl,
+    electron: process.versions.electron,
+    chrome: process.versions.chrome,
+    node: process.versions.node,
+    v8: process.versions.v8,
+    platform: process.platform,
+    arch: process.arch,
+  };
+});
+
+// Open an external URL in the default browser (renderer-initiated, scheme-allowlisted).
+ipcMain.handle('open-external-url', async (_e, url) => {
+  try {
+    const parsed = new URL(String(url));
+    if (['https:', 'http:', 'mailto:'].includes(parsed.protocol)) {
+      await shell.openExternal(parsed.toString());
+      return true;
+    }
+  } catch {
+    // Invalid URL or disallowed scheme — deny silently
+  }
+  return false;
+});
+
 ipcMain.handle('file-exists', (_e, p) => { try { return fs.existsSync(p); } catch { return false; } });
 
 // AI super-resolution upscale (Real-ESRGAN via onnxruntime-node, main-process native).
