@@ -48,75 +48,41 @@ npm run dist            # electron-builder for the current platform
 The packaged artifacts land in `release/`. A plain-text `README.txt` is also
 written there beside the installer for offline reference.
 
+## 🧩 Modules
+
+- **File Explorer** — browse and open photos from the local filesystem.
+- **Crop & Transform** — aspect ratios, free rotation, auto-straighten (horizon detection), and flip.
+- **Basic Adjustments** — exposure, contrast, highlights, brightness, black point, shadows, dehaze, saturation, and vibrance; Highlights/Shadows recovery is integrated here.
+- **Local Adjustments** — radial (circle/oval) and one-sided graduated-filter masks drawn on the canvas, each with its own Basic Adjustments sliders and feather control; managed from the Basic Adjustments panel.
+- **White Balance** — temperature and tint sliders with one-click median gray-world auto-neutralisation.
+- **Color Balance** — per-channel hue shifts in shadows, midtones, and highlights.
+- **Tone Curve** — master and per-channel RGB curves with auto-levels.
+- **Enhance** — Noise Reduction (GPU Non-Local-Means), Sharpening (FidelityFX CAS + Richardson–Lucy deblur), and ×2/×4 Lanczos upscale in a single panel; one **Apply Enhance** button drives all three.
+- **Lens Corrections** — Distortion, Vignetting, Chromatic Aberration, creative Blur, and Film Grain in collapsible accordion sections.
+- **History** — per-image checkpoint timeline; click any checkpoint to restore that state; persists across sessions separately from Ctrl+Z undo.
+- **Histogram** — live RGB and luminosity tone-distribution display.
+- **Settings** — application preferences, theme, and workspace configuration.
+
 ## 🌟 Features
 
-### RAW processing
-- **15+ RAW formats** — Canon CR2/CR3, Nikon NEF, Sony ARW, Olympus ORF, Adobe DNG,
-  Panasonic RW2, Pentax PEF, and more.
-- **True Bayer demosaic** in the Electron main process via native LibRaw
-  (`dcraw_emu`), with `libraw-wasm` and embedded-JPEG fallbacks.
-
-### Editing modules
-- **Crop & Transform** — aspect ratios, rotation/straighten, flip.
-- **Basic Adjustments** — exposure, contrast, highlights, brightness, black point,
-  shadows, dehaze, saturation, vibrance. *(The old standalone Shadows & Highlights
-  module was folded into Highlights/Shadows sliders here.)*
-- **Local Adjustments** — radial (circle/oval) masks with a rotation handle, and a
-  one-sided **graduated-filter** gradient (drag the line to move, the handle to rotate).
-  Created from the top of Basic Adjustments; drag on the canvas to place / move / resize /
-  rotate, click off to deselect, Delete to remove. Each mask gets its own Basic-Adjustments
-  panel plus a feather control.
-- **White Balance** (with **median gray-world Auto** that neutralises both warmth and
-  tint), **Color Balance**, **Tone Curve** (with auto-levels), **Enhance** (consolidates
-  **Noise Reduction** + **Sharpen** + **Upscale** in one panel — GPU Non-Local-Means
-  denoising, Richardson–Lucy deblur, FidelityFX CAS sharpening, ×2/×4 Lanczos upscale;
-  one **Apply Enhance** button drives all three; sidebar → Enhance → toggle what you need
-  → Apply), **Lens Corrections** (Distortion, Vignetting, Chromatic Aberration, plus
-  non-destructive **Blur** and **Film Grain** sections).
-- **Copy / Paste Style** — transfer a colour grade between images via per-channel
-  histogram matching.
-- **Auto adjustments** — one-click *Auto All* (its white-balance step uses the same
-  median gray-world neutralisation as the WB panel's Auto button), plus Auto Levels /
-  Contrast / Color.
-- Non-destructive: adjustments are reversible and re-processed live, and **persist per
-  image across sessions and app updates** (restored when you reopen a photo).
-- **History** — a per-image checkpoint timeline of everything you've done; click any
-  checkpoint to jump back to that state. Kept between sessions; separate from Ctrl+Z undo.
-
-### GPU acceleration (WebGL2 resident-texture pipeline)
-- The live preview runs as a **resident-texture WebGL2 pipeline**: the image is uploaded
-  to the GPU once, every editing module runs as a fragment-shader pass ping-ponging
-  between float textures, and the result is **presented directly to the canvas with zero
-  GPU→CPU readback** — for real-time slider feedback. Covered on the GPU: Exposure, White
-  Balance, Basic Adjustments, Tone Curve, Color Balance, Lens distortion/chromatic-
-  aberration/vignetting, Shadows/Highlights, Local
-  Adjustment masks, and a **GPU Non-Local-Means noise reducer**.
-- Each GPU op carries a CPU reference and an init **self-check** — the GPU path is used
-  only if its output matches the CPU within tolerance, so a faulty shader **falls back
-  rather than corrupting an image**.
-- **Nothing blocks the UI thread.** When the GPU path can't be used (no WebGL2, or an
-  active operation without a GPU path), the CPU pipeline runs in a **Web Worker** off the
-  main thread, and full-resolution **export resize runs in the Electron main process**
-  via sharp — so previews stay responsive and exports don't freeze the window.
-
-### Export & workflow
-- **Export** (the toolbar **Export** button, or `Ctrl+E`) to JPEG / PNG / TIFF / WebP,
-  8- and 16-bit (**defaults to PNG, Adobe RGB, and the highest bit depth the format
-  supports** — switching format auto-adjusts the depth), in **sRGB or wide-gamut**
-  (Adobe RGB / ProPhoto / Rec.2020) using generated ICC profiles, with **EXIF/XMP**
-  metadata embedding. The dialog closes as soon as the export starts and a cancellable
-  progress bar at the top-left tracks it. The **Enhance** module's result (sharpening
-  and/or upscale) is baked into every export automatically.
-- **Multi-export.** Select several photos in the filmstrip (**Ctrl/Cmd+click** to
-  toggle individual ones, **Shift+click** for a contiguous range), then **Export N**
-  writes them all with one set of settings — each with **its own saved edits** — into
-  a chosen folder as `<name>_PEP.<ext>` (auto-suffixed `_PEP_1`, … so nothing is
-  overwritten). A cancellable progress bar at the top-left tracks the run.
-- **Star ratings** on the filmstrip thumbnails and a large bottom-right canvas overlay;
-  press **1–5** to rate the open image (**0** clears), written to the file as
-  `xmp:Rating`, plus rating-based filtering.
-- Filmstrip (mouse-wheel scroll, collapsible, multi-select), **batch processing**,
-  presets, watermarking, web-gallery generation, and print soft-proofing.
+- **RAW processing** — native LibRaw (`dcraw_emu`) Bayer demosaic in the Electron main process for 15+ formats (CR2/CR3, NEF, ARW, ORF, DNG, RW2, PEF, …); `libraw-wasm` and embedded-JPEG fallbacks ensure every RAW opens.
+- **GPU-accelerated preview** — resident-texture WebGL2 pipeline: image uploaded to the GPU once, all modules run as fragment-shader passes with zero GPU→CPU readback; CPU/Web-Worker fallback runs off the main thread when WebGL2 is unavailable.
+- **Export** — JPEG, PNG, TIFF, or WebP in 8-bit or 16-bit; sRGB or wide-gamut (Adobe RGB, ProPhoto, Rec.2020) with generated ICC profiles; EXIF/XMP metadata embedded; Enhance output (sharpen/upscale) baked in automatically.
+- **Multi-export** — select any number of filmstrip photos (Ctrl/Shift+click) and export them all with one settings pass, each using its own saved edits, into a chosen folder with auto-suffixed filenames.
+- **Batch processing** — apply a fixed adjustment preset to a folder of images in one operation.
+- **Copy / Paste Style** — transfer a colour grade between images via per-channel RGB histogram matching, expressed as Tone Curve adjustments.
+- **Auto adjustments** — one-click *Auto All* (tone, white balance, colour) driven by a learned user-style profile; individual Auto buttons per panel.
+- **Before/After compare** — toggle the unedited original against the current edit with synced zoom and pan.
+- **Reference image compare** — pin a second photo alongside the current image for side-by-side grading reference.
+- **Star ratings + filtering** — press 1–5 to rate the open image (0 clears); rating written to the file as `xmp:Rating`; filter the filmstrip by minimum rating.
+- **Filmstrip** — scrollable, collapsible thumbnail strip; multi-select with Ctrl/Shift+click; mouse-wheel horizontal scroll.
+- **Presets** — save and apply named adjustment snapshots across images.
+- **Watermarking** — add text or image watermarks baked into exports.
+- **Web-gallery generation** — export a self-contained browsable HTML gallery from selected photos.
+- **Print soft-proofing** — simulate paper-and-ink colour output before printing.
+- **Per-image edit persistence** — every adjustment is saved per photo and restored automatically the next time the image is opened, across sessions and app updates.
+- **Output collections** — group processed images into named output sets for organised delivery.
+- **Keyboard shortcuts** — full shortcut coverage for common operations; a help dialog lists all bindings.
 
 ## 🏗️ Architecture
 
