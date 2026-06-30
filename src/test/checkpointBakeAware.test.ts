@@ -78,4 +78,22 @@ describe('CheckpointService — bake-aware (Task 6)', () => {
     expect(bridge.unwindToDepth).not.toHaveBeenCalled();
     expect(editPersistenceService.restore).toHaveBeenCalled();
   });
+
+  it('recordLabeled always creates a checkpoint even when serialized state is identical to lastSnapshot', () => {
+    // Use a fixed state so serialize() returns the SAME JSON on every call
+    const fixedState = { version: 1, modules: { basicadj: { exposure: 42 } }, localAdjustments: [] } as never;
+    (editPersistenceService.serialize as jest.Mock).mockReturnValue(fixedState);
+
+    // Seed lastSnapshot via record() — produces checkpoint #1 and sets lastSnapshot = JSON.stringify(fixedState)
+    checkpointService.record('Opened');
+    expect(checkpointService.getCheckpoints()).toHaveLength(1);
+
+    // Bug: serialize() still returns fixedState → json === lastSnapshot → old code returns early, no checkpoint
+    // Fix: recordLabeled must ALWAYS push the checkpoint regardless of state identity
+    checkpointService.recordLabeled('Enhanced ×2', 1);
+
+    const cps = checkpointService.getCheckpoints();
+    expect(cps).toHaveLength(2);
+    expect(cps[1].label).toBe('Enhanced ×2');
+  });
 });

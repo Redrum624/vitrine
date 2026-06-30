@@ -155,12 +155,12 @@ class CheckpointService {
   /** Record a checkpoint with a forced, verbatim label and an explicit bakeDepth.
    *  Use this (instead of record) for machine-generated entries like "Enhanced ×2" where
    *  describeChange must NOT run (it may return a generic summary that overwrites the label).
-   *  De-duplicates on state identity the same way record() does. */
+   *  No state-identity dedupe — a bake changes pixels/dims that serialize() does NOT capture,
+   *  so two param-identical states are genuinely different milestones and must both be recorded. */
   recordLabeled(label: string, bakeDepth: number): void {
     if (!imageService.getCurrentImage()) return;
     const state = editPersistenceService.serialize();
     const json = JSON.stringify(state);
-    if (json === this.lastSnapshot) return;
     this.lastSnapshot = json;
     const parsed = JSON.parse(json) as EditState;
     this.lastState = parsed;
