@@ -126,8 +126,11 @@ function OriginalPane() {
 
     // Internal canvas resolution = full original image dimensions (same as
     // Canvas.tsx uses preview dimensions for its internal resolution).
-    canvas.width = imageWidth;
-    canvas.height = imageHeight;
+    // Guard: assigning canvas.width/height always reallocates and clears the
+    // pixel buffer. The size never changes between redraws for the same image
+    // (the component is keyed on image id), so skip the reset when unchanged.
+    if (canvas.width !== imageWidth) canvas.width = imageWidth;
+    if (canvas.height !== imageHeight) canvas.height = imageHeight;
 
     // CSS sizing: fit image to container while preserving aspect ratio.
     // Mirrors the sizing logic in Canvas.tsx redrawCanvas().
@@ -148,7 +151,11 @@ function OriginalPane() {
     canvas.style.width = `${Math.floor(cssW)}px`;
     canvas.style.height = `${Math.floor(cssH)}px`;
 
-    // Background (matches Canvas.tsx background colour).
+    // Background (matches Canvas.tsx background colour). Reset the transform
+    // first so the fillRect always covers the full buffer regardless of any
+    // accumulated state from prior redraws (since we no longer rely on the
+    // canvas.width assignment to auto-clear the buffer each frame).
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.fillStyle = '#0d0d0d';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
