@@ -35,8 +35,22 @@ class EnhanceService {
     if (!original) throw new Error('No image loaded');
 
     const { width, height } = original;
-    const outW = Math.round(width * params.scale);
-    const outH = Math.round(height * params.scale);
+
+    // Derive the true processed dimensions. When Crop (or any geometric module) is
+    // active the pipeline output buffer is smaller than the native image, so we must
+    // pass the PROCESSED dims — not the native ones — to the enhance worker.
+    // CropPipelineModule.getOutputDimensions() returns the crop-adjusted size, or the
+    // native size when crop is disabled/identity. We use optional chaining so the mock
+    // (which omits getModule) degrades gracefully to native dims.
+    const cropMod = imageProcessingPipeline.getModule?.('crop') as
+      | { getOutputDimensions(w: number, h: number): { width: number; height: number } }
+      | undefined;
+    const procDims = cropMod ? cropMod.getOutputDimensions(width, height) : { width, height };
+    const procW = procDims.width;
+    const procH = procDims.height;
+
+    const outW = Math.round(procW * params.scale);
+    const outH = Math.round(procH * params.scale);
     const outPixels = outW * outH;
     if (outPixels > MAX_OUTPUT_PIXELS) {
       throw new Error(`Upscaled size too large (${outPixels} px). Try a smaller scale.`);
@@ -53,12 +67,14 @@ class EnhanceService {
       );
 
       // Capture snapshot before the worker call (cheap), but do not commit it yet.
+      // The restore point stores the NATIVE (pre-crop) buffer and dims so that revert
+      // can fully restore both the pixels and the edit state (including crop params).
       const restoreData = new Float32Array(original.data);
       const editState = editPersistenceService.serialize();
       const r = await enhanceWorkerClient.run(
         new Float32Array(edited),
-        width,
-        height,
+        procW,
+        procH,
         { ...params, sharpen: true, upscale: true },
       );
       // Worker succeeded — now safe to push the restore point and mutate.
@@ -67,7 +83,7 @@ class EnhanceService {
       imageProcessingPipeline.resetAllModules();
       imageService.updateCurrentImageData(r.enhanced, r.width, r.height);
       imageService.setOriginalImage(r.base, r.width, r.height);
-      imageService.setBakedUpscale({ scale: params.scale, nativeWidth: width, nativeHeight: height });
+      imageService.setBakedUpscale({ scale: params.scale, nativeWidth: procW, nativeHeight: procH });
       checkpointService.record(`Enhanced ×${params.scale}`);
       store.notifyExternalParamsChange();
       store.triggerReprocessing();

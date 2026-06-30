@@ -6,6 +6,7 @@ jest.mock('../services/ImageService', () => ({ imageService: {
 } }));
 jest.mock('../services/ImageProcessingPipeline', () => ({ imageProcessingPipeline: {
   processImage: jest.fn(async (d: Float32Array) => d), resetAllModules: jest.fn(),
+  getModule: jest.fn(() => undefined), // No crop module active by default
 } }));
 jest.mock('../services/EnhanceWorkerClient', () => ({ enhanceWorkerClient: {
   run: jest.fn(async () => ({ enhanced: new Float32Array(8*8*4), base: new Float32Array(8*8*4), width: 8, height: 8 })),
@@ -17,6 +18,7 @@ jest.mock('../stores/appStore', () => ({ useAppStore: { getState: () => ({ setIs
 import { enhanceService } from '../services/EnhanceService';
 import { imageService } from '../services/ImageService';
 import { imageProcessingPipeline } from '../services/ImageProcessingPipeline';
+import { enhanceWorkerClient } from '../services/EnhanceWorkerClient';
 import { editPersistenceService } from '../services/EditPersistenceService';
 import { checkpointService } from '../services/CheckpointService';
 import { DEFAULT_ENHANCE_PARAMS } from '../utils/enhanceChain';
@@ -126,5 +128,28 @@ describe('EnhanceService.unwindToDepth', () => {
     jest.clearAllMocks();
     enhanceService.unwindToDepth(2); // already depth 1, 2 > 1 so no pop
     expect(imageService.updateCurrentImageData).not.toHaveBeenCalled();
+  });
+});
+
+describe('EnhanceService — upscale with active Crop (I2 regression)', () => {
+  it('passes PROCESSED dims (not native) to the enhance worker when Crop reduces the image', async () => {
+    // Native image is 4×4, but an active crop makes the processed output 2×3.
+    (imageProcessingPipeline.getModule as jest.Mock).mockReturnValueOnce({
+      getOutputDimensions: (_w: number, _h: number) => ({ width: 2, height: 3 }),
+    });
+    // processImage returns a buffer sized for the 2×3 cropped image.
+    (imageProcessingPipeline.processImage as jest.Mock).mockResolvedValueOnce(new Float32Array(2 * 3 * 4));
+
+    await enhanceService.applyUpscale({ ...DEFAULT_ENHANCE_PARAMS, upscale: true, scale: 2 });
+
+    // Worker must be called with CROPPED dims (2×3), not native dims (4×4).
+    expect(enhanceWorkerClient.run).toHaveBeenCalledWith(
+      expect.any(Float32Array),
+      2,
+      3,
+      expect.any(Object),
+    );
+    // Baked marker must reflect the pre-upscale PROCESSED dims, not native.
+    expect(imageService.setBakedUpscale).toHaveBeenCalledWith({ scale: 2, nativeWidth: 2, nativeHeight: 3 });
   });
 });
