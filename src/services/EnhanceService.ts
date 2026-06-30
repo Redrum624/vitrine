@@ -84,7 +84,7 @@ class EnhanceService {
       imageService.updateCurrentImageData(r.enhanced, r.width, r.height);
       imageService.setOriginalImage(r.base, r.width, r.height);
       imageService.setBakedUpscale({ scale: params.scale, nativeWidth: procW, nativeHeight: procH });
-      checkpointService.record(`Enhanced ×${params.scale}`);
+      checkpointService.recordLabeled(`Enhanced ×${params.scale}`, this.getRestoreDepth());
       store.notifyExternalParamsChange();
       store.triggerReprocessing();
     } finally {
@@ -143,3 +143,12 @@ class EnhanceService {
 }
 
 export const enhanceService = new EnhanceService();
+
+// Wire the bake bridge so CheckpointService can query/unwind the restore stack without
+// creating a direct import cycle (EnhanceService already imports CheckpointService, so
+// a reverse import would be circular). The bridge is set once at module-load time via
+// arrow functions that capture the already-constructed singleton by reference.
+checkpointService.setBakeBridge({
+  getDepth: () => enhanceService.getRestoreDepth(),
+  unwindToDepth: (d) => enhanceService.unwindToDepth(d),
+});

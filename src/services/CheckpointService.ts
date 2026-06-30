@@ -15,6 +15,9 @@ export interface Checkpoint {
   label: string;
   at: number;       // epoch ms
   state: EditState;
+  /** Depth of the EnhanceService restore stack at the time this checkpoint was recorded.
+   *  0 = no baked upscale active. Used by restore() to unwind the bake before re-applying params. */
+  bakeDepth?: number;
 }
 
 interface StoredHistory {
@@ -84,6 +87,15 @@ function describeChange(prev: EditState | null, next: EditState): string | null 
  * the list per image in the durable userData store (key `history:<filePath>`) so it
  * survives sessions and app updates. Restoring keeps the list intact (new edits append).
  */
+// Bridge injected by EnhanceService at startup to avoid a direct import cycle
+// (EnhanceService already imports CheckpointService, so CheckpointService importing
+// EnhanceService would create a cycle). The bridge defaults to a no-op so all
+// existing behaviour is unchanged when no upscale pipeline is wired.
+interface BakeBridge {
+  getDepth: () => number;
+  unwindToDepth: (depth: number) => void;
+}
+
 class CheckpointService {
   private path: string | null = null;
   private checkpoints: Checkpoint[] = [];
@@ -94,6 +106,7 @@ class CheckpointService {
   private recordTimer: ReturnType<typeof setTimeout> | null = null;
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
   private listeners = new Set<() => void>();
+  private bakeBridge: BakeBridge = { getDepth: () => 0, unwindToDepth: () => {} };
 
   subscribe(fn: () => void): () => void {
     this.listeners.add(fn);
@@ -105,6 +118,12 @@ class CheckpointService {
 
   getCheckpoints(): readonly Checkpoint[] { return this.checkpoints; }
   getActiveId(): number | null { return this.activeId; }
+
+  /** Wire the bake bridge (called once by EnhanceService at startup). The bridge exposes
+   *  the EnhanceService restore-stack depth and unwind without creating an import cycle. */
+  setBakeBridge(bridge: BakeBridge): void {
+    this.bakeBridge = bridge;
+  }
 
   /** Record a checkpoint of the current edit state immediately (de-duplicated). The label
    *  describes the actual change (e.g. "White Balance — Tint -4.00"); `fallbackLabel` is
@@ -118,7 +137,8 @@ class CheckpointService {
     this.lastSnapshot = json;
     const parsed = JSON.parse(json) as EditState;
     this.lastState = parsed;
-    const cp: Checkpoint = { id: ++this.seq, label, at: Date.now(), state: parsed };
+    const bakeDepth = this.bakeBridge.getDepth();
+    const cp: Checkpoint = { id: ++this.seq, label, at: Date.now(), state: parsed, bakeDepth };
     this.checkpoints.push(cp);
     while (this.checkpoints.length > MAX_CHECKPOINTS) this.checkpoints.shift();
     this.activeId = cp.id;
@@ -132,11 +152,47 @@ class CheckpointService {
     this.recordTimer = setTimeout(() => { this.recordTimer = null; this.record(label); }, RECORD_DEBOUNCE_MS);
   }
 
-  /** Restore a checkpoint by id. Keeps the full list; returns true on success. */
+  /** Record a checkpoint with a forced, verbatim label and an explicit bakeDepth.
+   *  Use this (instead of record) for machine-generated entries like "Enhanced ×2" where
+   *  describeChange must NOT run (it may return a generic summary that overwrites the label).
+   *  De-duplicates on state identity the same way record() does. */
+  recordLabeled(label: string, bakeDepth: number): void {
+    if (!imageService.getCurrentImage()) return;
+    const state = editPersistenceService.serialize();
+    const json = JSON.stringify(state);
+    if (json === this.lastSnapshot) return;
+    this.lastSnapshot = json;
+    const parsed = JSON.parse(json) as EditState;
+    this.lastState = parsed;
+    const cp: Checkpoint = { id: ++this.seq, label, at: Date.now(), state: parsed, bakeDepth };
+    this.checkpoints.push(cp);
+    while (this.checkpoints.length > MAX_CHECKPOINTS) this.checkpoints.shift();
+    this.activeId = cp.id;
+    this.scheduleSave();
+    this.emit();
+  }
+
+  /** Restore a checkpoint by id. Keeps the full list; returns true on success.
+   *
+   * LIMITATION (bake-aware): History supports UNDOING an upscale (restoring a lower-bakeDepth
+   * checkpoint unwinds the bake first, then re-applies the edit params for the smaller image).
+   * It does NOT redo an upscale by clicking an "Enhanced ×N" entry — re-run Apply Upscale to redo.
+   */
   restore(id: number): boolean {
     const cp = this.checkpoints.find((c) => c.id === id);
+    if (!cp) return false;
+
+    // Unwind the bake stack if this checkpoint predates the current bake level.
+    const cpDepth = cp.bakeDepth ?? 0;
+    const currentDepth = this.bakeBridge.getDepth();
+    if (cpDepth < currentDepth) {
+      this.bakeBridge.unwindToDepth(cpDepth);
+    }
+
+    // Read dims AFTER the potential unwind — dimensions may have changed.
     const img = imageService.getCurrentImage();
-    if (!cp || !img) return false;
+    if (!img) return false;
+
     editPersistenceService.restore(cp.state, img.width, img.height);
     this.activeId = id;
     this.lastSnapshot = JSON.stringify(cp.state);             // restoring is not a new edit

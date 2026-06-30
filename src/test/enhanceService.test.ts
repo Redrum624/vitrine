@@ -11,7 +11,7 @@ jest.mock('../services/ImageProcessingPipeline', () => ({ imageProcessingPipelin
 jest.mock('../services/EnhanceWorkerClient', () => ({ enhanceWorkerClient: {
   run: jest.fn(async () => ({ enhanced: new Float32Array(8*8*4), base: new Float32Array(8*8*4), width: 8, height: 8 })),
 } }));
-jest.mock('../services/CheckpointService', () => ({ checkpointService: { record: jest.fn() } }));
+jest.mock('../services/CheckpointService', () => ({ checkpointService: { record: jest.fn(), recordLabeled: jest.fn(), setBakeBridge: jest.fn() } }));
 jest.mock('../services/EditPersistenceService', () => ({ editPersistenceService: { serialize: jest.fn(() => ({})), restore: jest.fn() } }));
 jest.mock('../stores/appStore', () => ({ useAppStore: { getState: () => ({ setIsProcessing: jest.fn(), notifyExternalParamsChange: jest.fn(), triggerReprocessing: jest.fn() }) } }));
 
@@ -35,7 +35,7 @@ describe('EnhanceService.applyUpscale', () => {
     await enhanceService.applyUpscale({ ...DEFAULT_ENHANCE_PARAMS, upscale: true, scale: 2 });
     expect(imageService.updateCurrentImageData).toHaveBeenCalledWith(expect.any(Float32Array), 8, 8);
     expect(imageService.setOriginalImage).toHaveBeenCalledWith(expect.any(Float32Array), 8, 8);
-    expect(checkpointService.record).toHaveBeenCalledWith('Enhanced ×2');
+    expect(checkpointService.recordLabeled).toHaveBeenCalledWith('Enhanced ×2', 1);
     expect(enhanceService.canRevert()).toBe(true);
   });
 
