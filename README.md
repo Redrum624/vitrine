@@ -1,8 +1,8 @@
 # Photo Editor Pro
 
-![Version](https://img.shields.io/badge/Version-1.10.0-blue)
+![Version](https://img.shields.io/badge/Version-1.11.0-blue)
 ![TypeScript](https://img.shields.io/badge/TypeScript-0_errors-blue)
-![Tests](https://img.shields.io/badge/Tests-1111_passing-brightgreen)
+![Tests](https://img.shields.io/badge/Tests-1113_passing-brightgreen)
 ![Lint](https://img.shields.io/badge/Lint-clean-brightgreen)
 ![GPU](https://img.shields.io/badge/GPU-WebGL2_accelerated-success)
 
@@ -48,14 +48,15 @@ The app opens automatically once the Vite dev server is ready (port 3005).
 ### Option C — Build a Windows release from source
 
 ```bash
-npm run build:win       # clean dist + release -> tsc + vite build -> NSIS installer + portable (x64)
-# Output: release/Photo Editor Pro Setup 1.10.0.exe  and  release/Photo Editor Pro 1.10.0.exe
+npm run build:win       # clean -> tsc + vite build -> NSIS installer -> collect into installer/
+# Output: installer/Photo Editor Pro Setup 1.11.0.exe (+ README.txt, LICENSE, THIRD-PARTY-LICENSES.md)
 npm run build:win:dir   # fast unpacked build (no installer, quick iteration)
 npm run dist            # electron-builder for the current platform
 ```
 
-The packaged artifacts land in `release/`. A plain-text `README.txt` is also
-written there beside the installer for offline reference.
+The user-facing distributables are collected into a clean **`installer/`** folder at the repo root:
+the versioned `Setup …​.exe`, a plain-text `README.txt`, `LICENSE`, and `THIRD-PARTY-LICENSES.md`.
+electron-builder's full staging output (unpacked app, block maps) stays in `release/`.
 
 ## Modules
 

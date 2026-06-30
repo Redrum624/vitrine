@@ -4,6 +4,14 @@ All notable changes to **Photo Editor Pro** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.11.0] - 2026-06-30
+
+### Added
+- **Help ("?") menu with an About dialog.** A new "?" menu sits after Window with *Keyboard Shortcuts*, *View on GitHub*, and *About Photo Editor Pro*. The About dialog shows the app version, description, license, author, engine versions (Electron / Chromium / Node), platform, and a clickable repository link. Why: standard discoverability for version/support info. Backed by new IPC `get-app-info` and a scheme-allowlisted `open-external-url`. Affects: `src/components/Layout/MenuBar.tsx`, `electron/main.cjs`, `electron/preload.cjs`, `src/types/electron.ts`.
+
+### Changed
+- **Build collects a clean `installer/` folder.** `build:win` now cleans `installer/` before building and, after the NSIS build, copies just the user-facing files there: `Setup <ver>.exe`, `README.txt`, `LICENSE`, `THIRD-PARTY-LICENSES.md`. electron-builder's full `release/` staging (unpacked app, block maps) is left behind, and the **portable** target was dropped (no longer built). Affects: `package.json`, `scripts/collect-installer.cjs`, `scripts/gh-release.cjs`.
+
 ## [1.10.0] - 2026-06-30
 
 ### Added
