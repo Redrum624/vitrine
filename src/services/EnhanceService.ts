@@ -6,7 +6,12 @@ import { editPersistenceService } from './EditPersistenceService';
 import { useAppStore } from '../stores/appStore';
 import { EnhanceParams } from '../utils/enhanceChain';
 
-const MAX_OUTPUT_PIXELS = 40_000_000;
+// Upscale produces two full Float32 RGBA buffers (enhanced + base) at the output
+// resolution plus working temporaries — peak memory ≈ 56 bytes/output-pixel. 160 MP
+// (~9 GB peak) comfortably covers 2× of cameras up to ~40 MP while still blocking the
+// genuinely dangerous cases (e.g. 4× of a 20 MP image = 320 MP ≈ 22 GB). The worker
+// also fails gracefully (the working image is left untouched) if memory runs out.
+const MAX_OUTPUT_PIXELS = 160_000_000;
 
 interface RestorePoint {
   data: Float32Array;
@@ -53,7 +58,9 @@ class EnhanceService {
     const outH = Math.round(procH * params.scale);
     const outPixels = outW * outH;
     if (outPixels > MAX_OUTPUT_PIXELS) {
-      throw new Error(`Upscaled size too large (${outPixels} px). Try a smaller scale.`);
+      const outMP = (outPixels / 1e6).toFixed(0);
+      const maxMP = (MAX_OUTPUT_PIXELS / 1e6).toFixed(0);
+      throw new Error(`Upscale would produce ${outMP} MP (${outW}×${outH}), above the ${maxMP} MP memory limit. Try ×2 instead of ×4, or a smaller image.`);
     }
 
     const store = useAppStore.getState();

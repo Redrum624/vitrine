@@ -44,10 +44,16 @@ describe('EnhanceService.applyUpscale', () => {
     expect(imageService.setBakedUpscale).toHaveBeenCalledWith({ scale: 2, nativeWidth: 4, nativeHeight: 4 });
   });
 
-  it('rejects when the upscaled size exceeds the 40M-pixel guard (not just the old 80M cap)', async () => {
-    // 4000 × 3000 × scale 2 → 8000 × 6000 = 48 M pixels > 40 M  and  < 80 M — proves the threshold moved down
-    (imageService.getOriginalImage as jest.Mock).mockReturnValueOnce({ data: new Float32Array(4), width: 4000, height: 3000 });
-    await expect(enhanceService.applyUpscale({ ...DEFAULT_ENHANCE_PARAMS, upscale: true, scale: 2 })).rejects.toThrow(/too large/);
+  it('rejects when the upscaled size exceeds the 160M-pixel memory guard', async () => {
+    // 8000 × 6000 × scale 2 → 16000 × 12000 = 192 M pixels > 160 M — the guard still fires on truly huge output.
+    (imageService.getOriginalImage as jest.Mock).mockReturnValueOnce({ data: new Float32Array(4), width: 8000, height: 6000 });
+    await expect(enhanceService.applyUpscale({ ...DEFAULT_ENHANCE_PARAMS, upscale: true, scale: 2 })).rejects.toThrow(/memory limit/);
+  });
+
+  it('allows a normal ~20MP image at ×2 (does not trip the memory guard)', async () => {
+    // 3904 × 5200 × scale 2 → 7808 × 10400 = 81.2 M pixels — under the 160 M cap (the real bug report).
+    (imageService.getOriginalImage as jest.Mock).mockReturnValueOnce({ data: new Float32Array(4), width: 3904, height: 5200 });
+    await expect(enhanceService.applyUpscale({ ...DEFAULT_ENHANCE_PARAMS, upscale: true, scale: 2 })).resolves.toBeUndefined();
   });
 });
 
