@@ -30,6 +30,7 @@ function createSplashWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      sandbox: true,
       preload: path.join(__dirname, 'preload.cjs')
     },
     backgroundColor: '#000000',
@@ -82,6 +83,7 @@ function createWindow() {
       nodeIntegration: false,
       contextIsolation: true,
       enableRemoteModule: false,
+      sandbox: true,
       preload: path.join(__dirname, 'preload.cjs'),
       webSecurity: true,
       allowRunningInsecureContent: false
@@ -150,7 +152,15 @@ function createWindow() {
 
   // Handle external links
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    try {
+      const parsed = new URL(url);
+      const allowed = ['https:', 'http:', 'mailto:'];
+      if (allowed.includes(parsed.protocol)) {
+        shell.openExternal(url);
+      }
+    } catch {
+      // Invalid URL — deny silently
+    }
     return { action: 'deny' };
   });
 }
@@ -698,10 +708,20 @@ function applyExifOrientation(pipe, ori) {
   }
 }
 
+// Path validation helper for write IPC handlers -- rejects traversal attempts
+function validateWritePath(p) {
+  const normalized = path.normalize(p);
+  if (normalized.includes('..')) {
+    throw new Error(`Path traversal rejected: ${p}`);
+  }
+  return normalized;
+}
+
 ipcMain.handle('write-file', async (event, filePath, data) => {
   try {
-    markSelfWrite(filePath); // don't let the folder watcher react to our own write
-    await fs.promises.writeFile(filePath, data);
+    const safeFilePath = validateWritePath(filePath);
+    markSelfWrite(safeFilePath); // don't let the folder watcher react to our own write
+    await fs.promises.writeFile(safeFilePath, data);
     return true;
   } catch (error) {
     throw error;
@@ -711,10 +731,11 @@ ipcMain.handle('write-file', async (event, filePath, data) => {
 // Write image file (for exports)
 ipcMain.handle('write-image-file', async (event, filePath, imageData, format, options) => {
   try {
+    const safeFilePath = validateWritePath(filePath);
     // Delegates to electron/imageWriter.cjs (unit-tested). Correctly handles
     // 8-bit and 16-bit raw RGBA buffers and embeds an sRGB ICC profile.
-    markSelfWrite(filePath); // exports into a watched folder must not retrigger it
-    return await writeImageFile(filePath, imageData, format, options);
+    markSelfWrite(safeFilePath); // exports into a watched folder must not retrigger it
+    return await writeImageFile(safeFilePath, imageData, format, options);
   } catch (error) {
     console.error('Failed to write image file:', error);
     throw error;
@@ -768,8 +789,9 @@ ipcMain.handle('read-image-metadata', async (event, filePath) => {
 // failure so the renderer promise rejects (no silent success).
 ipcMain.handle('write-image-metadata', async (event, filePath, metadata) => {
   try {
-    markSelfWrite(filePath); // in-place metadata write must not retrigger the watcher
-    return await writeImageMetadata(filePath, metadata);
+    const safeFilePath = validateWritePath(filePath);
+    markSelfWrite(safeFilePath); // in-place metadata write must not retrigger the watcher
+    return await writeImageMetadata(safeFilePath, metadata);
   } catch (error) {
     console.error('Failed to write image metadata:', error);
     throw error;
@@ -781,21 +803,27 @@ ipcMain.handle('write-image-metadata', async (event, filePath, metadata) => {
 // for everything else embed the XMP in-place.
 ipcMain.handle('write-image-rating', async (event, filePath, rating) => {
   try {
-    const ext = path.extname(filePath).toLowerCase();
+    const safeFilePath = validateWritePath(filePath);
+    const ext = path.extname(safeFilePath).toLowerCase();
     const rawFormats = ['.cr2', '.cr3', '.nef', '.nrw', '.arw', '.sr2', '.srf', '.orf', '.dng', '.raf', '.rw2', '.pef', '.srw', '.x3f'];
     if (rawFormats.includes(ext)) {
       const { buildXmpPacket } = require('./imageWriter.cjs');
-      const sidecar = filePath.slice(0, -ext.length) + '.xmp';
+      const sidecar = safeFilePath.slice(0, -ext.length) + '.xmp';
       // Mark BEFORE writing so the folder watcher swallows the resulting
       // change event instead of reloading the folder (filmstrip scroll reset).
       markSelfWrite(sidecar);
       await fs.promises.writeFile(sidecar, buildXmpPacket({ rating }), 'utf8');
       return { ok: true, method: 'sidecar', path: sidecar };
     }
-    markSelfWrite(filePath);
-    await writeImageMetadata(filePath, { xmp: { rating } });
+    markSelfWrite(safeFilePath);
+    await writeImageMetadata(safeFilePath, { xmp: { rating } });
     return { ok: true, method: 'embedded' };
   } catch (error) {
+    // A rejected path (traversal guard) is a security condition, not a soft
+    // write failure — surface it to the caller instead of returning { ok:false }.
+    if (error instanceof Error && error.message.startsWith('Path traversal rejected')) {
+      throw error;
+    }
     console.warn('Failed to write image rating:', error.message);
     return { ok: false, error: error.message };
   }
@@ -996,11 +1024,16 @@ app.on('window-all-closed', () => {
   }
 });
 
-// Security: Prevent new window creation
+// Security: Prevent navigation outside the app's own origin + new window creation
 app.on('web-contents-created', (event, contents) => {
-  contents.on('new-window', (event, navigationUrl) => {
-    event.preventDefault();
-    shell.openExternal(navigationUrl);
+  const appUrl = isDev
+    ? 'http://localhost:3005'
+    : `file://${path.join(__dirname, '../dist/index.html')}`;
+
+  contents.on('will-navigate', (e, url) => {
+    if (!url.startsWith(appUrl)) {
+      e.preventDefault();
+    }
   });
 });
 
