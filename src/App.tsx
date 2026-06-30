@@ -58,38 +58,128 @@ if (process.env.NODE_ENV === 'development') {
 const MODULE_IDS = new Set(['crop', 'basicadj', 'whitebalance', 'tonecurve', 'enhance', 'shadowshighlights', 'colorbalance', 'localadjustments', 'lenscorrections']);
 const isModuleTool = (tool: string) => MODULE_IDS.has(tool);
 
-/** Renders the cached original image for the Before/After split view. */
+/**
+ * Renders the cached original (pre-edit) image for the Before/After split view.
+ *
+ * The pane mirrors Canvas.tsx's transform exactly so both sides track the same
+ * region when the user zooms or pans:
+ *   ctx.translate(centerX + scaledPanX, centerY + scaledPanY)
+ *   ctx.drawImage(offscreen, …, -displayW/2, -displayH/2, displayW, displayH)
+ *
+ * panX/panY from the store are in Canvas's internal coordinate space (preview
+ * pixels).  Because OriginalPane uses the FULL original resolution as its
+ * internal canvas size, we scale the pan values by (original / preview) so
+ * that the same image fraction stays centred in both panes.
+ *
+ * NOTE: this is deliberately NOT applied to the Reference-mode <img> block —
+ * the reference image must remain viewport-independent (no transform).
+ */
 function OriginalPane() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
+  // Cache the uint8 offscreen canvas built from the float32 original so we
+  // only do the expensive conversion once per image (not on every pan/zoom).
+  const offscreenRef = useRef<HTMLCanvasElement | null>(null);
+
+  const { viewport, processedImageData } = useAppStore();
+
+  // Build the offscreen canvas once when this component mounts.
+  // The parent re-keys us (key={currentImage?.id ?? 'none'}) on image switch,
+  // so [] deps are correct — it runs exactly once per image.
   useEffect(() => {
     const original = imageService.getOriginalImage();
-    const canvas = canvasRef.current;
-    if (!original || !canvas) return;
+    if (!original) return;
 
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+    const offscreen = document.createElement('canvas');
+    offscreen.width = original.width;
+    offscreen.height = original.height;
+    const offCtx = offscreen.getContext('2d');
+    if (!offCtx) return;
 
-    canvas.width = original.width;
-    canvas.height = original.height;
-    const imgData = ctx.createImageData(original.width, original.height);
-
+    const imgData = offCtx.createImageData(original.width, original.height);
     const sampleMax = Math.max(...original.data.slice(0, Math.min(4000, original.data.length)));
     const norm = sampleMax <= 1.0;
-
     for (let i = 0; i < original.data.length && i < imgData.data.length; i++) {
       imgData.data[i] = norm
         ? Math.round(Math.max(0, Math.min(1, original.data[i])) * 255)
         : Math.round(Math.max(0, Math.min(255, original.data[i])));
     }
-    ctx.putImageData(imgData, 0, 0);
+    offCtx.putImageData(imgData, 0, 0);
+    offscreenRef.current = offscreen;
   }, []);
 
+  // Redraw whenever the viewport (zoom/pan) or processed image changes.
+  // processedImageData is in deps because its .width/.height tell us the
+  // preview resolution used by Canvas, which we need for pan scaling.
+  useEffect(() => {
+    const offscreen = offscreenRef.current;
+    const canvas = canvasRef.current;
+    const container = containerRef.current;
+    if (!offscreen || !canvas || !container) return;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const imageWidth = offscreen.width;
+    const imageHeight = offscreen.height;
+
+    // Internal canvas resolution = full original image dimensions (same as
+    // Canvas.tsx uses preview dimensions for its internal resolution).
+    canvas.width = imageWidth;
+    canvas.height = imageHeight;
+
+    // CSS sizing: fit image to container while preserving aspect ratio.
+    // Mirrors the sizing logic in Canvas.tsx redrawCanvas().
+    // p-5 = 20 px padding on each side → subtract 40 px from each dimension.
+    const rect = container.getBoundingClientRect();
+    const availW = Math.max(1, rect.width - 40);
+    const availH = Math.max(1, rect.height - 40);
+    const imageAspect = imageWidth / imageHeight;
+    const containerAspect = availW / availH;
+    let cssW: number, cssH: number;
+    if (imageAspect > containerAspect) {
+      cssW = availW;
+      cssH = availW / imageAspect;
+    } else {
+      cssH = availH;
+      cssW = availH * imageAspect;
+    }
+    canvas.style.width = `${Math.floor(cssW)}px`;
+    canvas.style.height = `${Math.floor(cssH)}px`;
+
+    // Background (matches Canvas.tsx background colour).
+    ctx.fillStyle = '#0d0d0d';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Pan scaling: viewport.panX/panY are produced by mouse drag on Canvas and
+    // are effectively in Canvas's internal (preview-pixel) coordinate space.
+    // Scale them to OriginalPane's internal (original-pixel) space so the same
+    // image fraction is centred in both panes.
+    const pd = processedImageData as { width?: number; height?: number } | null;
+    const previewW = (pd && typeof pd === 'object' && 'width' in pd) ? (pd as { width: number }).width : imageWidth;
+    const previewH = (pd && typeof pd === 'object' && 'height' in pd) ? (pd as { height: number }).height : imageHeight;
+    const scaledPanX = viewport.panX * (imageWidth / previewW);
+    const scaledPanY = viewport.panY * (imageHeight / previewH);
+
+    // Apply the same transform as Canvas.tsx drawLoadedImage():
+    //   ctx.translate(centerX + panX, centerY + panY)
+    //   ctx.drawImage(src, 0,0,w,h, -dW/2,-dH/2, dW,dH)
+    const centerX = canvas.width / 2;
+    const centerY = canvas.height / 2;
+    const displayW = canvas.width * viewport.zoom;
+    const displayH = canvas.height * viewport.zoom;
+
+    ctx.save();
+    ctx.translate(centerX + scaledPanX, centerY + scaledPanY);
+    ctx.drawImage(offscreen, 0, 0, imageWidth, imageHeight, -displayW / 2, -displayH / 2, displayW, displayH);
+    ctx.restore();
+  }, [viewport, processedImageData]);
+
   return (
-    <div className="w-full h-full flex items-center justify-center p-5 relative">
+    <div ref={containerRef} className="w-full h-full flex items-center justify-center p-5 relative">
       <canvas
         ref={canvasRef}
-        className="max-w-full max-h-full object-contain"
         style={{ display: 'block' }}
       />
       <div
