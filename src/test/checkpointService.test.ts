@@ -63,4 +63,43 @@ describe('CheckpointService', () => {
     checkpointService.record('X');
     expect(checkpointService.getCheckpoints().length).toBe(0);
   });
+
+  it('undo()/redo() step the active position through the timeline and restore state', () => {
+    basicadj().setParams({ exposure: 0.1 }); checkpointService.record('A');
+    basicadj().setParams({ exposure: 0.5 }); checkpointService.record('B');
+    basicadj().setParams({ exposure: 0.9 }); checkpointService.record('C');
+    const [a, b, c] = checkpointService.getCheckpoints();
+
+    expect(checkpointService.getActiveId()).toBe(c.id);
+    expect(checkpointService.canUndo()).toBe(true);
+    expect(checkpointService.canRedo()).toBe(false);
+
+    expect(checkpointService.undo()).toBe(true); // -> B
+    expect(checkpointService.getActiveId()).toBe(b.id);
+    expect(basicadj().getParams().exposure).toBeCloseTo(0.5, 5);
+    expect(checkpointService.canRedo()).toBe(true);
+
+    expect(checkpointService.undo()).toBe(true); // -> A
+    expect(checkpointService.getActiveId()).toBe(a.id);
+    expect(basicadj().getParams().exposure).toBeCloseTo(0.1, 5);
+    expect(checkpointService.canUndo()).toBe(false);
+    expect(checkpointService.undo()).toBe(false); // oldest → no-op
+
+    expect(checkpointService.redo()).toBe(true); // -> B
+    expect(checkpointService.getActiveId()).toBe(b.id);
+    expect(basicadj().getParams().exposure).toBeCloseTo(0.5, 5);
+
+    expect(checkpointService.redo()).toBe(true); // -> C
+    expect(checkpointService.getActiveId()).toBe(c.id);
+    expect(checkpointService.canRedo()).toBe(false);
+    expect(checkpointService.redo()).toBe(false); // newest → no-op
+  });
+
+  it('canUndo/canRedo are false with zero or one checkpoint', () => {
+    expect(checkpointService.canUndo()).toBe(false);
+    expect(checkpointService.canRedo()).toBe(false);
+    basicadj().setParams({ exposure: 0.2 }); checkpointService.record('only');
+    expect(checkpointService.canUndo()).toBe(false);
+    expect(checkpointService.canRedo()).toBe(false);
+  });
 });

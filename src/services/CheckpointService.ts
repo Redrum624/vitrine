@@ -119,6 +119,35 @@ class CheckpointService {
   getCheckpoints(): readonly Checkpoint[] { return this.checkpoints; }
   getActiveId(): number | null { return this.activeId; }
 
+  /** Index of the active checkpoint in the timeline, or -1 if none / not found. */
+  private activeIndex(): number {
+    if (this.activeId == null) return -1;
+    return this.checkpoints.findIndex((c) => c.id === this.activeId);
+  }
+
+  /** True if there is an earlier checkpoint to step back to (drives the Undo button). */
+  canUndo(): boolean { return this.activeIndex() > 0; }
+
+  /** True if there is a later checkpoint to step forward to (drives the Redo button). */
+  canRedo(): boolean {
+    const i = this.activeIndex();
+    return i >= 0 && i < this.checkpoints.length - 1;
+  }
+
+  /** Undo: move the active position one checkpoint back and restore it. Returns true if it moved. */
+  undo(): boolean {
+    const i = this.activeIndex();
+    if (i <= 0) return false;
+    return this.restore(this.checkpoints[i - 1].id);
+  }
+
+  /** Redo: move the active position one checkpoint forward and restore it. Returns true if it moved. */
+  redo(): boolean {
+    const i = this.activeIndex();
+    if (i < 0 || i >= this.checkpoints.length - 1) return false;
+    return this.restore(this.checkpoints[i + 1].id);
+  }
+
   /** Wire the bake bridge (called once by EnhanceService at startup). The bridge exposes
    *  the EnhanceService restore-stack depth and unwind without creating an import cycle. */
   setBakeBridge(bridge: BakeBridge): void {

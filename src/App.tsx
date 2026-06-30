@@ -333,6 +333,46 @@ function App() {
   const [refDragOver, setRefDragOver] = useState(false);
   const { notifications, remove: removeNotification, success: showSuccess, error: showError } = useNotifications();
 
+  // Keep the Undo/Redo enabled-state in sync with the checkpoint timeline. The History panel
+  // (CheckpointService) IS the undo/redo history: every edit appends a checkpoint and every
+  // record/restore/load/clear emits, so subscribing keeps canUndo/canRedo correct at all times.
+  useEffect(() => {
+    const sync = () => {
+      setCanUndo(checkpointService.canUndo());
+      setCanRedo(checkpointService.canRedo());
+    };
+    sync();
+    return checkpointService.subscribe(sync);
+  }, []);
+
+  // Step the checkpoint timeline (Undo/Redo). After moving the active position, re-key the
+  // panels and reprocess the canvas — the same follow-up the History panel does on a click —
+  // so the menu, toolbar, keyboard and window-event paths all update the view identically.
+  const doUndo = () => {
+    try {
+      if (checkpointService.undo()) {
+        imageProcessingPipeline.invalidateModuleCache('localadjustments');
+        const store = useAppStore.getState();
+        store.notifyExternalParamsChange();
+        store.triggerReprocessing();
+      }
+    } catch (error) {
+      logger.error('Failed to undo:', error);
+    }
+  };
+  const doRedo = () => {
+    try {
+      if (checkpointService.redo()) {
+        imageProcessingPipeline.invalidateModuleCache('localadjustments');
+        const store = useAppStore.getState();
+        store.notifyExternalParamsChange();
+        store.triggerReprocessing();
+      }
+    } catch (error) {
+      logger.error('Failed to redo:', error);
+    }
+  };
+
   // Viewing control functions (available in JSX)
   const handleZoomIn = () => {
     setViewport({ zoom: Math.min(5, useAppStore.getState().viewport.zoom + 0.1) });
@@ -769,40 +809,8 @@ function App() {
       }
     };
 
-    const handleUndo = () => {
-      try {
-        logger.info('Undo requested');
-        if (historyService.undo()) {
-          logger.info('Undo operation completed');
-          // Update undo/redo state
-          updateHistoryState();
-        } else {
-          logger.info('No previous state to undo to');
-        }
-      } catch (error) {
-        logger.error('Failed to undo:', error);
-      }
-    };
-
-    const handleRedo = () => {
-      try {
-        logger.info('Redo requested');
-        if (historyService.redo()) {
-          logger.info('Redo operation completed');
-          // Update undo/redo state
-          updateHistoryState();
-        } else {
-          logger.info('No next state to redo to');
-        }
-      } catch (error) {
-        logger.error('Failed to redo:', error);
-      }
-    };
-
-    const updateHistoryState = () => {
-      setCanUndo(historyService.canUndo());
-      setCanRedo(historyService.canRedo());
-    };
+    const handleUndo = () => doUndo();
+    const handleRedo = () => doRedo();
 
     const handleResetAll = () => {
       try {
@@ -883,8 +891,8 @@ function App() {
     const shortcuts = createDefaultShortcuts({
       onOpen: () => electronService.isElectron() && electronService.openFile(),
       onExport: () => setIsExportDialogOpen(true),
-      onUndo: () => historyService.undo(),
-      onRedo: () => historyService.redo(),
+      onUndo: () => doUndo(),
+      onRedo: () => doRedo(),
       onResetAll: () => historyService.resetAll(),
       onZoomIn: handleZoomIn,
       onZoomOut: handleZoomOut,
@@ -953,9 +961,7 @@ function App() {
 
     logger.info(`Initialized ${shortcuts.length + 3} keyboard shortcuts`);
 
-    // Initialize undo/redo state
-    setCanUndo(historyService.canUndo());
-    setCanRedo(historyService.canRedo());
+    // Undo/redo enabled-state is kept in sync by the checkpointService subscription effect.
 
     // Setup app lifecycle service for proper closing
     appLifecycleService.registerUnsavedChangesChecker({
@@ -1083,8 +1089,8 @@ function App() {
         onFileOpen={() => electronService.isElectron() && electronService.openFile()}
         onFileImport={handleFileImport}
         onFileExport={() => setIsExportDialogOpen(true)}
-        onEditUndo={() => historyService.undo() && setCanUndo(historyService.canUndo()) && setCanRedo(historyService.canRedo())}
-        onEditRedo={() => historyService.redo() && setCanUndo(historyService.canUndo()) && setCanRedo(historyService.canRedo())}
+        onEditUndo={doUndo}
+        onEditRedo={doRedo}
         onEditReset={() => historyService.resetAll()}
         onViewZoomIn={handleZoomIn}
         onViewZoomOut={handleZoomOut}
@@ -1128,8 +1134,8 @@ function App() {
           onBatchProcess={() => setIsBatchDialogOpen(true)}
           onOpenPresets={() => setIsPresetDialogOpen(true)}
           onShowHelp={() => setIsShortcutsDialogOpen(true)}
-          onUndo={() => historyService.undo() && setCanUndo(historyService.canUndo()) && setCanRedo(historyService.canRedo())}
-          onRedo={() => historyService.redo() && setCanUndo(historyService.canUndo()) && setCanRedo(historyService.canRedo())}
+          onUndo={doUndo}
+          onRedo={doRedo}
           canUndo={canUndo}
           canRedo={canRedo}
           onZoomIn={handleZoomIn}
