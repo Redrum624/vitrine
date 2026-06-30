@@ -10,7 +10,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-const TEST_DIR = 'C:/Users/<user>/Pictures/2025/2025-02-06';
+const TEST_DIR = process.argv[2] || '/path/to/your/raw-files';
 
 // Find test files
 const allFiles = fs.readdirSync(TEST_DIR);

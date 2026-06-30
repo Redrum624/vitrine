@@ -13,7 +13,7 @@ Photo Editor Pro is a professional-grade photo editing application built on mode
 - **Type Safety**: 100% TypeScript with strict type checking
 
 ### **Performance-First**
-- **GPU Acceleration**: WebGL2 and CUDA processing for maximum performance
+- **GPU Acceleration**: WebGL2 processing for maximum performance
 - **Memory Optimization**: Smart caching and streaming for large files
 - **Parallel Processing**: Multi-threaded pipeline with Web Workers
 - **Progressive Loading**: Efficient handling of large RAW files
@@ -71,8 +71,8 @@ LibRawService               // Professional RAW processing via WebAssembly
 #### **GPU Acceleration Services**
 ```typescript
 GPUAccelerationService      // WebGL2 high-performance processing
-├── CUDAAcceleratedService  // CUDA/Tensor Core integration
-├── VRAMOptimizedMemoryService // 12GB memory pool management
+├── GPUOptimizedProcessingService // WebGL2 shader optimization
+├── VRAMOptimizedMemoryService // GPU memory pool management
 ├── PyramidProcessingService // Multi-resolution processing
 └── BackgroundProcessingService // Priority-based queue system
 ```
@@ -212,21 +212,21 @@ class GPUProcessor {
 }
 ```
 
-### **CUDA Integration (RTX 3080)**
+### **WebGL2 GPU Pipeline**
 
 ```typescript
-class CUDAProcessor {
-  private streams: CUDAStream[];
-  private memoryPool: VRAMMemoryPool;
+class GPUProcessor {
+  private shaderPrograms: Map<string, WebGLProgram>;
+  private texturePool: WebGLTexture[];
 
-  // Parallel processing
+  // Parallel shader processing
   async processParallel(operations: ProcessingOperation[]): Promise<ProcessingResult[]>;
 
-  // Tensor Core AI
-  async denoiseWithTensorCores(imageData: Float32Array): Promise<Float32Array>;
+  // GPU-accelerated denoising (NLM)
+  async denoiseWithGPU(imageData: Float32Array): Promise<Float32Array>;
 
   // Memory optimization
-  allocateVRAM(size: number): VRAMBuffer;
+  allocateTexture(width: number, height: number): WebGLTexture;
   optimizeMemoryLayout(): void;
 }
 ```

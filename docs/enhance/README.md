@@ -37,7 +37,7 @@ That's enough for the full deterministic pipeline (Lanczos upscaling + Richardso
 ### Optional: GAN upscaling (Real-ESRGAN)
 
 ```bash
-pip install torch --index-url https://download.pytorch.org/whl/cu121   # CUDA build
+pip install torch  # for GPU support, see https://pytorch.org/get-started/locally/
 pip install realesrgan basicsr
 ```
 

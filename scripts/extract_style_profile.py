@@ -11,7 +11,7 @@ Output: src/services/UserStyleProfile.ts
 
 Run:
     python scripts/extract_style_profile.py \
-        --portfolio "C:/Users/<user>/Pictures/Portfolio-Sep 22, 2019 - Feb 6, 2025" \
+        --portfolio "/path/to/your/portfolio" \
         --out src/services/UserStyleProfile.ts
 
 The stats computed here mirror AutoAdjustService.analyse() exactly:
@@ -372,7 +372,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="Extract style profile from a folder of graded JPEGs.")
     ap.add_argument("--portfolio", required=True,
                     help="Portfolio folder. Either a full path, OR 'parent::substring' "
-                         "(e.g. 'C:/Users/<user>/Pictures::Portfolio-Sep') to avoid "
+                         "(e.g. '/path/to/pictures::Portfolio-Sep') to avoid "
                          "shell encoding issues with unicode folder names.")
     ap.add_argument("--out", required=True, help="Output .ts path")
     ap.add_argument("--max-side", type=int, default=768, help="Downsample longest side (px). Default 768.")

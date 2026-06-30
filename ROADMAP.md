@@ -8,7 +8,7 @@
 
 ## Executive Summary
 
-Photo Editor Pro is a professional-grade RAW photo editing application built with modern web technologies. The application leverages React, TypeScript, Electron, and WebGL2/CUDA acceleration to deliver desktop-quality performance in a modern interface.
+Photo Editor Pro is a professional-grade RAW photo editing application built with modern web technologies. The application leverages React, TypeScript, Electron, and a WebGL2 GPU pipeline to deliver desktop-quality performance in a modern interface.
 
 ### Current State
 - **Core Functionality:** Complete (10 processing modules + hue curves)
@@ -104,7 +104,7 @@ Build:        Vite + TypeScript + ESLint
 #### GPU Acceleration
 - `GPUAccelerationService` - WebGL2 processing
 - `GPUOptimizedProcessingService` - Optimized algorithms
-- `CUDAAcceleratedService` - CUDA/Tensor Core integration
+- `GPUAccelerationService` - WebGL2 shader pipeline (resident-texture)
 - `VRAMOptimizedMemoryService` - Memory management
 
 #### Advanced Editing

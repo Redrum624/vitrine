@@ -7,7 +7,11 @@ const fs = require('fs');
 const sharp = require('sharp');
 const { decodeNative } = require('../electron/rawDecoder.cjs');
 
-const FOLDER = process.argv[2] || 'C:\\Users\\<user>\\Pictures\\2025\\2025-02-06';
+const FOLDER = process.argv[2];
+if (!FOLDER) {
+  console.error('Usage: node scripts/style-match-test.cjs <folder-with-orf-jpg-pairs>');
+  process.exit(1);
+}
 const W = 700;
 
 function cdf(pixels, ch, c) {

@@ -15,7 +15,7 @@ This guide will help you set up, develop, and contribute to Photo Editor Pro.
 ### **Recommended Hardware**
 - **RAM**: 16GB+ (8GB minimum)
 - **Storage**: 10GB+ free space on SSD
-- **GPU**: NVIDIA RTX series for optimal performance (RTX 3080 recommended)
+- **GPU**: Any GPU with WebGL2 support (recommended for best performance)
 - **CPU**: Multi-core processor (8+ cores recommended)
 
 ### **Development Tools**
@@ -108,7 +108,7 @@ React components organized by type:
 Core application services:
 - **ImageProcessingPipeline**: Main processing orchestration
 - **LibRawService**: RAW processing via WebAssembly
-- **GPUAccelerationService**: WebGL2/CUDA optimization
+- **GPUAccelerationService**: WebGL2 GPU pipeline optimization
 - **ExportService**: Multi-format export functionality
 
 #### **`src/modules/`**
@@ -455,7 +455,7 @@ Before deployment, verify:
 ```
 type(scope): description
 
-feat(gpu): add RTX 3080 CUDA acceleration
+feat(gpu): add WebGL2 resident-texture pipeline
 fix(export): resolve JPEG quality issue
 docs(readme): update installation instructions
 perf(processing): optimize demosaicing algorithm
@@ -494,7 +494,7 @@ test(modules): add exposure module tests
 
 ### **Documentation**
 - [Technical Architecture](TECHNICAL_ARCHITECTURE.md)
-- [Performance Optimization](PERFORMANCE_OPTIMIZATION.md)
+
 - [RAW Processing Guide](RAW_PROCESSING.md)
 - [API Reference](API_REFERENCE.md)
 

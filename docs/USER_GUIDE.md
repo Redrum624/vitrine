@@ -297,7 +297,7 @@ that area only. Switch masks with the chips, and remove one with the trash icon.
 
 ## Auto Adjustments
 
-Every **Auto** button — the per-module ones and the **Auto All** button in the toolbar — now uses *your personal style profile*, extracted from 200 of your graded photos at `~\Pictures\Portfolio-Sep 22, 2019 – Feb 6, 2025`. Instead of aiming at generic "neutral" targets, the Auto functions aim at the way *you* actually grade: darker, warmer, with more contrast and less saturation than a textbook neutral.
+Every **Auto** button — the per-module ones and the **Auto All** button in the toolbar — now uses *your personal style profile*, extracted from your graded photos. Instead of aiming at generic "neutral" targets, the Auto functions aim at the way *you* actually grade: darker, warmer, with more contrast and less saturation than a textbook neutral.
 
 The profile is split into 5 **buckets** — `low_light`, `high_key`, `warm`, `cool`, and `standard`. **Auto All** automatically picks the right bucket for the current image based on its brightness and white balance, then adjusts Exposure, Basic Adjustments (including Highlights/Shadows), Tone Curve, and Color Balance in one click. Its **white-balance step** uses **median gray-world** neutralisation (the same as the WB panel's **Auto** button) — it scans the image's overall median colour cast and neutralises both warmth and tint, rather than nudging toward the style profile. The bucket it chose is written to the log (e.g. `AutoExposure[warm]: …`) so you can tell which profile fired.
 
@@ -305,7 +305,7 @@ The profile is split into 5 **buckets** — `low_light`, `high_key`, `warm`, `co
 
 ```
 python scripts/extract_style_profile.py \
-  --portfolio "C:/Users/<user>/Pictures::Portfolio-Sep" \
+  --portfolio "/path/to/your/pictures::Portfolio-Sep" \
   --out src/services/UserStyleProfile.ts \
   --report logs/style_profile_report.json
 ```

@@ -7,12 +7,12 @@ const gen = (orig: string | undefined, opts: Record<string, unknown>): string =>
 
 describe('ExportService output path (Windows-safe)', () => {
   it('joins the output directory with ONLY the basename of a Windows source path', () => {
-    const out = gen('C:\\Users\\<user>\\Pictures\\2024\\PA200788.ORF', { outputDirectory: 'C:\\Users\\<user>\\Desktop', format: 'jpeg' });
-    expect(out).toBe('C:\\Users\\<user>\\Desktop/PA200788_PEP.jpg');
+    const out = gen('C:\\Users\\Test\\Pictures\\2024\\PA200788.ORF', { outputDirectory: 'C:\\Users\\Test\\Desktop', format: 'jpeg' });
+    expect(out).toBe('C:\\Users\\Test\\Desktop/PA200788_PEP.jpg');
   });
 
   it('does not double the path (regression: Desktop/C:\\...\\img.png)', () => {
-    const out = gen('C:\\Users\\<user>\\Pictures\\PA200788.ORF', { outputDirectory: 'C:\\Users\\<user>\\Desktop', format: 'png' });
+    const out = gen('C:\\Users\\Test\\Pictures\\PA200788.ORF', { outputDirectory: 'C:\\Users\\Test\\Desktop', format: 'png' });
     expect(out).not.toContain('Desktop/C:');
     // exactly one drive-letter segment (the old bug produced two)
     const drives = out.split(/[/\\]/).filter((s) => /^[A-Za-z]:$/.test(s));
@@ -20,8 +20,8 @@ describe('ExportService output path (Windows-safe)', () => {
   });
 
   it('writes next to the original when no output directory is set', () => {
-    const out = gen('C:\\Users\\<user>\\Pictures\\PA200788.ORF', { format: 'tiff' });
-    expect(out).toBe('C:\\Users\\<user>\\Pictures/PA200788_PEP.tiff');
+    const out = gen('C:\\Users\\Test\\Pictures\\PA200788.ORF', { format: 'tiff' });
+    expect(out).toBe('C:\\Users\\Test\\Pictures/PA200788_PEP.tiff');
   });
 
   it('also handles forward-slash (POSIX) source paths', () => {
