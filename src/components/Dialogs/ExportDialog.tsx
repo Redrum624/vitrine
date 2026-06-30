@@ -11,6 +11,7 @@ import {
 import SliderControl from '../Controls/SliderControl';
 import { ExportOptions, ExportPreset, exportService } from '../../services/ExportService';
 import { imageService } from '../../services/ImageService';
+import { resolveExportSource } from './resolveExportSource';
 import { multiExportService } from '../../services/MultiExportService';
 import { useAppStore } from '../../stores/appStore';
 import { notificationService } from '../../services/NotificationService';
@@ -221,7 +222,10 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
       let exportHeight: number;
 
       if (originalFilePath) {
-        const fullResImageData = await imageService.loadImageForExport(originalFilePath);
+        // resolveExportSource returns the baked upscale buffer when active,
+        // otherwise falls through to loadImageForExport — the non-baked path
+        // is byte-for-byte identical to the previous behaviour.
+        const source = await resolveExportSource(originalFilePath);
         setProgress(0.1);
 
         const pipeline = imageService.getProcessingPipeline();
@@ -236,13 +240,13 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
             const active = order.filter((m) => pipeline.isModuleActive(m.getId()));
             logger.info(`[Export] ${exportName}: pipeline connected, ${active.length}/${order.length} modules active: [${active.map((m) => m.getId()).join(', ')}]`);
           } catch { /* diagnostic only — never block an export */ }
-          const context = { width: fullResImageData.width, height: fullResImageData.height, channels: 4 };
+          const context = { width: source.width, height: source.height, channels: 4 };
           // Force main-thread processing for exports (web workers may produce
           // different results). The onProgress hook yields between modules.
           // cacheResults=false: never park full-resolution module results in the
           // pipeline cache (hundreds of MB per module at 24MP+).
           const processedData = await pipeline.processImage(
-            fullResImageData.data,
+            source.data,
             context,
             false,
             (done, total) => setProgress(0.1 + 0.75 * (total > 0 ? done / total : 1)),
@@ -256,19 +260,19 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
             exportHeight = previewData.height;
           } else if (processedData && processedData instanceof Float32Array) {
             exportImageData = processedData;
-            exportWidth = fullResImageData.width;
-            exportHeight = fullResImageData.height;
+            exportWidth = source.width;
+            exportHeight = source.height;
           } else {
             logger.warn('[Export] processImage returned an unusable buffer — exporting the ORIGINAL pixels (edits will be missing)');
-            exportImageData = fullResImageData.data;
-            exportWidth = fullResImageData.width;
-            exportHeight = fullResImageData.height;
+            exportImageData = source.data;
+            exportWidth = source.width;
+            exportHeight = source.height;
           }
         } else {
           logger.warn('[Export] no processing pipeline connected — exporting the ORIGINAL pixels (edits will be missing)');
-          exportImageData = fullResImageData.data;
-          exportWidth = fullResImageData.width;
-          exportHeight = fullResImageData.height;
+          exportImageData = source.data;
+          exportWidth = source.width;
+          exportHeight = source.height;
         }
       } else {
         exportImageData = imageData;
