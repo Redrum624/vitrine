@@ -1023,13 +1023,14 @@ ipcMain.handle('get-log-file', async () => {
   return logFile;
 });
 
-// Decode a RAW file by extracting its embedded JPEG and returning raw pixels.
-// This runs in the main process (Node.js) to avoid the browser's
-// SharedArrayBuffer/Emscripten issues with libraw-wasm.
-ipcMain.handle('decode-raw-file', async (event, filePath) => {
+// Decode a RAW file via the native LibRaw pipeline (true demosaic).
+// Accepts optional decode options { demosaic, highlightMode }; defaults to
+// DEFAULT_RAW_DECODE_OPTIONS (DCB + blend) when omitted.
+// Runs in the main process (Node.js) to avoid browser SharedArrayBuffer/Emscripten issues.
+ipcMain.handle('decode-raw-file', async (event, filePath, options) => {
   const { decodeRawFile } = require('./rawDecoder.cjs');
   try {
-    return await decodeRawFile(filePath, console);
+    return await decodeRawFile(filePath, console, options);
   } catch (error) {
     console.error('RAW decode failed:', error);
     throw new Error(`RAW decode failed: ${error.message}`);

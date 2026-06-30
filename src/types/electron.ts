@@ -1,3 +1,16 @@
+// RAW decode options — parameterise demosaic algorithm and highlight handling.
+export type DemosaicAlgo = 'ahd' | 'dcb';
+export type HighlightMode = 'off' | 'blend' | 'reconstruct';
+export interface RawDecodeOptions {
+  demosaic: DemosaicAlgo;
+  highlightMode: HighlightMode;
+}
+/** Default used when no options are supplied (new default: DCB + blend). */
+export const DEFAULT_RAW_DECODE_OPTIONS: RawDecodeOptions = {
+  demosaic: 'dcb',
+  highlightMode: 'blend',
+};
+
 // Electron API types
 interface DialogFilter {
   name: string;
@@ -71,7 +84,7 @@ export interface ElectronAPI {
   // File system
   readFile: (filePath: string) => Promise<Buffer>;
   readFileBuffer: (filePath: string) => Promise<ArrayBuffer>;
-  decodeRawFile: (filePath: string) => Promise<{ data: ArrayBuffer; width: number; height: number; channels: number; bitDepth?: number }>;
+  decodeRawFile: (filePath: string, options?: RawDecodeOptions) => Promise<{ data: ArrayBuffer; width: number; height: number; channels: number; bitDepth?: number }>;
   readImageAsDataURL: (filePath: string) => Promise<string>;
   writeFile: (filePath: string, data: Buffer | string) => Promise<boolean>;
   writeLog: (logEntry: Record<string, unknown>) => Promise<boolean>;

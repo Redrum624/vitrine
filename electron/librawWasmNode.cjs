@@ -25,16 +25,57 @@ function resolveWorkerJs() {
   return candidates.find((c) => fs.existsSync(c)) || null;
 }
 
-// Mirror the native dcraw_emu rendering: camera white balance, sRGB primaries,
-// 16-bit, high-quality demosaic (balanced, gradeable — no in-camera grade).
-const WASM_OPTIONS = {
-  userQual: 3,
-  useCameraWb: true,
-  outputColor: 1,
-  outputBps: 16,
-};
+// Demosaic algorithm → libraw-wasm userQual value (mirrors -q in dcraw_emu).
+const WASM_DEMOSAIC_QUAL = { ahd: 3, dcb: 4 };
 
-async function decodeRawWithWasm(filePath, log = console) {
+// Highlight mode → libraw-wasm `highlight` integer value.
+// LibRaw C++ field: libraw_output_params_t.highlight (0=clip, 2=blend, 5=reconstruct).
+// The wasm binding exposes C++ struct fields using the same key names; `highlight`
+// is already one word so it requires no camelCase transformation (unlike user_qual→userQual).
+// NOTE: if the bundled wasm ignores this key it degrades gracefully to LibRaw's default
+// (clip, same as 'off') — callers are warned below when options are non-default.
+const WASM_HIGHLIGHT = { off: 0, blend: 2, reconstruct: 5 };
+
+/**
+ * Build the libraw-wasm options object from structured decode options.
+ * Pure mapping — no I/O.
+ *
+ * @param {object} options  { demosaic: 'ahd'|'dcb', highlightMode: 'off'|'blend'|'reconstruct' }
+ * @param {object} log
+ */
+function buildWasmOptions(options, log) {
+  const { demosaic = 'dcb', highlightMode = 'blend' } = options || {};
+
+  const userQual = WASM_DEMOSAIC_QUAL[demosaic] ?? WASM_DEMOSAIC_QUAL.dcb;
+  const highlightVal = WASM_HIGHLIGHT[highlightMode] ?? null;
+
+  const opts = {
+    userQual,
+    useCameraWb: true,
+    outputColor: 1,
+    outputBps: 16,
+  };
+
+  if (highlightVal !== null) {
+    // Pass through — wasm binding accepts `highlight` per libraw_output_params_t.
+    // If this key is silently ignored by the bundled wasm build, the image decodes
+    // correctly at the cost of using LibRaw's default clip mode.
+    opts.highlight = highlightVal;
+    if (highlightVal !== 0) {
+      // Non-default: surface a single log line so it's visible if wasm ignores it.
+      (log || console).log(
+        `[libraw-wasm] highlight mode: ${highlightMode} (wasm key "highlight"=${highlightVal}; ` +
+        `honoured only if bundled wasm exposes libraw_output_params_t.highlight)`
+      );
+    }
+  } else {
+    (log || console).warn(`[libraw-wasm] Unknown highlightMode "${highlightMode}", using LibRaw default (clip).`);
+  }
+
+  return opts;
+}
+
+async function decodeRawWithWasm(filePath, log = console, options) {
   const workerJs = resolveWorkerJs();
   if (!workerJs) throw new Error('libraw-wasm worker.js not found');
 
@@ -71,7 +112,7 @@ async function decodeRawWithWasm(filePath, log = console) {
     await new Promise((r) => setTimeout(r, 1200));
 
     const raw = fs.readFileSync(filePath);
-    await call('open', new Uint8Array(raw), WASM_OPTIONS);
+    await call('open', new Uint8Array(raw), buildWasmOptions(options, log));
     const meta = await call('metadata', false);
     const img = await call('imageData');
 
@@ -111,4 +152,4 @@ async function decodeRawWithWasm(filePath, log = console) {
   }
 }
 
-module.exports = { decodeRawWithWasm, resolveWorkerJs };
+module.exports = { decodeRawWithWasm, resolveWorkerJs, buildWasmOptions };

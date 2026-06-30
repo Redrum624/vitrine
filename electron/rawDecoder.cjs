@@ -23,15 +23,50 @@ const { promisify } = require('util');
 
 const execFileAsync = promisify(execFile);
 
-// dcraw_emu flags — a neutral "developed" raw: camera white balance applied so
-// the image is balanced and gradeable, but WITHOUT the in-camera Picture Mode
-// (contrast/saturation) grade.
-//   -q 3            AHD demosaic (high quality)
+// dcraw_emu base flags — always emitted regardless of decode options.
 //   -w              use the camera's as-shot white balance (balanced, gradeable)
 //   -o 1            sRGB output primaries
 //   -6              16-bit output
 //   -g 2.4 12.92    sRGB transfer curve
 //   (auto-brighten left ON — no -W — for a properly-exposed starting point)
+const DCRAW_BASE_FLAGS = ['-w', '-o', '1', '-6', '-g', '2.4', '12.92'];
+
+// Demosaic algorithm → dcraw_emu -q value.
+const DEMOSAIC_Q = { ahd: '3', dcb: '4' };
+
+// Highlight mode → dcraw_emu -H value (null = omit -H entirely).
+const HIGHLIGHT_H = { off: null, blend: '2', reconstruct: '5' };
+
+// Default decode options (new default: DCB demosaic + blend highlights).
+const DEFAULT_RAW_DECODE_OPTIONS = { demosaic: 'dcb', highlightMode: 'blend' };
+
+/**
+ * Build the dcraw_emu CLI flag array from structured decode options.
+ * Pure function — no I/O; directly unit-testable.
+ *
+ * @param {object} options  { demosaic: 'ahd'|'dcb', highlightMode: 'off'|'blend'|'reconstruct' }
+ * @returns {string[]} full flags array ready to spread before the input path
+ */
+function buildDcrawFlags(options) {
+  const { demosaic = 'dcb', highlightMode = 'blend' } = options || {};
+  const flags = [];
+
+  // Demosaic quality (-q)
+  flags.push('-q', DEMOSAIC_Q[demosaic] ?? DEMOSAIC_Q.dcb);
+
+  // Highlight mode (-H) — omit entirely for 'off' (LibRaw default = clip)
+  const hVal = HIGHLIGHT_H[highlightMode];
+  if (hVal != null) {
+    flags.push('-H', hVal);
+  }
+
+  // Base flags always present
+  flags.push(...DCRAW_BASE_FLAGS);
+  return flags;
+}
+
+// Legacy const kept for any external consumers that imported it directly.
+// Reflects AHD+clip, the previous default.  New callers should use buildDcrawFlags.
 const DCRAW_FLAGS = ['-q', '3', '-w', '-o', '1', '-6', '-g', '2.4', '12.92'];
 
 /** Resolve the bundled dcraw_emu.exe in both dev and packaged layouts. */
@@ -90,7 +125,7 @@ function parsePpm16(buf) {
 }
 
 /** Primary decoder: true demosaic via the bundled native LibRaw binary. */
-async function decodeNative(filePath, log) {
+async function decodeNative(filePath, log, options) {
   const bin = resolveLibrawBin();
   if (!bin) {
     throw new Error('dcraw_emu.exe not found in vendor/libraw');
@@ -105,7 +140,8 @@ async function decodeNative(filePath, log) {
 
   try {
     fs.copyFileSync(filePath, tmpIn);
-    await execFileAsync(bin, [...DCRAW_FLAGS, tmpIn], {
+    const resolvedOpts = options || DEFAULT_RAW_DECODE_OPTIONS;
+    await execFileAsync(bin, [...buildDcrawFlags(resolvedOpts), tmpIn], {
       timeout: 120000,
       windowsHide: true,
       maxBuffer: 4 * 1024 * 1024, // only diagnostic text on stdout; pixels go to the .ppm
@@ -125,10 +161,10 @@ async function decodeNative(filePath, log) {
   }
 }
 
-/** Placeholder for the libraw-wasm/Node fallback — wired up in Phase 2. */
-async function decodeWasm(filePath, log) {
+/** Libraw-wasm/Node fallback — middle rung of the decode chain. */
+async function decodeWasm(filePath, log, options) {
   const { decodeRawWithWasm } = require('./librawWasmNode.cjs');
-  return decodeRawWithWasm(filePath, log);
+  return decodeRawWithWasm(filePath, log, options);
 }
 
 /**
@@ -256,14 +292,19 @@ function sweepStaleRawTmpDirs({ baseDir = os.tmpdir(), maxAgeMs = 24 * 60 * 60 *
 /**
  * Decode a RAW file to packed pixels, trying each engine in order of quality and
  * degrading gracefully. Throws only if every path fails.
+ *
+ * @param {string} filePath
+ * @param {object} [log]     logger (defaults to console)
+ * @param {object} [options] { demosaic, highlightMode } — defaults to DEFAULT_RAW_DECODE_OPTIONS
  */
-async function decodeRawFile(filePath, log = console) {
+async function decodeRawFile(filePath, log = console, options) {
+  const resolvedOpts = options || DEFAULT_RAW_DECODE_OPTIONS;
   try {
-    return await decodeNative(filePath, log);
+    return await decodeNative(filePath, log, resolvedOpts);
   } catch (nativeError) {
     log.warn(`Native dcraw_emu decode failed (${nativeError.message}); trying libraw-wasm/Node`);
     try {
-      return await decodeWasm(filePath, log);
+      return await decodeWasm(filePath, log, resolvedOpts);
     } catch (wasmError) {
       log.warn(`libraw-wasm/Node decode failed (${wasmError.message}); falling back to embedded JPEG`);
       return await decodeEmbeddedJpeg(filePath, log);
@@ -279,5 +320,8 @@ module.exports = {
   parsePpm16,
   resolveLibrawBin,
   sweepStaleRawTmpDirs,
+  buildDcrawFlags,
+  DEFAULT_RAW_DECODE_OPTIONS,
+  // Legacy export — previous AHD+clip default; kept for backward compat.
   DCRAW_FLAGS,
 };
