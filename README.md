@@ -4,9 +4,9 @@ A **desktop RAW photo editor** built with Electron + React, featuring a WebGL2/C
 processing pipeline, native LibRaw demosaicing, colour-managed export, and
 non-destructive local adjustments.
 
-![Version](https://img.shields.io/badge/Version-1.7.2-blue)
+![Version](https://img.shields.io/badge/Version-1.8.0-blue)
 ![TypeScript](https://img.shields.io/badge/TypeScript-0_errors-blue)
-![Tests](https://img.shields.io/badge/Tests-1040_passing-brightgreen)
+![Tests](https://img.shields.io/badge/Tests-1084_passing-brightgreen)
 ![Lint](https://img.shields.io/badge/Lint-clean-brightgreen)
 ![GPU](https://img.shields.io/badge/GPU-WebGL2_accelerated-success)
 
@@ -30,7 +30,8 @@ non-destructive local adjustments.
   panel plus a feather control.
 - **White Balance** (with **median gray-world Auto** that neutralises both warmth and
   tint), **Color Balance**, **Tone Curve** (with auto-levels), **Noise Reduction**
-  (Apply button), **Sharpen** (unsharp-mask Amount / Radius / Detail), **Lens
+  (Apply button), **Enhance** (Sharpen + Upscale — Richardson–Lucy deblur, FidelityFX CAS,
+  ×2/×4 Lanczos upscale; Apply button, like Noise Reduction), **Lens
   Corrections** (Distortion, Vignetting, Chromatic Aberration, plus non-destructive
   **Blur** and **Film Grain** sections).
 - **Copy / Paste Style** — transfer a colour grade between images via per-channel
@@ -49,7 +50,7 @@ non-destructive local adjustments.
   between float textures, and the result is **presented directly to the canvas with zero
   GPU→CPU readback** — for real-time slider feedback. Covered on the GPU: Exposure, White
   Balance, Basic Adjustments, Tone Curve, Color Balance, Lens distortion/chromatic-
-  aberration/vignetting, Shadows/Highlights, Sharpen (separable unsharp mask), Local
+  aberration/vignetting, Shadows/Highlights, Local
   Adjustment masks, and a **GPU Non-Local-Means noise reducer**.
 - Each GPU op carries a CPU reference and an init **self-check** — the GPU path is used
   only if its output matches the CPU within tolerance, so a faulty shader **falls back
@@ -65,8 +66,8 @@ non-destructive local adjustments.
   supports** — switching format auto-adjusts the depth), in **sRGB or wide-gamut**
   (Adobe RGB / ProPhoto / Rec.2020) using generated ICC profiles, with **EXIF/XMP**
   metadata embedding. The dialog closes as soon as the export starts and a cancellable
-  progress bar at the top-left tracks it. Sharpening is no longer a separate export
-  option — the **Sharpen** module's result is baked into every export automatically.
+  progress bar at the top-left tracks it. The **Enhance** module's result (sharpening
+  and/or upscale) is baked into every export automatically.
 - **Multi-export.** Select several photos in the filmstrip (**Ctrl/Cmd+click** to
   toggle individual ones, **Shift+click** for a contiguous range), then **Export N**
   writes them all with one set of settings — each with **its own saved edits** — into
@@ -95,7 +96,7 @@ pnpm run electron-dev   # Vite dev server + Electron
 ### Build a Windows release
 ```bash
 npm run build:win       # clean dist + release -> tsc + vite build -> NSIS installer + portable (x64)
-# Output: release/Photo Editor Pro Setup 1.7.2.exe  and  release/Photo Editor Pro 1.7.2.exe
+# Output: release/Photo Editor Pro Setup 1.8.0.exe  and  release/Photo Editor Pro 1.8.0.exe
 npm run build:win:dir   # fast unpacked build (no installer)
 npm run dist            # electron-builder for the current platform
 ```

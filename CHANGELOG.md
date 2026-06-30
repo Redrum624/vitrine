@@ -4,6 +4,42 @@ All notable changes to **Photo Editor Pro** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.8.0] - 2026-06-29
+
+### Added
+- **Enhance module (replaces Sharpen).** A new develop module that ports a deterministic
+  denoise → deblur → upscale → sharpen chain into the Float32 RGBA pipeline, with two
+  toggles: **Sharpen** and **Upscale**.
+  - **Sharpen** (resolution-preserving): Richardson–Lucy deconvolution deblur + edge-masked
+    luma graft + AMD FidelityFX CAS sharpening + luma-guided chroma cleanup, in BT.601
+    luma/chroma with alpha preserved. Identity by default; runs only on **Apply Enhance**
+    (like Noise Reduction), so it never auto-processes. Applies on the live canvas and on
+    export at full resolution.
+  - **Upscale** (×2 / ×4, in-session): an off-main-thread bake that Lanczos-resamples in
+    linear light and reloads the enlarged image as the working image. Export writes the
+    upscaled result, History records an **"Enhanced ×N"** checkpoint, and a multi-level
+    **Revert** stack guarantees the native original is never lost. Reopening the image
+    returns the original (the upscale is in-session only). How to use: sidebar → Enhance →
+    toggle Sharpen and/or Upscale → Apply Enhance.
+
+### Changed
+- **Sharpen module removed.** Its sidebar tool, panel, and GPU shader pass are replaced by
+  Enhance. Export-time output sharpening is a separate feature and is unchanged. Affects:
+  `src/modules/EnhanceModule.ts`, `src/services/EnhanceService.ts`, `src/utils/enhance*.ts`,
+  `src/workers/enhance.worker.ts`, `src/components/Modules/EnhanceModuleComponent.tsx`,
+  plus pipeline/sidebar/panel wiring.
+- Removed the static "Processing Stats" footer from the adjustment panel.
+
+### Fixed
+- Export, History, and edit-persistence now correctly account for an in-session upscaled
+  (baked) image. Cause: export/persistence/History re-decoded the original file and ignored
+  the baked pixels. Fix: a baked-source marker on `ImageService` drives export to read the
+  baked buffer at baked dimensions; the "Enhanced ×N" checkpoint restores by unwinding the
+  bake; persistence is skipped while baked so the saved state isn't corrupted; upscaling
+  after a Crop uses the post-crop dimensions. Affects: `src/services/ImageService.ts`,
+  `src/services/CheckpointService.ts`, `src/services/EditPersistenceService.ts`,
+  `src/components/Dialogs/ExportDialog.tsx`.
+
 ## [1.7.2] - 2026-06-23
 
 ### Fixed

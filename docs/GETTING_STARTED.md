@@ -48,7 +48,7 @@ npm run dev
 
 **Step 5: Final Touch**
 - Basic Adjustments: +10 Contrast, +10 Vibrance
-- Sharpening if needed
+- Enhance (Sharpen and/or Upscale) if needed
 
 **Step 6: Export**
 - Full resolution

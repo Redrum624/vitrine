@@ -273,20 +273,25 @@ that area only. Switch masks with the chips, and remove one with the trash icon.
 - Chroma noise (color noise) more visible than luminance
 - Don't denoise ISO 100-400 images (unnecessary)
 
-### 11. Sharpen
-**Purpose:** Non-destructive unsharp-mask sharpening
-**When to use:** After noise reduction, just before export
+### 11. Enhance
+**Purpose:** Non-destructive sharpening and in-session upscaling
+**When to use:** After noise reduction, just before export; upscale before cropping for social/print delivery
 
 **Controls:**
-- **Amount:** 0–150% (sharpening strength)
-- **Radius:** 0.5–3 px (edge radius)
-- **Detail:** 0–100 (protects smooth areas and noise)
+- **Sharpen toggle** — enables Richardson–Lucy deconvolution deblur + edge-masked luma
+  graft + AMD FidelityFX CAS sharpening + luma-guided chroma cleanup (BT.601, alpha
+  preserved).
+- **Upscale toggle** — ×2 or ×4 Lanczos upscale (linear light). Bakes the enlarged image
+  as the working image for the session; reopening the file returns the native original.
+- **Apply Enhance** — runs the enabled operations (Sharpen and/or Upscale). Like Noise
+  Reduction, it never auto-processes on slider change.
 
 **Notes:**
-- It's a live develop module reached from the sidebar (below Noise Reduction)
-- It applies to the whole image, so the canvas preview matches the export, and the
-  result is baked into exports automatically (there is no separate export-sharpening
-  option)
+- Reached from the sidebar (below Noise Reduction), replacing the old Sharpen module.
+- The Sharpen result is baked into every export automatically; no separate export-sharpening
+  option needed.
+- Upscale is in-session only: History records an "Enhanced ×N" checkpoint and a multi-level
+  Revert stack keeps the native original accessible.
 
 ---
 

@@ -251,7 +251,7 @@ Hardware-accelerated processing using WebGL2.
 - Color balance
 - Denoise (bilateral filter)
 - Saturation/vibrance
-- Sharpen (unsharp mask)
+- Enhance (Richardson–Lucy deblur + FidelityFX CAS sharpening + Lanczos upscale)
 
 **Example:**
 ```typescript
