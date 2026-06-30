@@ -708,13 +708,34 @@ function applyExifOrientation(pipe, ori) {
   }
 }
 
-// Path validation helper for write IPC handlers -- rejects traversal attempts
+// Path validation helper for write IPC handlers. Resolves to an absolute path
+// (which collapses any `..` traversal) and then denies writes into protected
+// system locations. We use a DENY-LIST of system dirs rather than an allow-list:
+// this app legitimately exports to user-chosen paths (Desktop, external/SD drives,
+// any folder picked via the native save dialog), so an allow-list (e.g. Pictures
+// only) would break real export flows. The deny-list blocks the realistic threat —
+// a compromised renderer calling a write IPC with a system path (no `..` needed).
 function validateWritePath(p) {
-  const normalized = path.normalize(p);
-  if (normalized.includes('..')) {
-    throw new Error(`Path traversal rejected: ${p}`);
+  if (typeof p !== 'string' || !p.trim()) {
+    throw new Error('Invalid write path');
   }
-  return normalized;
+  const resolved = path.resolve(p);
+  const denied = [
+    process.env.SystemRoot,
+    process.env.windir,
+    process.env.ProgramFiles,
+    process.env['ProgramFiles(x86)'],
+    process.env.ProgramW6432,
+    process.resourcesPath,            // the packaged app's bundled resources
+    path.dirname(app.getPath('exe')), // the install directory
+  ].filter(Boolean).map((d) => path.resolve(d).toLowerCase());
+  const lower = resolved.toLowerCase();
+  for (const base of denied) {
+    if (lower === base || lower.startsWith(base + path.sep)) {
+      throw new Error(`Path rejected (protected system location): ${p}`);
+    }
+  }
+  return resolved;
 }
 
 ipcMain.handle('write-file', async (event, filePath, data) => {
@@ -1030,8 +1051,22 @@ app.on('web-contents-created', (event, contents) => {
     ? 'http://localhost:3005'
     : `file://${path.join(__dirname, '../dist/index.html')}`;
 
+  let expected;
+  try { expected = new URL(appUrl); } catch { expected = null; }
+
   contents.on('will-navigate', (e, url) => {
-    if (!url.startsWith(appUrl)) {
+    let target;
+    try { target = new URL(url); } catch { e.preventDefault(); return; }
+    // Structured comparison (NOT startsWith, which a crafted host/path like
+    // "http://localhost:3005.evil.com" would bypass). Same protocol + host, and
+    // for file:// also the exact pathname (the app's index.html).
+    const sameOrigin = !!expected
+      && target.protocol === expected.protocol
+      && target.host === expected.host;
+    const samePath = expected && expected.protocol === 'file:'
+      ? target.pathname === expected.pathname
+      : true;
+    if (!sameOrigin || !samePath) {
       e.preventDefault();
     }
   });
