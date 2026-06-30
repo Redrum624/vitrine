@@ -370,8 +370,11 @@ ipcMain.handle('get-app-info', () => {
   const pkg = require('../package.json');
   const repoUrl = (pkg.repository && (typeof pkg.repository === 'string' ? pkg.repository : pkg.repository.url) || '')
     .replace(/^git\+/, '').replace(/\.git$/, '');
+  // NOTE: electron-builder strips the `build` field from the packaged package.json, so
+  // pkg.build.productName is only available in dev. Fall back to the literal product name
+  // (never pkg.name, which is the npm id "photo_app").
   return {
-    name: (pkg.build && pkg.build.productName) || pkg.productName || pkg.name || 'Photo Editor Pro',
+    name: (pkg.build && pkg.build.productName) || 'Photo Editor Pro',
     version: pkg.version,
     description: pkg.description || '',
     author: typeof pkg.author === 'string' ? pkg.author : (pkg.author && pkg.author.name) || '',
