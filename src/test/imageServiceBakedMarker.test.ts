@@ -38,4 +38,12 @@ describe('ImageService - Baked Upscale Marker', () => {
 
     expect(imageService.getBakedUpscale()).toEqual(info);
   });
+
+  test('clearImage() also clears the baked marker (no stale marker without an image)', () => {
+    imageService.setBakedUpscale({ scale: 2, nativeWidth: 4, nativeHeight: 4 });
+    expect(imageService.isBakedUpscaleActive()).toBe(true);
+    imageService.clearImage();
+    expect(imageService.isBakedUpscaleActive()).toBe(false);
+  });
 });
+

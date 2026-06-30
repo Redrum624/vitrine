@@ -491,6 +491,7 @@ export class ImageService {
 
   clearImage(): void {
     this.currentImage = null;
+    this.bakedUpscale = null;
     logger.info('Image cleared');
   }
 
