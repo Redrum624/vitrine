@@ -16,6 +16,14 @@
   --gray-100: #cccccc;
   --white: #ffffff;
 
+  /* Primary accent (blue) — used by primary action buttons (e.g. Enhance "Apply"),
+     active toggles, and selectors. */
+  --primary-700: #1d4ed8;
+  --primary-600: #2563eb;
+  --primary-500: #3b82f6;
+  --primary-400: #60a5fa;
+  --primary-300: #93c5fd;
+
   --accent: #3a3a3a;
   --accent-hover: #4a4a4a;
   --accent-active: #555555;

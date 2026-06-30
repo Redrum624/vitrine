@@ -273,12 +273,24 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
         type="button"
         disabled={busy}
         style={{
-          width: '100%', padding: 11, borderRadius: 9, border: '1px solid var(--primary-500)',
-          background: 'var(--primary-600)', color: '#fff', fontSize: '.84rem', fontWeight: 600,
-          cursor: 'pointer', opacity: busy ? 0.6 : 1,
+          width: '100%', padding: 11, borderRadius: 9,
+          border: '1px solid var(--primary-500, #3b82f6)',
+          background: 'var(--primary-600, #2563eb)', color: '#fff', fontSize: '.84rem', fontWeight: 600,
+          cursor: busy ? 'wait' : 'pointer', opacity: busy ? 0.75 : 1,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
         }}
         onClick={handleApply}
       >
+        {busy && (
+          <span
+            className="animate-spin"
+            style={{
+              width: 14, height: 14, borderRadius: '50%',
+              border: '2px solid rgba(255,255,255,0.4)', borderTopColor: '#fff',
+              flexShrink: 0,
+            }}
+          />
+        )}
         {busy ? 'Enhancing…' : currentParams.upscale ? `Apply Enhance (×${currentParams.scale})` : 'Apply Enhance'}
       </button>
 
