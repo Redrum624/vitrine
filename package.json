@@ -138,13 +138,21 @@
         "filter": [
           "**/*"
         ]
+      },
+      {
+        "from": "resources/models",
+        "to": "models",
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "asarUnpack": [
       "electron/librawWasmWorker.cjs",
       "electron/librawWasmNode.cjs",
       "**/node_modules/sharp/**",
-      "**/node_modules/@img/**"
+      "**/node_modules/@img/**",
+      "**/node_modules/onnxruntime-node/**"
     ]
   }
 }
