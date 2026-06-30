@@ -1,4 +1,4 @@
-# Photo Editor Pro 🎨
+# Photo Editor Pro
 
 ![Version](https://img.shields.io/badge/Version-1.9.0-blue)
 ![TypeScript](https://img.shields.io/badge/TypeScript-0_errors-blue)
@@ -6,13 +6,22 @@
 ![Lint](https://img.shields.io/badge/Lint-clean-brightgreen)
 ![GPU](https://img.shields.io/badge/GPU-WebGL2_accelerated-success)
 
+![Electron](https://img.shields.io/badge/Electron_39-191970?logo=electron&logoColor=white)
+![React](https://img.shields.io/badge/React_19-20232A?logo=react&logoColor=61DAFB)
+![TypeScript](https://img.shields.io/badge/TypeScript_5.9-3178C6?logo=typescript&logoColor=white)
+![Vite](https://img.shields.io/badge/Vite_7-646CFF?logo=vite&logoColor=white)
+![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS_4-06B6D4?logo=tailwindcss&logoColor=white)
+![WebGL2](https://img.shields.io/badge/WebGL2-GPU_pipeline-990000)
+
 ![Photo Editor Pro](docs/screenshot.png)
 
 A **desktop RAW photo editor** built with Electron + React, featuring a WebGL2/CPU
 processing pipeline, native LibRaw demosaicing, colour-managed export, and
 non-destructive local adjustments.
 
-## 🚀 Installation
+*A free, non-destructive RAW photo editor for Windows — a lightweight alternative to Lightroom and darktable for Olympus ORF, Canon CR2/CR3, Nikon NEF, Sony ARW, and Adobe DNG files.*
+
+## Installation
 
 ### Prerequisites
 - Node.js 18+ and a package manager (the repo is set up for **pnpm**; npm also works)
@@ -48,7 +57,7 @@ npm run dist            # electron-builder for the current platform
 The packaged artifacts land in `release/`. A plain-text `README.txt` is also
 written there beside the installer for offline reference.
 
-## 🧩 Modules
+## Modules
 
 - **File Explorer** — browse and open photos from the local filesystem.
 - **Crop & Transform** — aspect ratios, free rotation, auto-straighten (horizon detection), and flip.
@@ -63,7 +72,7 @@ written there beside the installer for offline reference.
 - **Histogram** — live RGB and luminosity tone-distribution display.
 - **Settings** — application preferences, theme, and workspace configuration.
 
-## 🌟 Features
+## Features
 
 - **RAW processing** — native LibRaw (`dcraw_emu`) Bayer demosaic in the Electron main process for 15+ formats (CR2/CR3, NEF, ARW, ORF, DNG, RW2, PEF, …); `libraw-wasm` and embedded-JPEG fallbacks ensure every RAW opens.
 - **GPU-accelerated preview** — resident-texture WebGL2 pipeline: image uploaded to the GPU once, all modules run as fragment-shader passes with zero GPU→CPU readback; CPU/Web-Worker fallback runs off the main thread when WebGL2 is unavailable.
@@ -84,7 +93,7 @@ written there beside the installer for offline reference.
 - **Output collections** — group processed images into named output sets for organised delivery.
 - **Keyboard shortcuts** — full shortcut coverage for common operations; a help dialog lists all bindings.
 
-## 🏗️ Architecture
+## Architecture
 
 ### Technology stack
 - **Desktop**: Electron 39
@@ -106,7 +115,7 @@ AutoAdjustService         // Auto All driven by a user-style profile
 LocalAdjustmentsModule    // radial/linear masks + per-mask adjustments
 ```
 
-## 🧪 Development
+## Development
 
 ```bash
 npm run dev          # dev server (vite) + Electron via scripts/dev.cjs
@@ -117,7 +126,7 @@ npm run test         # jest (1087 tests)
 npm run test:e2e     # Playwright end-to-end tests
 ```
 
-## 📚 Documentation
+## Documentation
 
 - **[CHANGELOG.md](CHANGELOG.md)** — release notes
 - **[docs/USER_GUIDE.md](docs/USER_GUIDE.md)** — using the app
@@ -125,14 +134,14 @@ npm run test:e2e     # Playwright end-to-end tests
 - **[docs/RAW_PROCESSING.md](docs/RAW_PROCESSING.md)** — LibRaw integration
 - **[docs/DEVELOPMENT_GUIDE.md](docs/DEVELOPMENT_GUIDE.md)** — contributing
 
-## 🤝 Contributing
+## Contributing
 
 1. Create a feature branch (`git checkout -b feat/your-feature`)
 2. Make changes with proper TypeScript types
 3. Keep `npm run typecheck`, `npm run lint`, and `npm run test` green
 4. Commit with conventional commits and open a Pull Request
 
-## 📄 License
+## License
 
 **Source-available, non-commercial.** Photo Editor Pro is licensed under the
 [PolyForm Noncommercial License 1.0.0](LICENSE) — free to use, modify, and share for
@@ -143,11 +152,11 @@ Bundled third-party components (npm packages, LibRaw, libvips, Electron/Chromium
 own licenses and are unaffected by the project license. See [THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md)
 for the full attribution list and per-license obligations.
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
 - **LibRaw** — RAW decoding · **sharp / libvips** — image encode & colour management
 - **Electron**, **React**, **Vite**, **Tailwind CSS**
 
 ---
 
-**Photo Editor Pro** — a RAW photo editor for the desktop. 🎨
+**Photo Editor Pro** — a free RAW photo editor for Windows.
