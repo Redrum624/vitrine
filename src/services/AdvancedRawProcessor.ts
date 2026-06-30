@@ -206,17 +206,9 @@ export class AdvancedRawProcessor {
         result = await this.libRaw.processRawFile(filePath, libRawParams as LibRawProcessingParams);
       }
 
-      // Apply camera profile if available
-      const profileKey = `${result.metadata.make}:${result.metadata.model}`;
-      const cameraProfile = this.cameraProfiles.get(profileKey);
-
-      if (cameraProfile && processingOptions.useManufacturerProfile) {
-        result.imageData.data = this.applyCameraProfile(
-          result.imageData.data,
-          cameraProfile
-        );
-        logger.debug(`Applied camera profile: ${profileKey}`);
-      }
+      // NOTE: LibRaw already applies the correct per-camera colour matrix
+      // (-o 1 → sRGB). A second JS-side matrix multiply would double-transform
+      // the colours and is therefore omitted.
 
       // Apply additional post-processing
       if (processingOptions.denoiseThreshold > 0) {
@@ -326,35 +318,6 @@ export class AdvancedRawProcessor {
     params.useCameraProfile = options.useManufacturerProfile;
 
     return params;
-  }
-
-  private applyCameraProfile(data: Float32Array, profile: CameraProfile): Float32Array {
-    logger.debug(`Applying camera profile: ${profile.make} ${profile.model}`);
-
-    const processed = new Float32Array(data.length);
-    processed.set(data);
-
-    // Apply color matrix transformation
-    const matrix = profile.colorMatrix1;
-
-    for (let i = 0; i < data.length; i += 4) {
-      const r = processed[i];
-      const g = processed[i + 1];
-      const b = processed[i + 2];
-
-      // Apply 3x3 color matrix
-      processed[i] = Math.max(0, Math.min(1,
-        r * matrix[0] + g * matrix[1] + b * matrix[2]
-      ));
-      processed[i + 1] = Math.max(0, Math.min(1,
-        r * matrix[3] + g * matrix[4] + b * matrix[5]
-      ));
-      processed[i + 2] = Math.max(0, Math.min(1,
-        r * matrix[6] + g * matrix[7] + b * matrix[8]
-      ));
-    }
-
-    return processed;
   }
 
   private applyDenoising(

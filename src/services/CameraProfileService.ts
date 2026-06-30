@@ -168,52 +168,6 @@ export class CameraProfileService {
   }
 
   /**
-   * Apply camera profile color correction
-   */
-  applyCameraProfile(
-    imageData: Float32Array,
-    _width: number,
-    _height: number,
-    profile: CameraProfile,
-    illuminant: 'A' | 'D65' = 'D65'
-  ): Float32Array {
-    const startTime = performance.now();
-    logger.info('Applying camera profile color correction', {
-      make: profile.make,
-      model: profile.model,
-      illuminant
-    });
-
-    const output = new Float32Array(imageData.length);
-    const colorMatrix = illuminant === 'A' ? profile.colorMatrix1 : profile.colorMatrix2;
-
-    // Apply 3x3 color matrix transformation
-    for (let i = 0; i < imageData.length; i += 4) {
-      const r = imageData[i];
-      const g = imageData[i + 1];
-      const b = imageData[i + 2];
-      const a = imageData[i + 3];
-
-      // Matrix multiplication
-      output[i] = Math.max(0, Math.min(1,
-        colorMatrix[0] * r + colorMatrix[1] * g + colorMatrix[2] * b
-      ));
-      output[i + 1] = Math.max(0, Math.min(1,
-        colorMatrix[3] * r + colorMatrix[4] * g + colorMatrix[5] * b
-      ));
-      output[i + 2] = Math.max(0, Math.min(1,
-        colorMatrix[6] * r + colorMatrix[7] * g + colorMatrix[8] * b
-      ));
-      output[i + 3] = a;
-    }
-
-    const processingTime = performance.now() - startTime;
-    logger.info(`Camera profile applied in ${processingTime.toFixed(2)}ms`);
-
-    return output;
-  }
-
-  /**
    * Apply camera-specific white balance
    */
   applyCameraWhiteBalance(
@@ -262,28 +216,6 @@ export class CameraProfileService {
 
     logger.debug('Applied camera tone curve');
     return output;
-  }
-
-  /**
-   * Auto-detect camera profile from EXIF data
-   */
-  autoDetectProfile(exifData: Record<string, unknown>): CameraProfile | null {
-    const make = this.extractMake(exifData);
-    const model = this.extractModel(exifData);
-
-    if (make && model) {
-      const profile = this.getProfile(make, model);
-      if (profile) {
-        logger.info(`Auto-detected camera profile: ${make} ${model}`);
-        return profile;
-      }
-
-      // Try fuzzy matching for similar models
-      return this.findSimilarProfile(make, model);
-    }
-
-    logger.warn('Could not auto-detect camera profile');
-    return null;
   }
 
   /**
@@ -448,71 +380,6 @@ export class CameraProfileService {
     return curve[curve.length - 1][1];
   }
 
-  private extractMake(exifData: Record<string, unknown>): string | null {
-    const possibleKeys = ['Make', 'make', 'Camera Make', 'camera_make'];
-    for (const key of possibleKeys) {
-      if (exifData[key] && typeof exifData[key] === 'string') {
-        return (exifData[key] as string).trim();
-      }
-    }
-    return null;
-  }
-
-  private extractModel(exifData: Record<string, unknown>): string | null {
-    const possibleKeys = ['Model', 'model', 'Camera Model', 'camera_model'];
-    for (const key of possibleKeys) {
-      if (exifData[key] && typeof exifData[key] === 'string') {
-        return (exifData[key] as string).trim();
-      }
-    }
-    return null;
-  }
-
-  private findSimilarProfile(make: string, model: string): CameraProfile | null {
-    // Try to find similar models from the same manufacturer
-    const makeProfiles = this.getProfilesByMake(make);
-
-    for (const profile of makeProfiles) {
-      // Simple similarity check - could be enhanced with fuzzy matching
-      const similarity = this.calculateStringSimilarity(model.toLowerCase(), profile.model.toLowerCase());
-      if (similarity > 0.7) {
-        logger.info(`Found similar profile: ${profile.make} ${profile.model} (similarity: ${similarity.toFixed(2)})`);
-        return profile;
-      }
-    }
-
-    return null;
-  }
-
-  private calculateStringSimilarity(str1: string, str2: string): number {
-    const longer = str1.length > str2.length ? str1 : str2;
-    const shorter = str1.length > str2.length ? str2 : str1;
-
-    if (longer.length === 0) return 1.0;
-
-    const editDistance = this.levenshteinDistance(longer, shorter);
-    return (longer.length - editDistance) / longer.length;
-  }
-
-  private levenshteinDistance(str1: string, str2: string): number {
-    const matrix = Array(str2.length + 1).fill(null).map(() => Array(str1.length + 1).fill(null));
-
-    for (let i = 0; i <= str1.length; i++) matrix[0][i] = i;
-    for (let j = 0; j <= str2.length; j++) matrix[j][0] = j;
-
-    for (let j = 1; j <= str2.length; j++) {
-      for (let i = 1; i <= str1.length; i++) {
-        const substitutionCost = str1[i - 1] === str2[j - 1] ? 0 : 1;
-        matrix[j][i] = Math.min(
-          matrix[j][i - 1] + 1, // deletion
-          matrix[j - 1][i] + 1, // insertion
-          matrix[j - 1][i - 1] + substitutionCost // substitution
-        );
-      }
-    }
-
-    return matrix[str2.length][str1.length];
-  }
 }
 
 export const cameraProfileService = CameraProfileService.getInstance();

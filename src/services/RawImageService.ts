@@ -190,39 +190,11 @@ export class RawImageService {
     }
   }
 
-  // Helper method to finish RAW processing with camera profiles and final result
+  // Helper method to finish RAW processing with the final result.
+  // NOTE: LibRaw already applies the correct per-camera colour matrix and emits
+  // colour-managed sRGB pixels (-o 1). No JS-side colour-matrix multiply must
+  // be applied on top; that would double-transform the colours.
   private finishRawProcessing(result: ProcessedRawData, floatData: Float32Array, filePath: string): RawImageData {
-    // Apply advanced camera profile if available
-    if (result.metadata.make && result.metadata.model) {
-      const cameraProfile = cameraProfileService.getProfile(result.metadata.make, result.metadata.model);
-      if (cameraProfile) {
-        logger.info(`Applying camera profile: ${cameraProfile.make} ${cameraProfile.model}`);
-        floatData = cameraProfileService.applyCameraProfile(
-          floatData,
-          result.width,
-          result.height,
-          cameraProfile,
-          'D65' // Standard illuminant for most cases
-        );
-      } else {
-        // Try to auto-detect camera profile from EXIF
-        const autoProfile = cameraProfileService.autoDetectProfile({
-          Make: result.metadata.make,
-          Model: result.metadata.model
-        });
-        if (autoProfile) {
-          logger.info(`Auto-detected camera profile: ${autoProfile.make} ${autoProfile.model}`);
-          floatData = cameraProfileService.applyCameraProfile(
-            floatData,
-            result.width,
-            result.height,
-            autoProfile,
-            'D65'
-          );
-        }
-      }
-    }
-
     const rawData: RawImageData = {
       width: result.width,
       height: result.height,
