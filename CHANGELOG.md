@@ -4,6 +4,11 @@ All notable changes to **Photo Editor Pro** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.11.1] - 2026-06-30
+
+### Fixed
+- **Undo/Redo buttons now work.** They step the position in the History timeline. Cause: Undo/Redo were wired to `HistoryService`, whose `saveState()` is never called anywhere, so its stack stayed empty and `canUndo()/canRedo()` were always false — the buttons were permanently inert. Fix: added `undo()/redo()/canUndo()/canRedo()` to `CheckpointService` (the real, persisted History timeline) that step the active checkpoint and restore it, rewired every Undo/Redo path (menu, toolbar, keyboard, window-event) through them, and reprocess the canvas the same way clicking a History checkpoint does. Affects: `src/services/CheckpointService.ts`, `src/App.tsx`.
+
 ## [1.11.0] - 2026-06-30
 
 ### Added
