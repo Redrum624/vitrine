@@ -7,6 +7,7 @@ import EnhanceModuleComponent from '../components/Modules/EnhanceModuleComponent
 import { enhanceModule } from '../modules/EnhanceModule';
 import { enhanceService } from '../services/EnhanceService';
 import { NoiseReductionModule } from '../modules/NoiseReductionModule';
+import { useAppStore } from '../stores/appStore';
 
 function makeNrModule() {
   const m = new NoiseReductionModule();
@@ -15,7 +16,10 @@ function makeNrModule() {
 }
 
 describe('EnhanceModuleComponent', () => {
-  beforeEach(() => enhanceModule.resetParams());
+  beforeEach(() => {
+    enhanceModule.resetParams();
+    useAppStore.setState({ upscaleProgress: null, upscaleMode: null });
+  });
 
   it('shows the scale selector only when Upscale is on', () => {
     render(<EnhanceModuleComponent module={enhanceModule} noiseReductionModule={makeNrModule()} />);
@@ -59,6 +63,33 @@ describe('EnhanceModuleComponent', () => {
     fireEvent.click(screen.getByText('Apply Enhance'));
     expect(nrMod.setParams).toHaveBeenCalledWith({ enabled: false });
     expect(onNR).toHaveBeenCalledWith({ enabled: false });
+  });
+
+  it('renders an "AI" badge when the store upscaleMode is "ai"', () => {
+    act(() => { useAppStore.setState({ upscaleMode: 'ai' }); });
+    render(<EnhanceModuleComponent module={enhanceModule} noiseReductionModule={makeNrModule()} />);
+    fireEvent.click(screen.getByRole('button', { name: /upscale/i })); // reveal the scale row
+    expect(screen.getByTestId('upscale-mode-badge')).toHaveTextContent('AI');
+  });
+
+  it('renders a "Standard" badge when the store upscaleMode is "standard"', () => {
+    act(() => { useAppStore.setState({ upscaleMode: 'standard' }); });
+    render(<EnhanceModuleComponent module={enhanceModule} noiseReductionModule={makeNrModule()} />);
+    fireEvent.click(screen.getByRole('button', { name: /upscale/i }));
+    expect(screen.getByTestId('upscale-mode-badge')).toHaveTextContent('Standard');
+  });
+
+  it('shows determinate progress % on the Apply button while enhancing', async () => {
+    let resolveApply: () => void = () => {};
+    (enhanceService.applyUpscale as jest.Mock).mockImplementationOnce(
+      () => new Promise<void>((r) => { resolveApply = r; }),
+    );
+    render(<EnhanceModuleComponent module={enhanceModule} noiseReductionModule={makeNrModule()} />);
+    fireEvent.click(screen.getByRole('button', { name: /upscale/i }));
+    await act(async () => { fireEvent.click(screen.getByText(/Apply Enhance \(×/)); }); // busy=true, apply pending
+    act(() => { useAppStore.setState({ upscaleProgress: 0.45 }); });
+    expect(screen.getByText(/Enhancing… 45%/)).toBeInTheDocument();
+    await act(async () => { resolveApply(); }); // let it finish
   });
 
   it('Detail & quality section is collapsed by default and shows sliders when expanded', () => {

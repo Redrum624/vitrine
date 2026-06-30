@@ -5,6 +5,7 @@ import { EnhanceModule } from '../../modules/EnhanceModule';
 import { NoiseReductionModule, NoiseReductionParams } from '../../modules/NoiseReductionModule';
 import { EnhanceParams, DEFAULT_ENHANCE_PARAMS } from '../../utils/enhanceChain';
 import { enhanceService } from '../../services/EnhanceService';
+import { useAppStore } from '../../stores/appStore';
 
 interface Props {
   module: EnhanceModule;
@@ -19,6 +20,8 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
   const [nrEnabled, setNrEnabled] = useState<boolean>(() => noiseReductionModule.getParams().enabled);
   const [nrStrength, setNrStrength] = useState<number>(() => noiseReductionModule.getParams().strength);
   const [busy, setBusy] = useState(false);
+  const upscaleProgress = useAppStore((s) => s.upscaleProgress);
+  const upscaleMode = useAppStore((s) => s.upscaleMode);
   const [error, setError] = useState<string | null>(null);
   const [revertVersion, setRevertVersion] = useState(0);
   const [sectionOpen, setSectionOpen] = useState(false);
@@ -146,22 +149,42 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
 
       {/* Scale selector (only when Upscale on) */}
       {params.upscale && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: '.72rem', fontWeight: 500, color: 'var(--gray-300)', marginRight: 'auto' }}>Scale</span>
-          <div style={{ display: 'flex', border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
-            {([2, 4] as const).map((s) => (
-              <button key={s} type="button"
+        <>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: '.72rem', fontWeight: 500, color: 'var(--gray-300)', marginRight: 'auto' }}>Scale</span>
+            {upscaleMode && (
+              <span
+                data-testid="upscale-mode-badge"
+                title="AI upscale uses your GPU when available; falls back to Standard otherwise."
                 style={{
-                  padding: '5px 14px',
-                  background: params.scale === s ? 'var(--primary-600)' : 'var(--gray-800)',
-                  color: params.scale === s ? '#fff' : 'var(--gray-300)',
-                  border: 0,
-                  fontSize: '.78rem', cursor: 'pointer', fontFamily: 'ui-monospace,monospace',
+                  fontSize: '.62rem', fontWeight: 700, letterSpacing: '.04em', padding: '2px 7px',
+                  borderRadius: 999, textTransform: 'uppercase',
+                  background: upscaleMode === 'ai' ? 'rgba(59,130,246,.18)' : 'var(--gray-800)',
+                  color: upscaleMode === 'ai' ? '#9ec1ff' : 'var(--gray-300)',
+                  border: `1px solid ${upscaleMode === 'ai' ? 'var(--primary-500)' : 'var(--border)'}`,
                 }}
-                onClick={() => update({ scale: s })}>{s}×</button>
-            ))}
+              >
+                {upscaleMode === 'ai' ? 'AI' : 'Standard'}
+              </span>
+            )}
+            <div style={{ display: 'flex', border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
+              {([2, 4] as const).map((s) => (
+                <button key={s} type="button"
+                  style={{
+                    padding: '5px 14px',
+                    background: params.scale === s ? 'var(--primary-600)' : 'var(--gray-800)',
+                    color: params.scale === s ? '#fff' : 'var(--gray-300)',
+                    border: 0,
+                    fontSize: '.78rem', cursor: 'pointer', fontFamily: 'ui-monospace,monospace',
+                  }}
+                  onClick={() => update({ scale: s })}>{s}×</button>
+              ))}
+            </div>
           </div>
-        </div>
+          <div style={{ fontSize: '.68rem', color: 'var(--gray-400)', marginTop: -2 }}>
+            AI super-resolution on your GPU when available, otherwise Standard (Lanczos).
+          </div>
+        </>
       )}
 
       {/* Detail & quality accordion */}
@@ -291,7 +314,9 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
             }}
           />
         )}
-        {busy ? 'Enhancing…' : currentParams.upscale ? `Apply Enhance (×${currentParams.scale})` : 'Apply Enhance'}
+        {busy
+          ? (upscaleProgress != null ? `Enhancing… ${Math.round(upscaleProgress * 100)}%` : 'Enhancing…')
+          : currentParams.upscale ? `Apply Enhance (×${currentParams.scale})` : 'Apply Enhance'}
       </button>
 
       {/* Revert button */}
