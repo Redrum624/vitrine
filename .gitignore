@@ -278,5 +278,9 @@ postcss.config.js.map
 # Claude Code files
 .claude/
 *.claude
+
+# Superpowers / SDD scratch (internal agent notes, plans, progress ledger)
+.superpowers/
+
 # Local RAW/test fixtures (large binaries)
 /test/
