@@ -41,6 +41,7 @@
     "exifreader": "^4.23.5",
     "libraw-wasm": "^1.1.2",
     "lucide-react": "^0.562.0",
+    "onnxruntime-node": "^1.27.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "sharp": "^0.34.5",
