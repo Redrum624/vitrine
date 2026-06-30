@@ -138,7 +138,7 @@ export interface PassDescriptor {
 /**
  * A single draw within a multi-pass module step.
  *
- * Multi-INPUT binding (the load-bearing part for sharpen + T10 masks):
+ * Multi-INPUT binding (the load-bearing part for enhance unsharp + T10 masks):
  *   `bindings` is an ordered array of `{ texture, sampler }` pairs, one per texture unit
  *   starting at TEXTURE0. Each `texture` is either a logical name the pipeline resolves
  *   per-frame, or an already-uploaded WebGLTexture bound directly:

@@ -87,31 +87,6 @@ export function applyGaussianBlur(
   return output;
 }
 
-// ─── Sharpen (Unsharp Mask) ──────────────────────────────────────────────────
-
-export function applySharpen(
-  input: Float32Array,
-  ctx: FilterContext,
-  amount: number, // 0-2 typical
-  radius: number = 1
-): Float32Array {
-  if (amount <= 0) return new Float32Array(input);
-
-  const blurred = applyGaussianBlur(input, ctx, radius);
-  const output = new Float32Array(input.length);
-  const { channels } = ctx;
-
-  for (let i = 0; i < input.length; i += channels) {
-    for (let c = 0; c < 3; c++) {
-      // Unsharp mask: original + amount * (original - blurred)
-      output[i + c] = Math.max(0, Math.min(1, input[i + c] + amount * (input[i + c] - blurred[i + c])));
-    }
-    output[i + 3] = input[i + 3]; // preserve alpha
-  }
-
-  return output;
-}
-
 // ─── Vignette ────────────────────────────────────────────────────────────────
 
 export function applyVignette(

@@ -20,6 +20,7 @@ export default function EnhanceModuleComponent({ module, onParamsChange }: Props
   const paramsRef = useRef(params); paramsRef.current = params;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [revertVersion, setRevertVersion] = useState(0);
 
   const update = useCallback((patch: Partial<EnhanceParams>) => {
     setParams((prev) => ({ ...prev, ...patch }));
@@ -34,7 +35,10 @@ export default function EnhanceModuleComponent({ module, onParamsChange }: Props
 
   const applyUpscale = useCallback(async () => {
     setBusy(true); setError(null);
-    try { await enhanceService.applyUpscale({ ...paramsRef.current, upscale: true }); }
+    try {
+      await enhanceService.applyUpscale({ ...paramsRef.current, upscale: true });
+      setRevertVersion((v) => v + 1);
+    }
     catch (e) { setError(e instanceof Error ? e.message : String(e)); }
     finally { setBusy(false); }
   }, []);
@@ -46,10 +50,13 @@ export default function EnhanceModuleComponent({ module, onParamsChange }: Props
         <button type="button" aria-pressed={params.upscale} onClick={() => update({ upscale: !params.upscale })}>Upscale</button>
       </div>
       {params.upscale && (
-        <div className="flex gap-2">
-          {[2, 4].map((s) => (
-            <button key={s} type="button" aria-pressed={params.scale === s} onClick={() => update({ scale: s as 2 | 4 })}>{s}×</button>
-          ))}
+        <div className="space-y-1">
+          <div className="flex gap-2">
+            {[2, 4].map((s) => (
+              <button key={s} type="button" aria-pressed={params.scale === s} onClick={() => update({ scale: s as 2 | 4 })}>{s}×</button>
+            ))}
+          </div>
+          <p className="text-xs text-gray-500 dark:text-gray-400">Upscale applies in this session; reopening the image returns the original.</p>
         </div>
       )}
       <details>
@@ -69,7 +76,9 @@ export default function EnhanceModuleComponent({ module, onParamsChange }: Props
       {params.upscale
         ? <button type="button" disabled={busy} onClick={applyUpscale}>{busy ? 'Enhancing…' : `Apply Enhance (×${params.scale})`}</button>
         : <button type="button" disabled={busy} onClick={applySharpen}>Apply Enhance</button>}
-      {enhanceService.canRevert() && <button type="button" onClick={() => enhanceService.revert()}>Revert Enhance</button>}
+      {revertVersion >= 0 && enhanceService.canRevert() && (
+        <button type="button" onClick={() => { enhanceService.revert(); setRevertVersion((v) => v + 1); }}>Revert Enhance</button>
+      )}
     </div>
   );
 }

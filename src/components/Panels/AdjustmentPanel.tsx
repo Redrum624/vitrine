@@ -248,13 +248,13 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
       // the GPU only when every *active* module is GPU-capable, where "active" means
       // enabled AND non-identity (the exact gate the CPU processImage loop uses).
       //
-      // buildPassList() maps CPU-only module ids (crop, exposure, sharpen,
+      // buildPassList() maps CPU-only module ids (crop, exposure, enhance,
       // shadowshighlights, localadjustments, noise-reduction) to cpuBridges purely by id
       // — it has no notion of identity, so with all 11 modules registered it would ALWAYS
       // report a non-empty cpuBridges and the GPU path would never fire. We therefore
       // keep only the cpuBridges that are genuinely ACTIVE (imageProcessingPipeline
-      // .isModuleActive). An inactive (default/identity) crop or sharpen does not block
-      // GPU; an actually-cropped image or an applied sharpen / a live local-adjustment
+      // .isModuleActive). An inactive (default/identity) crop or enhance does not block
+      // GPU; an actually-cropped image or an applied enhance / a live local-adjustment
       // mask does → CPU fallback for that frame.
       const orderedModules = imageProcessingPipeline.getOrderedModules();
       // Provide the render dims + a mask-rebuild callback so the local-adjustments pass

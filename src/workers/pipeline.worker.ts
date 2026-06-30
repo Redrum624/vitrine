@@ -140,7 +140,7 @@ ctx.addEventListener('message', async (event: MessageEvent) => {
         const startTime = performance.now();
         const { tileData, tileWidth, tileHeight, tileX, tileY, channels, pipeline: pipelineConfig } = msg.data;
         // NOTE/TODO: tiles are processed as standalone images (fullWidth/fullHeight are
-        // ignored). Spatial/neighborhood filters — blur in Sharpen, NoiseReduction — will
+        // ignored). Spatial/neighborhood filters — blur in Enhance, NoiseReduction — will
         // therefore produce seam artifacts at tile boundaries. Matching the retired
         // worker's pre-existing behavior (not a regression). Seam-free tiling would
         // require full-image context (ghost pixels / overlap regions) for those passes.

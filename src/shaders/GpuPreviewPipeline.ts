@@ -667,7 +667,7 @@ export class GpuPreviewPipeline {
       // immediately-preceding basicadj sub-pass wrote its result to scratch:
       //   layer: basicadj(prev=running) → scratch ; blend(u_base=prev=running, u_adjusted=scratch) → pingpong
       // and the NEXT layer's basicadj then reads prev = THIS blend output (correct
-      // sequential semantics). Sharpen is unaffected: its blurV binds 'scratch' explicitly
+      // sequential semantics). Enhance (unsharp) is unaffected: its blurV binds 'scratch' explicitly
       // and its unsharp's 'prev' is the blurV PING-PONG output (which DOES advance prev).
       if (target === 'pingpong') {
         prev = dst.texture;
