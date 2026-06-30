@@ -1,6 +1,6 @@
 {
   "name": "photo_app",
-  "version": "1.8.0",
+  "version": "1.9.0",
   "description": "Professional photo editor",
   "main": "electron/main.cjs",
   "scripts": {
@@ -15,7 +15,7 @@
     "electron-build": "npm run build && electron-builder",
     "dist": "npm run build && electron-builder --publish=never",
     "clean:dist": "node -e \"const fs=require('fs');fs.rmSync('dist',{recursive:true,force:true});fs.rmSync('release',{recursive:true,force:true})\"",
-    "build:win": "npm run clean:dist && npm run build && node scripts/build-installer.cjs --win --publish=never",
+    "build:win": "npm run clean:dist && npm run build && node scripts/build-installer.cjs --win --publish=never && node scripts/gen-readme-txt.cjs",
     "build:win:dir": "npm run clean:dist && npm run build && node scripts/build-installer.cjs --win --dir --publish=never",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "lint:fix": "eslint . --ext ts,tsx --fix",

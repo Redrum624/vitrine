@@ -4,6 +4,30 @@ All notable changes to **Photo Editor Pro** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.9.0] - 2026-06-30
+
+### Added
+- **Noise Reduction consolidated into Enhance.** The Enhance module is now a single
+  denoise → sharpen → upscale pipeline with three toggles — **Noise Reduction**, **Sharpen**,
+  **Upscale** — driven by one **Apply Enhance** button. The standalone Noise Reduction sidebar
+  tool is removed; its GPU Non-Local-Means engine still runs at pipeline slot 7 (correctly
+  ordered before sharpen/upscale), now controlled from the Enhance panel. How to use:
+  sidebar → Enhance → toggle Noise Reduction / Sharpen / Upscale → Apply Enhance.
+
+### Changed
+- **Enhance panel redesigned** to match the other module panels: styled mode toggles, a
+  collapsible "Detail & quality" section for the advanced sliders, and a primary Apply button
+  (replacing the previous unstyled controls). Affects: `src/components/Modules/EnhanceModuleComponent.tsx`.
+- **Before/After now tracks zoom & pan across both panes.** Panning or zooming the edited side
+  moves the original side identically, for pixel-level detail comparison. The Reference view
+  stays independent (deliberately not synced). Affects: `src/App.tsx`.
+
+### Fixed
+- **Wheel-zoom no longer warns "Unable to preventDefault inside passive event listener".**
+  Cause: the canvas wheel handler was a React `onWheel` (passive), so its `preventDefault()`
+  was ignored on every scroll. Fix: the handler is attached as a native non-passive listener
+  (`{ passive: false }`), so zoom is honored cleanly. Affects: `src/components/Layout/Canvas.tsx`.
+
 ## [1.8.0] - 2026-06-29
 
 ### Added

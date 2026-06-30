@@ -1,14 +1,52 @@
 # Photo Editor Pro 🎨
 
+![Version](https://img.shields.io/badge/Version-1.9.0-blue)
+![TypeScript](https://img.shields.io/badge/TypeScript-0_errors-blue)
+![Tests](https://img.shields.io/badge/Tests-1087_passing-brightgreen)
+![Lint](https://img.shields.io/badge/Lint-clean-brightgreen)
+![GPU](https://img.shields.io/badge/GPU-WebGL2_accelerated-success)
+
+![Photo Editor Pro](docs/screenshot.png)
+
 A **desktop RAW photo editor** built with Electron + React, featuring a WebGL2/CPU
 processing pipeline, native LibRaw demosaicing, colour-managed export, and
 non-destructive local adjustments.
 
-![Version](https://img.shields.io/badge/Version-1.8.0-blue)
-![TypeScript](https://img.shields.io/badge/TypeScript-0_errors-blue)
-![Tests](https://img.shields.io/badge/Tests-1084_passing-brightgreen)
-![Lint](https://img.shields.io/badge/Lint-clean-brightgreen)
-![GPU](https://img.shields.io/badge/GPU-WebGL2_accelerated-success)
+## 🚀 Installation
+
+### Prerequisites
+- Node.js 18+ and a package manager (the repo is set up for **pnpm**; npm also works)
+- Windows, macOS, or Linux · 8 GB+ RAM (16 GB+ recommended for large RAW files)
+
+### Option A — Prebuilt installer (Windows)
+
+Download the latest `Photo Editor Pro Setup X.Y.Z.exe` from the
+[Releases](https://github.com/Redrum624/photo_app/releases) page and run it.
+The installer creates a desktop shortcut and Start Menu entry; no extra
+dependencies are needed.
+
+### Option B — Install & run from source (development)
+
+```bash
+git clone https://github.com/Redrum624/photo_app.git
+cd photo_app
+pnpm install            # or: npm install
+pnpm run electron-dev   # Vite dev server + Electron
+```
+
+The app opens automatically once the Vite dev server is ready (port 3005).
+
+### Option C — Build a Windows release from source
+
+```bash
+npm run build:win       # clean dist + release -> tsc + vite build -> NSIS installer + portable (x64)
+# Output: release/Photo Editor Pro Setup 1.9.0.exe  and  release/Photo Editor Pro 1.9.0.exe
+npm run build:win:dir   # fast unpacked build (no installer, quick iteration)
+npm run dist            # electron-builder for the current platform
+```
+
+The packaged artifacts land in `release/`. A plain-text `README.txt` is also
+written there beside the installer for offline reference.
 
 ## 🌟 Features
 
@@ -29,11 +67,12 @@ non-destructive local adjustments.
   rotate, click off to deselect, Delete to remove. Each mask gets its own Basic-Adjustments
   panel plus a feather control.
 - **White Balance** (with **median gray-world Auto** that neutralises both warmth and
-  tint), **Color Balance**, **Tone Curve** (with auto-levels), **Noise Reduction**
-  (Apply button), **Enhance** (Sharpen + Upscale — Richardson–Lucy deblur, FidelityFX CAS,
-  ×2/×4 Lanczos upscale; Apply button, like Noise Reduction), **Lens
-  Corrections** (Distortion, Vignetting, Chromatic Aberration, plus non-destructive
-  **Blur** and **Film Grain** sections).
+  tint), **Color Balance**, **Tone Curve** (with auto-levels), **Enhance** (consolidates
+  **Noise Reduction** + **Sharpen** + **Upscale** in one panel — GPU Non-Local-Means
+  denoising, Richardson–Lucy deblur, FidelityFX CAS sharpening, ×2/×4 Lanczos upscale;
+  one **Apply Enhance** button drives all three; sidebar → Enhance → toggle what you need
+  → Apply), **Lens Corrections** (Distortion, Vignetting, Chromatic Aberration, plus
+  non-destructive **Blur** and **Film Grain** sections).
 - **Copy / Paste Style** — transfer a colour grade between images via per-channel
   histogram matching.
 - **Auto adjustments** — one-click *Auto All* (its white-balance step uses the same
@@ -79,28 +118,6 @@ non-destructive local adjustments.
 - Filmstrip (mouse-wheel scroll, collapsible, multi-select), **batch processing**,
   presets, watermarking, web-gallery generation, and print soft-proofing.
 
-## 🚀 Quick Start
-
-### Prerequisites
-- Node.js 18+ and a package manager (the repo is set up for **pnpm**; npm also works)
-- Windows, macOS, or Linux · 8 GB+ RAM (16 GB+ recommended for large RAW files)
-
-### Install & run (development)
-```bash
-git clone https://github.com/Redrum624/photo_app.git
-cd photo_app
-pnpm install            # or: npm install
-pnpm run electron-dev   # Vite dev server + Electron
-```
-
-### Build a Windows release
-```bash
-npm run build:win       # clean dist + release -> tsc + vite build -> NSIS installer + portable (x64)
-# Output: release/Photo Editor Pro Setup 1.8.0.exe  and  release/Photo Editor Pro 1.8.0.exe
-npm run build:win:dir   # fast unpacked build (no installer)
-npm run dist            # electron-builder for the current platform
-```
-
 ## 🏗️ Architecture
 
 ### Technology stack
@@ -130,7 +147,7 @@ npm run dev          # dev server (vite) + Electron via scripts/dev.cjs
 npm run build        # tsc + vite build
 npm run typecheck    # tsc --noEmit
 npm run lint         # eslint (0 problems)
-npm run test         # jest (1040 tests)
+npm run test         # jest (1087 tests)
 npm run test:e2e     # Playwright end-to-end tests
 ```
 
