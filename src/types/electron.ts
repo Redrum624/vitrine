@@ -190,6 +190,16 @@ export interface ElectronAPI {
   getAppVersion: () => Promise<string>;
   onSplashProgress: (callback: (data: { progress?: number; message?: string; error?: string }) => void) => void;
 
+  // AI super-resolution upscale
+  aiUpscaleAvailable: () => Promise<boolean>;
+  aiUpscale: (
+    rgba: Uint8Array,
+    width: number,
+    height: number,
+    scale: 2 | 4,
+  ) => Promise<{ data: Uint8Array; width: number; height: number; backend: string | null }>;
+  onAiUpscaleProgress: (callback: (p: { done: number; total: number }) => void) => () => void;
+
   // Cleanup
   removeAllListeners: (channel: string) => void;
 }

@@ -4,6 +4,7 @@ const fs = require('fs');
 const os = require('os');
 const { writeImageFile, writeImageMetadata } = require('./imageWriter.cjs');
 const { markSelfWrite, createFolderChangeDebouncer } = require('./selfWriteRegistry.cjs');
+const aiUpscaler = require('./aiUpscaler.cjs');
 
 // Keep a global reference of the window objects
 let mainWindow;
@@ -365,6 +366,16 @@ ipcMain.handle('get-app-version', () => {
 });
 
 ipcMain.handle('file-exists', (_e, p) => { try { return fs.existsSync(p); } catch { return false; } });
+
+// AI super-resolution upscale (Real-ESRGAN via onnxruntime-node, main-process native).
+ipcMain.handle('ai-upscale-available', async () => {
+  try { return await aiUpscaler.isAvailable(); } catch { return false; }
+});
+ipcMain.handle('ai-upscale', async (event, { rgba, width, height, scale }) => {
+  const onProgress = (p) => { try { event.sender.send('ai-upscale-progress', p); } catch { /* window gone */ } };
+  const r = await aiUpscaler.upscale(new Uint8Array(rgba), width, height, scale, onProgress);
+  return { data: r.data, width: r.width, height: r.height, backend: aiUpscaler.getBackend() };
+});
 
 ipcMain.handle('show-open-dialog', async (event, options) => {
   const result = await dialog.showOpenDialog(mainWindow, options);

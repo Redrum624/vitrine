@@ -76,6 +76,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
   onSplashProgress: (callback) => ipcRenderer.on('splash-progress', (event, data) => callback(data)),
 
+  // AI super-resolution upscale
+  aiUpscaleAvailable: () => ipcRenderer.invoke('ai-upscale-available'),
+  aiUpscale: (rgba, width, height, scale) => ipcRenderer.invoke('ai-upscale', { rgba, width, height, scale }),
+  onAiUpscaleProgress: (callback) => {
+    const listener = (event, data) => callback(data);
+    ipcRenderer.on('ai-upscale-progress', listener);
+    return () => ipcRenderer.removeListener('ai-upscale-progress', listener);
+  },
+
   // Logging
   getLogFile: () => ipcRenderer.invoke('get-log-file'),
 
