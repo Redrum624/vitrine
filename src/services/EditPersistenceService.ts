@@ -134,6 +134,7 @@ class EditPersistenceService {
     if (this.saveTimer) { clearTimeout(this.saveTimer); this.saveTimer = null; }
     const img = imageService.getCurrentImage();
     if (!img?.filePath || !window.electronAPI?.storeSet) return;
+    if (imageService.isBakedUpscaleActive()) return;
     const json = JSON.stringify(this.serialize());
     if (json === this.baseline) return; // unchanged since load — nothing to persist
     this.baseline = json;
