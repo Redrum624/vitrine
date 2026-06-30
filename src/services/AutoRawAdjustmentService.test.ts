@@ -3,7 +3,7 @@
  *
  * Focused on the previously-broken path: the auto-computed dehaze value must now
  * reach the BasicAdjustments module via applyParametersToPipeline (the old code
- * had a "skipping dehaze" comment and dropped it). Heavy GPU/RAW dependencies are
+ * had a "skipping dehaze" comment and dropped it). RAW service dependencies are
  * mocked so the test stays a pure unit test in jsdom.
  */
 
@@ -25,12 +25,6 @@ jest.mock('./RawImageService', () => ({
     loadRawImageWithHistogram: jest.fn(),
     analyzeImageExposure: jest.fn(),
   },
-}));
-jest.mock('./CUDAAcceleratedService', () => ({
-  cudaAcceleratedService: { processRAWImageCUDA: jest.fn() },
-}));
-jest.mock('./VRAMOptimizedMemoryService', () => ({
-  vramOptimizedMemoryService: { getMemoryStats: jest.fn(() => ({ availableVRAM: 0, totalVRAM: 0 })) },
 }));
 
 import { AutoRawAdjustmentService } from './AutoRawAdjustmentService';

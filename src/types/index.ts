@@ -127,26 +127,6 @@ export interface WebGLUniforms {
   u_tint?: number;
 }
 
-export interface CUDAKernelParams {
-  blockSize: number;
-  gridSize: number;
-  sharedMemory?: number;
-  streamId?: number;
-  priority?: 'low' | 'normal' | 'high';
-  timeout?: number;
-}
-
-export interface GPUOperationParams {
-  inputTexture: WebGLTexture;
-  outputTexture?: WebGLTexture;
-  uniforms?: WebGLUniforms;
-  program?: WebGLProgram;
-  width: number;
-  height: number;
-  format?: number;
-  type?: number;
-}
-
 // Service configuration types
 export interface ServiceConfig {
   [key: string]: string | number | boolean | ServiceConfig | undefined;

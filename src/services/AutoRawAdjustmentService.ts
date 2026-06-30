@@ -5,11 +5,6 @@ import { ExposureModule } from '../modules/ExposureModule';
 import { WhiteBalanceModule } from '../modules/WhiteBalanceModule';
 import { BasicAdjustmentsModule } from '../modules/BasicAdjustmentsModule';
 import { ShadowsHighlightsPipelineModule } from '../modules/ShadowsHighlightsPipelineModule';
-// GPU services for RTX 3080 acceleration (imported for future use)
-// import { gpuOptimizedProcessingService } from './GPUOptimizedProcessingService';
-import { cudaAcceleratedService } from './CUDAAcceleratedService';
-import { vramOptimizedMemoryService } from './VRAMOptimizedMemoryService';
-
 // Define parameter interfaces since they're not exported
 interface ExposureParams {
   exposure?: number;
@@ -74,7 +69,7 @@ export class AutoRawAdjustmentService {
     pipeline: ImageProcessingPipeline
   ): Promise<RAWDetectionResult> {
     try {
-      logger.info(`Auto-detecting RAW parameters with RTX 3080 acceleration: ${filePath}`);
+      logger.info(`Auto-detecting RAW parameters: ${filePath}`);
 
       // Check if file is RAW by extension
       const isRAWFile = rawImageService.isRawFile(filePath);
@@ -88,68 +83,26 @@ export class AutoRawAdjustmentService {
         };
       }
 
-      // Load RAW image to analyze metadata with GPU optimization
+      // Load RAW image to analyze metadata
       const rawData = await rawImageService.loadRawImageWithHistogram(filePath, {}, {
         generateHistogram: true,
         bins: 256,
         bitDepth: 16
       });
 
-      // Pre-allocate GPU memory for processing
-      const memoryStats = vramOptimizedMemoryService.getMemoryStats();
-      logger.info(`VRAM available: ${this.formatBytes(memoryStats.availableVRAM)} / ${this.formatBytes(memoryStats.totalVRAM)}`);
-
       // Analyze image content and metadata
       const analysis = this.analyzeRAWImage(rawData);
 
-      // Generate auto-adjustment parameters optimized for RTX 3080
+      // Generate auto-adjustment parameters
       const recommendedParams = this.generateAutoAdjustments(rawData, analysis);
-
-      // Apply GPU-accelerated processing if image is large enough
-      const pixelCount = rawData.width * rawData.height;
-      const useGPUAcceleration = pixelCount > 12 * 1024 * 1024; // 12MP threshold
-
-      if (useGPUAcceleration) {
-        logger.info(`Using RTX 3080 acceleration for ${rawData.width}x${rawData.height} RAW processing`);
-
-        try {
-          // Use CUDA acceleration for maximum performance
-          // @ts-ignore: Variable used for GPU processing initialization
-          const ___gpuProcessedData = await cudaAcceleratedService.processRAWImageCUDA(
-            rawData.data,
-            rawData.width,
-            rawData.height,
-            {
-              ...recommendedParams,
-              bayerPattern: rawData.metadata.bayerPattern || 0,
-              noiseReduction: this.calculateOptimalNoiseReduction(rawData.metadata),
-              aiDenoising: true, // Enable Tensor Core AI denoising
-              colorGrading: this.generateColorGradingParams(rawData.metadata)
-            }
-          );
-
-          // Update the pipeline with GPU-processed results
-          logger.info('GPU processing completed, applying to pipeline');
-
-        } catch (gpuError) {
-          logger.warn('GPU acceleration failed, falling back to CPU:', gpuError);
-          // Continue with regular CPU processing
-        }
-      }
 
       // Apply the parameters to the pipeline
       this.applyParametersToPipeline(recommendedParams, pipeline);
-
-      // Get performance metrics
-      const perfMetrics = await cudaAcceleratedService.getPerformanceMetrics();
 
       logger.info(`RAW auto-adjustments applied for ${filePath}:`, {
         camera: `${rawData.metadata.make} ${rawData.metadata.model}`,
         iso: rawData.metadata.iso,
         resolution: `${rawData.width}x${rawData.height}`,
-        gpuAcceleration: useGPUAcceleration,
-        gpuUtilization: `${perfMetrics.gpuUtilization}%`,
-        tensorCoreUsage: `${perfMetrics.tensorCoreUsage}%`,
         adjustments: analysis.reasoning
       });
 
@@ -158,10 +111,7 @@ export class AutoRawAdjustmentService {
         confidence: analysis.confidence,
         recommendedParams,
         metadata: rawData.metadata,
-        reasoning: [
-          ...analysis.reasoning,
-          ...(useGPUAcceleration ? ['RTX 3080 GPU acceleration enabled'] : [])
-        ]
+        reasoning: analysis.reasoning
       };
 
     } catch (error) {
@@ -636,99 +586,6 @@ export class AutoRawAdjustmentService {
     }
 
     return {};
-  }
-
-  /**
-   * Get recommended adjustments for specific shooting conditions
-   * Optimized for RAW files with extended dynamic range capabilities
-   */
-  /**
-   * Calculate optimal noise reduction strength based on metadata
-   */
-  private calculateOptimalNoiseReduction(metadata: RawMetadata): number {
-    const iso = metadata.iso || 100;
-
-    // RTX 3080 can handle aggressive noise reduction, so be more liberal
-    if (iso >= 12800) return 0.9;      // Very high ISO - aggressive NR
-    if (iso >= 6400) return 0.7;       // High ISO - strong NR
-    if (iso >= 3200) return 0.5;       // Medium-high ISO - moderate NR
-    if (iso >= 1600) return 0.3;       // Medium ISO - light NR
-    if (iso >= 800) return 0.15;       // Low-medium ISO - very light NR
-    return 0.0;                        // Low ISO - no NR needed
-  }
-
-  /**
-   * Generate color grading parameters for specific cameras
-   */
-  private generateColorGradingParams(metadata: RawMetadata): Record<string, number | string | boolean | number[]> {
-    const make = metadata.make?.toLowerCase() || '';
-
-    const baseParams = {
-      strength: 0.8,
-      lift: [0.0, 0.0, 0.0],
-      gamma: [1.0, 1.0, 1.0],
-      gain: [1.0, 1.0, 1.0],
-      saturation: 1.0
-    };
-
-    // Camera-specific color grading
-    if (make.includes('canon')) {
-      return {
-        ...baseParams,
-        lift: [0.02, 0.01, -0.01],     // Slightly warm shadows
-        gamma: [0.95, 1.0, 1.02],      // Canon's characteristic curve
-        gain: [1.0, 0.98, 0.95],       // Reduce blue in highlights
-        saturation: 1.1
-      };
-    }
-
-    if (make.includes('sony')) {
-      return {
-        ...baseParams,
-        lift: [-0.01, 0.0, 0.02],      // Cool shadows
-        gamma: [1.0, 0.98, 0.96],      // Enhance green/blue
-        gain: [0.98, 1.0, 1.02],       // Sony's cooler look
-        saturation: 1.15
-      };
-    }
-
-    if (make.includes('nikon')) {
-      return {
-        ...baseParams,
-        lift: [0.01, 0.01, 0.0],       // Balanced shadows
-        gamma: [0.98, 1.0, 0.99],      // Nikon's natural curve
-        gain: [1.0, 1.0, 0.98],        // Slight yellow reduction
-        saturation: 1.05
-      };
-    }
-
-    if (make.includes('fujifilm')) {
-      return {
-        ...baseParams,
-        lift: [0.03, 0.02, -0.02],     // Warm shadows for film look
-        gamma: [0.92, 0.98, 1.05],     // Film-like curve
-        gain: [1.05, 1.0, 0.92],       // Fuji's characteristic warmth
-        saturation: 1.25
-      };
-    }
-
-    return baseParams;
-  }
-
-  /**
-   * Format bytes for logging
-   */
-  private formatBytes(bytes: number): string {
-    const units = ['B', 'KB', 'MB', 'GB'];
-    let value = bytes;
-    let unitIndex = 0;
-
-    while (value >= 1024 && unitIndex < units.length - 1) {
-      value /= 1024;
-      unitIndex++;
-    }
-
-    return `${value.toFixed(1)} ${units[unitIndex]}`;
   }
 
   getConditionBasedAdjustments(metadata: RawMetadata): Partial<AutoAdjustmentParams> {

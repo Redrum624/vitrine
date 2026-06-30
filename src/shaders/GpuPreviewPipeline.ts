@@ -13,8 +13,8 @@
  *
  * Single responsibility: own the GL context + run the resident-texture pipeline.
  * No React, no store. GLSL lives in `sources.ts`; uniform-setters in `uniforms.ts`.
- * Patterns mirror WebGLImageProcessor (context/program/texture) + ShaderPipeline
- * (ping-pong framebuffers) so GPU self-checks stay meaningful.
+ * Patterns mirror WebGLImageProcessor (context/program/texture) with ping-pong
+ * framebuffers so GPU self-checks stay meaningful.
  */
 import { logger } from '../utils/Logger';
 import {

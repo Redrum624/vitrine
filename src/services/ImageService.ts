@@ -6,9 +6,6 @@ import { imageCacheService } from './ImageCacheService';
 import { canvasPoolService } from './CanvasPoolService';
 import { autoRawAdjustmentService, RAWDetectionResult } from './AutoRawAdjustmentService';
 import { ImageProcessingPipeline } from './ImageProcessingPipeline';
-import { gpuOptimizedProcessingService } from './GPUOptimizedProcessingService';
-import { cudaAcceleratedService } from './CUDAAcceleratedService';
-import { vramOptimizedMemoryService } from './VRAMOptimizedMemoryService';
 
 export interface ImageData {
   width: number;
@@ -41,29 +38,6 @@ export class ImageService {
       ImageService.instance = new ImageService();
     }
     return ImageService.instance;
-  }
-
-  constructor() {
-    // Initialize GPU optimization services for RTX 3080
-    this.initializeGPUServices();
-  }
-
-  private async initializeGPUServices(): Promise<void> {
-    try {
-      logger.info('Initializing RTX 3080 acceleration services...');
-
-      // Initialize services in parallel for faster startup
-      await Promise.all([
-        vramOptimizedMemoryService.initializeMemoryManagement(),
-        cudaAcceleratedService.optimizeForMaxPerformance(),
-        gpuOptimizedProcessingService.getOptimalConfig()
-      ]);
-
-      logger.info('RTX 3080 acceleration services initialized successfully');
-    } catch (error) {
-      logger.error('Failed to initialize GPU services:', error);
-      logger.info('Falling back to CPU-only processing');
-    }
   }
 
   addImageLoadListener(callback: () => void): () => void {
