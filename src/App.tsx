@@ -254,6 +254,29 @@ export async function openFolderFromDialog(deps: OpenFolderDeps): Promise<void> 
   }
 }
 
+/**
+ * Builds the ImageFileInfo for a single file opened via File > Open / Ctrl+O /
+ * the 'electron-file-open' relay. Mirrors the per-file shape handleFileImport
+ * builds inline for its own entries (id/name/path/size/format/type/lastModified/
+ * dateModified) so the workspace's currentImage state stays consistent across
+ * both load paths. Exported (pure, no side effects) so the shape that feeds
+ * setCurrentImage can be unit-tested without rendering the full App component
+ * graph.
+ */
+export function imageFileInfoFromOpenedPath(filePath: string): ImageFileInfo {
+  const ext = filePath.split('.').pop()?.toLowerCase() || 'unknown';
+  return {
+    id: `image-${Date.now()}`,
+    name: filePath.split(/[/\\]/).pop() || filePath,
+    path: filePath,
+    size: 0, // Size will be determined when file is loaded
+    format: ext,
+    type: ext,
+    lastModified: Date.now(),
+    dateModified: new Date()
+  };
+}
+
 function App() {
   const { setViewport, resetZoom, viewport, processedImageData, setSelectedTool: storeSetSelectedTool, showGrid, showRulers, showOriginal, toggleGrid, toggleRulers, toggleOriginal, referenceMode, referenceImageUrl, referenceImageName, toggleReferenceMode, setReferenceImage, lastProcessingTimeMs, modulesActive, modulesTotal } = useAppStore();
   const [selectedTool, setSelectedToolLocal] = useState<string | null>('file-explorer'); // Default to file explorer
@@ -744,6 +767,7 @@ function App() {
         logger.info('Loading image:', filePath);
         const imageData = await imageService.loadImage(filePath);
         logger.info(`Image loaded: ${imageData.width}x${imageData.height} - ${imageData.fileName}`);
+        setCurrentImage(imageFileInfoFromOpenedPath(filePath));
         showSuccess('Image Loaded', `${imageData.fileName} (${imageData.width}x${imageData.height})`);
       } catch (error) {
         logger.error('Failed to load image:', error);
