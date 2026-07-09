@@ -18,6 +18,7 @@ import { CropModuleComponent } from '../Modules/CropModuleComponent';
 import { LocalAdjustmentsModuleComponent } from '../Modules/LocalAdjustmentsModuleComponent';
 import { LensCorrectionsModuleComponent } from '../Modules/LensCorrectionsModuleComponent';
 import { HistoryPanel } from './HistoryPanel';
+import { RawDecodePanel } from './RawDecodePanel';
 import EnhanceModuleComponent from '../Modules/EnhanceModuleComponent';
 import { imageProcessingPipeline } from '../../services/ImageProcessingPipeline';
 import { imageService } from '../../services/ImageService';
@@ -700,6 +701,12 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
 
       {/* Darktable Modules */}
       <div className="flex-1 overflow-y-auto">
+
+        {/* RAW Decode — pinned at the top regardless of which module is selected below;
+            self-gates to RAW images only, so it's a no-op render for non-RAW files. */}
+        <div className="px-5 pt-4">
+          <RawDecodePanel />
+        </div>
 
         {/* Crop Module */}
         {cropModule && selectedModule === 'crop' && (() => {
