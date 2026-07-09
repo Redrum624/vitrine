@@ -4,6 +4,15 @@ All notable changes to **Photo Editor Pro** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.13.0] - 2026-07-09
+
+### Added
+- **Per-image RAW Decode panel — choose demosaic + highlight recovery per photo.** A collapsible "RAW Decode" section (pinned in the Adjustments panel, shown only for RAW files) exposes the demosaic algorithm (**AHD** / **DCB**) and highlight-recovery mode (**Off** / **Blend** / **Reconstruct**) for the currently open RAW. Changing either re-decodes the file from disk, and the choice is persisted per image — restored on reopen and honoured by export. Why: the best demosaic/highlight settings differ shot to shot, so decode quality is now tunable instead of a fixed global. How to use: open a RAW file → **Adjustments → RAW Decode** → pick demosaic / highlight. Affects: `src/components/Panels/RawDecodePanel.tsx`, `src/components/Panels/AdjustmentPanel.tsx`, `src/services/RawImageService.ts`, `src/services/ImageService.ts`, `src/services/EditPersistenceService.ts`, `src/stores/appStore.ts`, `src/components/Layout/Canvas.tsx`.
+
+### Fixed
+- **RAW re-decode no longer races an image switch, and exports honour the saved decode options.** Cause: re-decoding a RAW is async — switching to another photo mid-flight could apply the finished decode to the wrong image, and the export path re-decoded with defaults instead of the image's saved demosaic/highlight choice. Fix: `reDecode` now guards against a mid-flight current-image change, and the persisted decode options are threaded through the export decode. Affects: `src/services/RawImageService.ts`, `src/services/ImageService.ts`.
+- **Status bar no longer stuck on "No image loaded" after File > Open.** Cause: the File > Open / Ctrl+O handler decoded and displayed the image but never set the app's `currentImage` state that the status bar reads, unlike the filmstrip/import paths. Fix: the open handler now sets `currentImage` from the opened path (matching the sibling load paths) and relies on the reactive canvas load rather than a second explicit decode. Affects: `src/App.tsx`.
+
 ## [1.12.0] - 2026-07-09
 
 ### Added
