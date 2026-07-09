@@ -761,19 +761,19 @@ function App() {
 
   useEffect(() => {
     // Set up Electron event listeners
-    const handleFileOpen = async (event: CustomEvent) => {
-      try {
-        const filePath = event.detail;
-        logger.info('Loading image:', filePath);
-        const imageData = await imageService.loadImage(filePath);
-        logger.info(`Image loaded: ${imageData.width}x${imageData.height} - ${imageData.fileName}`);
-        setCurrentImage(imageFileInfoFromOpenedPath(filePath));
-        showSuccess('Image Loaded', `${imageData.fileName} (${imageData.width}x${imageData.height})`);
-      } catch (error) {
-        logger.error('Failed to load image:', error);
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-        showError('Failed to Load Image', errorMessage);
-      }
+    const handleFileOpen = (event: CustomEvent) => {
+      const filePath = event.detail;
+      logger.info('Loading image:', filePath);
+      // Set currentImage only - Canvas's reactive effect (currentImage.path !==
+      // displayImage?.path) performs the single real decode, same as the sibling
+      // paths (handleImageSelected, handleFolderSelected, handleFileImport). A
+      // direct call to ImageService's loader here would decode twice: once here,
+      // once more via Canvas's effect, since the image cache never matches on the
+      // second call (see Canvas.tsx's loadImage callback for the equivalent call).
+      // Canvas's loadImage already surfaces decode failures via notificationService
+      // (the same singleton backing showError here), so no separate error toast
+      // is needed for decode errors.
+      setCurrentImage(imageFileInfoFromOpenedPath(filePath));
     };
 
     const handleFileImport = async (event: CustomEvent) => {
