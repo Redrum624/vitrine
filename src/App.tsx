@@ -558,9 +558,10 @@ function App() {
       imageProcessingPipeline.invalidateModuleCache('exposure');
     }
 
-    // White Balance — median gray-world neutralization, the SAME engine as the WB
-    // "Auto" button: scan the image's median colour cast and neutralise both warmth
-    // (temperature) and tint, inverting the module's own gain model.
+    // White Balance — gray-candidate estimation + damped correction, the SAME engine
+    // as the WB "Auto" button: estimate the illuminant from near-neutral samples
+    // (median cast, inverting the module's own gain model), then apply a partial
+    // correction that cleans the cast while retaining some of the scene's warmth.
     const wbMod = imageProcessingPipeline.getModule('temperature');
     if (wbMod) {
       const wbChannels = Math.max(3, Math.round(img.data.length / (img.width * img.height)));

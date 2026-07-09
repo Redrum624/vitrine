@@ -4,7 +4,7 @@
  * Tests parameter management, preset application, and processing behavior.
  */
 
-import { WhiteBalanceModule, WHITE_BALANCE_PRESETS } from './WhiteBalanceModule';
+import { WhiteBalanceModule, WHITE_BALANCE_PRESETS, computeWBGains } from './WhiteBalanceModule';
 import {
   createTestImage,
   createProcessingContext,
@@ -254,41 +254,170 @@ describe('WhiteBalanceModule', () => {
     });
   });
 
-  describe('Auto white balance neutralization (median gray-world)', () => {
+  describe('Auto white balance (gray-candidate estimation + damped correction)', () => {
     const fill = (w: number, h: number, r: number, g: number, b: number) => {
       const d = new Float32Array(w * h * 4);
       for (let i = 0; i < w * h; i++) { d[i * 4] = r; d[i * 4 + 1] = g; d[i * 4 + 2] = b; d[i * 4 + 3] = 1; }
       return d;
     };
 
-    it('cools a warm cast so corrected R≈B and G sits between them', () => {
+    // Test-side replica of the module's solvers (same binary search over the SAME
+    // exported gain model) so the expected damped values can be derived exactly.
+    const AUTO_WB_STRENGTH = 0.7;
+    const solveTemp = (mR: number, mB: number): number => {
+      let lo = 2000, hi = 12000;
+      const f = (t: number) => { const g = computeWBGains(t, 0); return g.r * mR - g.b * mB; };
+      const flo = f(lo), fhi = f(hi);
+      if (flo > 0 && fhi > 0) return lo;
+      if (flo < 0 && fhi < 0) return hi;
+      for (let iter = 0; iter < 40; iter++) {
+        const mid = (lo + hi) / 2;
+        if (f(mid) > 0) hi = mid; else lo = mid;
+      }
+      return (lo + hi) / 2;
+    };
+    const solveTintAt = (temperature: number, mR: number, mG: number, mB: number): number => {
+      let lo = -100, hi = 100;
+      const h = (t: number) => { const g = computeWBGains(temperature, t); return g.g * mG - (g.r * mR + g.b * mB) / 2; };
+      const hlo = h(lo), hhi = h(hi);
+      if (hlo > 0 && hhi > 0) return lo;
+      if (hlo < 0 && hhi < 0) return hi;
+      for (let iter = 0; iter < 40; iter++) {
+        const mid = (lo + hi) / 2;
+        if (h(mid) > 0) hi = mid; else lo = mid;
+      }
+      return (lo + hi) / 2;
+    };
+    // Fixtures are stored in a Float32Array, so the medians the module sees are the
+    // float32-rounded values — replicate that with Math.fround.
+    const expected = (r: number, g: number, b: number) => {
+      const mR = Math.fround(r), mG = Math.fround(g), mB = Math.fround(b);
+      const solvedTemperature = solveTemp(mR, mB);
+      const solvedTint = solveTintAt(solvedTemperature, mR, mG, mB);
+      // No-cast dead-band mirror: tiny solved corrections snap to exactly 6500/0.
+      const tempRatio = Math.max(solvedTemperature, 6500) / Math.min(solvedTemperature, 6500);
+      const noCast = tempRatio <= 1.08 && Math.abs(solvedTint) < 10;
+      return {
+        solvedTemperature,
+        solvedTint,
+        noCast,
+        temperature: noCast ? 6500 : Math.round(6500 * Math.pow(solvedTemperature / 6500, AUTO_WB_STRENGTH)),
+        tint: noCast ? 0 : Math.round(Math.max(-35, Math.min(35, solvedTint * AUTO_WB_STRENGTH)) * 10) / 10,
+      };
+    };
+
+    it('damps a warm cast: correct direction, warmth retained, cast meaningfully reduced', () => {
       const w = 24, h = 24;
-      const input = fill(w, h, 0.62, 0.5, 0.40); // warm: R > B
+      // Uniform warm fill — relative chroma 0.355 > 0.25, so NO gray candidates
+      // exist and estimation falls back to all kept samples.
+      const input = fill(w, h, 0.62, 0.5, 0.40);
       const ctx = { width: w, height: h, channels: 4 };
       module.autoDetectWhiteBalance(input, ctx);
-      expect(module.getParams().auto).toBe(true);
-      expect(module.getParams().temperature).toBeLessThan(6500); // cooled to fight the warm cast
+      const params = module.getParams();
+      const exp = expected(0.62, 0.5, 0.40);
+      expect(params.auto).toBe(true);
+      expect(params.temperature).toBeLessThan(6500);                    // still cools (correct direction)
+      expect(params.temperature).toBeGreaterThan(exp.solvedTemperature); // but milder than the full solve
+      expect(params.temperature).toBe(exp.temperature);                 // exact damping formula
+      expect(params.tint).toBe(exp.tint);
       const out = module.process(input, ctx);
-      expect(Math.abs(out[0] - out[2])).toBeLessThan(0.02);             // R ≈ B
-      expect(Math.abs(out[1] - (out[0] + out[2]) / 2)).toBeLessThan(0.02); // G neutralized
+      // Warmth is RETAINED — R stays decisively above B (no flip past neutral).
+      expect(out[0]).toBeGreaterThan(out[2] + 0.02);
+      // …but the cast is meaningfully reduced: warm excess (R/B − 1) drops ≥ 25%.
+      const inExcess = 0.62 / 0.40 - 1;
+      const outExcess = out[0] / out[2] - 1;
+      expect(outExcess).toBeLessThan(inExcess * 0.75);
     });
 
-    it('removes a green cast with negative tint', () => {
+    it('applies temperature = round(6500·(Tsolved/6500)^0.7) — warmth-retention formula', () => {
       const w = 24, h = 24;
-      const input = fill(w, h, 0.5, 0.6, 0.5); // green: G high
-      const ctx = { width: w, height: h, channels: 4 };
-      module.autoDetectWhiteBalance(input, ctx);
-      expect(module.getParams().tint).toBeLessThan(0); // negative tint removes green
-      const out = module.process(input, ctx);
-      expect(Math.abs(out[1] - (out[0] + out[2]) / 2)).toBeLessThan(0.02);
+      const input = fill(w, h, 0.65, 0.45, 0.3); // strong warm cast
+      module.autoDetectWhiteBalance(input, { width: w, height: h, channels: 4 });
+      const exp = expected(0.65, 0.45, 0.3);
+      expect(module.getParams().temperature).toBe(
+        Math.round(6500 * Math.pow(exp.solvedTemperature / 6500, 0.7))
+      );
     });
 
-    it('leaves a neutral image essentially unchanged', () => {
+    it('estimates from near-neutral gray candidates, not the colourful subject', () => {
+      const w = 100, h = 100;
+      const ctx = { width: w, height: h, channels: 4 };
+      // ~30% warm-cast gray (0.5 × (1.15, 1.0, 0.9) → chroma 0.217 < 0.25: gray
+      // candidate) + 70% strongly coloured warm subject (chroma 0.778: excluded).
+      const grayCast: [number, number, number] = [0.575, 0.5, 0.45];
+      const subject: [number, number, number] = [0.9, 0.45, 0.2];
+      const composite = new Float32Array(w * h * 4);
+      const graySplit = Math.floor(w * h * 0.3);
+      for (let i = 0; i < w * h; i++) {
+        const [r, g, b] = i < graySplit ? grayCast : subject;
+        composite[i * 4] = r; composite[i * 4 + 1] = g; composite[i * 4 + 2] = b; composite[i * 4 + 3] = 1;
+      }
+      module.autoDetectWhiteBalance(composite, ctx);
+      const compositeParams = module.getParams();
+
+      // The estimate must track the GRAY region's mild cast, not the subject.
+      const expGray = expected(...grayCast);
+      expect(compositeParams.temperature).toBe(expGray.temperature);
+
+      // A 100%-subject image (no gray candidates → all-sample fallback) solves a much
+      // stronger correction; the composite must be strictly milder (closer to 6500).
+      const subjectOnly = new WhiteBalanceModule();
+      subjectOnly.autoDetectWhiteBalance(fill(w, h, ...subject), ctx);
+      expect(compositeParams.temperature).toBeGreaterThan(subjectOnly.getParams().temperature);
+
+      const out = module.process(composite, ctx);
+      // Gray region ends up closer to neutral than before…
+      const grayIdx = 0;
+      expect(Math.abs(out[grayIdx] - out[grayIdx + 2])).toBeLessThan(Math.abs(grayCast[0] - grayCast[2]));
+      // …while the subject stays warm.
+      const subjIdx = (w * h - 1) * 4;
+      expect(out[subjIdx]).toBeGreaterThan(out[subjIdx + 2]);
+    });
+
+    it('leaves a neutral image essentially unchanged (damping keeps the identity fixed point)', () => {
       const w = 24, h = 24;
       const ctx = { width: w, height: h, channels: 4 };
       module.autoDetectWhiteBalance(fill(w, h, 0.5, 0.5, 0.5), ctx);
       expect(Math.abs(module.getParams().temperature - 6500)).toBeLessThan(400);
       expect(Math.abs(module.getParams().tint)).toBeLessThan(2);
+    });
+
+    it('damps and clamps a green cast: negative tint, magnitude capped at 35', () => {
+      const w = 24, h = 24;
+      const input = fill(w, h, 0.5, 0.6, 0.5); // green: G high
+      const ctx = { width: w, height: h, channels: 4 };
+      module.autoDetectWhiteBalance(input, ctx);
+      const params = module.getParams();
+      const exp = expected(0.5, 0.6, 0.5);
+      expect(params.tint).toBeLessThan(0);                              // still removes green (direction)
+      expect(Math.abs(params.tint)).toBeLessThanOrEqual(35);            // clamp
+      expect(Math.abs(params.tint)).toBeLessThan(Math.abs(exp.solvedTint)); // weaker than the full solve
+      expect(params.tint).toBe(-35); // 0.7 × solved (−90.9) = −63.6 → clamped to −35
+      const out = module.process(input, ctx);
+      // Green excess is reduced but NOT fully neutralised (and never flips to magenta).
+      const inGreenExcess = 0.6 - (0.5 + 0.5) / 2;
+      const outGreenExcess = out[1] - (out[0] + out[2]) / 2;
+      expect(outGreenExcess).toBeLessThan(inGreenExcess);
+      expect(outGreenExcess).toBeGreaterThan(0);
+    });
+
+    it('snaps a near-balanced image to exactly 6500/0 (no-cast dead-band)', () => {
+      const w = 24, h = 24;
+      const ctx = { width: w, height: h, channels: 4 };
+      // Slightly blue-leaning near-grays — the live-app medians measured on an
+      // already-balanced sunset (hazy sky). Solved ≈ 6756K / +9.3: inside the
+      // dead-band, so Auto must report "no cast" instead of a token warm nudge.
+      const input = fill(w, h, 0.6, 0.58, 0.62);
+      const exp = expected(0.6, 0.58, 0.62);
+      expect(exp.noCast).toBe(true); // fixture sanity: solved correction is in-band
+      module.autoDetectWhiteBalance(input, ctx);
+      expect(module.getParams().temperature).toBe(6500);
+      expect(module.getParams().tint).toBe(0);
+      expect(module.getParams().auto).toBe(true);
+      // Applying the result is an exact identity.
+      const out = module.process(input, ctx);
+      expect(out[0]).toBeCloseTo(0.6, 5);
+      expect(out[2]).toBeCloseTo(0.62, 5);
     });
 
     it('uses the median — blown-out highlights do not drag the estimate toward neutral', () => {

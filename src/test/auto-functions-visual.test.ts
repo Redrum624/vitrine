@@ -686,7 +686,7 @@ describe('WhiteBalanceModule.autoDetectWhiteBalance', () => {
     wb.autoDetectWhiteBalance(img, CTX);
     const params = wb.getParams();
 
-    // Module uses 6500/rbRatio, so neutral (rb=1) → 6500K
+    // Neutral median solves to 6500K, and damping keeps 6500 as its fixed point
     expect(params.temperature).toBeCloseTo(6500, -2);
     expect(params.auto).toBe(true);
     logVisual('module autoDetect on neutral', params as unknown as Record<string, unknown>);
@@ -712,7 +712,7 @@ describe('WhiteBalanceModule.autoDetectWhiteBalance', () => {
     logVisual('module autoDetect on cool', params as unknown as Record<string, unknown>);
   });
 
-  it('should produce near-neutral output after autoDetect + process', () => {
+  it('should reduce the cast after autoDetect + process while retaining some warmth (damped policy)', () => {
     const wb = new WhiteBalanceModule();
     const img = createWarmImage();
     const beforeAvg = calculateAveragePixel(img);
@@ -721,7 +721,8 @@ describe('WhiteBalanceModule.autoDetectWhiteBalance', () => {
     const output = wb.process(img, CTX);
     const afterAvg = calculateAveragePixel(output);
 
-    // After correction, R/B spread should be smaller
+    // Damped correction: the R/B spread shrinks, but the scene keeps part of its
+    // warmth (R stays above B) instead of being neutralised to R≈B.
     const beforeSpread = Math.abs(beforeAvg[0] - beforeAvg[2]);
     const afterSpread = Math.abs(afterAvg[0] - afterAvg[2]);
 
@@ -731,6 +732,7 @@ describe('WhiteBalanceModule.autoDetectWhiteBalance', () => {
     console.log(`  Improved? ${afterSpread < beforeSpread ? 'YES' : 'NO'}`);
 
     expect(afterSpread).toBeLessThan(beforeSpread);
+    expect(afterAvg[0]).toBeGreaterThan(afterAvg[2]); // warmth retained, not sterilised
     expect(isValidImageData(output)).toBe(true);
     logVisual('module autoDetect+process warm', wb.getParams() as unknown as Record<string, unknown>, beforeAvg, afterAvg);
   });

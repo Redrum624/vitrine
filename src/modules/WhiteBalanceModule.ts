@@ -57,6 +57,22 @@ export function computeWBGains(temperature: number, tint: number): { r: number; 
   return { r: r / avg, g: g / avg, b: b / avg };
 }
 
+/**
+ * Fraction of the solved auto-WB correction that actually gets applied. Retains
+ * ~30% of the scene's cast so auto WB cleans the cast without sterilising warm
+ * scenes (sunsets, tungsten interiors) — matches camera/Lightroom auto behaviour.
+ */
+const AUTO_WB_STRENGTH = 0.7;
+
+/**
+ * No-cast dead-band: when the SOLVED correction is this small, auto WB applies
+ * exactly 6500K / 0 instead of a token nudge. A near-balanced image (e.g. camera
+ * WB already correct) must read as "no cast detected", not drift a few percent
+ * warmer or cooler on estimator noise.
+ */
+const AUTO_WB_DEADBAND_TEMP_RATIO = 1.08; // solved temp within 6500/1.08..6500*1.08
+const AUTO_WB_DEADBAND_TINT = 10;         // and |solved tint| below this
+
 export class WhiteBalanceModule {
   private params: WhiteBalanceParams = {
     temperature: 6500, // D65 reference (no correction / identity)
@@ -156,10 +172,13 @@ export class WhiteBalanceModule {
   }
 
   /**
-   * Auto white balance — median gray-world. Scans the whole image, takes the MEDIAN
-   * of each channel (robust to highlights/shadows that skew a mean), then solves the
-   * temperature AND tint that neutralise that median cast, inverting the module's own
-   * gain model so the resulting correction genuinely makes the median neutral.
+   * Auto white balance — gray-candidate estimation with a damped, warmth-preserving
+   * correction. Samples the whole image, prefers NEAR-NEUTRAL (low relative chroma)
+   * samples for the illuminant estimate (a colourful subject like a sunset sky must
+   * not drag it), takes per-channel MEDIANS (robust to outliers), solves the
+   * temperature AND tint that would neutralise that median cast by inverting the
+   * module's own gain model, then applies only AUTO_WB_STRENGTH of the correction —
+   * deliberately NOT full neutralisation, so warm scenes keep part of their cast.
    */
   autoDetectWhiteBalance(input: Float32Array, context: WhiteBalanceProcessingContext): void {
     const { width, height, channels } = context;
@@ -187,21 +206,45 @@ export class WhiteBalanceModule {
       }
     }
 
-    const mR = this.median(rs), mG = this.median(gs), mB = this.median(bs);
+    // Gray-candidate subset: near-neutral (low relative chroma) samples reveal the
+    // illuminant; a colourful subject (e.g. a sunset sky) must not drag the estimate.
+    const grayR: number[] = [], grayG: number[] = [], grayB: number[] = [];
+    for (let i = 0; i < rs.length; i++) {
+      const r = rs[i], g = gs[i], b = bs[i];
+      const maxC = Math.max(r, g, b);
+      const chroma = (maxC - Math.min(r, g, b)) / Math.max(maxC, 1e-6);
+      if (chroma < 0.25) { grayR.push(r); grayG.push(g); grayB.push(b); }
+    }
+    // Only trust the subset when it is big enough to be representative; otherwise
+    // fall back to all kept samples (whole-scene median gray-world).
+    const useGray = grayR.length >= Math.max(200, rs.length * 0.02);
+
+    const mR = this.median(useGray ? grayR : rs);
+    const mG = this.median(useGray ? grayG : gs);
+    const mB = this.median(useGray ? grayB : bs);
     if (mR <= 0 && mG <= 0 && mB <= 0) return; // black image — nothing to balance
 
-    // 1) Temperature neutralises the red/blue (warm/cool) cast.
-    const temperature = this.solveTemperature(mR, mB);
-    // 2) Tint neutralises the residual green/magenta cast (R/B balance is preserved).
-    const tint = this.solveTint(temperature, mR, mG, mB);
+    // 1) Temperature that would neutralise the red/blue (warm/cool) cast.
+    const solvedTemperature = this.solveTemperature(mR, mB);
+    // 2) Tint that would neutralise the residual green/magenta cast (R/B preserved).
+    const solvedTint = this.solveTint(solvedTemperature, mR, mG, mB);
+
+    // Damp the correction so it cleans the cast without sterilising the scene:
+    // temperature is damped in log-temperature ratio space (6500K is the fixed
+    // point, direction is preserved), tint is scaled and clamped. A solved
+    // correction inside the no-cast dead-band snaps to exactly 6500K / 0.
+    const tempRatio = Math.max(solvedTemperature, 6500) / Math.min(solvedTemperature, 6500);
+    const noCast = tempRatio <= AUTO_WB_DEADBAND_TEMP_RATIO && Math.abs(solvedTint) < AUTO_WB_DEADBAND_TINT;
+    const appliedTemperature = noCast ? 6500 : 6500 * Math.pow(solvedTemperature / 6500, AUTO_WB_STRENGTH);
+    const appliedTint = noCast ? 0 : Math.max(-35, Math.min(35, solvedTint * AUTO_WB_STRENGTH));
 
     this.setParams({
-      temperature: Math.round(temperature),
-      tint: Math.round(tint * 10) / 10,
+      temperature: Math.round(appliedTemperature),
+      tint: Math.round(appliedTint * 10) / 10,
       auto: true
     });
 
-    logger.info(`Auto white balance (median gray-world): median RGB=(${mR.toFixed(3)}, ${mG.toFixed(3)}, ${mB.toFixed(3)}) → ${Math.round(temperature)}K, tint ${Math.round(tint * 10) / 10}`);
+    logger.info(`Auto white balance (gray-candidate, damped ×${AUTO_WB_STRENGTH}): samples=${useGray ? grayR.length : rs.length}/${rs.length} (${grayR.length} gray candidates, ${useGray ? 'subset' : 'all-sample fallback'}), median RGB=(${mR.toFixed(3)}, ${mG.toFixed(3)}, ${mB.toFixed(3)}), solved ${Math.round(solvedTemperature)}K / tint ${Math.round(solvedTint * 10) / 10} → applied ${Math.round(appliedTemperature)}K / tint ${Math.round(appliedTint * 10) / 10}${noCast ? ' (no-cast dead-band)' : ''}`);
   }
 
   private median(values: number[]): number {
