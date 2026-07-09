@@ -57,7 +57,7 @@ export function SliderRow({
   return (
     <div className={`flex flex-col ${className}`} style={{ gap: 6 }}>
       <div className="flex items-center justify-between">
-        <label id={labelId} htmlFor={sliderId} style={{ fontSize: 12, fontWeight: 500, color: '#c2c2ca' }}>
+        <label id={labelId} htmlFor={sliderId} style={{ fontSize: 12, fontWeight: 500, color: 'var(--glass-text-label)' }}>
           {label}
         </label>
         <span
@@ -70,7 +70,7 @@ export function SliderRow({
             borderRadius: 6,
             border: `1px solid ${edited ? 'var(--accent-ring)' : 'rgba(255,255,255,.1)'}`,
             background: edited ? 'var(--accent-soft)' : 'rgba(255,255,255,.04)',
-            color: edited ? 'var(--accent)' : '#a8a8b0',
+            color: edited ? 'var(--accent)' : 'var(--glass-text-secondary)',
           }}
         >
           {chipText}
@@ -126,7 +126,7 @@ export function SliderRow({
       </div>
 
       {legend && (
-        <div className="flex items-center justify-between" style={{ fontSize: 10, color: '#7a7a82' }}>
+        <div className="flex items-center justify-between" style={{ fontSize: 10, color: 'var(--glass-text-muted)' }}>
           <span>{legend.left}</span>
           {legend.center && <span>{legend.center}</span>}
           <span>{legend.right}</span>

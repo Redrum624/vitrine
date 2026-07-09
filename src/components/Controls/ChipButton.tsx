@@ -58,7 +58,7 @@ export function ChipButton({
         borderStyle: dashed && !highlighted ? 'dashed' : 'solid',
         borderColor: highlighted ? 'var(--accent-ring)' : 'rgba(255,255,255,.1)',
         background: highlighted ? 'var(--accent-soft)' : 'rgba(255,255,255,.04)',
-        color: highlighted ? 'var(--accent)' : '#c2c2ca',
+        color: highlighted ? 'var(--accent)' : 'var(--glass-text-label)',
         cursor: disabled ? 'default' : 'pointer',
         opacity: disabled ? 0.5 : 1,
         transform: pressed ? 'scale(.97)' : 'scale(1)',

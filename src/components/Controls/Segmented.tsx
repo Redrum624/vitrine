@@ -48,7 +48,7 @@ export function Segmented<T extends string>({ options, value, onChange, classNam
               border: '1px solid',
               borderColor: active ? 'var(--accent-ring)' : 'transparent',
               background: active ? 'var(--accent-soft)' : 'transparent',
-              color: active ? 'var(--accent)' : '#a8a8b0',
+              color: active ? 'var(--accent)' : 'var(--glass-text-secondary)',
               cursor: 'pointer',
               transition: 'background 150ms ease, color 150ms ease, border-color 150ms ease',
             }}
