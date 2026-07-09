@@ -1,8 +1,10 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { RotateCcw, Circle, Trash2 } from 'lucide-react';
+import { Circle, Trash2 } from 'lucide-react';
 import { BasicAdjustmentsModule, BasicAdjParams } from '../../modules/BasicAdjustmentsModule';
 import { logger } from '../../utils/Logger';
-import { DelayedInputControl } from '../Controls/DelayedInputControl';
+import { SliderRow } from '../Controls/SliderRow';
+import { SectionLabel } from '../Controls/SectionLabel';
+import { ChipButton } from '../Controls/ChipButton';
 import { useRegisterModuleCardActions, type RegisterModuleCardActions } from '../Controls/moduleCardActions';
 import { autoAdjustService } from '../../services/AutoAdjustService';
 import { imageService } from '../../services/ImageService';
@@ -17,32 +19,41 @@ const NEUTRAL_BA: BasicAdjParams = {
 };
 
 type SliderKey = 'exposure' | 'contrast' | 'highlights' | 'brightness' | 'black_point' | 'shadows' | 'dehaze' | 'saturation' | 'vibrance';
+type SliderSection = 'TONE' | 'PRESENCE' | 'COLOR';
 
 interface SliderCfg {
   key: SliderKey;
   label: string;
+  section: SliderSection;
   min: number;
   max: number;
-  step?: number;       // DelayedInput + default range step
+  step?: number;       // slider + value-chip step
   rangeStep?: number;  // slider step override
   gradient: string;    // CSS gradient stops (without the linear-gradient wrapper)
-  unit?: string;
 }
 
-// Slider order: Exposure, Contrast, Highlights, Brightness, Black Point, Shadows,
-// Dehaze, Saturation, Vibrance. Highlights/Shadows replace the old standalone
-// Shadows & Highlights module.
+// Slider order + §4 groupings: TONE (Exposure, Contrast, Highlights, Brightness,
+// Black Point, Shadows) / PRESENCE (Dehaze) / COLOR (Saturation, Vibrance).
+// Highlights/Shadows replace the old standalone Shadows & Highlights module.
 const BASIC_ADJ_SLIDERS: SliderCfg[] = [
-  { key: 'exposure', label: 'Exposure', min: -1, max: 1, step: 0.01, gradient: '#000000, #6b7280, #ffffff', unit: 'EV' },
-  { key: 'contrast', label: 'Contrast', min: -2.5, max: 2.5, step: 0.01, gradient: '#6b7280, #000000' },
-  { key: 'highlights', label: 'Highlights', min: -1, max: 1, step: 0.01, gradient: '#6b7280, #ffffff' },
-  { key: 'brightness', label: 'Brightness', min: -2, max: 2, step: 0.01, gradient: '#000000, #6b7280, #ffffff' },
-  { key: 'black_point', label: 'Black Point', min: -1, max: 1, step: 0.01, gradient: '#ffffff, #000000' },
-  { key: 'shadows', label: 'Shadows', min: -1, max: 1, step: 0.01, gradient: '#000000, #6b7280' },
-  { key: 'dehaze', label: 'Dehaze', min: -1, max: 1, step: 0.01, rangeStep: 0.05, gradient: '#94a3b8, #64748b, #334155, #0ea5e9' },
-  { key: 'saturation', label: 'Saturation', min: -1, max: 1, step: 0.01, rangeStep: 0.05, gradient: '#6b7280, #3b82f6, #10b981, #eab308, #f97316, #ef4444' },
-  { key: 'vibrance', label: 'Vibrance', min: -1, max: 1, step: 0.01, rangeStep: 0.05, gradient: '#64748b, #a855f7, #ec4899, #f43f5e, #f97316' },
+  { key: 'exposure', label: 'Exposure', section: 'TONE', min: -1, max: 1, step: 0.01, gradient: '#000000, #6b7280, #ffffff' },
+  { key: 'contrast', label: 'Contrast', section: 'TONE', min: -2.5, max: 2.5, step: 0.01, gradient: '#6b7280, #000000' },
+  { key: 'highlights', label: 'Highlights', section: 'TONE', min: -1, max: 1, step: 0.01, gradient: '#6b7280, #ffffff' },
+  { key: 'brightness', label: 'Brightness', section: 'TONE', min: -2, max: 2, step: 0.01, gradient: '#000000, #6b7280, #ffffff' },
+  { key: 'black_point', label: 'Black Point', section: 'TONE', min: -1, max: 1, step: 0.01, gradient: '#ffffff, #000000' },
+  { key: 'shadows', label: 'Shadows', section: 'TONE', min: -1, max: 1, step: 0.01, gradient: '#000000, #6b7280' },
+  { key: 'dehaze', label: 'Dehaze', section: 'PRESENCE', min: -1, max: 1, step: 0.01, rangeStep: 0.05, gradient: '#94a3b8, #64748b, #334155, #0ea5e9' },
+  { key: 'saturation', label: 'Saturation', section: 'COLOR', min: -1, max: 1, step: 0.01, rangeStep: 0.05, gradient: '#6b7280, #3b82f6, #10b981, #eab308, #f97316, #ef4444' },
+  { key: 'vibrance', label: 'Vibrance', section: 'COLOR', min: -1, max: 1, step: 0.01, rangeStep: 0.05, gradient: '#64748b, #a855f7, #ec4899, #f43f5e, #f97316' },
 ];
+
+const SLIDER_SECTIONS: SliderSection[] = ['TONE', 'PRESENCE', 'COLOR'];
+
+/** Title-case display text for each section id (SectionLabel uppercases via CSS). */
+const SECTION_LABELS: Record<SliderSection, string> = { TONE: 'Tone', PRESENCE: 'Presence', COLOR: 'Color' };
+
+/** "+0.35" / "0.00" / "-0.20" — the Glass · Sectioned edited-chip format (see 4a-develop.png). */
+const formatSigned = (v: number): string => (v > 0 ? `+${v.toFixed(2)}` : v.toFixed(2));
 
 interface BasicAdjustmentsModuleComponentProps {
   module: BasicAdjustmentsModule;
@@ -91,22 +102,6 @@ export function BasicAdjustmentsModuleComponent({
       delete updateTimeoutRef.current[key];
     }, 16); // ~60fps for smooth updates
   }, [module, onParamsChange, updateParamImmediate]);
-
-  // Real-time update for slider dragging
-  const updateParamRealTime = useCallback((key: keyof BasicAdjParams, value: number) => {
-    // Update ref and UI immediately without blocking
-    const newParams = { ...paramsRef.current, [key]: value };
-    paramsRef.current = newParams;
-    setParams(newParams);
-
-    // Trigger module update and processing
-    module.setParams({ [key]: value });
-    onParamsChange?.(newParams);
-  }, [module, onParamsChange]);
-
-  const resetParam = useCallback((key: keyof BasicAdjParams, defaultValue: number) => {
-    updateParam(key, defaultValue);
-  }, [updateParam]);
 
   const resetAll = useCallback(() => {
     module.resetParams();
@@ -229,145 +224,114 @@ export function BasicAdjustmentsModuleComponent({
     return () => window.removeEventListener('keydown', onKey);
   }, [selectedMaskId, deleteMask]);
 
-  const renderMaskSlider = (cfg: SliderCfg, value: number, onChange: (v: number) => void) => {
-    const rangeStep = cfg.rangeStep ?? cfg.step ?? 0.01;
-    return (
-      <div key={cfg.key} className="space-y-1.5">
-        <div className="flex items-center justify-between">
-          <label className="text-xs font-medium" style={{ color: 'var(--gray-300)' }}>{cfg.label}</label>
-          <div className="flex items-center gap-1.5">
-            <DelayedInputControl value={value} onChange={onChange} min={cfg.min} max={cfg.max} step={cfg.step ?? 0.01} precision={2} />
-            {cfg.unit && <span className="text-xs font-mono" style={{ color: 'var(--gray-500)', width: '20px' }}>{cfg.unit}</span>}
-            <button onClick={() => onChange(0)} className="p-1 rounded" style={{ backgroundColor: 'transparent', color: 'var(--gray-500)' }} title="Reset"><RotateCcw className="w-3 h-3" /></button>
-          </div>
-        </div>
-        <input
-          type="range" min={cfg.min} max={cfg.max} step={rangeStep} value={value}
-          onInput={(e) => onChange(parseFloat((e.target as HTMLInputElement).value))}
-          onChange={(e) => onChange(parseFloat(e.target.value))}
-          onDoubleClick={() => onChange(0)}
-          className="slider w-full"
-          style={{ background: `linear-gradient(to right, ${cfg.gradient})` }}
-          title="Double-click to reset"
-        />
-      </div>
-    );
-  };
+  const renderMaskSlider = (cfg: SliderCfg) => (
+    <SliderRow
+      key={cfg.key}
+      label={cfg.label}
+      value={maskBA[cfg.key] as number}
+      defaultValue={0}
+      min={cfg.min}
+      max={cfg.max}
+      step={cfg.rangeStep ?? cfg.step ?? 0.01}
+      onChange={(v) => updateMaskBA(cfg.key, v)}
+      formatValue={formatSigned}
+      trackBackground={`linear-gradient(to right, ${cfg.gradient})`}
+    />
+  );
 
-  const formatValue = (value: number, precision: number = 2): string => {
-    return value.toFixed(precision);
-  };
-
-  // Use formatValue to prevent unused variable warning
-  console.debug('formatValue available:', formatValue);
-
-  const renderSlider = (cfg: SliderCfg) => {
-    const value = params[cfg.key] as number;
-    const rangeStep = cfg.rangeStep ?? cfg.step ?? 0.01;
-    return (
-      <div key={cfg.key} className="space-y-1.5">
-        <div className="flex items-center justify-between">
-          <label className="text-xs font-medium" style={{ color: 'var(--gray-300)' }}>{cfg.label}</label>
-          <div className="flex items-center gap-1.5">
-            <DelayedInputControl
-              value={value}
-              onChange={(v) => updateParam(cfg.key, v)}
-              min={cfg.min}
-              max={cfg.max}
-              step={cfg.step ?? 0.01}
-              precision={2}
-            />
-            {cfg.unit && <span className="text-xs font-mono" style={{ color: 'var(--gray-500)', width: '20px' }}>{cfg.unit}</span>}
-            <button
-              onClick={() => resetParam(cfg.key, 0.0)}
-              className="p-1 rounded"
-              style={{ backgroundColor: 'transparent', color: 'var(--gray-500)', transition: 'var(--transition-fast)' }}
-              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--gray-800)'; e.currentTarget.style.color = 'var(--white)'; }}
-              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.color = 'var(--gray-500)'; }}
-              title={`Reset ${cfg.label.toLowerCase()}`}
-            >
-              <RotateCcw className="w-3 h-3" />
-            </button>
-          </div>
-        </div>
-        <input
-          type="range"
-          min={cfg.min}
-          max={cfg.max}
-          step={rangeStep}
-          value={value}
-          onInput={(e) => updateParamRealTime(cfg.key, parseFloat((e.target as HTMLInputElement).value))}
-          onChange={(e) => updateParam(cfg.key, parseFloat(e.target.value))}
-          onDoubleClick={() => updateParam(cfg.key, 0.0)}
-          className="slider w-full"
-          style={{ background: `linear-gradient(to right, ${cfg.gradient})` }}
-          title="Double-click to reset"
-        />
-      </div>
-    );
-  };
+  const renderSlider = (cfg: SliderCfg) => (
+    <SliderRow
+      key={cfg.key}
+      label={cfg.label}
+      value={params[cfg.key] as number}
+      defaultValue={0}
+      min={cfg.min}
+      max={cfg.max}
+      step={cfg.rangeStep ?? cfg.step ?? 0.01}
+      onChange={(v) => updateParam(cfg.key, v)}
+      formatValue={formatSigned}
+      trackBackground={`linear-gradient(to right, ${cfg.gradient})`}
+    />
+  );
 
   return (
-    <div className="space-y-3">
+    <div className="flex flex-col" style={{ gap: 16 }}>
       {/* Local Adjustments mask tools */}
-      <div className="space-y-2 pb-2" style={{ borderBottom: '1px solid var(--border)' }}>
-        <label className="text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--gray-500)', letterSpacing: '0.5px' }}>Local Adjustments</label>
-        <div className="flex gap-1.5">
-          <button onClick={() => createMask('radial_gradient')} className="flex items-center justify-center gap-1.5 flex-1 px-3 py-1.5 rounded border text-xs"
-            style={{ backgroundColor: 'transparent', borderColor: 'var(--border)', color: 'var(--gray-300)' }} title="Add a circle / oval mask">
-            <Circle className="w-3.5 h-3.5" /> Circle
-          </button>
-          <button onClick={() => createMask('linear_gradient')} className="flex items-center justify-center gap-1.5 flex-1 px-3 py-1.5 rounded border text-xs"
-            style={{ backgroundColor: 'transparent', borderColor: 'var(--border)', color: 'var(--gray-300)' }} title="Add a linear gradient mask">
-            <span style={{ fontSize: '13px', lineHeight: 1 }}>▤</span> Gradient
-          </button>
+      <div className="flex flex-col" style={{ gap: 10 }}>
+        <div className="flex items-center" style={{ gap: 8 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <SectionLabel>Masks</SectionLabel>
+          </div>
+          <ChipButton onClick={() => createMask('radial_gradient')} title="Add a circle / oval mask">
+            <Circle className="w-3.5 h-3.5" style={{ marginRight: 6 }} /> Circle
+          </ChipButton>
+          <ChipButton onClick={() => createMask('linear_gradient')} title="Add a linear gradient mask">
+            <span style={{ fontSize: 13, lineHeight: 1, marginRight: 6 }}>▤</span> Gradient
+          </ChipButton>
         </div>
         {masks.length > 0 && (
-          <div className="flex flex-wrap gap-1.5">
+          <div className="flex flex-wrap" style={{ gap: 6 }}>
             {masks.map(mk => (
-              <button key={mk.id} onClick={() => (mk.id === selectedMaskId ? deselectMask() : selectMask(mk.id))} className="px-2 py-1 rounded border text-xs"
-                style={{ backgroundColor: mk.id === selectedMaskId ? 'var(--gray-700)' : 'transparent', borderColor: mk.id === selectedMaskId ? 'var(--primary-500)' : 'var(--border)', color: 'var(--gray-200)' }}
-                title={mk.id === selectedMaskId ? 'Click again to hide this mask and its sliders' : 'Select this mask'}>
+              <ChipButton
+                key={mk.id}
+                active={mk.id === selectedMaskId}
+                onClick={() => (mk.id === selectedMaskId ? deselectMask() : selectMask(mk.id))}
+                title={mk.id === selectedMaskId ? 'Click again to hide this mask and its sliders' : 'Select this mask'}
+              >
                 {mk.type === 'radial_gradient' ? '◯' : '▤'} {mk.name}
-              </button>
+              </ChipButton>
             ))}
           </div>
         )}
       </div>
 
       {/* Per-mask Local Adjustments sliders — directly under the mask buttons, only
-          when a mask is selected; in a lighter-grey card to distinguish it from the
+          when a mask is selected; in a distinct panel to set it apart from the
           global Basic Adjustments below. */}
       {selectedMask && (
-        <div className="space-y-3 rounded-lg" style={{ backgroundColor: 'var(--gray-700)', border: '1px solid var(--border)', padding: '10px' }}>
+        <div
+          className="flex flex-col"
+          style={{ gap: 12, borderRadius: 10, border: '1px solid var(--glass-border)', background: 'rgba(0,0,0,.25)', padding: 12 }}
+        >
           <div className="flex items-center justify-between">
-            <label className="text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--primary-400)' }}>
+            <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--accent)' }}>
               {selectedMask.type === 'radial_gradient' ? '◯' : '▤'} {selectedMask.name}
-            </label>
-            <button onClick={() => deleteMask(selectedMask.id)} className="p-1 rounded" style={{ color: 'var(--red-400)' }} title="Delete mask (Del)">
+            </span>
+            <button
+              onClick={() => deleteMask(selectedMask.id)}
+              className="inline-flex items-center justify-center"
+              style={{ padding: 4, borderRadius: 6, color: 'var(--red-400)', background: 'transparent' }}
+              title="Delete mask (Del)"
+            >
               <Trash2 className="w-3.5 h-3.5" />
             </button>
           </div>
-          <div className="text-xs" style={{ color: 'var(--gray-300)' }}>Drag on the image to place / move / resize / rotate this mask. Click its button above again to hide it. Press Del to delete.</div>
-          <div className="space-y-1">
-            <div className="flex items-center justify-between">
-              <span className="text-xs" style={{ color: 'var(--gray-200)' }}>Feather</span>
-              <span className="text-xs font-mono" style={{ color: 'var(--gray-400)' }}>{maskFeather.toFixed(2)}</span>
-            </div>
-            <input type="range" min={0.01} max={1} step={0.01} value={maskFeather} className="slider w-full"
-              onInput={(e) => updateMaskFeather(parseFloat((e.target as HTMLInputElement).value))}
-              onChange={(e) => updateMaskFeather(parseFloat(e.target.value))} />
+          <div style={{ fontSize: 11, color: 'var(--glass-text-secondary)' }}>
+            Drag on the image to place / move / resize / rotate this mask. Click its chip above again to hide it. Press Del to delete.
           </div>
-          <div className="space-y-3">
-            {BASIC_ADJ_SLIDERS.map(cfg => renderMaskSlider(cfg, maskBA[cfg.key] as number, (v) => updateMaskBA(cfg.key, v)))}
+          <SliderRow
+            label="Feather"
+            value={maskFeather}
+            defaultValue={0.5}
+            min={0.01}
+            max={1}
+            step={0.01}
+            onChange={updateMaskFeather}
+            formatValue={(v) => v.toFixed(2)}
+          />
+          <div className="flex flex-col" style={{ gap: 12 }}>
+            {BASIC_ADJ_SLIDERS.map(renderMaskSlider)}
           </div>
         </div>
       )}
 
-      {/* Global Basic Adjustments */}
-      <div className="space-y-3">
-        {BASIC_ADJ_SLIDERS.map(renderSlider)}
-      </div>
+      {/* Global Basic Adjustments — §4 groupings: TONE / PRESENCE / COLOR. */}
+      {SLIDER_SECTIONS.map((section) => (
+        <div key={section} className="flex flex-col" style={{ gap: 12 }}>
+          <SectionLabel>{SECTION_LABELS[section]}</SectionLabel>
+          {BASIC_ADJ_SLIDERS.filter((cfg) => cfg.section === section).map(renderSlider)}
+        </div>
+      ))}
     </div>
   );
 }

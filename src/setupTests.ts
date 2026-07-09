@@ -32,6 +32,8 @@ HTMLCanvasElement.prototype.getContext = jest.fn(() => ({
   arc: jest.fn(),
   rect: jest.fn(),
   clip: jest.fn(),
+  setLineDash: jest.fn(),
+  getLineDash: jest.fn(() => []),
   measureText: jest.fn(() => ({ width: 0 })),
   fillText: jest.fn(),
   strokeText: jest.fn(),

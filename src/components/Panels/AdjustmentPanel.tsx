@@ -650,7 +650,7 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
         }
         case 'basicadj': {
           const n = countActive(basicAdjModule?.getParams() as Record<string, unknown> | undefined);
-          return n > 0 ? `${n} edit${n === 1 ? '' : 's'} active` : 'No adjustments';
+          return n > 0 ? `Develop · ${n} edit${n === 1 ? '' : 's'} active` : 'No adjustments';
         }
         case 'colorbalance': return 'Color grading';
         case 'tonecurve': return 'Curve editor';

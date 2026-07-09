@@ -1,8 +1,10 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { RotateCcw, Zap } from 'lucide-react';
+import { Zap } from 'lucide-react';
 import { WhiteBalanceModule, WhiteBalanceParams, WHITE_BALANCE_PRESETS } from '../../modules/WhiteBalanceModule';
 import { logger } from '../../utils/Logger';
-import { DelayedInputControl } from '../Controls/DelayedInputControl';
+import { SliderRow } from '../Controls/SliderRow';
+import { SectionLabel } from '../Controls/SectionLabel';
+import { ChipButton } from '../Controls/ChipButton';
 import { useRegisterModuleCardActions, type RegisterModuleCardActions } from '../Controls/moduleCardActions';
 
 interface WhiteBalanceModuleComponentProps {
@@ -36,10 +38,6 @@ export function WhiteBalanceModuleComponent({
     logger.debug(`WhiteBalance ${key} updated:`, value);
   }, [module, onParamsChange]);
 
-  const resetParam = useCallback((key: keyof WhiteBalanceParams, defaultValue: number | string) => {
-    updateParam(key, defaultValue);
-  }, [updateParam]);
-
   const resetAll = useCallback(() => {
     module.resetParams();
     const resetParams = module.getParams();
@@ -69,171 +67,61 @@ export function WhiteBalanceModuleComponent({
   useRegisterModuleCardActions(onRegisterActions, { auto: handleAutoDetect, reset: resetAll });
 
   return (
-    <div className="space-y-3">
-      <div className="space-y-3">
-        {/* Presets */}
-        <div className="space-y-2">
-          <label className="text-xs font-medium" style={{color: 'var(--gray-400)'}}>Preset</label>
-          <div className="grid grid-cols-2 gap-1.5">
-            {Object.keys(WHITE_BALANCE_PRESETS).map((preset) => (
-              <button
-                key={preset}
-                onClick={() => handlePresetChange(preset)}
-                className="px-3 py-1.5 text-xs rounded border font-medium"
-                style={{
-                  backgroundColor: params.preset === preset ? 'var(--gray-700)' : 'var(--gray-850)',
-                  borderColor: params.preset === preset ? 'var(--border-light)' : 'var(--border)',
-                  color: params.preset === preset ? 'var(--white)' : 'var(--gray-300)',
-                  transition: 'var(--transition-fast)'
-                }}
-                onMouseEnter={(e) => {
-                  if (params.preset !== preset) {
-                    e.currentTarget.style.backgroundColor = 'var(--gray-800)';
-                    e.currentTarget.style.borderColor = 'var(--border-light)';
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  if (params.preset !== preset) {
-                    e.currentTarget.style.backgroundColor = 'var(--gray-850)';
-                    e.currentTarget.style.borderColor = 'var(--border)';
-                  }
-                }}
-              >
-                {preset.charAt(0).toUpperCase() + preset.slice(1)}
-              </button>
-            ))}
-          </div>
+    <div className="flex flex-col" style={{ gap: 16 }}>
+      {/* Preset */}
+      <div className="flex flex-col" style={{ gap: 10 }}>
+        <SectionLabel>Preset</SectionLabel>
+        <div className="grid grid-cols-3" style={{ gap: 6 }}>
+          {Object.keys(WHITE_BALANCE_PRESETS).map((preset) => (
+            <ChipButton
+              key={preset}
+              active={params.preset === preset}
+              onClick={() => handlePresetChange(preset)}
+            >
+              {preset.charAt(0).toUpperCase() + preset.slice(1)}
+            </ChipButton>
+          ))}
         </div>
 
         {/* Auto Indicator */}
         {params.auto && (
-          <div className="flex items-center gap-2 px-2 py-1.5 rounded border" style={{backgroundColor: 'var(--gray-850)', borderColor: 'var(--border)'}}>
-            <Zap className="w-3 h-3" style={{color: 'var(--gray-400)'}} />
-            <span className="text-xs" style={{color: 'var(--gray-300)'}}>Auto-detected white balance</span>
+          <div
+            className="flex items-center"
+            style={{ gap: 8, padding: '8px 10px', borderRadius: 8, background: 'rgba(255,255,255,.04)', border: '1px solid var(--glass-border)' }}
+          >
+            <Zap className="w-3 h-3" style={{ color: 'var(--glass-text-muted)' }} />
+            <span style={{ fontSize: 11, color: 'var(--glass-text-secondary)' }}>Auto-detected white balance</span>
           </div>
         )}
+      </div>
 
-        {/* Temperature */}
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between">
-            <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Temperature</label>
-            <div className="flex items-center gap-1.5">
-              <DelayedInputControl
-                value={params.temperature}
-                onChange={(value) => updateParam('temperature', value)}
-                min={2000}
-                max={12000}
-                step={100}
-                precision={0}
-              />
-              <span className="text-xs font-mono" style={{color: 'var(--gray-500)', width: '12px'}}>K</span>
-              <button
-                onClick={() => resetParam('temperature', 6500)}
-                className="p-1 rounded"
-                style={{
-                  backgroundColor: 'transparent',
-                  color: 'var(--gray-500)',
-                  transition: 'var(--transition-fast)'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = 'var(--gray-800)';
-                  e.currentTarget.style.color = 'var(--white)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = 'transparent';
-                  e.currentTarget.style.color = 'var(--gray-500)';
-                }}
-                title="Reset"
-              >
-                <RotateCcw className="w-3 h-3" />
-              </button>
-            </div>
-          </div>
-          <input
-            type="range"
-            min="2000"
-            max="12000"
-            step="100"
-            value={Math.min(12000, params.temperature)}
-            onChange={(e) => updateParam('temperature', parseInt(e.target.value))}
-            className="slider w-full"
-            style={{
-              background: 'linear-gradient(to right, #60a5fa, #e5e7eb, #fb923c)',
-            }}
-            title="Double-click to reset"
-          />
-          <div className="flex justify-between text-xs" style={{color: 'var(--gray-500)'}}>
-            <span>Cool</span>
-            <span>Neutral</span>
-            <span>Warm</span>
-          </div>
-        </div>
-
-        {/* Tint */}
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between">
-            <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Tint</label>
-            <div className="flex items-center gap-1.5">
-              <DelayedInputControl
-                value={params.tint}
-                onChange={(value) => updateParam('tint', value)}
-                min={-100}
-                max={100}
-                step={1}
-                precision={1}
-              />
-              <button
-                onClick={() => resetParam('tint', 0.0)}
-                className="p-1 rounded"
-                style={{
-                  backgroundColor: 'transparent',
-                  color: 'var(--gray-500)',
-                  transition: 'var(--transition-fast)'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = 'var(--gray-800)';
-                  e.currentTarget.style.color = 'var(--white)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = 'transparent';
-                  e.currentTarget.style.color = 'var(--gray-500)';
-                }}
-                title="Reset"
-              >
-                <RotateCcw className="w-3 h-3" />
-              </button>
-            </div>
-          </div>
-          <input
-            type="range"
-            min="-100"
-            max="100"
-            step="1"
-            value={params.tint}
-            onChange={(e) => updateParam('tint', parseFloat(e.target.value))}
-            className="slider w-full"
-            style={{
-              background: 'linear-gradient(to right, #f472b6, #9ca3af, #4ade80)',
-            }}
-            title="Double-click to reset"
-          />
-          <div className="flex justify-between text-xs" style={{color: 'var(--gray-500)'}}>
-            <span>Magenta</span>
-            <span>Green</span>
-          </div>
-        </div>
-
-        {/* Current Values */}
-        <div className="flex justify-between text-xs pt-2" style={{borderTop: '1px solid var(--border)', color: 'var(--gray-400)'}}>
-          <div>
-            <span style={{color: 'var(--gray-500)'}}>Temp: </span>
-            <span className="font-mono" style={{color: 'var(--gray-200)'}}>{Math.round(params.temperature)}K</span>
-          </div>
-          <div>
-            <span style={{color: 'var(--gray-500)'}}>Tint: </span>
-            <span className="font-mono" style={{color: 'var(--gray-200)'}}>{params.tint >= 0 ? '+' : ''}{params.tint.toFixed(1)}</span>
-          </div>
-        </div>
+      {/* Cast */}
+      <div className="flex flex-col" style={{ gap: 12 }}>
+        <SectionLabel>Cast</SectionLabel>
+        <SliderRow
+          label="Temperature"
+          value={params.temperature}
+          defaultValue={6500}
+          min={2000}
+          max={12000}
+          step={100}
+          onChange={(v) => updateParam('temperature', v)}
+          formatValue={(v) => `${Math.round(v)} K`}
+          trackBackground="linear-gradient(to right, #60a5fa, #e5e7eb, #fb923c)"
+          legend={{ left: 'Cool', center: 'Neutral', right: 'Warm' }}
+        />
+        <SliderRow
+          label="Tint"
+          value={params.tint}
+          defaultValue={0}
+          min={-100}
+          max={100}
+          step={1}
+          onChange={(v) => updateParam('tint', v)}
+          formatValue={(v) => v.toFixed(1)}
+          trackBackground="linear-gradient(to right, #f472b6, #9ca3af, #4ade80)"
+          legend={{ left: 'Magenta', right: 'Green' }}
+        />
       </div>
     </div>
   );

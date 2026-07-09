@@ -1,7 +1,9 @@
 import React, { useState, useCallback, useRef } from 'react';
 import { ColorBalanceModule, ColorBalanceParams } from '../../modules/ColorBalanceModule';
 import ColorWheel from '../Controls/ColorWheel';
-import ColoredSliderControl from '../Controls/ColoredSliderControl';
+import { SliderRow } from '../Controls/SliderRow';
+import { SectionLabel } from '../Controls/SectionLabel';
+import { Segmented } from '../Controls/Segmented';
 import { logger } from '../../utils/Logger';
 import { autoAdjustService } from '../../services/AutoAdjustService';
 import { imageService } from '../../services/ImageService';
@@ -16,6 +18,7 @@ interface ColorBalanceModuleComponentProps {
 
 type TabType = 'traditional' | 'global';
 type GlobalTabType = 'saturation' | 'luminance' | 'hue';
+type ToneRange = 'shadows' | 'midtones' | 'highlights';
 
 const COLOR_RANGES = [
   { id: 'red', name: 'Red', color: '#ef4444' },
@@ -28,6 +31,119 @@ const COLOR_RANGES = [
   { id: 'magenta', name: 'Magenta', color: '#d946ef' }
 ] as const;
 
+const MODE_OPTIONS = [
+  { value: 'global' as TabType, label: 'Global' },
+  { value: 'traditional' as TabType, label: 'Traditional' },
+];
+
+const GLOBAL_TAB_OPTIONS = [
+  { value: 'saturation' as GlobalTabType, label: 'Saturation' },
+  { value: 'luminance' as GlobalTabType, label: 'Luminance' },
+  { value: 'hue' as GlobalTabType, label: 'Hue' },
+];
+
+const RANGE_OPTIONS = [
+  { value: 'shadows' as ToneRange, label: 'Shadows' },
+  { value: 'midtones' as ToneRange, label: 'Midtones' },
+  { value: 'highlights' as ToneRange, label: 'Highlights' },
+];
+
+/** Full hue-rotation gradient for a mixer row's tinted track (ported verbatim
+ * from the old ColoredSliderControl's hue-mode gradient math). */
+function hueTrackGradient(color: string): string {
+  const hexValue = parseInt(color.replace('#', ''), 16);
+  const r = ((hexValue >> 16) & 0xff) / 255;
+  const g = ((hexValue >> 8) & 0xff) / 255;
+  const b = (hexValue & 0xff) / 255;
+
+  const cMax = Math.max(r, g, b);
+  const cMin = Math.min(r, g, b);
+  let baseHue = 0;
+
+  if (cMax !== cMin) {
+    const delta = cMax - cMin;
+    if (cMax === r) baseHue = ((g - b) / delta + (g < b ? 6 : 0)) / 6;
+    else if (cMax === g) baseHue = ((b - r) / delta + 2) / 6;
+    else baseHue = ((r - g) / delta + 4) / 6;
+  }
+  baseHue *= 360;
+
+  const stops: string[] = [];
+  for (let i = 0; i <= 8; i++) {
+    const shift = -180 + (i / 8) * 360;
+    const h = (baseHue + shift + 360) % 360;
+    stops.push(`hsl(${h}, 80%, 50%) ${(i / 8 * 100).toFixed(1)}%`);
+  }
+  return `linear-gradient(to right, ${stops.join(', ')})`;
+}
+
+/** Mixer row track tint, per §4 ("colored dot + tinted track"). */
+function mixerTrackGradient(tab: GlobalTabType, color: string): string {
+  if (tab === 'luminance') return `linear-gradient(to right, #000000, ${color}, #ffffff)`;
+  if (tab === 'hue') return hueTrackGradient(color);
+  return `linear-gradient(to right, #6b7280, ${color}, #6b7280)`;
+}
+
+/** One MIXER row: colored dot + name, SliderRow-style tinted track, plain trailing value.
+ * Not promoted to the shared Controls/ library — this dot-before-label + inline-value
+ * layout is specific to the Color Balance mixer (see 4a-module-color-balance.png). */
+function MixerRow({
+  name, color, tab, value, min, max, onChange,
+}: {
+  name: string; color: string; tab: GlobalTabType; value: number; min: number; max: number;
+  onChange: (value: number) => void;
+}) {
+  const rowId = React.useId();
+  const labelId = `${rowId}-label`;
+  const edited = value !== 0;
+  const formatted = value > 0 ? `+${Math.round(value)}` : `${Math.round(value)}`;
+
+  return (
+    <div className="flex items-center" style={{ gap: 10 }}>
+      <span aria-hidden="true" style={{ width: 9, height: 9, borderRadius: '50%', background: color, flexShrink: 0 }} />
+      <span id={labelId} style={{ width: 56, fontSize: 11.5, color: 'var(--glass-text-secondary)', flexShrink: 0 }}>
+        {name}
+      </span>
+      <div style={{ position: 'relative', flex: 1, height: 5 }}>
+        <div
+          aria-hidden="true"
+          style={{
+            position: 'absolute', inset: 0, borderRadius: 3,
+            background: mixerTrackGradient(tab, color),
+            boxShadow: 'inset 0 1px 2px rgba(0,0,0,.6)',
+            pointerEvents: 'none',
+          }}
+        />
+        <div
+          aria-hidden="true"
+          style={{ position: 'absolute', top: -3, left: '50%', marginLeft: -0.5, width: 1, height: 11, background: 'rgba(255,255,255,.25)', pointerEvents: 'none' }}
+        />
+        <input
+          type="range"
+          min={min}
+          max={max}
+          step={1}
+          value={value}
+          aria-labelledby={labelId}
+          onChange={(e) => onChange(parseFloat(e.target.value))}
+          onDoubleClick={() => onChange(0)}
+          title="Double-click to reset to 0"
+          className={`glass-slider-thumb${edited ? ' is-edited' : ''}`}
+          style={{ position: 'absolute', inset: 0, width: '100%', margin: 0, background: 'transparent' }}
+        />
+      </div>
+      <span
+        style={{
+          width: 30, textAlign: 'right', fontFamily: 'ui-monospace, monospace', fontSize: 10.5,
+          color: edited ? 'var(--accent)' : 'var(--glass-text-secondary)', flexShrink: 0,
+        }}
+      >
+        {formatted}
+      </span>
+    </div>
+  );
+}
+
 export const ColorBalanceModuleComponent: React.FC<ColorBalanceModuleComponentProps> = ({
   module,
   onParamsChange,
@@ -38,7 +154,7 @@ export const ColorBalanceModuleComponent: React.FC<ColorBalanceModuleComponentPr
   const updateTimeoutRef = useRef<Record<string, NodeJS.Timeout>>({});
   const [activeTab, setActiveTab] = useState<TabType>('global');
   const [globalTab, setGlobalTab] = useState<GlobalTabType>('saturation');
-  const [activeRange, setActiveRange] = useState<'shadows' | 'midtones' | 'highlights'>('midtones');
+  const [activeRange, setActiveRange] = useState<ToneRange>('midtones');
 
   // Keep ref in sync
   React.useEffect(() => {
@@ -58,15 +174,6 @@ export const ColorBalanceModuleComponent: React.FC<ColorBalanceModuleComponentPr
       onParamsChange(updatedParams);
       delete updateTimeoutRef.current[key];
     }, 16);
-  }, [module, onParamsChange]);
-
-  // Real-time update for onInput (during drag)
-  const updateParamsRealTime = useCallback((newParams: Partial<ColorBalanceParams>) => {
-    const updatedParams = { ...paramsRef.current, ...newParams };
-    paramsRef.current = updatedParams;
-    setParams(updatedParams);
-    module.setParams(updatedParams);
-    onParamsChange(updatedParams);
   }, [module, onParamsChange]);
 
   const resetParams = useCallback(() => {
@@ -93,7 +200,7 @@ export const ColorBalanceModuleComponent: React.FC<ColorBalanceModuleComponentPr
 
   useRegisterModuleCardActions(onRegisterActions, { auto: handleAuto, reset: resetParams });
 
-  const updateTraditionalParam = (range: 'shadows' | 'midtones' | 'highlights', param: 'cyan_red' | 'magenta_green' | 'yellow_blue', value: number) => {
+  const updateTraditionalParam = (range: ToneRange, param: 'cyan_red' | 'magenta_green' | 'yellow_blue', value: number) => {
     updateParams({
       [range]: {
         ...params[range],
@@ -102,127 +209,52 @@ export const ColorBalanceModuleComponent: React.FC<ColorBalanceModuleComponentPr
     });
   };
 
-  const getGlobalSliderProps = (colorId: string, tab: GlobalTabType) => {
-    const paramKey = `${colorId}_${tab}` as keyof ColorBalanceParams;
-    const value = (params[paramKey] as number) || 0;
-
-    switch (tab) {
-      case 'saturation':
-        return {
-          min: -100,
-          max: 100,
-          step: 1,
-          value,
-          precision: 0,
-          unit: '%'
-        };
-      case 'luminance':
-        return {
-          min: -100,
-          max: 100,
-          step: 1,
-          value,
-          precision: 0,
-          unit: '%'
-        };
-      case 'hue':
-        return {
-          min: -180,
-          max: 180,
-          step: 1,
-          value,
-          precision: 0,
-          unit: '°'
-        };
-    }
-  };
-
   const handleGlobalSliderChange = (colorId: string, tab: GlobalTabType, value: number) => {
     const paramKey = `${colorId}_${tab}` as keyof ColorBalanceParams;
     updateParams({ [paramKey]: value });
-  };
-
-  const handleGlobalSliderInput = (colorId: string, tab: GlobalTabType, value: number) => {
-    const paramKey = `${colorId}_${tab}` as keyof ColorBalanceParams;
-    updateParamsRealTime({ [paramKey]: value });
   };
 
   const renderTraditionalControls = () => {
     const rangeParams = params[activeRange];
 
     return (
-      <div className="space-y-3">
-        {/* Range Selection */}
-        <div className="flex gap-1 rounded-lg p-1" style={{backgroundColor: 'var(--gray-700)'}}>
-          {(['shadows', 'midtones', 'highlights'] as const).map((range) => (
-            <button
-              key={range}
-              onClick={() => setActiveRange(range)}
-              className={`flex-1 px-3 py-2 text-xs font-medium rounded-md transition-all capitalize ${
-                activeRange === range
-                  ? 'shadow-sm'
-                  : 'bg-transparent'
-              }`}
-              style={{
-                backgroundColor: activeRange === range ? 'var(--gray-600)' : 'transparent',
-                color: activeRange === range ? 'var(--white)' : 'var(--gray-300)'
-              }}
-            >
-              {range}
-            </button>
-          ))}
+      <div className="flex flex-col" style={{ gap: 14 }}>
+        <div className="flex flex-col" style={{ gap: 10 }}>
+          <SectionLabel>Range</SectionLabel>
+          <Segmented options={RANGE_OPTIONS} value={activeRange} onChange={setActiveRange} className="w-full" />
         </div>
 
-        {/* Large Color Wheel */}
-        <div className="flex flex-col items-center space-y-3">
-          <ColorWheel
-            cyanRed={rangeParams.cyan_red}
-            magentaGreen={rangeParams.magenta_green}
-            yellowBlue={rangeParams.yellow_blue}
-            onChange={(values) => {
-              updateParams({
-                [activeRange]: {
-                  ...rangeParams,
-                  cyan_red: values.cyanRed,
-                  magenta_green: values.magentaGreen,
-                  yellow_blue: values.yellowBlue
-                }
-              });
-            }}
-            size={200}
-          />
-
-          {/* Yellow-Blue Slider */}
-          <div className="w-full max-w-xs space-y-1.5">
-            <div className="flex justify-between items-center">
-              <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Yellow ↔ Blue</label>
-              <span className="text-xs font-mono" style={{color: 'var(--gray-400)'}}>{rangeParams.yellow_blue.toFixed(2)}</span>
-            </div>
-            <div className="relative">
-              <div
-                className="w-full h-2 rounded-lg relative overflow-hidden"
-                style={{
-                  background: 'linear-gradient(to right, #eab308, #6b7280, #3b82f6)',
-                  border: '1px solid var(--border)'
-                }}
-              >
-                {/* Center line indicator */}
-                <div className="absolute top-0 h-full w-px" style={{left: '50%', backgroundColor: 'var(--white)', opacity: 0.5}} />
-              </div>
-              <input
-                type="range"
-                min={-1}
-                max={1}
-                step={0.01}
-                value={rangeParams.yellow_blue}
-                onInput={(e) => updateTraditionalParam(activeRange, 'yellow_blue', parseFloat((e.target as HTMLInputElement).value))}
-                onChange={(e) => updateTraditionalParam(activeRange, 'yellow_blue', parseFloat(e.target.value))}
-                onDoubleClick={() => updateTraditionalParam(activeRange, 'yellow_blue', 0)}
-                className="slider w-full absolute top-0"
-                style={{ background: 'transparent' }}
-                title="Double-click to reset to 0"
-              />
-            </div>
+        <div className="flex flex-col" style={{ gap: 10 }}>
+          <SectionLabel>Wheel</SectionLabel>
+          <div className="flex flex-col items-center" style={{ gap: 12 }}>
+            <ColorWheel
+              cyanRed={rangeParams.cyan_red}
+              magentaGreen={rangeParams.magenta_green}
+              yellowBlue={rangeParams.yellow_blue}
+              onChange={(values) => {
+                updateParams({
+                  [activeRange]: {
+                    ...rangeParams,
+                    cyan_red: values.cyanRed,
+                    magenta_green: values.magentaGreen,
+                    yellow_blue: values.yellowBlue
+                  }
+                });
+              }}
+              size={200}
+            />
+            <SliderRow
+              label="Yellow ↔ Blue"
+              value={rangeParams.yellow_blue}
+              defaultValue={0}
+              min={-1}
+              max={1}
+              step={0.01}
+              onChange={(v) => updateTraditionalParam(activeRange, 'yellow_blue', v)}
+              formatValue={(v) => v.toFixed(2)}
+              trackBackground="linear-gradient(to right, #eab308, #6b7280, #3b82f6)"
+              className="w-full"
+            />
           </div>
         </div>
       </div>
@@ -231,112 +263,39 @@ export const ColorBalanceModuleComponent: React.FC<ColorBalanceModuleComponentPr
 
   const renderGlobalControls = () => {
     return (
-      <div className="space-y-3">
-        {/* Global Color Control Tabs */}
-        <div className="flex gap-1 rounded-lg p-1" style={{backgroundColor: 'var(--gray-700)'}}>
-          {(['saturation', 'luminance', 'hue'] as GlobalTabType[]).map((tab) => (
-            <button
-              key={tab}
-              onClick={() => setGlobalTab(tab)}
-              className={`flex-1 px-3 py-2 text-xs font-medium rounded-md transition-all capitalize ${
-                globalTab === tab
-                  ? 'shadow-sm'
-                  : 'bg-transparent'
-              }`}
-              style={{
-                backgroundColor: globalTab === tab ? 'var(--gray-600)' : 'transparent',
-                color: globalTab === tab ? 'var(--white)' : 'var(--gray-300)'
-              }}
-            >
-              {tab}
-            </button>
-          ))}
-        </div>
+      <div className="flex flex-col" style={{ gap: 14 }}>
+        <Segmented options={GLOBAL_TAB_OPTIONS} value={globalTab} onChange={setGlobalTab} className="w-full" />
 
-        {/* Color Controls */}
-        <div className="space-y-1.5">
-          {COLOR_RANGES.map((color) => {
-            const sliderProps = getGlobalSliderProps(color.id, globalTab);
-
-            return (
-              <div key={color.id} className="flex items-center gap-1.5">
-                <div className="flex items-center gap-1.5 w-20">
-                  <div
-                    className="w-3 h-3 rounded-full"
-                    style={{
-                      backgroundColor: color.color,
-                      border: '1px solid var(--border)'
-                    }}
-                  />
-                  <span className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>{color.name}</span>
-                </div>
-
-                <div className="flex-1">
-                  <ColoredSliderControl
-                    label=""
-                    value={sliderProps.value}
-                    min={sliderProps.min}
-                    max={sliderProps.max}
-                    step={sliderProps.step}
-                    onInput={(value) => handleGlobalSliderInput(color.id, globalTab, value)}
-                    onChange={(value) => handleGlobalSliderChange(color.id, globalTab, value)}
-                    precision={sliderProps.precision}
-                    unit={sliderProps.unit}
-                    color={color.color}
-                    className="mb-0"
-                    sliderType={globalTab}
-                  />
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
-        {/* Tab Description */}
-        <div className="text-xs px-2" style={{color: 'var(--gray-500)'}}>
-          {globalTab === 'saturation' && 'Adjust the intensity of each color range'}
-          {globalTab === 'luminance' && 'Adjust the brightness of each color range'}
-          {globalTab === 'hue' && 'Shift the hue of each color range'}
+        <div className="flex flex-col" style={{ gap: 10 }}>
+          <SectionLabel>Mixer</SectionLabel>
+          <div className="flex flex-col" style={{ gap: 11 }}>
+            {COLOR_RANGES.map((color) => {
+              const paramKey = `${color.id}_${globalTab}` as keyof ColorBalanceParams;
+              const value = (params[paramKey] as number) || 0;
+              const range = globalTab === 'hue' ? 180 : 100;
+              return (
+                <MixerRow
+                  key={color.id}
+                  name={color.name}
+                  color={color.color}
+                  tab={globalTab}
+                  value={value}
+                  min={-range}
+                  max={range}
+                  onChange={(v) => handleGlobalSliderChange(color.id, globalTab, v)}
+                />
+              );
+            })}
+          </div>
         </div>
       </div>
     );
   };
 
   return (
-    <div className="space-y-3">
-      {/* Main Tabs */}
-      <div className="flex gap-1 rounded-lg p-1" style={{backgroundColor: 'var(--gray-700)'}}>
-        <button
-          onClick={() => setActiveTab('global')}
-          className={`flex-1 px-3 py-2 text-xs font-medium rounded-md transition-all ${
-            activeTab === 'global'
-              ? 'shadow-sm'
-              : 'bg-transparent'
-          }`}
-          style={{
-            backgroundColor: activeTab === 'global' ? 'var(--gray-600)' : 'transparent',
-            color: activeTab === 'global' ? 'var(--white)' : 'var(--gray-300)'
-          }}
-        >
-          Global Colors
-        </button>
-        <button
-          onClick={() => setActiveTab('traditional')}
-          className={`flex-1 px-3 py-2 text-xs font-medium rounded-md transition-all ${
-            activeTab === 'traditional'
-              ? 'shadow-sm'
-              : 'bg-transparent'
-          }`}
-          style={{
-            backgroundColor: activeTab === 'traditional' ? 'var(--gray-600)' : 'transparent',
-            color: activeTab === 'traditional' ? 'var(--white)' : 'var(--gray-300)'
-          }}
-        >
-          Traditional
-        </button>
-      </div>
+    <div className="flex flex-col" style={{ gap: 14 }}>
+      <Segmented options={MODE_OPTIONS} value={activeTab} onChange={setActiveTab} className="w-full" />
 
-      {/* Content */}
       {activeTab === 'global' && renderGlobalControls()}
       {activeTab === 'traditional' && renderTraditionalControls()}
     </div>

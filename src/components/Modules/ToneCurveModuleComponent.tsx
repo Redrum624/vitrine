@@ -1,9 +1,12 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { TrendingUp, Settings, Zap } from 'lucide-react';
+import { Settings, Zap } from 'lucide-react';
 import { ToneCurveModule, ToneCurveParams } from '../../modules/ToneCurveModule';
 import { logger } from '../../utils/Logger';
 import { autoAdjustService } from '../../services/AutoAdjustService';
 import { imageService } from '../../services/ImageService';
+import { SliderRow } from '../Controls/SliderRow';
+import { Segmented } from '../Controls/Segmented';
+import { ChipButton } from '../Controls/ChipButton';
 import { useRegisterModuleCardActions, type RegisterModuleCardActions } from '../Controls/moduleCardActions';
 
 interface ToneCurveModuleComponentProps {
@@ -14,6 +17,21 @@ interface ToneCurveModuleComponentProps {
 }
 
 type CurveChannel = 'base' | 'red' | 'green' | 'blue';
+
+const CHANNEL_OPTIONS = [
+  { value: 'base' as CurveChannel, label: 'RGB' },
+  { value: 'red' as CurveChannel, label: 'R' },
+  { value: 'green' as CurveChannel, label: 'G' },
+  { value: 'blue' as CurveChannel, label: 'B' },
+];
+
+const CURVE_PRESETS = [
+  { id: 'linear', label: 'Linear' },
+  { id: 'contrast', label: 'Contrast' },
+  { id: 'film', label: 'Film' },
+  { id: 'vintage', label: 'Vintage' },
+  { id: 'dramatic', label: 'Dramatic' },
+] as const;
 
 export const ToneCurveModuleComponent: React.FC<ToneCurveModuleComponentProps> = ({
   module,
@@ -52,11 +70,11 @@ export const ToneCurveModuleComponent: React.FC<ToneCurveModuleComponentProps> =
     if (!ctx) return;
 
     // Clear canvas
-    ctx.fillStyle = '#1f2937';
+    ctx.fillStyle = '#0a0a0b';
     ctx.fillRect(0, 0, canvasSize, canvasSize);
 
     // Draw grid
-    ctx.strokeStyle = '#374151';
+    ctx.strokeStyle = '#1d1d20';
     ctx.lineWidth = 1;
     ctx.setLineDash([2, 2]);
 
@@ -76,7 +94,7 @@ export const ToneCurveModuleComponent: React.FC<ToneCurveModuleComponentProps> =
 
     // Draw diagonal reference line
     ctx.setLineDash([4, 4]);
-    ctx.strokeStyle = '#4b5563';
+    ctx.strokeStyle = '#2c2c30';
     ctx.beginPath();
     ctx.moveTo(0, canvasSize);
     ctx.lineTo(canvasSize, 0);
@@ -86,11 +104,11 @@ export const ToneCurveModuleComponent: React.FC<ToneCurveModuleComponentProps> =
     // Function to get channel color
     const getChannelColor = (channel: CurveChannel): string => {
       switch (channel) {
-        case 'base': return '#ffffff';
+        case 'base': return '#f0f0f2';
         case 'red': return '#ef4444';
         case 'green': return '#22c55e';
         case 'blue': return '#3b82f6';
-        default: return '#ffffff';
+        default: return '#f0f0f2';
       }
     };
 
@@ -147,7 +165,7 @@ export const ToneCurveModuleComponent: React.FC<ToneCurveModuleComponentProps> =
 
           ctx.globalAlpha = 1.0;
           ctx.fillStyle = getChannelColor(channel);
-          ctx.strokeStyle = '#1f2937';
+          ctx.strokeStyle = '#0a0a0b';
           ctx.lineWidth = 2;
 
           ctx.beginPath();
@@ -299,70 +317,31 @@ export const ToneCurveModuleComponent: React.FC<ToneCurveModuleComponentProps> =
   useRegisterModuleCardActions(onRegisterActions, { auto: handleAuto, reset: resetCurve });
 
   return (
-    <div className="space-y-3">
-
+    <div className="flex flex-col" style={{ gap: 14 }}>
       {/* Channel Selection */}
-      <div className="flex gap-1 rounded-lg p-1" style={{backgroundColor: 'var(--gray-700)'}}>
-        {[
-          { id: 'base', label: 'RGB', color: 'text-white' },
-          { id: 'red', label: 'R', color: 'text-gray-300' },
-          { id: 'green', label: 'G', color: 'text-gray-300' },
-          { id: 'blue', label: 'B', color: 'text-gray-300' }
-        ].map(channel => (
-          <button
-            key={channel.id}
-            onClick={() => setActiveChannel(channel.id as CurveChannel)}
-            className={`flex-1 px-3 py-2 text-xs font-medium rounded-md transition-all ${
-              activeChannel === channel.id
-                ? 'text-white shadow-sm'
-                : `bg-transparent ${channel.color}`
-            }`}
-            style={{
-              backgroundColor: activeChannel === channel.id ? 'var(--gray-600)' : 'transparent'
-            }}
-            onMouseEnter={(e) => {
-              if (activeChannel !== channel.id) {
-                e.currentTarget.style.backgroundColor = 'var(--gray-600)';
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (activeChannel !== channel.id) {
-                e.currentTarget.style.backgroundColor = 'transparent';
-              }
-            }}
-          >
-            {channel.label}
-          </button>
-        ))}
-      </div>
+      <Segmented options={CHANNEL_OPTIONS} value={activeChannel} onChange={setActiveChannel} className="w-full" />
 
-      {/* Curve Editor Canvas */}
-      <div className="rounded-lg p-4" style={{backgroundColor: 'var(--gray-800)'}}>
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-1.5">
-            <TrendingUp className="w-4 h-4" style={{color: 'var(--primary-400)'}} />
-            <span className="text-sm" style={{color: 'var(--white)'}}>
-              {activeChannel === 'base' ? 'Tone Curve' : `${activeChannel.toUpperCase()} Channel`}
-            </span>
-          </div>
+      {/* Curve Editor, framed to the card idiom */}
+      <div
+        style={{
+          borderRadius: 10,
+          border: '1px solid var(--glass-border)',
+          background: 'rgba(0,0,0,.25)',
+          padding: 10,
+        }}
+      >
+        <div className="flex items-center justify-between" style={{ marginBottom: 8 }}>
+          <span style={{ fontSize: 11, color: 'var(--glass-text-secondary)' }}>
+            {activeChannel === 'base' ? 'RGB · 1 point' : `${activeChannel.toUpperCase()} Channel`}
+          </span>
           <button
             onClick={() => setShowAdvanced(!showAdvanced)}
-            className="p-1 rounded transition-colors"
+            className="inline-flex items-center justify-center"
             style={{
-              backgroundColor: showAdvanced ? 'var(--gray-700)' : 'transparent',
-              color: showAdvanced ? 'var(--white)' : 'var(--gray-400)'
-            }}
-            onMouseEnter={(e) => {
-              if (!showAdvanced) {
-                e.currentTarget.style.backgroundColor = 'var(--gray-700)';
-                e.currentTarget.style.color = 'var(--white)';
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (!showAdvanced) {
-                e.currentTarget.style.backgroundColor = 'transparent';
-                e.currentTarget.style.color = 'var(--gray-400)';
-              }
+              padding: 4,
+              borderRadius: 6,
+              background: showAdvanced ? 'var(--accent-soft)' : 'transparent',
+              color: showAdvanced ? 'var(--accent)' : 'var(--glass-text-muted)',
             }}
             title="Advanced options"
           >
@@ -375,8 +354,8 @@ export const ToneCurveModuleComponent: React.FC<ToneCurveModuleComponentProps> =
             ref={canvasRef}
             width={canvasSize}
             height={canvasSize}
-            className="w-full h-64 rounded border cursor-crosshair"
-            style={{backgroundColor: '#1f2937', borderColor: 'var(--border)'}}
+            className="w-full h-64 rounded cursor-crosshair"
+            style={{ backgroundColor: '#0a0a0b', border: '1px solid var(--glass-border)' }}
             onMouseDown={handleCanvasMouseDown}
             onMouseMove={handleCanvasMouseMove}
             onMouseUp={handleCanvasMouseUp}
@@ -385,82 +364,52 @@ export const ToneCurveModuleComponent: React.FC<ToneCurveModuleComponentProps> =
           />
 
           {/* Instructions */}
-          <div className="absolute bottom-2 left-2 text-xs" style={{color: 'var(--gray-500)'}}>
+          <div className="absolute bottom-2 left-2" style={{ fontSize: 10, color: 'var(--glass-text-muted)' }}>
             Click: Add point • Drag: Move point • Double-click: Remove point
           </div>
         </div>
       </div>
 
       {/* Quick Actions */}
-      <div className="space-y-1.5">
-        <div className="flex items-center justify-between">
-          <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Quick Actions</label>
-          <button
-            onClick={() => {
-              updateParams({
-                autoLevels: true,
-                autoContrast: true
-              });
-            }}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded transition-all shadow-sm"
-            style={{
-              background: 'linear-gradient(to right, #8b5cf6, #3b82f6)',
-              color: 'var(--white)'
-            }}
-            title="Automatically adjust levels and contrast based on histogram"
-          >
-            <Zap className="w-3 h-3" />
-            Auto Levels
-          </button>
-        </div>
+      <div className="flex items-center justify-between">
+        <span style={{ fontSize: 11.5, color: 'var(--glass-text-label)' }}>Quick Actions</span>
+        <ChipButton
+          onClick={() => updateParams({ autoLevels: true, autoContrast: true })}
+          title="Automatically adjust levels and contrast based on histogram"
+        >
+          <Zap className="w-3 h-3" style={{ marginRight: 6 }} /> Auto Levels
+        </ChipButton>
       </div>
 
       {/* Curve Presets */}
-      <div className="space-y-1.5">
-        <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Presets</label>
-        <div className="grid grid-cols-5 gap-1">
-          {[
-            { id: 'linear', label: 'Linear' },
-            { id: 'contrast', label: 'Contrast' },
-            { id: 'film', label: 'Film' },
-            { id: 'vintage', label: 'Vintage' },
-            { id: 'dramatic', label: 'Dramatic' }
-          ].map(preset => (
-            <button
-              key={preset.id}
-              onClick={() => loadPreset(preset.id as 'linear' | 'contrast' | 'film' | 'vintage' | 'dramatic')}
-              className="px-2 py-1.5 text-xs rounded transition-colors"
-              style={{
-                backgroundColor: 'var(--gray-700)',
-                color: 'var(--gray-300)'
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.backgroundColor = 'var(--gray-600)';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.backgroundColor = 'var(--gray-700)';
-              }}
-            >
-              {preset.label}
-            </button>
-          ))}
-        </div>
+      <div className="grid grid-cols-5" style={{ gap: 5 }}>
+        {CURVE_PRESETS.map(preset => (
+          <ChipButton
+            key={preset.id}
+            onClick={() => loadPreset(preset.id)}
+            className="w-full"
+          >
+            {preset.label}
+          </ChipButton>
+        ))}
       </div>
 
       {/* Advanced Options */}
       {showAdvanced && (
-        <div className="space-y-3 pt-3" style={{borderTop: '1px solid var(--border)'}}>
+        <div className="flex flex-col" style={{ gap: 12, paddingTop: 12, borderTop: '1px solid var(--glass-border)' }}>
           {/* Curve Type */}
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Interpolation</label>
+          <div className="flex flex-col" style={{ gap: 6 }}>
+            <label style={{ fontSize: 11.5, color: 'var(--glass-text-label)' }}>Interpolation</label>
             <select
               value={params.baseCurveType}
               onChange={(e) => updateParams({ baseCurveType: parseInt(e.target.value) })}
-              className="w-full text-sm rounded px-3 py-1.5 border"
+              className="w-full rounded"
               style={{
-                backgroundColor: 'var(--gray-700)',
-                color: 'var(--white)',
-                borderColor: 'var(--border)'
+                fontSize: 12,
+                padding: '6px 10px',
+                background: 'rgba(255,255,255,.04)',
+                color: 'var(--glass-text-title)',
+                border: '1px solid var(--glass-border)',
               }}
             >
               <option value={0}>Linear</option>
@@ -470,16 +419,18 @@ export const ToneCurveModuleComponent: React.FC<ToneCurveModuleComponentProps> =
           </div>
 
           {/* Color Preservation */}
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Color Preservation</label>
+          <div className="flex flex-col" style={{ gap: 6 }}>
+            <label style={{ fontSize: 11.5, color: 'var(--glass-text-label)' }}>Color Preservation</label>
             <select
               value={params.preserveColors}
               onChange={(e) => updateParams({ preserveColors: parseInt(e.target.value) })}
-              className="w-full text-sm rounded px-3 py-1.5 border"
+              className="w-full rounded"
               style={{
-                backgroundColor: 'var(--gray-700)',
-                color: 'var(--white)',
-                borderColor: 'var(--border)'
+                fontSize: 12,
+                padding: '6px 10px',
+                background: 'rgba(255,255,255,.04)',
+                color: 'var(--glass-text-title)',
+                border: '1px solid var(--glass-border)',
               }}
             >
               <option value={0}>None</option>
@@ -489,94 +440,70 @@ export const ToneCurveModuleComponent: React.FC<ToneCurveModuleComponentProps> =
             </select>
           </div>
 
-          {/* Exposure Fusion */}
-          <div className="space-y-1.5">
-            <div className="flex items-center justify-between">
-              <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>
-                Exposure Fusion
-              </label>
-              <span className="text-xs font-mono" style={{color: 'var(--gray-400)'}}>{params.exposureFusion.toFixed(2)}</span>
-            </div>
-            <input
-              type="range"
-              min="0"
-              max="1"
-              step="0.01"
-              value={params.exposureFusion}
-              onChange={(e) => updateParams({ exposureFusion: parseFloat(e.target.value) })}
-              className="slider w-full"
-              style={{
-                background: 'linear-gradient(to right, #6b7280, #8b5cf6)',
-              }}
-            />
-          </div>
+          <SliderRow
+            label="Exposure Fusion"
+            value={params.exposureFusion}
+            defaultValue={0}
+            min={0}
+            max={1}
+            step={0.01}
+            onChange={(v) => updateParams({ exposureFusion: v })}
+            formatValue={(v) => v.toFixed(2)}
+            trackBackground="linear-gradient(to right, #6b7280, #8b5cf6)"
+          />
 
-          {/* Exposure Stops */}
           {params.exposureFusion > 0 && (
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>
-                  Fusion Range
-                </label>
-                <span className="text-xs font-mono" style={{color: 'var(--gray-400)'}}>{params.exposureStops.toFixed(1)} stops</span>
-              </div>
-              <input
-                type="range"
-                min="0.1"
-                max="4"
-                step="0.1"
-                value={params.exposureStops}
-                onChange={(e) => updateParams({ exposureStops: parseFloat(e.target.value) })}
-                className="slider w-full"
-                style={{
-                  background: 'linear-gradient(to right, #6b7280, #f59e0b)',
-                }}
-              />
-            </div>
+            <SliderRow
+              label="Fusion Range"
+              value={params.exposureStops}
+              defaultValue={1.0}
+              min={0.1}
+              max={4}
+              step={0.1}
+              onChange={(v) => updateParams({ exposureStops: v })}
+              formatValue={(v) => `${v.toFixed(1)} stops`}
+              trackBackground="linear-gradient(to right, #6b7280, #f59e0b)"
+            />
           )}
 
           {/* Auto Adjustments */}
-          <div className="space-y-2">
-            <div className="flex items-center gap-1.5">
-              <Zap className="w-4 h-4" style={{color: 'var(--yellow-400)'}} />
-              <span className="text-sm" style={{color: 'var(--white)'}}>Auto Adjustments</span>
+          <div className="flex flex-col" style={{ gap: 8 }}>
+            <div className="flex items-center" style={{ gap: 6 }}>
+              <Zap className="w-3.5 h-3.5" style={{ color: 'var(--accent)' }} />
+              <span style={{ fontSize: 12, color: 'var(--glass-text-title)' }}>Auto Adjustments</span>
             </div>
 
-            <label className="flex items-center gap-2">
+            <label className="flex items-center" style={{ gap: 8 }}>
               <input
                 type="checkbox"
                 checked={params.autoLevels}
                 onChange={(e) => updateParams({ autoLevels: e.target.checked })}
-                className="rounded"
-                style={{borderColor: 'var(--border)'}}
               />
-              <span className="text-xs" style={{color: 'var(--gray-300)'}}>Auto Levels</span>
+              <span style={{ fontSize: 11.5, color: 'var(--glass-text-label)' }}>Auto Levels</span>
             </label>
 
-            <label className="flex items-center gap-2">
+            <label className="flex items-center" style={{ gap: 8 }}>
               <input
                 type="checkbox"
                 checked={params.autoContrast}
                 onChange={(e) => updateParams({ autoContrast: e.target.checked })}
-                className="rounded"
-                style={{borderColor: 'var(--border)'}}
               />
-              <span className="text-xs" style={{color: 'var(--gray-300)'}}>Auto Contrast</span>
+              <span style={{ fontSize: 11.5, color: 'var(--glass-text-label)' }}>Auto Contrast</span>
             </label>
           </div>
         </div>
       )}
 
       {/* Channel Info */}
-      <div className="text-xs space-y-1" style={{color: 'var(--gray-500)'}}>
-        <div>Active Channel: <span style={{color: 'var(--white)'}}>{activeChannel.toUpperCase()}</span></div>
+      <div className="flex flex-col" style={{ gap: 4, fontSize: 10.5, color: 'var(--glass-text-muted)' }}>
+        <div>Active Channel: <span style={{ color: 'var(--glass-text-title)' }}>{activeChannel.toUpperCase()}</span></div>
         <div>
-          Control Points: <span style={{color: 'var(--white)'}}>
+          Control Points: <span style={{ color: 'var(--glass-text-title)' }}>
             {activeChannel === 'base' ? params.baseCurveNodes : params.rgbCurveNodes[activeChannel]}
           </span>
         </div>
         {params.exposureFusion > 0 && (
-          <div>Fusion: <span style={{color: 'var(--yellow-400)'}}>Active</span></div>
+          <div>Fusion: <span style={{ color: 'var(--accent)' }}>Active</span></div>
         )}
       </div>
     </div>
