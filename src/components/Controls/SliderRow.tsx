@@ -1,4 +1,4 @@
-import { useId } from 'react';
+import { useId, useState } from 'react';
 
 export interface SliderRowLegend {
   left: string;
@@ -54,27 +54,90 @@ export function SliderRow({
   const hasDetent = min < defaultValue && defaultValue < max;
   const detentFraction = hasDetent ? ((defaultValue - min) / (max - min)) * 100 : null;
 
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+
+  const beginEdit = () => {
+    if (disabled) return;
+    setDraft(String(value));
+    setEditing(true);
+  };
+
+  const commitEdit = () => {
+    const parsed = parseFloat(draft);
+    if (!Number.isNaN(parsed)) {
+      const clamped = Math.min(max, Math.max(min, parsed));
+      const snapped = step
+        ? Math.round((clamped - min) / step) * step + min
+        : clamped;
+      const decimals = (step ? step.toString().split('.')[1] ?? '' : '').length;
+      onChange(decimals > 0 ? parseFloat(snapped.toFixed(decimals)) : snapped);
+    }
+    setEditing(false);
+  };
+
+  const cancelEdit = () => setEditing(false);
+
   return (
     <div className={`flex flex-col ${className}`} style={{ gap: 6 }}>
       <div className="flex items-center justify-between">
         <label id={labelId} htmlFor={sliderId} style={{ fontSize: 12, fontWeight: 500, color: 'var(--glass-text-label)' }}>
           {label}
         </label>
-        <span
-          data-edited={edited || undefined}
-          style={{
-            fontFamily: 'ui-monospace, monospace',
-            fontSize: 11,
-            lineHeight: '16px',
-            padding: '2px 8px',
-            borderRadius: 6,
-            border: `1px solid ${edited ? 'var(--accent-ring)' : 'rgba(255,255,255,.1)'}`,
-            background: edited ? 'var(--accent-soft)' : 'rgba(255,255,255,.04)',
-            color: edited ? 'var(--accent)' : 'var(--glass-text-secondary)',
-          }}
-        >
-          {chipText}
-        </span>
+        {editing ? (
+          <input
+            type="number"
+            autoFocus
+            aria-label={`${label} value`}
+            value={draft}
+            min={min}
+            max={max}
+            step={step}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commitEdit}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                commitEdit();
+              } else if (e.key === 'Escape') {
+                e.preventDefault();
+                cancelEdit();
+              }
+            }}
+            style={{
+              fontFamily: 'ui-monospace, monospace',
+              fontSize: 11,
+              lineHeight: '16px',
+              padding: '2px 6px',
+              width: 52,
+              textAlign: 'right',
+              borderRadius: 6,
+              border: '1px solid var(--accent-ring)',
+              background: 'var(--accent-soft)',
+              color: 'var(--accent)',
+            }}
+          />
+        ) : (
+          <button
+            type="button"
+            data-edited={edited || undefined}
+            onClick={beginEdit}
+            title="Click to type a value"
+            style={{
+              fontFamily: 'ui-monospace, monospace',
+              fontSize: 11,
+              lineHeight: '16px',
+              padding: '2px 8px',
+              borderRadius: 6,
+              border: `1px solid ${edited ? 'var(--accent-ring)' : 'rgba(255,255,255,.1)'}`,
+              background: edited ? 'var(--accent-soft)' : 'rgba(255,255,255,.04)',
+              color: edited ? 'var(--accent)' : 'var(--glass-text-secondary)',
+              cursor: disabled ? 'default' : 'text',
+            }}
+          >
+            {chipText}
+          </button>
+        )}
       </div>
 
       <div style={{ position: 'relative', height: 5 }}>

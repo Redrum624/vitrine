@@ -153,4 +153,63 @@ describe('SliderRow', () => {
     expect(screen.getByText('Neutral')).toBeInTheDocument();
     expect(screen.getByText('Warm')).toBeInTheDocument();
   });
+
+  describe('click-to-edit value chip', () => {
+    it('turns the value chip into a numeric input on click, seeded with the raw value', () => {
+      render(
+        <SliderRow label="Exposure" value={0.35} defaultValue={0} min={-2} max={2} step={0.01} onChange={() => {}} />
+      );
+      fireEvent.click(screen.getByText('0.35'));
+      expect(screen.getByRole('spinbutton')).toHaveValue(0.35);
+    });
+
+    it('commits the typed value via onChange on Enter and exits edit mode', () => {
+      const onChange = jest.fn();
+      render(
+        <SliderRow label="Exposure" value={0} defaultValue={0} min={-2} max={2} step={0.01} onChange={onChange} />
+      );
+      fireEvent.click(screen.getByText('0'));
+      const input = screen.getByRole('spinbutton');
+      fireEvent.change(input, { target: { value: '1.2' } });
+      fireEvent.keyDown(input, { key: 'Enter' });
+      expect(onChange).toHaveBeenCalledWith(1.2);
+      expect(screen.queryByRole('spinbutton')).not.toBeInTheDocument();
+    });
+
+    it('commits the typed value via onChange on blur', () => {
+      const onChange = jest.fn();
+      render(<SliderRow label="Tint" value={0} defaultValue={0} min={-100} max={100} onChange={onChange} />);
+      fireEvent.click(screen.getByText('0'));
+      const input = screen.getByRole('spinbutton');
+      fireEvent.change(input, { target: { value: '42' } });
+      fireEvent.blur(input);
+      expect(onChange).toHaveBeenCalledWith(42);
+    });
+
+    it('cancels the edit on Escape without calling onChange, reverting to the chip', () => {
+      const onChange = jest.fn();
+      render(
+        <SliderRow label="Exposure" value={0.5} defaultValue={0} min={-2} max={2} step={0.01} onChange={onChange} />
+      );
+      fireEvent.click(screen.getByText('0.5'));
+      const input = screen.getByRole('spinbutton');
+      fireEvent.change(input, { target: { value: '99' } });
+      fireEvent.keyDown(input, { key: 'Escape' });
+      expect(onChange).not.toHaveBeenCalled();
+      expect(screen.queryByRole('spinbutton')).not.toBeInTheDocument();
+      expect(screen.getByText('0.5')).toBeInTheDocument();
+    });
+
+    it('clamps the committed value to the min/max range', () => {
+      const onChange = jest.fn();
+      render(
+        <SliderRow label="Exposure" value={0} defaultValue={0} min={-2} max={2} step={0.01} onChange={onChange} />
+      );
+      fireEvent.click(screen.getByText('0'));
+      const input = screen.getByRole('spinbutton');
+      fireEvent.change(input, { target: { value: '50' } });
+      fireEvent.keyDown(input, { key: 'Enter' });
+      expect(onChange).toHaveBeenCalledWith(2);
+    });
+  });
 });
