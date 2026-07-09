@@ -6,6 +6,7 @@ import { imageCacheService } from './ImageCacheService';
 import { canvasPoolService } from './CanvasPoolService';
 import { autoRawAdjustmentService, RAWDetectionResult } from './AutoRawAdjustmentService';
 import { ImageProcessingPipeline } from './ImageProcessingPipeline';
+import { useAppStore } from '../stores/appStore';
 
 export interface ImageData {
   width: number;
@@ -110,7 +111,11 @@ export class ImageService {
         // Check if it's a RAW file
         if (rawImageService.isRawFile(filePath)) {
           logger.info('RAW file detected, using RAW processing with auto-adjustments');
-          const rawData = await rawImageService.loadRawImage(filePath);
+          // Decode the base with the current image's decode options. The Canvas open flow sets
+          // these from per-image persistence (or DEFAULT_RAW_DECODE_OPTIONS) BEFORE calling
+          // loadImage, so the initial decode matches the user's last-chosen demosaic/highlights.
+          const decodeOptions = useAppStore.getState().rawDecodeOptions;
+          const rawData = await rawImageService.loadRawImage(filePath, undefined, decodeOptions);
 
           // Validate dimensions
           const dimensionValidation = ValidationService.validateDimensions(rawData.width, rawData.height);

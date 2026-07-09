@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { AppState, ImageFile, Layer, ViewportState, ProcessedImageData, RenderMode } from '../types';
+import { DEFAULT_RAW_DECODE_OPTIONS, type RawDecodeOptions } from '../types/electron';
 
 interface AppStore extends AppState {
   setCurrentImage: (image: ImageFile | null) => void;
@@ -35,6 +36,15 @@ interface AppStore extends AppState {
   setUpscaleProgress: (v: number | null) => void;
   upscaleMode: 'ai' | 'standard' | null;
   setUpscaleMode: (v: 'ai' | 'standard' | null) => void;
+  // RAW decode options applied to the CURRENT image's base pixels. Changed only via a
+  // re-decode (RawImageService.reDecode) or restored from per-image persistence on open —
+  // never a live edit, so it stays in lock-step with the actually-decoded base.
+  rawDecodeOptions: RawDecodeOptions;
+  setRawDecodeOptions: (opts: RawDecodeOptions) => void;
+  // True while a re-decode IPC round-trip + reprocess is in flight (drives the panel's
+  // progress affordance and disables the decode controls).
+  reDecoding: boolean;
+  setReDecoding: (v: boolean) => void;
   // Which display path the Canvas should use:
   //  'gpu' → present the resident-texture GPU result on the WebGL2 canvas (zero readback)
   //  'cpu' → blit `processedImageData` to the 2D canvas (the proven path)
@@ -99,6 +109,8 @@ export const useAppStore = create<AppStore>((set) => ({
   isProcessing: false,
   upscaleProgress: null,
   upscaleMode: null,
+  rawDecodeOptions: DEFAULT_RAW_DECODE_OPTIONS,
+  reDecoding: false,
   renderMode: 'cpu',
   gpuResultVersion: 0,
   lastProcessingTimeMs: 0,
@@ -126,6 +138,8 @@ export const useAppStore = create<AppStore>((set) => ({
   setIsProcessing: (v) => set({ isProcessing: v }),
   setUpscaleProgress: (v) => set({ upscaleProgress: v }),
   setUpscaleMode: (v) => set({ upscaleMode: v }),
+  setRawDecodeOptions: (opts) => set({ rawDecodeOptions: opts }),
+  setReDecoding: (v) => set({ reDecoding: v }),
 
   setRenderMode: (mode) => set({ renderMode: mode }),
 

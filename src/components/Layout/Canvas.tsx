@@ -15,6 +15,7 @@ import { LocalAdjustmentMaskOverlay } from '../Canvas/LocalAdjustmentMaskOverlay
 import { notificationService } from '../../services/NotificationService';
 import { StarRating } from '../common/StarRating';
 import { gpuPreviewPipeline } from '../../shaders/GpuPreviewPipeline';
+import { DEFAULT_RAW_DECODE_OPTIONS } from '../../types/electron';
 
 // Debug mode for canvas rendering - set to false for production
 const DEBUG_CANVAS = process.env.NODE_ENV === 'development';
@@ -696,6 +697,11 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
 
       setImageLoading(true);
       setDisplayImage(image);
+
+      // Load this image's saved RAW decode options (or defaults) into the store BEFORE decoding,
+      // so ImageService.loadImage decodes the base with the user's last-chosen demosaic/highlights.
+      const savedDecodeOptions = await editPersistenceService.getSavedRawDecodeOptions(image.path);
+      useAppStore.getState().setRawDecodeOptions(savedDecodeOptions ?? DEFAULT_RAW_DECODE_OPTIONS);
 
       // Load image using ImageService (will use cache if available)
       await imageService.loadImage(image.path);

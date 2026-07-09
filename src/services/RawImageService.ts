@@ -9,6 +9,12 @@ import { lensProfileService, LensProfile, LensCorrections } from './LensProfileS
 import { colorManagementService, SoftProofOptions, ColorConversionOptions } from './ColorManagementService';
 import { printService, PrintSettings } from './PrintService';
 import { webGalleryService, GalleryImage, GalleryOutput, GallerySettings } from './WebGalleryService';
+import { imageService } from './ImageService';
+import { imageProcessingPipeline } from './ImageProcessingPipeline';
+import { imageCacheService } from './ImageCacheService';
+import { editPersistenceService } from './EditPersistenceService';
+import { useAppStore } from '../stores/appStore';
+import { type RawDecodeOptions } from '../types/electron';
 
 export interface RawImageData {
   width: number;
@@ -72,7 +78,11 @@ export class RawImageService {
     return RAW_EXTENSIONS.includes(extension);
   }
 
-  async loadRawImage(filePath: string, options?: Partial<AdvancedRawProcessingOptions>): Promise<RawImageData> {
+  async loadRawImage(
+    filePath: string,
+    options?: Partial<AdvancedRawProcessingOptions>,
+    decodeOptions?: RawDecodeOptions,
+  ): Promise<RawImageData> {
     try {
       logger.info(`Loading RAW image: ${filePath}`);
       const startTime = performance.now();
@@ -82,7 +92,7 @@ export class RawImageService {
       // Try LibRaw WebAssembly processing first
       try {
         logger.debug('Attempting LibRaw WebAssembly processing...');
-        const rawData = await this.decodeRawFile(filePath, extension);
+        const rawData = await this.decodeRawFile(filePath, extension, decodeOptions);
 
         const loadTime = performance.now() - startTime;
         logger.info(`RAW image loaded with LibRaw in ${loadTime.toFixed(2)}ms: ${rawData.width}x${rawData.height}`);
@@ -117,16 +127,77 @@ export class RawImageService {
   }
 
   /**
+   * Re-decode the CURRENT RAW image's base pixels with new decode options and reprocess
+   * existing module edits on top of the fresh base. This is the ONLY path by which decode
+   * options take effect (per the M0 spec) — the Task 5 panel calls it when the user changes
+   * the demosaic / highlight controls.
+   *
+   * Flow: guard (RAW only, not already running) → raise `reDecoding` → re-decode via the
+   * same native→wasm→embedded fallback chain (loadRawImage) → REPLACE the working base +
+   * before/after original snapshot + session cache → apply & persist the options → clear the
+   * pipeline cache and reprocess so the module edits re-apply → lower `reDecoding`.
+   *
+   * History integrity (Step 4 decision): a re-decode does NOT push a checkpoint and does NOT
+   * touch the History timeline. Decode options are a property of the base image, orthogonal to
+   * the module-edit timeline. CheckpointService.restore() re-applies module params but never
+   * re-decodes, so recording a "RAW: <opts>" checkpoint would be an inert/misleading entry whose
+   * restore couldn't reproduce the base — and re-applying options on restore would desync the
+   * displayed options from the actual pixels. Keeping the timeline untouched means stepping
+   * History before/after a re-decode only re-applies module edits (valid on ANY base): never a
+   * stale-pixel restore, never a crash. The options change is still durably persisted.
+   */
+  async reDecode(options: RawDecodeOptions): Promise<void> {
+    const store = useAppStore.getState();
+    const current = imageService.getCurrentImage();
+
+    // RAW images only; ignore no-op calls while a re-decode is already in flight.
+    if (!current || !current.isRaw || !current.filePath) return;
+    if (store.reDecoding) return;
+
+    store.setReDecoding(true);
+    try {
+      logger.info(`Re-decoding RAW base for ${current.filePath} with`, options);
+      const rawData = await this.loadRawImage(current.filePath, undefined, options);
+
+      // Replace the working base image + the before/after original snapshot, and refresh the
+      // session cache entry so a later cache-hit reopen returns these re-decoded pixels.
+      imageService.updateCurrentImageData(rawData.data, rawData.width, rawData.height);
+      imageService.setOriginalImage(new Float32Array(rawData.data), rawData.width, rawData.height);
+      imageCacheService.set(
+        current.filePath,
+        rawData.data,
+        rawData.width,
+        rawData.height,
+        undefined,
+        { isRaw: true, ...rawData.metadata },
+      );
+
+      // Apply the options to the store (source of truth for the panel) and persist them
+      // (scheduleSave writes serialize(), which embeds rawDecodeOptions into the edit state).
+      store.setRawDecodeOptions(options);
+      editPersistenceService.scheduleSave();
+
+      // Clear cached module results (base changed) and reprocess so the existing edits re-apply.
+      imageProcessingPipeline.clearCache();
+      store.triggerReprocessing();
+    } finally {
+      store.setReDecoding(false);
+    }
+  }
+
+  /**
    * Primary decoder: uses Electron main process (Node.js + Sharp) to extract
    * the embedded JPEG from the RAW file. This is 100% reliable for every file
    * and avoids the browser SharedArrayBuffer/Emscripten issues entirely.
    */
-  private async decodeRawFile(filePath: string, extension: string): Promise<RawImageData> {
-    // Try Electron main-process decoder first (embedded JPEG extraction via Sharp)
+  private async decodeRawFile(filePath: string, extension: string, decodeOptions?: RawDecodeOptions): Promise<RawImageData> {
+    // Try Electron main-process decoder first (native LibRaw demosaic → wasm → embedded JPEG).
+    // decodeOptions (demosaic + highlight mode) are threaded to the main process, which mirrors
+    // them onto the native and wasm rungs; the embedded-JPEG last resort ignores them by design.
     if (typeof window !== 'undefined' && window.electronAPI?.decodeRawFile) {
       try {
         logger.info(`Decoding RAW file via Electron main process: ${extension.toUpperCase()}`);
-        const result = await window.electronAPI.decodeRawFile(filePath);
+        const result = await window.electronAPI.decodeRawFile(filePath, decodeOptions);
 
         // Native LibRaw demosaic returns 16-bit pixels; the embedded-JPEG
         // fallback returns 8-bit. Convert from whichever depth we got.

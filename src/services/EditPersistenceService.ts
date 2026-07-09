@@ -3,6 +3,8 @@ import { imageService } from './ImageService';
 import { LocalAdjustmentsPipelineModule } from '../modules/LocalAdjustmentsPipelineModule';
 import type { MaskGeometry } from '../modules/LocalAdjustmentsModule';
 import { logger } from '../utils/Logger';
+import { useAppStore } from '../stores/appStore';
+import type { RawDecodeOptions } from '../types/electron';
 
 const STORE_VERSION = 1;
 
@@ -22,6 +24,12 @@ interface EditState {
   version: number;
   modules: Record<string, Record<string, unknown>>;
   localAdjustments?: { enabled: boolean; layers: SerializedLayer[] };
+  // RAW decode options the current image's base was decoded with. Persisted so the next
+  // open decodes the base with the same demosaic/highlight settings (see getSavedRawDecodeOptions).
+  // NOTE: this is intentionally NOT re-applied by restore() — decode options are a property of
+  // the base image, not the module-edit timeline. Re-applying on a checkpoint restore (which does
+  // NOT re-decode) would desync the displayed options from the actually-decoded pixels.
+  rawDecodeOptions?: RawDecodeOptions;
 }
 
 /**
@@ -51,7 +59,11 @@ class EditPersistenceService {
       }
     }
 
-    const state: EditState = { version: STORE_VERSION, modules };
+    const state: EditState = {
+      version: STORE_VERSION,
+      modules,
+      rawDecodeOptions: useAppStore.getState().rawDecodeOptions,
+    };
 
     const la = imageProcessingPipeline.getModule<LocalAdjustmentsPipelineModule>('localadjustments');
     if (la) {
@@ -118,6 +130,25 @@ class EditPersistenceService {
     // so unedited images and the load-triggered reprocess never write a spurious save.
     this.baseline = JSON.stringify(this.serialize());
     return restored;
+  }
+
+  /**
+   * Read the saved RAW decode options for an image path WITHOUT touching the pipeline.
+   * Used before the initial decode so the base is decoded with the same options the user
+   * last chose (or null → caller falls back to DEFAULT_RAW_DECODE_OPTIONS). This is the
+   * read half of the persist/restore round-trip for decode options; the write half is
+   * serialize() embedding useAppStore's rawDecodeOptions into the durable edit state.
+   */
+  async getSavedRawDecodeOptions(path: string): Promise<RawDecodeOptions | null> {
+    try {
+      const state = window.electronAPI?.storeGet
+        ? await window.electronAPI.storeGet<EditState>(this.keyForPath(path))
+        : null;
+      return state?.rawDecodeOptions ?? null;
+    } catch (e) {
+      logger.warn('getSavedRawDecodeOptions failed', e);
+      return null;
+    }
   }
 
   /** Debounced save of the current image's edits — call after any edit. */
