@@ -20,6 +20,7 @@ import { LensCorrectionsModuleComponent } from '../Modules/LensCorrectionsModule
 import { HistoryPanel } from './HistoryPanel';
 import { RawDecodePanel } from './RawDecodePanel';
 import EnhanceModuleComponent from '../Modules/EnhanceModuleComponent';
+import type { ImageFileInfo } from '../../services/FileSystemService';
 import { imageProcessingPipeline } from '../../services/ImageProcessingPipeline';
 import { imageService } from '../../services/ImageService';
 import { progressivePreviewService } from '../../services/ProgressivePreviewService';
@@ -34,9 +35,12 @@ import { choosePreviewPath } from '../../services/previewRouting';
 
 interface AdjustmentPanelProps {
   selectedModule?: string | null;
+  // Required so tsc guarantees App threads its live selection down to the
+  // RAW Decode panel (which self-gates to RAW files). null = no image open.
+  currentImage: ImageFileInfo | null;
 }
 
-export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
+export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPanelProps) {
   const { setProcessedImageData, processingVersion, externalParamsVersion, setProcessingStats } = useAppStore();
   const [resetCounter, setResetCounter] = useState(0);
   // Remount the module panels (so each re-reads module.getParams() into its
@@ -292,8 +296,11 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
       if (previewPath === 'gpu') {
         // Source identity: image path + preview dims. Crop never contributes here
         // (active crop ⇒ activeCpuBridges non-empty ⇒ this branch is skipped), so the
-        // source is the raw downsampled image and only changes on image switch / dim change.
-        const sourceKey = `${currentImage.filePath ?? ''}_${previewWidth}x${previewHeight}`;
+        // source is the raw downsampled image and only changes on image switch / dim change,
+        // OR when the base pixels are replaced in place at the same path+dims (a RAW
+        // re-decode / flip) — baseImageVersion folds that in so we re-upload the new pixels.
+        const baseImageVersion = useAppStore.getState().baseImageVersion;
+        const sourceKey = `${currentImage.filePath ?? ''}_${previewWidth}x${previewHeight}_${baseImageVersion}`;
         if (lastGpuSourceKeyRef.current !== sourceKey) {
           gpuPreviewPipeline.setSource(previewData, previewWidth, previewHeight);
           lastGpuSourceKeyRef.current = sourceKey;
@@ -705,7 +712,7 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
         {/* RAW Decode — pinned at the top regardless of which module is selected below;
             self-gates to RAW images only, so it's a no-op render for non-RAW files. */}
         <div className="px-5 pt-4">
-          <RawDecodePanel />
+          <RawDecodePanel currentImage={currentImage} />
         </div>
 
         {/* Crop Module */}

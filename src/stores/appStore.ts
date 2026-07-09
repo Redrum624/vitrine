@@ -55,6 +55,13 @@ interface AppStore extends AppState {
   // Bumped every time a GPU render completes so the Canvas re-presents the new result.
   gpuResultVersion: number;
   bumpGpuResult: () => void;
+  // Bumped when the working BASE image pixels are replaced in place (RAW re-decode,
+  // upscale, rotate/flip). Path AND dimensions can stay the same across such a swap
+  // (a re-decode changes neither), so consumers that key a cache off path+dims — e.g.
+  // the GPU resident-source upload in AdjustmentPanel — must fold this in to know the
+  // pixels changed and re-upload.
+  baseImageVersion: number;
+  bumpBaseImageVersion: () => void;
   // Live processing stats (surfaced in the StatusBar)
   lastProcessingTimeMs: number;
   modulesActive: number;
@@ -113,6 +120,7 @@ export const useAppStore = create<AppStore>((set) => ({
   reDecoding: false,
   renderMode: 'cpu',
   gpuResultVersion: 0,
+  baseImageVersion: 0,
   lastProcessingTimeMs: 0,
   modulesActive: 0,
   modulesTotal: 0,
@@ -144,6 +152,8 @@ export const useAppStore = create<AppStore>((set) => ({
   setRenderMode: (mode) => set({ renderMode: mode }),
 
   bumpGpuResult: () => set((state) => ({ gpuResultVersion: state.gpuResultVersion + 1 })),
+
+  bumpBaseImageVersion: () => set((state) => ({ baseImageVersion: state.baseImageVersion + 1 })),
 
   setCurrentImage: (image) => set({ currentImage: image }),
 

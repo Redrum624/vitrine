@@ -340,6 +340,10 @@ export class ImageService {
         height
       };
       logger.info(`Updated current image data: ${width}x${height}`);
+      // The base pixels were replaced in place — path/dimensions may be unchanged
+      // (a RAW re-decode changes neither), so signal consumers that cache off those
+      // (e.g. the GPU resident-source upload) to refresh from the new pixels.
+      useAppStore.getState().bumpBaseImageVersion();
       this.notifyImageLoaded();
     }
   }

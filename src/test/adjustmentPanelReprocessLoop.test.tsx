@@ -88,7 +88,7 @@ describe('AdjustmentPanel reprocess-loop regression', () => {
   });
 
   it('runs a bounded number of pipeline passes after mount, then stabilises (no endless loop)', async () => {
-    await act(async () => { render(<AdjustmentPanel selectedModule={null} />); });
+    await act(async () => { render(<AdjustmentPanel selectedModule={null} currentImage={null} />); });
 
     // Simulated ~2s: flush timers + microtasks in 50ms steps (the panel's throttle window).
     for (let i = 0; i < 40; i++) {

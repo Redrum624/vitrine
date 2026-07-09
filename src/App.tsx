@@ -1216,7 +1216,7 @@ function App() {
               </div>
               {/* Module panels */}
               <div style={{display: selectedTool && !['file-explorer', 'settings'].includes(selectedTool) ? 'block' : 'none', height: '100%'}}>
-                <AdjustmentPanel selectedModule={selectedTool} />
+                <AdjustmentPanel selectedModule={selectedTool} currentImage={currentImage} />
               </div>
             </div>
 
