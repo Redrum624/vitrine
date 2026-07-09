@@ -290,3 +290,7 @@ postcss.config.js.map
 
 # Local RAW/test fixtures (large binaries)
 /test/
+
+# Internal planning / analysis artifacts (not part of the shipped repo)
+idea-eval/
+docs/go-public-plan.html
