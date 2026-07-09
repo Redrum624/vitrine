@@ -38,6 +38,39 @@
   --transition-fast: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
   --transition-normal: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   --transition-slow: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* "Glass · Sectioned" redesign tokens (design_handoff_glass_ui, §2).
+     Accent derives from --primary-500 so it stays swappable; soft/ring are
+     the accent at 14%/35% alpha. Existing gray scale above stays untouched
+     for legacy surfaces until each module is ported. */
+  --accent: var(--primary-500);
+  --accent-soft: rgba(59, 130, 246, 0.14);
+  --accent-ring: rgba(59, 130, 246, 0.35);
+
+  /* Glass surfaces: cards (module/histogram panels) vs. chrome (toolbar,
+     icon rail, filmstrip dock — smaller floating pills). */
+  --glass-bg: rgba(15, 15, 19, 0.78);
+  --glass-bg-chrome: rgba(16, 16, 20, 0.72);
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --glass-blur: 28px;
+  --glass-blur-chrome: 24px;
+  --glass-shadow: 0 32px 90px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  --glass-shadow-chrome: 0 16px 48px rgba(0, 0, 0, 0.5);
+  --canvas-bg: radial-gradient(1400px 800px at 42% 45%, #121216, #08080a);
+
+  /* Glass text scale: title / control label / secondary / muted-subtitle,
+     plus the chrome idle/primary pair used by toolbar/rail text. */
+  --glass-text-title: #f0f0f2;
+  --glass-text-label: #c2c2ca;
+  --glass-text-secondary: #a8a8b0;
+  --glass-text-muted: #7a7a82;
+  --glass-text-chrome-idle: #8a8a92;
+  --glass-text-chrome-primary: #d8d8de;
+
+  /* Radii scale: 20 card · 16 dock/rail · 9-11 controls · 6-7 chips (the
+     control/chip ranges are applied per-component per the anatomy spec). */
+  --radius-card: 20px;
+  --radius-dock: 16px;
 }
 
 /* Global font smoothing for crisp text */
@@ -215,4 +248,127 @@ body {
 
 .animate-slide-in-right {
   animation: slide-in-right 0.3s ease-out forwards;
+}
+
+/* ---------------------------------------------------------------------- */
+/* "Glass · Sectioned" redesign — shared surfaces + entrance motion.       */
+/* Tokens above (§2); utilities below are consumed by src/components/     */
+/* Controls/* and, later, the module cards / floating chrome (Tasks 2-7). */
+/* ---------------------------------------------------------------------- */
+
+.glass-card {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-card);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  box-shadow: var(--glass-shadow);
+}
+
+.glass-chrome {
+  background: var(--glass-bg-chrome);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: blur(var(--glass-blur-chrome));
+  -webkit-backdrop-filter: blur(var(--glass-blur-chrome));
+  box-shadow: var(--glass-shadow-chrome);
+}
+
+/* Card/chrome entrance: opacity 0→1, translateY 10px→0, 380ms. Apply once
+   per mount (stagger via animation-delay on the consumer), not per re-render. */
+@keyframes dcRise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.dc-rise {
+  animation: dcRise 380ms cubic-bezier(0.2, 0.7, 0.3, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dc-rise {
+    animation: none;
+  }
+}
+
+/* SliderRow thumb (src/components/Controls/SliderRow.tsx): 14px white circle,
+   1px dark border; hover scale(1.28) + 4px accent ring; drag scale(1.18);
+   edited state (.is-edited) carries a static 3px accent-ring glow. */
+.glass-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 5px;
+  background: transparent;
+  cursor: grab;
+  margin: 0;
+}
+
+.glass-slider-thumb:active {
+  cursor: grabbing;
+}
+
+.glass-slider-thumb::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.5);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+  cursor: grab;
+  transition: transform 150ms ease, box-shadow 150ms ease;
+}
+
+.glass-slider-thumb:hover::-webkit-slider-thumb {
+  transform: scale(1.28);
+  box-shadow: 0 0 0 4px var(--accent-ring);
+}
+
+.glass-slider-thumb:active::-webkit-slider-thumb {
+  cursor: grabbing;
+  transform: scale(1.18);
+}
+
+.glass-slider-thumb.is-edited::-webkit-slider-thumb {
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+
+.glass-slider-thumb.is-edited:hover::-webkit-slider-thumb {
+  box-shadow: 0 0 0 4px var(--accent-ring);
+}
+
+.glass-slider-thumb::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.5);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+  cursor: grab;
+  transition: transform 150ms ease, box-shadow 150ms ease;
+}
+
+.glass-slider-thumb:hover::-moz-range-thumb {
+  transform: scale(1.28);
+  box-shadow: 0 0 0 4px var(--accent-ring);
+}
+
+.glass-slider-thumb:active::-moz-range-thumb {
+  cursor: grabbing;
+  transform: scale(1.18);
+}
+
+.glass-slider-thumb.is-edited::-moz-range-thumb {
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+
+.glass-slider-thumb.is-edited:hover::-moz-range-thumb {
+  box-shadow: 0 0 0 4px var(--accent-ring);
 }
