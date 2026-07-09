@@ -1,20 +1,24 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { TrendingUp, RotateCcw, Settings, Zap } from 'lucide-react';
+import { TrendingUp, Settings, Zap } from 'lucide-react';
 import { ToneCurveModule, ToneCurveParams } from '../../modules/ToneCurveModule';
 import { logger } from '../../utils/Logger';
 import { autoAdjustService } from '../../services/AutoAdjustService';
 import { imageService } from '../../services/ImageService';
+import { useRegisterModuleCardActions, type RegisterModuleCardActions } from '../Controls/moduleCardActions';
 
 interface ToneCurveModuleComponentProps {
   module: ToneCurveModule;
   onParamsChange: (params: ToneCurveParams) => void;
+  /** Surfaces this module's Auto/Reset to the unified card header (Task 2). */
+  onRegisterActions?: RegisterModuleCardActions;
 }
 
 type CurveChannel = 'base' | 'red' | 'green' | 'blue';
 
 export const ToneCurveModuleComponent: React.FC<ToneCurveModuleComponentProps> = ({
   module,
-  onParamsChange
+  onParamsChange,
+  onRegisterActions
 }) => {
   const [params, setParams] = useState<ToneCurveParams>(module.getParams());
   const paramsRef = useRef<ToneCurveParams>(params);
@@ -278,72 +282,24 @@ export const ToneCurveModuleComponent: React.FC<ToneCurveModuleComponentProps> =
     onParamsChange(updatedParams);
   }, [module, onParamsChange]);
 
+  // Image-aware auto tone curve — lifted verbatim from the old inner-header ⚡
+  // button so the card header's Auto keeps identical semantics (Task 2).
+  const handleAuto = useCallback(() => {
+    const img = imageService.getCurrentImage();
+    if (!img) return;
+    const stats = autoAdjustService.analyse(img.data, img.width, img.height);
+    const computed = autoAdjustService.autoToneCurve(stats);
+    module.setParams(computed as ToneCurveParams);
+    const newParams = module.getParams();
+    setParams(newParams);
+    onParamsChange(newParams);
+  }, [module, onParamsChange]);
+
+  // Reset ↺ keeps its original per-active-channel semantics (resetCurve).
+  useRegisterModuleCardActions(onRegisterActions, { auto: handleAuto, reset: resetCurve });
+
   return (
     <div className="space-y-3">
-      {/* Header */}
-      <div className="flex items-center justify-between pb-2" style={{borderBottom: '1px solid var(--border)'}}>
-        <div className="flex items-center gap-2">
-          <div className="w-1 h-3 rounded-sm" style={{backgroundColor: 'var(--gray-600)'}} />
-          <span className="text-xs font-medium uppercase tracking-wider" style={{color: 'var(--gray-500)', letterSpacing: '0.5px'}}>Controls</span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <button
-            onClick={() => {
-              const img = imageService.getCurrentImage();
-              if (!img) return;
-              const stats = autoAdjustService.analyse(img.data, img.width, img.height);
-              const computed = autoAdjustService.autoToneCurve(stats);
-              module.setParams(computed as ToneCurveParams);
-              const newParams = module.getParams();
-              setParams(newParams);
-              onParamsChange(newParams);
-            }}
-            className="p-1.5 rounded border"
-            style={{
-              backgroundColor: 'transparent',
-              borderColor: 'var(--border)',
-              color: 'var(--gray-400)',
-              transition: 'var(--transition-fast)'
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = 'var(--gray-800)';
-              e.currentTarget.style.borderColor = 'var(--border-light)';
-              e.currentTarget.style.color = 'var(--white)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = 'transparent';
-              e.currentTarget.style.borderColor = 'var(--border)';
-              e.currentTarget.style.color = 'var(--gray-400)';
-            }}
-            title="Auto adjust tone curve"
-          >
-            <Zap className="w-3.5 h-3.5" />
-          </button>
-          <button
-            onClick={resetCurve}
-            className="p-1.5 rounded border"
-            style={{
-              backgroundColor: 'transparent',
-              borderColor: 'var(--border)',
-              color: 'var(--gray-400)',
-              transition: 'var(--transition-fast)'
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = 'var(--gray-800)';
-              e.currentTarget.style.borderColor = 'var(--border-light)';
-              e.currentTarget.style.color = 'var(--white)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = 'transparent';
-              e.currentTarget.style.borderColor = 'var(--border)';
-              e.currentTarget.style.color = 'var(--gray-400)';
-            }}
-            title="Reset curve"
-          >
-            <RotateCcw className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      </div>
 
       {/* Channel Selection */}
       <div className="flex gap-1 rounded-lg p-1" style={{backgroundColor: 'var(--gray-700)'}}>

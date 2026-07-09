@@ -8,6 +8,7 @@ import {
 } from '../../modules/LocalAdjustmentsModule';
 import { DelayedInputControl } from '../Controls/DelayedInputControl';
 import { logger } from '../../utils/Logger';
+import { useRegisterModuleCardActions, type RegisterModuleCardActions } from '../Controls/moduleCardActions';
 
 interface LocalAdjustmentsModuleComponentProps {
   parameters: LocalAdjustmentParams;
@@ -24,6 +25,8 @@ interface LocalAdjustmentsModuleComponentProps {
   geometry?: MaskGeometry;
   onUpdateGeometry?: (geom: MaskGeometry) => void;
   className?: string;
+  /** Surfaces this module's Reset to the unified card header (Task 2). */
+  onRegisterActions?: RegisterModuleCardActions;
 }
 
 const DEFAULT_GEOMETRY: MaskGeometry = {
@@ -48,7 +51,8 @@ export const LocalAdjustmentsModuleComponent: React.FC<LocalAdjustmentsModuleCom
   onUpdateLayerOpacity,
   geometry,
   onUpdateGeometry,
-  className = ''
+  className = '',
+  onRegisterActions
 }) => {
   const [activeTab, setActiveTab] = useState<TabType>('tools');
   const [localGeom, setLocalGeom] = useState<MaskGeometry>(geometry ?? DEFAULT_GEOMETRY);
@@ -60,6 +64,17 @@ export const LocalAdjustmentsModuleComponent: React.FC<LocalAdjustmentsModuleCom
       return next;
     });
   }, [onUpdateGeometry]);
+
+  // Card header (Task 2): Reset ↺ zeroes the active layer's adjustments — lifted
+  // verbatim from the old inner-header button (no auto function).
+  const handleResetAll = useCallback(() => {
+    onParametersChange({
+      exposure: 0, shadows: 0, highlights: 0, temperature: 0, tint: 0,
+      saturation: 0, vibrance: 0, contrast: 0, brightness: 0, clarity: 0,
+      hueShift: 0, colorBalance: [0, 0, 0],
+    });
+  }, [onParametersChange]);
+  useRegisterModuleCardActions(onRegisterActions, { reset: handleResetAll });
   const [activeTool, setActiveTool] = useState<ToolType>('brush');
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showNewLayerDialog, setShowNewLayerDialog] = useState(false);
@@ -1474,55 +1489,6 @@ export const LocalAdjustmentsModuleComponent: React.FC<LocalAdjustmentsModuleCom
 
   return (
     <div className={`space-y-3 ${className}`}>
-      {/* Header */}
-      <div className="flex items-center justify-between pb-2" style={{borderBottom: '1px solid var(--border)'}}>
-        <div className="flex items-center gap-2">
-          <div className="w-1 h-3 rounded-sm" style={{backgroundColor: 'var(--gray-600)'}} />
-          <span className="text-xs font-medium uppercase tracking-wider" style={{color: 'var(--gray-500)', letterSpacing: '0.5px'}}>Controls</span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <button
-            onClick={() => {
-              // Reset all adjustments
-              onParametersChange({
-                exposure: 0,
-                shadows: 0,
-                highlights: 0,
-                temperature: 0,
-                tint: 0,
-                saturation: 0,
-                vibrance: 0,
-                contrast: 0,
-                brightness: 0,
-                clarity: 0,
-                hueShift: 0,
-                colorBalance: [0, 0, 0]
-              });
-            }}
-            className="p-1.5 rounded border"
-            style={{
-              backgroundColor: 'transparent',
-              borderColor: 'var(--border)',
-              color: 'var(--gray-400)',
-              transition: 'var(--transition-fast)'
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = 'var(--gray-800)';
-              e.currentTarget.style.borderColor = 'var(--border-light)';
-              e.currentTarget.style.color = 'var(--white)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = 'transparent';
-              e.currentTarget.style.borderColor = 'var(--border)';
-              e.currentTarget.style.color = 'var(--gray-400)';
-            }}
-            title="Reset all adjustments"
-          >
-            <RotateCcw className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      </div>
-
       {/* Tab Navigation */}
       <div className="flex gap-1 rounded-lg p-1" style={{backgroundColor: 'var(--gray-700)'}}>
         {[

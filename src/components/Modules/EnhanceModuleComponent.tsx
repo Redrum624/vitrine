@@ -8,15 +8,18 @@ import { enhanceService, getUpscaleFeasibility, UpscaleFeasibility } from '../..
 import { imageService } from '../../services/ImageService';
 import { imageProcessingPipeline } from '../../services/ImageProcessingPipeline';
 import { useAppStore } from '../../stores/appStore';
+import { useRegisterModuleCardActions, type RegisterModuleCardActions } from '../Controls/moduleCardActions';
 
 interface Props {
   module: EnhanceModule;
   noiseReductionModule: NoiseReductionModule;
   onParamsChange?: (p: Partial<EnhanceParams>) => void;
   onNoiseReductionChange?: (p: Partial<NoiseReductionParams>) => void;
+  /** Surfaces this module's Reset to the unified card header (Task 2; no auto). */
+  onRegisterActions?: RegisterModuleCardActions;
 }
 
-export default function EnhanceModuleComponent({ module, noiseReductionModule, onParamsChange, onNoiseReductionChange }: Props) {
+export default function EnhanceModuleComponent({ module, noiseReductionModule, onParamsChange, onNoiseReductionChange, onRegisterActions }: Props) {
   const [params, setParams] = useState<EnhanceParams>(() => module.getParams());
   const paramsRef = useRef(params); paramsRef.current = params;
   const [nrEnabled, setNrEnabled] = useState<boolean>(() => noiseReductionModule.getParams().enabled);
@@ -44,6 +47,10 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
       chromaClean: DEFAULT_ENHANCE_PARAMS.chromaClean,
     });
   }, [update]);
+
+  // Card header (Task 2): Reset ↺ = reset the detail/quality params (Enhance has
+  // no auto function). Reuses the existing resetSection handler unchanged.
+  useRegisterModuleCardActions(onRegisterActions, { reset: resetSection });
 
   const handleApply = useCallback(async () => {
     setBusy(true); setError(null);

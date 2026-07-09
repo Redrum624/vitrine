@@ -3,17 +3,21 @@ import { RotateCcw, Zap } from 'lucide-react';
 import { WhiteBalanceModule, WhiteBalanceParams, WHITE_BALANCE_PRESETS } from '../../modules/WhiteBalanceModule';
 import { logger } from '../../utils/Logger';
 import { DelayedInputControl } from '../Controls/DelayedInputControl';
+import { useRegisterModuleCardActions, type RegisterModuleCardActions } from '../Controls/moduleCardActions';
 
 interface WhiteBalanceModuleComponentProps {
   module: WhiteBalanceModule;
   onParamsChange?: (params: Partial<WhiteBalanceParams>) => void;
   onAutoDetect?: () => void;
+  /** Surfaces this module's Auto/Reset to the unified card header (Task 2). */
+  onRegisterActions?: RegisterModuleCardActions;
 }
 
 export function WhiteBalanceModuleComponent({
   module,
   onParamsChange,
-  onAutoDetect
+  onAutoDetect,
+  onRegisterActions
 }: WhiteBalanceModuleComponentProps) {
   const [params, setParams] = useState<WhiteBalanceParams>(module.getParams());
   const paramsRef = useRef<WhiteBalanceParams>(params);
@@ -62,64 +66,10 @@ export function WhiteBalanceModuleComponent({
     }, 100);
   }, [module, onParamsChange, onAutoDetect]);
 
+  useRegisterModuleCardActions(onRegisterActions, { auto: handleAutoDetect, reset: resetAll });
+
   return (
     <div className="space-y-3">
-      {/* Header - Redesigned */}
-      <div className="flex items-center justify-between pb-2" style={{borderBottom: '1px solid var(--border)'}}>
-        <div className="flex items-center gap-2">
-          <div className="w-1 h-3 rounded-sm" style={{backgroundColor: 'var(--gray-600)'}} />
-          <span className="text-xs font-medium uppercase tracking-wider" style={{color: 'var(--gray-500)', letterSpacing: '0.5px'}}>Controls</span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <button
-            onClick={handleAutoDetect}
-            className="p-1.5 rounded border"
-            style={{
-              backgroundColor: 'transparent',
-              borderColor: 'var(--border)',
-              color: 'var(--gray-400)',
-              transition: 'var(--transition-fast)'
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = 'var(--gray-800)';
-              e.currentTarget.style.borderColor = 'var(--border-light)';
-              e.currentTarget.style.color = 'var(--white)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = 'transparent';
-              e.currentTarget.style.borderColor = 'var(--border)';
-              e.currentTarget.style.color = 'var(--gray-400)';
-            }}
-            title="Auto detect"
-          >
-            <Zap className="w-3.5 h-3.5" />
-          </button>
-          <button
-            onClick={resetAll}
-            className="p-1.5 rounded border"
-            style={{
-              backgroundColor: 'transparent',
-              borderColor: 'var(--border)',
-              color: 'var(--gray-400)',
-              transition: 'var(--transition-fast)'
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = 'var(--gray-800)';
-              e.currentTarget.style.borderColor = 'var(--border-light)';
-              e.currentTarget.style.color = 'var(--white)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = 'transparent';
-              e.currentTarget.style.borderColor = 'var(--border)';
-              e.currentTarget.style.color = 'var(--gray-400)';
-            }}
-            title="Reset all"
-          >
-            <RotateCcw className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      </div>
-
       <div className="space-y-3">
         {/* Presets */}
         <div className="space-y-2">

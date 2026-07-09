@@ -1,8 +1,9 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { RotateCcw, Maximize, RotateCw, FlipHorizontal, FlipVertical, Zap, ChevronDown, ChevronUp } from 'lucide-react';
+import { RotateCcw, RotateCw, FlipHorizontal, FlipVertical, Zap, ChevronDown, ChevronUp } from 'lucide-react';
 import { CropModule, CropParams, AspectRatio } from '../../modules/CropModule';
 import { logger } from '../../utils/Logger';
 import { useAppStore } from '../../stores/appStore';
+import { useRegisterModuleCardActions, type RegisterModuleCardActions } from '../Controls/moduleCardActions';
 
 interface CropModuleComponentProps {
   module: CropModule;
@@ -10,6 +11,8 @@ interface CropModuleComponentProps {
   imageWidth: number;
   imageHeight: number;
   imageData?: Float32Array;
+  /** Surfaces this module's Auto/Reset to the unified card header (Task 2). */
+  onRegisterActions?: RegisterModuleCardActions;
 }
 
 export const CropModuleComponent: React.FC<CropModuleComponentProps> = ({
@@ -17,7 +20,8 @@ export const CropModuleComponent: React.FC<CropModuleComponentProps> = ({
   onParamsChange,
   imageWidth,
   imageHeight,
-  imageData: _imageData  // Now using processedImageData from appStore instead
+  imageData: _imageData,  // Now using processedImageData from appStore instead
+  onRegisterActions
 }) => {
   const [params, setParams] = useState<CropParams>(module.getParams());
   const paramsRef = useRef<CropParams>(params);
@@ -62,14 +66,6 @@ export const CropModuleComponent: React.FC<CropModuleComponentProps> = ({
       }
     }
   }, [module, updateParams]);
-
-  const handleUncrop = useCallback(() => {
-    module.uncrop();
-    const updatedParams = module.getParams();
-    paramsRef.current = updatedParams;
-    setParams(updatedParams);
-    onParamsChange(updatedParams);
-  }, [module, onParamsChange]);
 
   const handleReset = useCallback(() => {
     module.resetParams();
@@ -132,6 +128,9 @@ export const CropModuleComponent: React.FC<CropModuleComponentProps> = ({
       setIsDetecting(false);
     }
   }, [module, onParamsChange, storeProcessedData]);
+
+  // Card header (Task 2): Auto ⚡ = auto-straighten, Reset ↺ = full crop reset.
+  useRegisterModuleCardActions(onRegisterActions, { auto: handleAutoStraighten, reset: handleReset });
 
   const handleFlipHorizontal = useCallback(() => {
     updateParams({ flipHorizontal: !params.flipHorizontal, enabled: true });
@@ -209,66 +208,6 @@ export const CropModuleComponent: React.FC<CropModuleComponentProps> = ({
 
   return (
     <div className="space-y-3">
-      {/* Header */}
-      <div className="flex items-center justify-between pb-2" style={{borderBottom: '1px solid var(--border)'}}>
-        <div className="flex items-center gap-2">
-          <div className="w-1 h-3 rounded-sm" style={{backgroundColor: 'var(--gray-600)'}} />
-          <span className="text-xs font-medium uppercase tracking-wider" style={{color: 'var(--gray-500)', letterSpacing: '0.5px'}}>Controls</span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <button
-            onClick={handleUncrop}
-            disabled={!module.isCropped()}
-            className="p-1.5 rounded border"
-            style={{
-              backgroundColor: 'transparent',
-              borderColor: 'var(--border)',
-              color: 'var(--gray-400)',
-              transition: 'var(--transition-fast)',
-              opacity: !module.isCropped() ? 0.3 : 1
-            }}
-            onMouseEnter={(e) => {
-              if (module.isCropped()) {
-                e.currentTarget.style.backgroundColor = 'var(--gray-800)';
-                e.currentTarget.style.borderColor = 'var(--border-light)';
-                e.currentTarget.style.color = 'var(--white)';
-              }
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = 'transparent';
-              e.currentTarget.style.borderColor = 'var(--border)';
-              e.currentTarget.style.color = 'var(--gray-400)';
-            }}
-            title="Uncrop to original"
-          >
-            <Maximize className="w-3.5 h-3.5" />
-          </button>
-          <button
-            onClick={handleReset}
-            className="p-1.5 rounded border"
-            style={{
-              backgroundColor: 'transparent',
-              borderColor: 'var(--border)',
-              color: 'var(--gray-400)',
-              transition: 'var(--transition-fast)'
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = 'var(--gray-800)';
-              e.currentTarget.style.borderColor = 'var(--border-light)';
-              e.currentTarget.style.color = 'var(--white)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = 'transparent';
-              e.currentTarget.style.borderColor = 'var(--border)';
-              e.currentTarget.style.color = 'var(--gray-400)';
-            }}
-            title="Reset all"
-          >
-            <RotateCcw className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      </div>
-
       {/* Aspect Ratio Selection */}
       <div className="space-y-1.5">
         <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Aspect Ratio</label>

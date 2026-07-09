@@ -1,6 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import { Zap, Palette, Eye, RotateCcw, Target, ChevronDown, ChevronRight, Aperture, Film } from 'lucide-react';
 import { LensCorrectionsParams } from '../../modules/LensCorrectionsModule';
+import { useRegisterModuleCardActions, type RegisterModuleCardActions } from '../Controls/moduleCardActions';
 
 interface LensCorrectionsModuleComponentProps {
   parameters: LensCorrectionsParams;
@@ -8,6 +9,8 @@ interface LensCorrectionsModuleComponentProps {
   onAutoDetectVignetting?: () => void;
   onResetSection?: (section: 'vignetting' | 'distortion' | 'chromaticAberration' | 'blur' | 'filmGrain' | 'all') => void;
   className?: string;
+  /** Surfaces this module's Auto/Reset to the unified card header (Task 2). */
+  onRegisterActions?: RegisterModuleCardActions;
 }
 
 const VIGNETTING_PRESETS = [
@@ -97,7 +100,7 @@ function Section({ title, icon: Icon, enabled, onToggleEnabled, onReset, onAuto,
 
 // ── Module ──────────────────────────────────────────────────────────────────
 export const LensCorrectionsModuleComponent: React.FC<LensCorrectionsModuleComponentProps> = ({
-  parameters, onParametersChange, onAutoDetectVignetting, onResetSection, className = '',
+  parameters, onParametersChange, onAutoDetectVignetting, onResetSection, className = '', onRegisterActions,
 }) => {
   const [showAdvanced, setShowAdvanced] = useState(false);
   // Local UI state mirror of the params. The component is keyed by paramSync, so it
@@ -126,19 +129,15 @@ export const LensCorrectionsModuleComponent: React.FC<LensCorrectionsModuleCompo
 
   const activeCount = [vignetting.enabled, distortion.enabled, ca.enabled, blur.enabled, filmGrain.enabled].filter(Boolean).length;
 
+  // Card header (Task 2): Auto ⚡ = auto-detect vignetting, Reset ↺ = reset all
+  // corrections — both reuse the module's existing callbacks unchanged.
+  useRegisterModuleCardActions(onRegisterActions, {
+    auto: onAutoDetectVignetting,
+    reset: onResetSection ? () => onResetSection('all') : undefined,
+  });
+
   return (
     <div className={`space-y-2 ${className}`}>
-      {/* Header */}
-      <div className="flex items-center justify-between pb-2" style={{ borderBottom: '1px solid var(--border)' }}>
-        <span className="text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--gray-500)', letterSpacing: '0.5px' }}>Lens Corrections</span>
-        {onResetSection && (
-          <button onClick={() => onResetSection('all')} className="p-1.5 rounded border"
-            style={{ backgroundColor: 'transparent', borderColor: 'var(--border)', color: 'var(--gray-400)' }} title="Reset all corrections">
-            <RotateCcw className="w-3.5 h-3.5" />
-          </button>
-        )}
-      </div>
-
       {/* Distortion */}
       <Section title="Distortion" icon={Zap} enabled={distortion.enabled}
         onToggleEnabled={(v) => setDistortion('enabled', v)} onReset={onResetSection && (() => onResetSection('distortion'))}>

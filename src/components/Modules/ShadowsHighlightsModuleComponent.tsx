@@ -5,17 +5,21 @@ import { logger } from '../../utils/Logger';
 import { DelayedInputControl } from '../Controls/DelayedInputControl';
 import { autoAdjustService } from '../../services/AutoAdjustService';
 import { imageService } from '../../services/ImageService';
+import { useRegisterModuleCardActions, type RegisterModuleCardActions } from '../Controls/moduleCardActions';
 
 interface ShadowsHighlightsModuleComponentProps {
   module: ShadowsHighlightsModule;
   onParamsChange?: (params: Partial<ShadowsHighlightsParams>) => void;
+  /** Surfaces this module's Auto/Reset to the unified card header (Task 2). */
+  onRegisterActions?: RegisterModuleCardActions;
 }
 
 type PresetType = 'subtle' | 'moderate' | 'strong' | 'highlights-only' | 'shadows-only';
 
 export const ShadowsHighlightsModuleComponent: React.FC<ShadowsHighlightsModuleComponentProps> = ({
   module,
-  onParamsChange
+  onParamsChange,
+  onRegisterActions
 }) => {
   const [params, setParams] = useState<ShadowsHighlightsParams>(module.getParams());
   const [activeSection, setActiveSection] = useState<'shadows' | 'highlights' | 'advanced'>('shadows');
@@ -71,74 +75,24 @@ export const ShadowsHighlightsModuleComponent: React.FC<ShadowsHighlightsModuleC
     handleParamChange(key, defaultValue);
   }, [handleParamChange]);
 
+  // Image-aware auto — lifted verbatim from the old inner-header ⚡ button so the
+  // card header's Auto keeps identical semantics (Task 2).
+  const handleAuto = useCallback(() => {
+    const img = imageService.getCurrentImage();
+    if (!img) { logger.warn('No image for auto SH'); return; }
+    const stats = autoAdjustService.analyse(img.data, img.width, img.height);
+    const computed = autoAdjustService.autoShadowsHighlights(stats);
+    module.setParams(computed as ShadowsHighlightsParams);
+    const newParams = module.getParams();
+    setParams(newParams);
+    onParamsChange?.(newParams);
+    logger.info('Auto shadows/highlights applied (image-aware)');
+  }, [module, onParamsChange]);
+
+  useRegisterModuleCardActions(onRegisterActions, { auto: handleAuto, reset: handleReset });
+
   return (
     <div className="space-y-3">
-      {/* Header */}
-      <div className="flex items-center justify-between pb-2" style={{borderBottom: '1px solid var(--border)'}}>
-        <div className="flex items-center gap-2">
-          <div className="w-1 h-3 rounded-sm" style={{backgroundColor: 'var(--gray-600)'}} />
-          <span className="text-xs font-medium uppercase tracking-wider" style={{color: 'var(--gray-500)', letterSpacing: '0.5px'}}>Controls</span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <button
-            onClick={() => {
-              const img = imageService.getCurrentImage();
-              if (!img) { logger.warn('No image for auto SH'); return; }
-              const stats = autoAdjustService.analyse(img.data, img.width, img.height);
-              const computed = autoAdjustService.autoShadowsHighlights(stats);
-              module.setParams(computed as ShadowsHighlightsParams);
-              const newParams = module.getParams();
-              setParams(newParams);
-              onParamsChange?.(newParams);
-              logger.info('Auto shadows/highlights applied (image-aware)');
-            }}
-            className="p-1.5 rounded border"
-            style={{
-              backgroundColor: 'transparent',
-              borderColor: 'var(--border)',
-              color: 'var(--gray-400)',
-              transition: 'var(--transition-fast)'
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = 'var(--gray-800)';
-              e.currentTarget.style.borderColor = 'var(--border-light)';
-              e.currentTarget.style.color = 'var(--white)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = 'transparent';
-              e.currentTarget.style.borderColor = 'var(--border)';
-              e.currentTarget.style.color = 'var(--gray-400)';
-            }}
-            title="Auto adjust"
-          >
-            <Zap className="w-3.5 h-3.5" />
-          </button>
-          <button
-            onClick={handleReset}
-            className="p-1.5 rounded border"
-            style={{
-              backgroundColor: 'transparent',
-              borderColor: 'var(--border)',
-              color: 'var(--gray-400)',
-              transition: 'var(--transition-fast)'
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = 'var(--gray-800)';
-              e.currentTarget.style.borderColor = 'var(--border-light)';
-              e.currentTarget.style.color = 'var(--white)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = 'transparent';
-              e.currentTarget.style.borderColor = 'var(--border)';
-              e.currentTarget.style.color = 'var(--gray-400)';
-            }}
-            title="Reset all"
-          >
-            <RotateCcw className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      </div>
-
       {/* Preset Buttons */}
       <div className="grid grid-cols-3 gap-1.5">
         <button

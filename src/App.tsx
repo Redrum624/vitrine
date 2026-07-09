@@ -1203,7 +1203,22 @@ function App() {
               pointerEvents: (selectedTool || histogramVisible) ? 'auto' : 'none'
             }}
           >
-            {/* Panel content (Controls / File / Settings) — fills the space ABOVE the histogram */}
+            {/* Histogram card — ABOVE the module card (spec order: histogram, then module). */}
+            {histogramVisible && (
+              <div
+                style={{
+                  flex: selectedTool ? '0 0 auto' : '1 1 auto',
+                  minHeight: 0,
+                  overflowY: 'auto',
+                  padding: '12px 12px 0 12px',
+                  backgroundColor: 'var(--gray-900)',
+                }}
+              >
+                <HistogramPanel />
+              </div>
+            )}
+
+            {/* Panel content (Controls / File / Settings) — fills the space BELOW the histogram */}
             <div style={{ flex: selectedTool ? '1 1 0%' : '0 0 0%', minHeight: 0, overflow: 'hidden' }}>
               <div style={{display: selectedTool === 'file-explorer' ? 'block' : 'none', height: '100%'}}>
                 <FileBrowser
@@ -1219,21 +1234,6 @@ function App() {
                 <AdjustmentPanel selectedModule={selectedTool} currentImage={currentImage} />
               </div>
             </div>
-
-            {/* Histogram — stacked BELOW the Controls (its top = the Controls' bottom), never overlapping. */}
-            {histogramVisible && (
-              <div
-                style={{
-                  flex: selectedTool ? '0 0 auto' : '1 1 auto',
-                  minHeight: 0,
-                  overflowY: 'auto',
-                  borderTop: '1px solid var(--border)',
-                  backgroundColor: 'var(--gray-900)',
-                }}
-              >
-                <HistogramPanel />
-              </div>
-            )}
           </div>
 
           {/* Column 1: Canvas (flex) — splits when referenceMode is active */}

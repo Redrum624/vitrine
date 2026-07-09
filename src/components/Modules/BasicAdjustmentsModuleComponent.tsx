@@ -1,8 +1,9 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { RotateCcw, Zap, Circle, Trash2 } from 'lucide-react';
+import { RotateCcw, Circle, Trash2 } from 'lucide-react';
 import { BasicAdjustmentsModule, BasicAdjParams } from '../../modules/BasicAdjustmentsModule';
 import { logger } from '../../utils/Logger';
 import { DelayedInputControl } from '../Controls/DelayedInputControl';
+import { useRegisterModuleCardActions, type RegisterModuleCardActions } from '../Controls/moduleCardActions';
 import { autoAdjustService } from '../../services/AutoAdjustService';
 import { imageService } from '../../services/ImageService';
 import { imageProcessingPipeline } from '../../services/ImageProcessingPipeline';
@@ -46,11 +47,14 @@ const BASIC_ADJ_SLIDERS: SliderCfg[] = [
 interface BasicAdjustmentsModuleComponentProps {
   module: BasicAdjustmentsModule;
   onParamsChange?: (params: Partial<BasicAdjParams>) => void;
+  /** Surfaces this module's Auto/Reset to the unified card header (Task 2). */
+  onRegisterActions?: RegisterModuleCardActions;
 }
 
 export function BasicAdjustmentsModuleComponent({
   module,
-  onParamsChange
+  onParamsChange,
+  onRegisterActions
 }: BasicAdjustmentsModuleComponentProps) {
   const [params, setParams] = useState<BasicAdjParams>(module.getParams());
   const paramsRef = useRef<BasicAdjParams>(params);
@@ -111,6 +115,23 @@ export function BasicAdjustmentsModuleComponent({
     onParamsChange?.(resetParams);
     logger.info('BasicAdj: All parameters reset to defaults');
   }, [module, onParamsChange]);
+
+  // Image-aware auto: analyse the current image and apply the computed basic
+  // adjustments. Lifted verbatim from the old inner-header ⚡ button so the card
+  // header's Auto keeps identical semantics (Task 2).
+  const handleAuto = useCallback(() => {
+    const img = imageService.getCurrentImage();
+    if (!img) { logger.warn('No image for auto adjust'); return; }
+    const stats = autoAdjustService.analyse(img.data, img.width, img.height);
+    const computed = autoAdjustService.autoBasicAdj(stats);
+    module.setParams(computed);
+    const newParams = module.getParams() as BasicAdjParams;
+    setParams(newParams);
+    onParamsChange?.(newParams);
+    logger.info('Auto adjustments applied (image-aware)');
+  }, [module, onParamsChange]);
+
+  useRegisterModuleCardActions(onRegisterActions, { auto: handleAuto, reset: resetAll });
 
   // ── Local Adjustments: mask tools + per-mask "second Basic Adjustments" ─────
   const [masks, setMasks] = useState<LocalAdjustmentLayer[]>([]);
@@ -288,72 +309,6 @@ export function BasicAdjustmentsModuleComponent({
 
   return (
     <div className="space-y-3">
-      {/* Header - Redesigned */}
-      <div className="flex items-center justify-between pb-2" style={{borderBottom: '1px solid var(--border)'}}>
-        <div className="flex items-center gap-2">
-          <div className="w-1 h-3 rounded-sm" style={{backgroundColor: 'var(--gray-600)'}} />
-          <span className="text-xs font-medium uppercase tracking-wider" style={{color: 'var(--gray-500)', letterSpacing: '0.5px'}}>Controls</span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <button
-            onClick={() => {
-              const img = imageService.getCurrentImage();
-              if (!img) { logger.warn('No image for auto adjust'); return; }
-              const stats = autoAdjustService.analyse(img.data, img.width, img.height);
-              const computed = autoAdjustService.autoBasicAdj(stats);
-              module.setParams(computed);
-              const newParams = module.getParams() as BasicAdjParams;
-              setParams(newParams);
-              onParamsChange?.(newParams);
-              logger.info('Auto adjustments applied (image-aware)');
-            }}
-            className="p-1.5 rounded border"
-            style={{
-              backgroundColor: 'transparent',
-              borderColor: 'var(--border)',
-              color: 'var(--gray-400)',
-              transition: 'var(--transition-fast)'
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = 'var(--gray-800)';
-              e.currentTarget.style.borderColor = 'var(--border-light)';
-              e.currentTarget.style.color = 'var(--white)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = 'transparent';
-              e.currentTarget.style.borderColor = 'var(--border)';
-              e.currentTarget.style.color = 'var(--gray-400)';
-            }}
-            title="Auto adjust"
-          >
-            <Zap className="w-3.5 h-3.5" />
-          </button>
-          <button
-            onClick={resetAll}
-            className="p-1.5 rounded border"
-            style={{
-              backgroundColor: 'transparent',
-              borderColor: 'var(--border)',
-              color: 'var(--gray-400)',
-              transition: 'var(--transition-fast)'
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = 'var(--gray-800)';
-              e.currentTarget.style.borderColor = 'var(--border-light)';
-              e.currentTarget.style.color = 'var(--white)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = 'transparent';
-              e.currentTarget.style.borderColor = 'var(--border)';
-              e.currentTarget.style.color = 'var(--gray-400)';
-            }}
-            title="Reset all"
-          >
-            <RotateCcw className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      </div>
-
       {/* Local Adjustments mask tools */}
       <div className="space-y-2 pb-2" style={{ borderBottom: '1px solid var(--border)' }}>
         <label className="text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--gray-500)', letterSpacing: '0.5px' }}>Local Adjustments</label>

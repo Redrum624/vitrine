@@ -20,6 +20,10 @@ import { LensCorrectionsModuleComponent } from '../Modules/LensCorrectionsModule
 import { HistoryPanel } from './HistoryPanel';
 import { RawDecodePanel } from './RawDecodePanel';
 import EnhanceModuleComponent from '../Modules/EnhanceModuleComponent';
+import { ModuleCardHeader } from '../Controls/ModuleCardHeader';
+import type { ModuleCardActions } from '../Controls/moduleCardActions';
+import { Sun, Droplet, Palette, Activity, Crop, Sparkles, Focus, History as HistoryIcon, Sliders } from 'lucide-react';
+import type { ReactNode } from 'react';
 import type { ImageFileInfo } from '../../services/FileSystemService';
 import { imageProcessingPipeline } from '../../services/ImageProcessingPipeline';
 import { imageService } from '../../services/ImageService';
@@ -43,6 +47,10 @@ interface AdjustmentPanelProps {
 export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPanelProps) {
   const { setProcessedImageData, processingVersion, externalParamsVersion, setProcessingStats } = useAppStore();
   const [resetCounter, setResetCounter] = useState(0);
+  // The Auto/Reset handlers the CURRENTLY-mounted module registers with the card
+  // header (Task 2). Only one module mounts at a time, so a single slot suffices;
+  // React runs cleanups before setups, so a module switch ends on the new module.
+  const [moduleActions, setModuleActions] = useState<ModuleCardActions | null>(null);
   // Remount the module panels (so each re-reads module.getParams() into its
   // sliders) on a manual Reset OR when params are set in bulk from outside the
   // panels (Paste Style / Auto All / presets). External bulk-setters bump
@@ -525,72 +533,6 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
     }
   }, [whiteBalanceModule, processCurrentImageRealTime]);
 
-  const resetAllModules = useCallback(() => {
-    // Call resetParams() on each module individually, just like individual reset buttons do
-    // This ensures the exact same behavior as clicking each reset button
-
-    // Reset new modules first (Crop & Transform unified, Lens Corrections, Local Adjustments)
-    if (cropModule) {
-      cropModule.reset();
-      const cropParams = cropModule.getParams();
-      handleModuleParamsChange('crop', cropParams, 'button');
-    }
-
-    if (lensCorrectionsModule) {
-      lensCorrectionsModule.reset();
-      const lensParams = lensCorrectionsModule.getParameters();
-      handleModuleParamsChange('lenscorrections', lensParams.lensCorrectionsParams, 'button');
-    }
-
-    if (localAdjustmentsModule) {
-      localAdjustmentsModule.reset();
-      const localParams = localAdjustmentsModule.getParameters();
-      handleModuleParamsChange('localadjustments', localParams.defaultParams, 'button');
-    }
-
-    // Reset core modules
-    if (basicAdjModule) {
-      basicAdjModule.resetParams();
-      const basicAdjParams = basicAdjModule.getParams();
-      handleModuleParamsChange('basicadj', basicAdjParams, 'button');
-    }
-
-    if (whiteBalanceModule) {
-      whiteBalanceModule.resetParams();
-      const whiteBalanceParams = whiteBalanceModule.getParams();
-      handleModuleParamsChange('temperature', whiteBalanceParams, 'button');
-    }
-
-    // ToneCurve, ColorBalance, and ShadowsHighlights are pipeline modules
-    // They need to be reset through the pipeline's resetAllModules method
-    // since they don't have individual resetParams methods
-    imageProcessingPipeline.resetAllModules();
-
-    // Increment reset counter to force all module components to refresh
-    setResetCounter(prev => prev + 1);
-
-    // Clear debounce history since we're resetting everything
-    adaptiveDebounceService.clearHistory();
-
-    // Immediate processing for reset operations
-    adaptiveDebounceService.debounce(
-      'reset-all-modules',
-      processCurrentImageRealTime,
-      {
-        moduleId: 'all',
-        parameterName: 'reset',
-        changeType: 'button'
-      },
-      {
-        priority: 'high',
-        immediate: false,
-        adaptiveDelay: false
-      }
-    );
-
-    logger.info('All modules reset to defaults');
-  }, [processCurrentImageRealTime, basicAdjModule, whiteBalanceModule, handleModuleParamsChange, cropModule, lensCorrectionsModule, localAdjustmentsModule]);
-
   // Latest processing callback behind a stable ref: the mount/image effect below must
   // re-fire on IMAGE identity (mount + image-load listener events), never on callback
   // identity churn — a [processCurrentImageRealTime] dep re-ran the already-processed
@@ -668,52 +610,83 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
     return titles[selectedModule || ''] || 'Develop';
   };
 
+  // Card-header icon chip glyph, reusing each module's IconSidebar lucide icon.
+  const getModuleIcon = (): ReactNode => {
+    const icons: Record<string, ReactNode> = {
+      crop: <Crop size={15} />,
+      basicadj: <Sun size={15} />,
+      whitebalance: <Droplet size={15} />,
+      tonecurve: <Activity size={15} />,
+      enhance: <Sparkles size={15} />,
+      shadowshighlights: <Sun size={15} />,
+      colorbalance: <Palette size={15} />,
+      localadjustments: <Sliders size={15} />,
+      lenscorrections: <Focus size={15} />,
+      history: <HistoryIcon size={15} />,
+    };
+    return icons[selectedModule || ''] ?? <Sliders size={15} />;
+  };
+
+  // Cheap state subtitle. WB/Crop are derived live; BasicAdj counts non-zero
+  // params; the rest fall back to a static description (per the Task-2 brief).
+  const getModuleSubtitle = (): string | undefined => {
+    const countActive = (p: Record<string, unknown> | undefined): number =>
+      p ? Object.values(p).filter((v) => typeof v === 'number' && v !== 0).length : 0;
+    try {
+      switch (selectedModule) {
+        case 'whitebalance': {
+          const p = whiteBalanceModule?.getParams() as { preset?: string; temperature?: number } | undefined;
+          if (!p) return 'Temperature & tint';
+          const raw = p.preset && p.preset !== 'custom' ? p.preset : 'Custom';
+          const label = raw.charAt(0).toUpperCase() + raw.slice(1);
+          return typeof p.temperature === 'number' ? `${label} · ${Math.round(p.temperature)} K` : label;
+        }
+        case 'crop': {
+          const p = cropModule?.getParams() as { aspectRatio?: string; angle?: number } | undefined;
+          if (!p) return 'Ratio & geometry';
+          const ratio = p.aspectRatio && p.aspectRatio !== 'free' ? p.aspectRatio : 'Free';
+          const angle = typeof p.angle === 'number' ? p.angle : 0;
+          return angle ? `Ratio ${ratio} · ${angle > 0 ? '+' : ''}${angle.toFixed(1)}°` : `Ratio ${ratio}`;
+        }
+        case 'basicadj': {
+          const n = countActive(basicAdjModule?.getParams() as Record<string, unknown> | undefined);
+          return n > 0 ? `${n} edit${n === 1 ? '' : 's'} active` : 'No adjustments';
+        }
+        case 'colorbalance': return 'Color grading';
+        case 'tonecurve': return 'Curve editor';
+        case 'enhance': return 'Detail & scale';
+        case 'shadowshighlights': return 'Tone recovery';
+        case 'localadjustments': return 'Masked adjustments';
+        case 'lenscorrections': return 'Vignette · distortion · grain';
+        case 'history': return 'Edit timeline';
+        default: return 'Develop';
+      }
+    } catch {
+      return undefined;
+    }
+  };
+
   return (
     <div className="flex flex-col h-full" style={{width: '360px', backgroundColor: 'var(--gray-900)'}}>
-      {/* Header - Redesigned */}
-      <div className="border-b flex items-center justify-between" style={{padding: '14px 20px', borderBottomColor: 'var(--border)', backgroundColor: 'var(--black)'}}>
-        <div className="flex items-center gap-2">
-          <div className="w-1 h-4 rounded-sm" style={{backgroundColor: 'var(--white)'}} />
-          <h2 className="text-white font-semibold uppercase tracking-wider" style={{fontSize: '11px', fontWeight: 600, letterSpacing: '1.5px'}}>
-            {getModuleTitle()}
-          </h2>
-        </div>
-        <button
-          onClick={resetAllModules}
-          className="border-0 cursor-pointer px-3 py-1.5 rounded text-xs font-medium"
-          style={{
-            backgroundColor: 'var(--gray-850)',
-            color: 'var(--gray-300)',
-            transition: 'var(--transition-fast)',
-            border: '1px solid var(--border)',
-            cursor: 'pointer'
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.color = 'var(--white)';
-            e.currentTarget.style.backgroundColor = 'var(--gray-800)';
-            e.currentTarget.style.borderColor = 'var(--border-light)';
-            e.currentTarget.style.cursor = 'pointer';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.color = 'var(--gray-300)';
-            e.currentTarget.style.backgroundColor = 'var(--gray-850)';
-            e.currentTarget.style.borderColor = 'var(--border)';
-            e.currentTarget.style.cursor = 'pointer';
-          }}
-          title="Reset all adjustments to defaults"
-        >
-          Reset All
-        </button>
-      </div>
+      {/* Module card lives in the current 360px overlay; the floating column is Task 5. */}
+      <div className="flex-1 overflow-y-auto" style={{ padding: '12px' }}>
 
-      {/* Darktable Modules */}
-      <div className="flex-1 overflow-y-auto">
+        {/* RAW Decode — pinned above the module card; self-gates to RAW images only,
+            so it's a no-op render for non-RAW files. */}
+        <RawDecodePanel currentImage={currentImage} />
 
-        {/* RAW Decode — pinned at the top regardless of which module is selected below;
-            self-gates to RAW images only, so it's a no-op render for non-RAW files. */}
-        <div className="px-5 pt-4">
-          <RawDecodePanel currentImage={currentImage} />
-        </div>
+        {/* Unified module card (Glass · Sectioned §4): header chrome + body. */}
+        <div className="glass-card dc-rise" style={{ overflow: 'hidden' }}>
+          <ModuleCardHeader
+            icon={getModuleIcon()}
+            title={getModuleTitle()}
+            subtitle={getModuleSubtitle()}
+            onAuto={moduleActions?.auto}
+            onReset={moduleActions?.reset}
+          />
+
+          {/* Module bodies — unchanged for Task 2 (restyled in Tasks 3-4). */}
+          <div>
 
         {/* Crop Module */}
         {cropModule && selectedModule === 'crop' && (() => {
@@ -727,6 +700,7 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
                 imageData={img?.data}
                 imageWidth={img?.width || 0}
                 imageHeight={img?.height || 0}
+                onRegisterActions={setModuleActions}
               />
             </div>
           );
@@ -739,6 +713,7 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
               key={`basicadj-${paramSync}`}
               module={basicAdjModule}
               onParamsChange={(params) => handleModuleParamsChange('basicadj', params)}
+              onRegisterActions={setModuleActions}
             />
           </div>
         )}
@@ -751,6 +726,7 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
               module={whiteBalanceModule}
               onParamsChange={(params) => handleModuleParamsChange('temperature', params)}
               onAutoDetect={handleAutoWhiteBalance}
+              onRegisterActions={setModuleActions}
             />
           </div>
         )}
@@ -762,6 +738,7 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
               key={`tonecurve-${paramSync}`}
               module={toneCurveModule.getToneCurveModule()}
               onParamsChange={(params) => handleModuleParamsChange('tonecurve', params)}
+              onRegisterActions={setModuleActions}
             />
           </div>
         )}
@@ -775,6 +752,7 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
               noiseReductionModule={noiseReductionModule}
               onParamsChange={(params) => handleModuleParamsChange('enhance', params)}
               onNoiseReductionChange={(p) => handleModuleParamsChange('noise-reduction', p)}
+              onRegisterActions={setModuleActions}
             />
           </div>
         )}
@@ -786,6 +764,7 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
               key={`shadowshighlights-${paramSync}`}
               module={shadowsHighlightsModule.getShadowsHighlightsModule()}
               onParamsChange={(params) => handleModuleParamsChange('shadowshighlights', params)}
+              onRegisterActions={setModuleActions}
             />
           </div>
         )}
@@ -797,6 +776,7 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
               key={`colorbalance-${paramSync}`}
               module={colorBalanceModule.getColorBalanceModule()}
               onParamsChange={(params) => handleModuleParamsChange('colorbalance', params)}
+              onRegisterActions={setModuleActions}
             />
           </div>
         )}
@@ -855,6 +835,7 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
                   if (la.activeLayerId) localAdjustmentsModule.setLayerGeometry(la.activeLayerId, geom, img.width, img.height);
                   reprocess();
                 }}
+                onRegisterActions={setModuleActions}
               />
             </div>
           );
@@ -902,6 +883,7 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
                 handleModuleParamsChange('lenscorrections', lensCorrectionsModule.getParameters().lensCorrectionsParams);
                 useAppStore.getState().notifyExternalParamsChange();
               }}
+              onRegisterActions={setModuleActions}
             />
           </div>
         )}
@@ -911,6 +893,8 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
             <HistoryPanel />
           </div>
         )}
+          </div>
+        </div>
       </div>
     </div>
   );
