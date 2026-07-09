@@ -353,27 +353,36 @@ class WebGLImageProcessor {
     return ok;
   }
 
-  /** CPU reference — a replica of ColorBalanceModule.process. */
+  /** CPU reference — a replica of ColorBalanceModule.process (keep formula-identical
+   *  with it AND with sources.ts FRAG_COLORBALANCE: normalised band weights,
+   *  chroma gate, proportional saturation, headroom-mapped luminance). */
   colorBalanceCPU(
     data: Float32Array, _width: number, _height: number,
     shadows: number[], mid: number[], high: number[], sat: number[], lum: number[], hue: number[]
   ): Float32Array {
     const out = new Float32Array(data);
     const ranges: [number[], 0 | 1 | 2][] = [[shadows, 0], [mid, 1], [high, 2]];
+    const bandW = [0, 0, 0, 0, 0, 0, 0, 0];
     for (let i = 0; i < out.length; i += 4) {
       let r = out[i], g = out[i + 1], b = out[i + 2];
       const luminance = 0.299 * r + 0.587 * g + 0.114 * b;
       for (const [vals, rng] of ranges) {
         const w = cbTonalWeight(luminance, rng);
-        if (w > 0.01) { r += vals[0] * w * 0.1; g += vals[1] * w * 0.1; b += vals[2] * w * 0.1; }
+        if (w > 0.01) { r += vals[0] * w * 0.3; g += vals[1] * w * 0.3; b += vals[2] * w * 0.3; }
       }
       r = clamp01(r); g = clamp01(g); b = clamp01(b);
       const [h, s, l] = rgbToHsl(r, g, b);
-      let nh = h, ns = s, nl = l;
+      let wSum = 0;
+      for (let c = 0; c < 8; c++) { bandW[c] = cbColorWeight(h, c); wSum += bandW[c]; }
+      const scale = Math.min(1, s / 20) / Math.max(1, wSum);
+      let hueShift = 0, satAdj = 0, lumAdj = 0;
       for (let c = 0; c < 8; c++) {
-        const w = cbColorWeight(h, c);
-        if (w > 0.01) { nh += hue[c] * w; ns += sat[c] * w; nl += lum[c] * w; }
+        const w = bandW[c] * scale;
+        hueShift += hue[c] * w; satAdj += (sat[c] / 100) * w; lumAdj += (lum[c] / 100) * w;
       }
+      const nh = ((h + hueShift) % 360 + 360) % 360;
+      const ns = Math.max(0, Math.min(100, s * (1 + satAdj)));
+      const nl = Math.max(0, Math.min(100, lumAdj >= 0 ? l + (100 - l) * lumAdj : l + l * lumAdj));
       const [nr, ng, nb] = hslToRgb(nh, ns, nl);
       out[i] = clamp01(nr); out[i + 1] = clamp01(ng); out[i + 2] = clamp01(nb);
     }

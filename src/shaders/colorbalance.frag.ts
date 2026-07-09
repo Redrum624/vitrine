@@ -1,4 +1,7 @@
 /**
+ * DEAD CODE — unused (only imported by the equally-dead GPUImageProcessor.ts).
+ * The live color-balance shader is FRAG_COLORBALANCE in ./sources.ts.
+ *
  * Color Balance Shader
  * GPU-accelerated 3-way color grading (shadows, midtones, highlights)
  */

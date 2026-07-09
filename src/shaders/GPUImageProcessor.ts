@@ -1,4 +1,8 @@
 /**
+ * DEAD CODE — unused (imported by nothing live). The live GPU pipeline is
+ * WebGLImageProcessor + GpuPreviewPipeline with shaders from ./sources.ts
+ * (color balance: FRAG_COLORBALANCE).
+ *
  * GPUImageProcessor - Hardware-Accelerated Image Processing
  *
  * Uses WebGL2 shaders for fast image processing operations.

@@ -5,7 +5,8 @@
  * and 8-color HSL adjustments.
  */
 
-import { ColorBalanceModule } from './ColorBalanceModule';
+import { ColorBalanceModule, ColorBalanceParams } from './ColorBalanceModule';
+import { rgbToHsl } from './utils/ColorUtils';
 import {
   createTestImage,
   createProcessingContext,
@@ -292,70 +293,109 @@ describe('ColorBalanceModule', () => {
     });
   });
 
-  describe('Global color controls - HSL adjustments', () => {
-    it('should increase red saturation', () => {
-      const width = 4;
-      const height = 4;
-      // Create reddish image
-      const input = createTestImage(width, height, 0.7, 0.3, 0.3);
-      const context = createProcessingContext(width, height);
+  describe('Global color controls - HSL calibration', () => {
+    // Quantitative tests locking the calibrated formula (proportional saturation,
+    // headroom-mapped luminance, normalised band weights, chroma gate). The exact
+    // same math is mirrored in WebGLImageProcessor.colorBalanceCPU and
+    // sources.ts FRAG_COLORBALANCE — the GPU parity self-check depends on it.
+    const W = 2;
+    const H = 2;
+    const ctx = createProcessingContext(W, H);
 
-      module.setParams({ red_saturation: 50 });
-      const output = module.process(input, context);
+    /** Process one uniform-colour image; return the first output pixel as RGB + HSL. */
+    const run = (rgb: [number, number, number], params: Partial<ColorBalanceParams>) => {
+      module.setParams(params);
+      const out = module.process(createTestImage(W, H, rgb[0], rgb[1], rgb[2]), ctx);
+      const [r, g, b] = getPixel(out, W, 0, 0);
+      return { r, g, b, hsl: rgbToHsl(r, g, b) };
+    };
 
-      expect(isValidImageData(output)).toBe(true);
-      // Output should still be valid
+    it('saturation -100 desaturates an in-band pixel to exact grayscale (S\'==0)', () => {
+      // Pure green (h=120) sits alone in the green band (weight sum == 1),
+      // so -100 gives satAdj == -1 -> S' = S * (1 - 1) = 0 -> r == g == b.
+      const { r, g, b } = run([0, 1, 0], { green_saturation: -100 });
+      expect(r).toBeCloseTo(0.5, 6);
+      expect(g).toBeCloseTo(0.5, 6);
+      expect(b).toBeCloseTo(0.5, 6);
     });
 
-    it('should shift red hue', () => {
-      const width = 4;
-      const height = 4;
-      // Create reddish image
-      const input = createTestImage(width, height, 0.8, 0.2, 0.2);
-      const context = createProcessingContext(width, height);
-
-      module.setParams({ red_hue: 30 });
-      const output = module.process(input, context);
-
-      expect(isValidImageData(output)).toBe(true);
+    it('saturation +100 exactly doubles chroma of an in-band pixel (S 40 -> 80)', () => {
+      // hslToRgb(120, 40, 50) == (0.3, 0.7, 0.3)
+      const { hsl } = run([0.3, 0.7, 0.3], { green_saturation: 100 });
+      expect(hsl[1]).toBeCloseTo(80, 3);
+      expect(hsl[0]).toBeCloseTo(120, 3); // hue untouched
+      expect(hsl[2]).toBeCloseTo(50, 3);  // lightness untouched
     });
 
-    it('should adjust red luminance', () => {
-      const width = 4;
-      const height = 4;
-      const input = createTestImage(width, height, 0.7, 0.3, 0.3);
-      const context = createProcessingContext(width, height);
-
-      module.setParams({ red_luminance: 20 });
-      const output = module.process(input, context);
-
-      expect(isValidImageData(output)).toBe(true);
+    it('red slider effect on pure red is scaled by the normalised band weight (sum=1.5 at h=0)', () => {
+      // At h=0 the weights are red=1.0 + orange=0.5 (30-deg falloff), sum=1.5,
+      // so wFinal(red) = 1/1.5 and red_saturation=-100 gives S' = 100*(1 - 2/3).
+      const down = run([1, 0, 0], { red_saturation: -100 });
+      expect(down.hsl[1]).toBeCloseTo(100 / 3, 3);
+      // hslToRgb(0, 40, 50) == (0.7, 0.3, 0.3): +100 -> S' = 40*(1 + 2/3)
+      const up = run([0.7, 0.3, 0.3], { red_saturation: 100 });
+      expect(up.hsl[1]).toBeCloseTo(200 / 3, 3);
     });
 
-    it('should adjust blue color separately', () => {
-      const width = 4;
-      const height = 4;
-      // Create bluish image
-      const input = createTestImage(width, height, 0.2, 0.2, 0.8);
-      const context = createProcessingContext(width, height);
-
-      module.setParams({ blue_saturation: 30 });
-      const output = module.process(input, context);
-
-      expect(isValidImageData(output)).toBe(true);
+    it('chroma gate: mid-gray is completely unchanged by red saturation/luminance', () => {
+      // Grays get h=0 from rgbToHsl (red band) but S=0 -> gate min(1, S/20) == 0.
+      const { r, g, b } = run([0.5, 0.5, 0.5], { red_saturation: 100, red_luminance: 100 });
+      expect(r).toBeCloseTo(0.5, 10);
+      expect(g).toBeCloseTo(0.5, 10);
+      expect(b).toBeCloseTo(0.5, 10);
     });
 
-    it('should adjust green color separately', () => {
-      const width = 4;
-      const height = 4;
-      // Create greenish image
-      const input = createTestImage(width, height, 0.2, 0.8, 0.2);
-      const context = createProcessingContext(width, height);
+    it('chroma gate ramps linearly below S=20 (S=10 -> half effect)', () => {
+      // hslToRgb(120, 10, 50) == (0.45, 0.55, 0.45); gate = 10/20 = 0.5,
+      // so green_saturation=-100 gives S' = 10 * (1 - 0.5) = 5.
+      const { hsl } = run([0.45, 0.55, 0.45], { green_saturation: -100 });
+      expect(hsl[1]).toBeCloseTo(5, 3);
+    });
 
-      module.setParams({ green_saturation: 30 });
-      const output = module.process(input, context);
+    it('luminance +100 lifts an in-band L=50 pixel to exactly L\'=100', () => {
+      const { r, g, b } = run([0.3, 0.7, 0.3], { green_luminance: 100 });
+      expect(r).toBeCloseTo(1, 5);
+      expect(g).toBeCloseTo(1, 5);
+      expect(b).toBeCloseTo(1, 5);
+    });
 
-      expect(isValidImageData(output)).toBe(true);
+    it('luminance -100 drops an in-band L=50 pixel to exactly L\'=0', () => {
+      const { r, g, b } = run([0.3, 0.7, 0.3], { green_luminance: -100 });
+      expect(r).toBeCloseTo(0, 5);
+      expect(g).toBeCloseTo(0, 5);
+      expect(b).toBeCloseTo(0, 5);
+    });
+
+    it('luminance +50 maps half the headroom: L 50 -> 75', () => {
+      const { hsl } = run([0.3, 0.7, 0.3], { green_luminance: 50 });
+      expect(hsl[2]).toBeCloseTo(75, 3);
+      expect(hsl[1]).toBeCloseTo(40, 3); // saturation untouched
+    });
+
+    it('normalises overlapping bands at a shared boundary (h=45: orange+yellow -> 1x, not 2x)', () => {
+      // hslToRgb(45, 40, 50) == (0.7, 0.6, 0.3). Both bands have weight 1.0 at
+      // h=45 (sum=2), so +30 on each shifts hue by 30 total, not 60.
+      const { hsl } = run([0.7, 0.6, 0.3], { orange_hue: 30, yellow_hue: 30 });
+      expect(hsl[0]).toBeCloseTo(75, 3);
+    });
+
+    it('traditional midtones cyan_red +1.0 shifts mid-gray red channel by exactly 0.3', () => {
+      // getTonalWeight(0.5, 'midtones') == 1.0 -> r = 0.5 + 1.0 * 1.0 * 0.3.
+      const { r, g, b } = run([0.5, 0.5, 0.5], {
+        midtones: { cyan_red: 1.0, magenta_green: 0, yellow_blue: 0 },
+      });
+      expect(r).toBeCloseTo(0.8, 4);
+      expect(g).toBeCloseTo(0.5, 4);
+      expect(b).toBeCloseTo(0.5, 4);
+    });
+
+    it('default parameters are an exact identity', () => {
+      for (const rgb of [[0.7, 0.3, 0.3], [0.3, 0.7, 0.3], [0.2, 0.4, 0.9], [0.5, 0.5, 0.5]] as const) {
+        const { r, g, b } = run([rgb[0], rgb[1], rgb[2]], {});
+        expect(r).toBeCloseTo(rgb[0], 6);
+        expect(g).toBeCloseTo(rgb[1], 6);
+        expect(b).toBeCloseTo(rgb[2], 6);
+      }
     });
   });
 

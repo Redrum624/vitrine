@@ -266,24 +266,28 @@ class AutoAdjustService {
     const castG = (stats.meanG - avgAll) - (tgtG - 1) * avgAll;
     const castB = (stats.meanB - avgAll) - (tgtB - 1) * avgAll;
 
-    // Apply stronger correction to midtones, lighter to shadows/highlights
-    const midStrength = 0.8;
-    const sideStrength = 0.4;
+    // Apply stronger correction to midtones, lighter to shadows/highlights.
+    // Strengths and clamps are divided by 3: the Color Balance traditional-tab
+    // damping factor went 0.1 -> 0.3, so 1/3 the params keeps Auto results
+    // visually identical to what these strengths were originally tuned for.
+    const midStrength = 0.8 / 3;
+    const sideStrength = 0.4 / 3;
+    const lim = 0.5 / 3;
 
     const shadows = {
-      cyan_red: clamp(-castR * sideStrength * 2, -0.5, 0.5),
-      magenta_green: clamp(-castG * sideStrength * 2, -0.5, 0.5),
-      yellow_blue: clamp(-castB * sideStrength * 2, -0.5, 0.5),
+      cyan_red: clamp(-castR * sideStrength * 2, -lim, lim),
+      magenta_green: clamp(-castG * sideStrength * 2, -lim, lim),
+      yellow_blue: clamp(-castB * sideStrength * 2, -lim, lim),
     };
     const midtones = {
-      cyan_red: clamp(-castR * midStrength * 2, -0.5, 0.5),
-      magenta_green: clamp(-castG * midStrength * 2, -0.5, 0.5),
-      yellow_blue: clamp(-castB * midStrength * 2, -0.5, 0.5),
+      cyan_red: clamp(-castR * midStrength * 2, -lim, lim),
+      magenta_green: clamp(-castG * midStrength * 2, -lim, lim),
+      yellow_blue: clamp(-castB * midStrength * 2, -lim, lim),
     };
     const highlights = {
-      cyan_red: clamp(-castR * sideStrength * 2, -0.5, 0.5),
-      magenta_green: clamp(-castG * sideStrength * 2, -0.5, 0.5),
-      yellow_blue: clamp(-castB * sideStrength * 2, -0.5, 0.5),
+      cyan_red: clamp(-castR * sideStrength * 2, -lim, lim),
+      magenta_green: clamp(-castG * sideStrength * 2, -lim, lim),
+      yellow_blue: clamp(-castB * sideStrength * 2, -lim, lim),
     };
 
     logger.info(`AutoColorBalance[${name}]: bias R=${castR.toFixed(3)}, G=${castG.toFixed(3)}, B=${castB.toFixed(3)}`);

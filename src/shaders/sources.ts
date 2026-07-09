@@ -127,16 +127,27 @@ void main() {
   vec4 src = texture(u_image, v_uv);
   vec3 rgb = src.rgb;
   float lum = 0.299 * rgb.r + 0.587 * rgb.g + 0.114 * rgb.b;
-  float ws = tonal(lum, 0); if (ws > 0.01) rgb += u_shadows * ws * 0.1;
-  float wm = tonal(lum, 1); if (wm > 0.01) rgb += u_mid * wm * 0.1;
-  float wh = tonal(lum, 2); if (wh > 0.01) rgb += u_high * wh * 0.1;
+  float ws = tonal(lum, 0); if (ws > 0.01) rgb += u_shadows * ws * 0.3;
+  float wm = tonal(lum, 1); if (wm > 0.01) rgb += u_mid * wm * 0.3;
+  float wh = tonal(lum, 2); if (wh > 0.01) rgb += u_high * wh * 0.3;
   rgb = clamp(rgb, 0.0, 1.0);
   vec3 hsl = rgb2hsl(rgb);
-  float nh = hsl.x, ns = hsl.y, nl = hsl.z;
+  // Calibrated HSL bands — keep formula-identical with ColorBalanceModule.process
+  // and WebGLImageProcessor.colorBalanceCPU (the GPU self-check compares them):
+  // normalised band weights, chroma gate min(1, S/20), proportional saturation,
+  // headroom-mapped luminance.
+  float w[8];
+  float wSum = 0.0;
+  for (int i = 0; i < 8; i++) { w[i] = colorWeight(hsl.x, i); wSum += w[i]; }
+  float scale = min(1.0, hsl.y / 20.0) / max(1.0, wSum);
+  float hueShift = 0.0, satAdj = 0.0, lumAdj = 0.0;
   for (int i = 0; i < 8; i++) {
-    float w = colorWeight(hsl.x, i);
-    if (w > 0.01) { nh += u_hue[i] * w; ns += u_sat[i] * w; nl += u_lum[i] * w; }
+    float wf = w[i] * scale;
+    hueShift += u_hue[i] * wf; satAdj += (u_sat[i] / 100.0) * wf; lumAdj += (u_lum[i] / 100.0) * wf;
   }
+  float nh = hsl.x + hueShift;
+  float ns = clamp(hsl.y * (1.0 + satAdj), 0.0, 100.0);
+  float nl = clamp(lumAdj >= 0.0 ? hsl.z + (100.0 - hsl.z) * lumAdj : hsl.z + hsl.z * lumAdj, 0.0, 100.0);
   outColor = vec4(clamp(hsl2rgb(nh, ns, nl), 0.0, 1.0), src.a);
 }`;
 

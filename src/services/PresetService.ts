@@ -350,9 +350,11 @@ export class PresetService {
         },
         colorBalance: {
           enabled: true,
-          shadows: { cyan_red: 5, magenta_green: 0, yellow_blue: 10 },
-          midtones: { cyan_red: 0, magenta_green: -5, yellow_blue: 15 },
-          highlights: { cyan_red: -5, magenta_green: 0, yellow_blue: 5 },
+          // Values divided by 3 to compensate the 0.1 -> 0.3 damping change in
+          // ColorBalanceModule (value * weight * 0.3): same pixel output as before.
+          shadows: { cyan_red: 5 / 3, magenta_green: 0, yellow_blue: 10 / 3 },
+          midtones: { cyan_red: 0, magenta_green: -5 / 3, yellow_blue: 5 },
+          highlights: { cyan_red: -5 / 3, magenta_green: 0, yellow_blue: 5 / 3 },
           preserveLuminosity: true,
           globalSaturation: 0.1,
           globalVibrance: 0.15,
@@ -385,9 +387,11 @@ export class PresetService {
         },
         colorBalance: {
           enabled: true,
-          shadows: { cyan_red: 15, magenta_green: -5, yellow_blue: -10 },
-          midtones: { cyan_red: 5, magenta_green: 0, yellow_blue: 0 },
-          highlights: { cyan_red: -10, magenta_green: -5, yellow_blue: 20 },
+          // Values divided by 3 to compensate the 0.1 -> 0.3 damping change in
+          // ColorBalanceModule (value * weight * 0.3): same pixel output as before.
+          shadows: { cyan_red: 5, magenta_green: -5 / 3, yellow_blue: -10 / 3 },
+          midtones: { cyan_red: 5 / 3, magenta_green: 0, yellow_blue: 0 },
+          highlights: { cyan_red: -10 / 3, magenta_green: -5 / 3, yellow_blue: 20 / 3 },
           preserveLuminosity: true,
           globalSaturation: 0.2,
           globalVibrance: 0.2,

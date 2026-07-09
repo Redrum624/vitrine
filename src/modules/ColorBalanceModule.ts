@@ -213,6 +213,13 @@ export class ColorBalanceModule {
       );
     }
 
+    // Precompute per-band slider values once (sat/lum as -1..+1 factors, hue in degrees).
+    const colorRanges = ['red', 'orange', 'yellow', 'green', 'cyan', 'blue', 'purple', 'magenta'];
+    const satP = colorRanges.map(c => this.getNumericParam(`${c}_saturation`) / 100);
+    const lumP = colorRanges.map(c => this.getNumericParam(`${c}_luminance`) / 100);
+    const hueP = colorRanges.map(c => this.getNumericParam(`${c}_hue`));
+    const bandW = [0, 0, 0, 0, 0, 0, 0, 0];
+
     // Process each pixel
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
@@ -231,10 +238,11 @@ export class ColorBalanceModule {
           if (weight > 0.01) {
             const range = this.params[rangeName];
 
-            // Apply color balance adjustments
-            r += range.cyan_red * weight * 0.1;
-            g += range.magenta_green * weight * 0.1;
-            b += range.yellow_blue * weight * 0.1;
+            // Apply color balance adjustments (0.3 damping = max channel shift
+            // at full deflection; mirrored in colorBalanceCPU + FRAG_COLORBALANCE)
+            r += range.cyan_red * weight * 0.3;
+            g += range.magenta_green * weight * 0.3;
+            b += range.yellow_blue * weight * 0.3;
           }
         }
 
@@ -243,36 +251,40 @@ export class ColorBalanceModule {
         g = Math.max(0.0, Math.min(1.0, g));
         b = Math.max(0.0, Math.min(1.0, b));
 
-        // 2. Apply global color controls (HSL-based)
+        // 2. Apply global color controls (HSL-based).
+        // CALIBRATION — MUST stay formula-identical with the two mirrors
+        // (WebGLImageProcessor.colorBalanceCPU and sources.ts FRAG_COLORBALANCE);
+        // the runtime GPU self-check compares them and permanently falls back to
+        // CPU on any drift. The formula:
+        //  - band weights normalised so their sum never exceeds 1 (no double
+        //    effect where adjacent hue bands overlap)
+        //  - chroma gate min(1, S/20) keeps neutral pixels untouched (grays get
+        //    h=0 from rgbToHsl, which would otherwise land in the red band)
+        //  - saturation is proportional: -100 => grayscale, +100 => 2x chroma
+        //  - luminance maps the remaining headroom: +100 => L=100, -100 => L=0
         const [h, s, l] = rgbToHsl(r, g, b);
 
-        let newH = h;
-        let newS = s;
-        let newL = l;
+        let wSum = 0;
+        for (let i = 0; i < 8; i++) {
+          bandW[i] = this.calculateColorWeight(h, colorRanges[i]);
+          wSum += bandW[i];
+        }
+        const scale = Math.min(1, s / 20) / Math.max(1, wSum);
 
-        // Apply color-specific adjustments
-        const colorRanges = ['red', 'orange', 'yellow', 'green', 'cyan', 'blue', 'purple', 'magenta'];
-
-        for (const colorRange of colorRanges) {
-          const weight = this.calculateColorWeight(h, colorRange);
-
-          if (weight > 0.01) { // Only apply if there's significant weight
-            // Safely get numeric parameters with type guards
-            const satAdjust = this.getNumericParam(`${colorRange}_saturation`);
-            const lumAdjust = this.getNumericParam(`${colorRange}_luminance`);
-            const hueAdjust = this.getNumericParam(`${colorRange}_hue`);
-
-            // Apply weighted adjustments
-            newH += (hueAdjust * weight);
-            newS += (satAdjust * weight);
-            newL += (lumAdjust * weight);
-          }
+        let hueShift = 0;
+        let satAdj = 0;
+        let lumAdj = 0;
+        for (let i = 0; i < 8; i++) {
+          const w = bandW[i] * scale;
+          hueShift += hueP[i] * w;
+          satAdj += satP[i] * w;
+          lumAdj += lumP[i] * w;
         }
 
-        // Clamp values
-        newH = (newH % 360 + 360) % 360;
-        newS = Math.max(0, Math.min(100, newS));
-        newL = Math.max(0, Math.min(100, newL));
+        const newH = ((h + hueShift) % 360 + 360) % 360;
+        const newS = Math.max(0, Math.min(100, s * (1 + satAdj)));
+        const newL = Math.max(0, Math.min(100,
+          lumAdj >= 0 ? l + (100 - l) * lumAdj : l + l * lumAdj));
 
         // Convert back to RGB
         const [newR, newG, newB] = hslToRgb(newH, newS, newL);
