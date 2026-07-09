@@ -1,6 +1,16 @@
 // src/test/enhancePanel.test.tsx
+// Controls what imageService.getOriginalImage() reports to the component (null = no image
+// loaded → feasibility unknown → every scale stays enabled).
+let mockOriginalDims: { width: number; height: number } | null = null;
 import { render, screen, fireEvent, act } from '@testing-library/react';
+jest.mock('../services/ImageService', () => ({ imageService: {
+  getOriginalImage: jest.fn(() => (mockOriginalDims ? { data: new Float32Array(4), ...mockOriginalDims } : null)),
+  getCurrentImage: jest.fn(() => null),
+} }));
 jest.mock('../services/EnhanceService', () => ({
+  // getUpscaleFeasibility is a PURE helper — use the real implementation so the
+  // disabled states / tooltip numbers under test are the production ones.
+  getUpscaleFeasibility: jest.requireActual('../services/EnhanceService').getUpscaleFeasibility,
   enhanceService: { applyUpscale: jest.fn(async () => {}), revert: jest.fn(), canRevert: () => false }
 }));
 import EnhanceModuleComponent from '../components/Modules/EnhanceModuleComponent';
@@ -19,6 +29,7 @@ describe('EnhanceModuleComponent', () => {
   beforeEach(() => {
     enhanceModule.resetParams();
     useAppStore.setState({ upscaleProgress: null, upscaleMode: null });
+    mockOriginalDims = null;
   });
 
   it('shows the scale selector only when Upscale is on', () => {
@@ -101,5 +112,61 @@ describe('EnhanceModuleComponent', () => {
     fireEvent.click(screen.getByText('Detail & quality'));
     expect(screen.getByText('Sharpen strength')).toBeInTheDocument();
     expect(screen.getByText('Noise reduction strength')).toBeInTheDocument();
+  });
+});
+
+describe('EnhanceModuleComponent — upscale feasibility (160 MP output cap)', () => {
+  beforeEach(() => {
+    enhanceModule.resetParams();
+    useAppStore.setState({ upscaleProgress: null, upscaleMode: null });
+    mockOriginalDims = null;
+    (enhanceService.applyUpscale as jest.Mock).mockClear();
+  });
+
+  it('disables ×4 with an explanatory title for a 20 MP (5200×3904) image; ×2 stays enabled', () => {
+    mockOriginalDims = { width: 5200, height: 3904 };
+    render(<EnhanceModuleComponent module={enhanceModule} noiseReductionModule={makeNrModule()} />);
+    fireEvent.click(screen.getByRole('button', { name: /upscale/i }));
+
+    const x4 = screen.getByRole('button', { name: '4×' });
+    expect(x4).toBeDisabled();
+    const title = x4.getAttribute('title') ?? '';
+    expect(title).toMatch(/325 MP/);   // 20800×15616 = 324,812,800 px → 325 MP
+    expect(title).toMatch(/160 MP/);   // the cap
+    expect(title).toMatch(/×2/);       // max feasible scale for this image
+    expect(screen.getByRole('button', { name: '2×' })).toBeEnabled();
+  });
+
+  it('keeps ×4 enabled (no warning title) for a small 2000×1500 image', () => {
+    mockOriginalDims = { width: 2000, height: 1500 };
+    render(<EnhanceModuleComponent module={enhanceModule} noiseReductionModule={makeNrModule()} />);
+    fireEvent.click(screen.getByRole('button', { name: /upscale/i }));
+
+    const x4 = screen.getByRole('button', { name: '4×' });
+    expect(x4).toBeEnabled();
+    expect(x4.getAttribute('title')).toBeNull();
+  });
+
+  it('prevents Apply when the SELECTED scale is infeasible (e.g. ×4 kept after an image switch)', async () => {
+    mockOriginalDims = { width: 5200, height: 3904 };
+    enhanceModule.setParams({ upscale: true, scale: 4 });
+    render(<EnhanceModuleComponent module={enhanceModule} noiseReductionModule={makeNrModule()} />);
+
+    // Inline hint near the selector explains why, with the computed numbers.
+    expect(screen.getByTestId('upscale-infeasible-hint')).toHaveTextContent(/max for this image: ×2/i);
+
+    const apply = screen.getByRole('button', { name: /apply enhance/i });
+    expect(apply).toBeDisabled();
+    await act(async () => { fireEvent.click(apply); });
+    expect(enhanceService.applyUpscale).not.toHaveBeenCalled();
+  });
+
+  it('still surfaces a residual service throw via the role="alert" error line', async () => {
+    mockOriginalDims = { width: 2000, height: 1500 };
+    (enhanceService.applyUpscale as jest.Mock).mockRejectedValueOnce(new Error('boom from service'));
+    render(<EnhanceModuleComponent module={enhanceModule} noiseReductionModule={makeNrModule()} />);
+    fireEvent.click(screen.getByRole('button', { name: /upscale/i }));
+    await act(async () => { fireEvent.click(screen.getByText(/Apply Enhance \(×/)); });
+    expect(screen.getByRole('alert')).toHaveTextContent('boom from service');
   });
 });

@@ -43,7 +43,10 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
   // panels (Paste Style / Auto All / presets). External bulk-setters bump
   // externalParamsVersion; normal slider drags do not, so editing isn't disrupted.
   const paramSync = `${resetCounter}-${externalParamsVersion}`;
-  const [isProcessing, setIsProcessing] = useState(false);
+  // Only the setter is bound: nothing renders from this state, and depending on its VALUE
+  // anywhere (e.g. a useCallback dep) recreates the processing callback every run — the
+  // exact identity churn behind the endless-reprocess-loop bug. Use isProcessingRef to read.
+  const [, setIsProcessing] = useState(false);
   const processingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastProcessingTimeRef = useRef<number>(0);
   // Monotonic id per processing run. The 800ms spinner timer and the finally clear are
@@ -91,7 +94,7 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
   const noiseReductionModule = imageProcessingPipeline.getModule<NoiseReductionModule>('noise-reduction');
   const enhanceModuleInstance = imageProcessingPipeline.getModule<EnhanceModule>('enhance');
 
-  const processCurrentImageRealTime = useCallback(async () => {
+  const processCurrentImageRealTime = useCallback(async (opts?: { queueIfBusy?: boolean }) => {
     const currentImage = imageService.getCurrentImage();
     console.log('AdjustmentPanel: processCurrentImageRealTime called, currentImage:', currentImage ? `${currentImage.width}x${currentImage.height}` : 'null');
 
@@ -103,10 +106,17 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
     // The debouncing and isProcessing checks provide sufficient protection.
 
     // Skip if a pipeline pass is already in flight (synchronous ref — React state is
-    // stale here). Mark it pending so the latest state is reprocessed when this finishes.
+    // stale here). Mark it pending so the latest state is reprocessed when this finishes —
+    // but ONLY for a real new trigger (param change / processingVersion bump / image load).
+    // Non-trigger callers (the mount effect) pass queueIfBusy:false; queuing those made the
+    // finally-block triggerReprocessing() feed the next pass forever.
     if (isProcessingRef.current) {
-      pendingReprocessRef.current = true;
-      logger.debug('Skipping processing - already in progress (queued)');
+      if (opts?.queueIfBusy !== false) {
+        pendingReprocessRef.current = true;
+        logger.debug('Skipping processing - already in progress (queued)');
+      } else {
+        logger.debug('Skipping processing - already in progress (not queued)');
+      }
       return;
     }
 
@@ -432,7 +442,11 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
         useAppStore.getState().triggerReprocessing();
       }
     }
-  }, [setProcessedImageData, setProcessingStats, isProcessing]);
+    // NOTE: deps deliberately exclude the isProcessing STATE — the body never reads it
+    // (it uses isProcessingRef + setIsProcessing). Including it minted a new callback
+    // identity on every run's true→false toggle, re-firing the [callback] effects below
+    // in an endless reprocess loop (82 identical passes in the renderer log).
+  }, [setProcessedImageData, setProcessingStats]);
 
   // Note: Removed viewport-triggered reprocessing as viewport changes (zoom, pan)
   // should not trigger image reprocessing - only display changes
@@ -468,9 +482,10 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
     if (!currentImage || !whiteBalanceModule) return;
 
     try {
-      // Median gray-world: scan the image for its overall median colour cast and
-      // neutralise it (both temperature/warmth AND tint). Channel count is detected
-      // from the buffer (RGB or RGBA).
+      // Gray-candidate estimation + damped correction: estimate the illuminant from
+      // near-neutral samples (median cast) and apply a partial temperature/tint
+      // correction that cleans the cast without sterilising warm scenes. Channel
+      // count is detected from the buffer (RGB or RGBA).
       const { data, width, height } = currentImage;
       const channels = Math.max(3, Math.round(data.length / (width * height)));
       whiteBalanceModule.autoDetectWhiteBalance(data, { width, height, channels });
@@ -568,6 +583,13 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
     logger.info('All modules reset to defaults');
   }, [processCurrentImageRealTime, basicAdjModule, whiteBalanceModule, handleModuleParamsChange, cropModule, lensCorrectionsModule, localAdjustmentsModule]);
 
+  // Latest processing callback behind a stable ref: the mount/image effect below must
+  // re-fire on IMAGE identity (mount + image-load listener events), never on callback
+  // identity churn — a [processCurrentImageRealTime] dep re-ran the already-processed
+  // image on every callback identity change.
+  const processCallbackRef = useRef(processCurrentImageRealTime);
+  processCallbackRef.current = processCurrentImageRealTime;
+
   // Monitor image changes for real-time updates
   useEffect(() => {
     // Add listener for new image loads
@@ -576,14 +598,15 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
       // Force module components to remount so they re-read the (reset) module params
       // instead of keeping stale styled values in their local useState
       setResetCounter(prev => prev + 1);
-      processCurrentImageRealTime();
+      processCallbackRef.current();
     });
 
-    // Process current image if one is already loaded
+    // Process current image if one is already loaded. Not a new trigger — if a pass is
+    // already in flight for this image, don't queue a redundant follow-up.
     const currentImage = imageService.getCurrentImage();
     if (currentImage) {
       logger.debug('Image detected, ready for real-time processing');
-      processCurrentImageRealTime();
+      processCallbackRef.current({ queueIfBusy: false });
     }
 
     // Cleanup listener and debounce service on unmount
@@ -596,7 +619,7 @@ export function AdjustmentPanel({ selectedModule }: AdjustmentPanelProps) {
         gpuReadbackTimerRef.current = null;
       }
     };
-  }, [processCurrentImageRealTime]);
+  }, []);
 
   // Watch for external processing triggers (e.g., from Canvas crop handles)
   useEffect(() => {

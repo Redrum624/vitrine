@@ -20,7 +20,7 @@ jest.mock('../services/CheckpointService', () => ({ checkpointService: { record:
 jest.mock('../services/EditPersistenceService', () => ({ editPersistenceService: { serialize: jest.fn(() => ({})), restore: jest.fn() } }));
 jest.mock('../stores/appStore', () => ({ useAppStore: { getState: () => ({ setIsProcessing: jest.fn(), setUpscaleProgress: jest.fn(), setUpscaleMode: jest.fn(), notifyExternalParamsChange: jest.fn(), triggerReprocessing: jest.fn() }) } }));
 
-import { enhanceService } from '../services/EnhanceService';
+import { enhanceService, getUpscaleFeasibility } from '../services/EnhanceService';
 import { imageService } from '../services/ImageService';
 import { imageProcessingPipeline } from '../services/ImageProcessingPipeline';
 import { enhanceWorkerClient } from '../services/EnhanceWorkerClient';
@@ -59,6 +59,38 @@ describe('EnhanceService.applyUpscale', () => {
     // 3904 × 5200 × scale 2 → 7808 × 10400 = 81.2 M pixels — under the 160 M cap (the real bug report).
     (imageService.getOriginalImage as jest.Mock).mockReturnValueOnce({ data: new Float32Array(4), width: 3904, height: 5200 });
     await expect(enhanceService.applyUpscale({ ...DEFAULT_ENHANCE_PARAMS, upscale: true, scale: 2 })).resolves.toBeUndefined();
+  });
+
+  it('rejects ×4 of the 20 MP bug-report image (5200×3904) with a message naming the limit and ×2', async () => {
+    (imageService.getOriginalImage as jest.Mock).mockReturnValueOnce({ data: new Float32Array(4), width: 5200, height: 3904 });
+    const p = enhanceService.applyUpscale({ ...DEFAULT_ENHANCE_PARAMS, upscale: true, scale: 4 });
+    await expect(p).rejects.toThrow(/160 MP/);
+    // The message must also tell the user the max feasible scale for THIS image (×2).
+    (imageService.getOriginalImage as jest.Mock).mockReturnValueOnce({ data: new Float32Array(4), width: 5200, height: 3904 });
+    await expect(enhanceService.applyUpscale({ ...DEFAULT_ENHANCE_PARAMS, upscale: true, scale: 4 })).rejects.toThrow(/×2/);
+  });
+});
+
+describe('getUpscaleFeasibility', () => {
+  it('reports ×4 infeasible for a 20 MP image (5200×3904) with maxFeasibleScale 2', () => {
+    const f = getUpscaleFeasibility(5200, 3904, 4);
+    expect(f.feasible).toBe(false);
+    expect(f.outputPixels).toBe(324_812_800);
+    expect(f.maxPixels).toBe(160_000_000);
+    expect(f.maxFeasibleScale).toBe(2);
+  });
+
+  it('a ~10 MP image (3162×3162) is right under the cap at ×4 — feasible', () => {
+    const f = getUpscaleFeasibility(3162, 3162, 4);
+    expect(f.outputPixels).toBe(12648 * 12648); // 159,971,904 ≤ 160 M
+    expect(f.feasible).toBe(true);
+    expect(f.maxFeasibleScale).toBe(4);
+  });
+
+  it('maxFeasibleScale is null when even ×2 overflows the cap', () => {
+    const f = getUpscaleFeasibility(30000, 30000, 2);
+    expect(f.feasible).toBe(false);
+    expect(f.maxFeasibleScale).toBeNull();
   });
 });
 

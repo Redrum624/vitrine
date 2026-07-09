@@ -4,7 +4,9 @@ import { ChevronDown, ChevronRight } from 'lucide-react';
 import { EnhanceModule } from '../../modules/EnhanceModule';
 import { NoiseReductionModule, NoiseReductionParams } from '../../modules/NoiseReductionModule';
 import { EnhanceParams, DEFAULT_ENHANCE_PARAMS } from '../../utils/enhanceChain';
-import { enhanceService } from '../../services/EnhanceService';
+import { enhanceService, getUpscaleFeasibility, UpscaleFeasibility } from '../../services/EnhanceService';
+import { imageService } from '../../services/ImageService';
+import { imageProcessingPipeline } from '../../services/ImageProcessingPipeline';
 import { useAppStore } from '../../stores/appStore';
 
 interface Props {
@@ -71,6 +73,36 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
   }, [nrEnabled, nrStrength, module, onParamsChange, onNoiseReductionChange]);
 
   const currentParams = paramsRef.current;
+
+  // Per-scale output-size feasibility for the CURRENT image (crop-adjusted dims, mirroring
+  // EnhanceService.applyUpscale). Unknown dims (no image) ⇒ leave every scale enabled; the
+  // service guard still protects the actual apply.
+  const feasibility: Partial<Record<2 | 4, UpscaleFeasibility>> = (() => {
+    const original = imageService.getOriginalImage();
+    if (!original) return {};
+    const cropMod = imageProcessingPipeline.getModule?.('crop') as
+      | { getOutputDimensions(w: number, h: number): { width: number; height: number } }
+      | undefined;
+    const dims = cropMod
+      ? cropMod.getOutputDimensions(original.width, original.height)
+      : { width: original.width, height: original.height };
+    return {
+      2: getUpscaleFeasibility(dims.width, dims.height, 2),
+      4: getUpscaleFeasibility(dims.width, dims.height, 4),
+    };
+  })();
+
+  const infeasibleHint = (s: 2 | 4): string | undefined => {
+    const f = feasibility[s];
+    if (!f || f.feasible) return undefined;
+    const outMP = Math.round(f.outputPixels / 1e6);
+    const maxMP = Math.round(f.maxPixels / 1e6);
+    const maxHint = f.maxFeasibleScale !== null ? ` (max for this image: ×${f.maxFeasibleScale})` : '';
+    return `×${s} would create a ${outMP} MP image — over the ${maxMP} MP limit${maxHint}`;
+  };
+
+  const selectedScaleInfeasible =
+    params.upscale && feasibility[params.scale as 2 | 4]?.feasible === false;
 
   return (
     <div className="enhance-panel px-5 pt-4 space-y-4">
@@ -168,19 +200,29 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
               </span>
             )}
             <div style={{ display: 'flex', border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
-              {([2, 4] as const).map((s) => (
-                <button key={s} type="button"
-                  style={{
-                    padding: '5px 14px',
-                    background: params.scale === s ? 'var(--primary-600)' : 'var(--gray-800)',
-                    color: params.scale === s ? '#fff' : 'var(--gray-300)',
-                    border: 0,
-                    fontSize: '.78rem', cursor: 'pointer', fontFamily: 'ui-monospace,monospace',
-                  }}
-                  onClick={() => update({ scale: s })}>{s}×</button>
-              ))}
+              {([2, 4] as const).map((s) => {
+                const infeasible = feasibility[s]?.feasible === false;
+                return (
+                  <button key={s} type="button"
+                    disabled={infeasible}
+                    title={infeasibleHint(s)}
+                    style={{
+                      padding: '5px 14px',
+                      background: params.scale === s ? 'var(--primary-600)' : 'var(--gray-800)',
+                      color: infeasible ? 'var(--gray-600)' : params.scale === s ? '#fff' : 'var(--gray-300)',
+                      border: 0,
+                      fontSize: '.78rem', cursor: infeasible ? 'not-allowed' : 'pointer', fontFamily: 'ui-monospace,monospace',
+                    }}
+                    onClick={() => update({ scale: s })}>{s}×</button>
+                );
+              })}
             </div>
           </div>
+          {selectedScaleInfeasible && (
+            <div data-testid="upscale-infeasible-hint" style={{ fontSize: '.68rem', color: '#f87171', marginTop: -2 }}>
+              {infeasibleHint(params.scale as 2 | 4)}
+            </div>
+          )}
           <div style={{ fontSize: '.68rem', color: 'var(--gray-400)', marginTop: -2 }}>
             AI super-resolution on your GPU when available, otherwise Standard (Lanczos).
           </div>
@@ -294,12 +336,13 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
       {/* Apply button */}
       <button
         type="button"
-        disabled={busy}
+        disabled={busy || selectedScaleInfeasible}
         style={{
           width: '100%', padding: 11, borderRadius: 9,
           border: '1px solid var(--primary-500, #3b82f6)',
           background: 'var(--primary-600, #2563eb)', color: '#fff', fontSize: '.84rem', fontWeight: 600,
-          cursor: busy ? 'wait' : 'pointer', opacity: busy ? 0.75 : 1,
+          cursor: busy ? 'wait' : selectedScaleInfeasible ? 'not-allowed' : 'pointer',
+          opacity: busy || selectedScaleInfeasible ? 0.75 : 1,
           display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
         }}
         onClick={handleApply}

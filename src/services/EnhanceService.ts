@@ -31,6 +31,39 @@ function uint8ToFloat32Rgba(u: Uint8Array): Float32Array {
 // also fails gracefully (the working image is left untouched) if memory runs out.
 const MAX_OUTPUT_PIXELS = 160_000_000;
 
+/** Scale factors the Enhance UI offers. */
+const SUPPORTED_UPSCALE_SCALES = [2, 4] as const;
+
+export interface UpscaleFeasibility {
+  feasible: boolean;
+  outputPixels: number;
+  maxPixels: number;
+  /** Largest supported scale whose output fits under the cap, or null if none does. */
+  maxFeasibleScale: number | null;
+}
+
+/**
+ * Pure feasibility check for upscaling a width×height image by `scale` against the
+ * MAX_OUTPUT_PIXELS memory cap. Used by the UI to disable impossible scale choices
+ * up front, and by applyUpscale's guard (defense in depth).
+ */
+export function getUpscaleFeasibility(width: number, height: number, scale: number): UpscaleFeasibility {
+  const pixelsAt = (s: number) => Math.round(width * s) * Math.round(height * s);
+  const outputPixels = pixelsAt(scale);
+  let maxFeasibleScale: number | null = null;
+  for (const s of SUPPORTED_UPSCALE_SCALES) {
+    if (pixelsAt(s) <= MAX_OUTPUT_PIXELS && (maxFeasibleScale === null || s > maxFeasibleScale)) {
+      maxFeasibleScale = s;
+    }
+  }
+  return {
+    feasible: outputPixels <= MAX_OUTPUT_PIXELS,
+    outputPixels,
+    maxPixels: MAX_OUTPUT_PIXELS,
+    maxFeasibleScale,
+  };
+}
+
 interface RestorePoint {
   data: Float32Array;
   width: number;
@@ -74,11 +107,14 @@ class EnhanceService {
 
     const outW = Math.round(procW * params.scale);
     const outH = Math.round(procH * params.scale);
-    const outPixels = outW * outH;
-    if (outPixels > MAX_OUTPUT_PIXELS) {
-      const outMP = (outPixels / 1e6).toFixed(0);
-      const maxMP = (MAX_OUTPUT_PIXELS / 1e6).toFixed(0);
-      throw new Error(`Upscale would produce ${outMP} MP (${outW}×${outH}), above the ${maxMP} MP memory limit. Try ×2 instead of ×4, or a smaller image.`);
+    const feasibility = getUpscaleFeasibility(procW, procH, params.scale);
+    if (!feasibility.feasible) {
+      const outMP = (feasibility.outputPixels / 1e6).toFixed(0);
+      const maxMP = (feasibility.maxPixels / 1e6).toFixed(0);
+      const hint = feasibility.maxFeasibleScale !== null
+        ? `Max feasible scale for this image: ×${feasibility.maxFeasibleScale}.`
+        : 'This image is too large to upscale at any supported scale.';
+      throw new Error(`Upscale ×${params.scale} would produce ${outMP} MP (${outW}×${outH}), above the ${maxMP} MP memory limit. ${hint}`);
     }
 
     const store = useAppStore.getState();
