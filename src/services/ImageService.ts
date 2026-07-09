@@ -7,6 +7,8 @@ import { canvasPoolService } from './CanvasPoolService';
 import { autoRawAdjustmentService, RAWDetectionResult } from './AutoRawAdjustmentService';
 import { ImageProcessingPipeline } from './ImageProcessingPipeline';
 import { useAppStore } from '../stores/appStore';
+import { editPersistenceService } from './EditPersistenceService';
+import { DEFAULT_RAW_DECODE_OPTIONS } from '../types/electron';
 
 export interface ImageData {
   width: number;
@@ -447,7 +449,16 @@ export class ImageService {
     logger.info(`Decoding image for export (no editor side effects): ${filePath}`);
 
     if (rawImageService.isRawFile(filePath)) {
-      const rawData = await rawImageService.loadRawImage(filePath);
+      // Honor the per-image decode options so the export matches what the user sees in the
+      // preview: the CURRENTLY open image's options live in the store (source of truth while
+      // it's open); any OTHER file's options were persisted by EditPersistenceService the last
+      // time it was open. Neither present -> DEFAULT_RAW_DECODE_OPTIONS.
+      const isCurrentImage = this.getCurrentImage()?.filePath === filePath;
+      const decodeOptions = isCurrentImage
+        ? useAppStore.getState().rawDecodeOptions
+        : (await editPersistenceService.getSavedRawDecodeOptions(filePath)) ?? DEFAULT_RAW_DECODE_OPTIONS;
+
+      const rawData = await rawImageService.loadRawImage(filePath, undefined, decodeOptions);
 
       const dimensionValidation = ValidationService.validateDimensions(rawData.width, rawData.height);
       if (!dimensionValidation.valid) {

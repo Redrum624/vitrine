@@ -4,6 +4,7 @@ import { rawImageService } from '../services/RawImageService';
 import { imageService } from '../services/ImageService';
 import { checkpointService } from '../services/CheckpointService';
 import { imageProcessingPipeline } from '../services/ImageProcessingPipeline';
+import { imageCacheService } from '../services/ImageCacheService';
 import { DEFAULT_RAW_DECODE_OPTIONS, RawDecodeOptions } from '../types/electron';
 import type { ImageData as ServiceImageData } from '../services/ImageService';
 
@@ -144,5 +145,98 @@ describe('RawImageService.reDecode', () => {
     jest.spyOn(imageService, 'getCurrentImage').mockReturnValue(null);
     await rawImageService.reDecode(AHD_RECON);
     expect(api().decodeRawFile).not.toHaveBeenCalled();
+  });
+
+  it('bails out without mutating the newly-selected image when the user switches mid-decode', async () => {
+    const original = makeRaw();
+    const switched = makeRaw({ fileName: 'other.orf', filePath: '/other.orf' });
+    let liveImage: ServiceImageData | null = original;
+    jest.spyOn(imageService, 'getCurrentImage').mockImplementation(() => liveImage);
+    const upd = jest.spyOn(imageService, 'updateCurrentImageData').mockImplementation(() => {});
+    const setOrig = jest.spyOn(imageService, 'setOriginalImage').mockImplementation(() => {});
+    const save = jest.spyOn(editPersistenceService, 'scheduleSave').mockImplementation(() => {});
+    const cacheSet = jest.spyOn(imageCacheService, 'set');
+    const clearCache = jest.spyOn(imageProcessingPipeline, 'clearCache');
+
+    api().decodeRawFile.mockImplementation(async () => {
+      // Simulate the user switching to a different image while this native decode IPC call
+      // is still in flight (before it resolves back into RawImageService.reDecode).
+      liveImage = switched;
+      const px = new Uint16Array(4 * 2 * 3).fill(32768);
+      return { data: px.buffer.slice(0), width: 4, height: 2, channels: 3, bitDepth: 16 };
+    });
+
+    await rawImageService.reDecode(AHD_RECON);
+
+    // Only the still-valid cache write for the file that was ACTUALLY decoded may proceed —
+    // it's keyed by the original path and is correct data to have cached for a later reopen.
+    expect(cacheSet).toHaveBeenCalledWith(
+      '/photo.orf', expect.any(Float32Array), 4, 2, undefined, expect.objectContaining({ isRaw: true }),
+    );
+
+    // Nothing about the newly-selected image (now the one on screen) is touched.
+    expect(upd).not.toHaveBeenCalled();
+    expect(setOrig).not.toHaveBeenCalled();
+    expect(save).not.toHaveBeenCalled();
+    expect(clearCache).not.toHaveBeenCalled();
+    expect(useAppStore.getState().rawDecodeOptions).toEqual(DEFAULT_RAW_DECODE_OPTIONS);
+    expect(useAppStore.getState().reDecoding).toBe(false);
+  });
+});
+
+describe('ImageService.decodeForExport — per-file RAW decode options', () => {
+  const px = new Uint16Array(4 * 2 * 3).fill(32768); // 3ch 16-bit native decode payload
+
+  beforeEach(() => {
+    useAppStore.getState().setRawDecodeOptions(DEFAULT_RAW_DECODE_OPTIONS);
+    (window as unknown as { electronAPI: unknown }).electronAPI = {
+      decodeRawFile: jest.fn().mockImplementation(async () => ({
+        data: px.buffer.slice(0), width: 4, height: 2, channels: 3, bitDepth: 16,
+      })),
+      storeGet: jest.fn(),
+      storeSet: jest.fn(),
+    };
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+    useAppStore.getState().setRawDecodeOptions(DEFAULT_RAW_DECODE_OPTIONS);
+  });
+
+  const api = () => (window as unknown as { electronAPI: { decodeRawFile: jest.Mock } }).electronAPI;
+
+  it('uses the store options when exporting the CURRENT image', async () => {
+    jest.spyOn(imageService, 'getCurrentImage').mockReturnValue({
+      width: 4, height: 2, data: new Float32Array(4 * 2 * 4),
+      fileName: 'photo.orf', filePath: '/photo.orf', isRaw: true,
+    });
+    useAppStore.getState().setRawDecodeOptions(AHD_RECON);
+    const getSaved = jest.spyOn(editPersistenceService, 'getSavedRawDecodeOptions');
+
+    await imageService.decodeForExport('/photo.orf');
+
+    expect(api().decodeRawFile).toHaveBeenCalledWith('/photo.orf', AHD_RECON);
+    expect(getSaved).not.toHaveBeenCalled();
+  });
+
+  it('uses the persisted per-image options when exporting a NON-current file', async () => {
+    jest.spyOn(imageService, 'getCurrentImage').mockReturnValue({
+      width: 4, height: 2, data: new Float32Array(4 * 2 * 4),
+      fileName: 'photo.orf', filePath: '/photo.orf', isRaw: true,
+    });
+    jest.spyOn(editPersistenceService, 'getSavedRawDecodeOptions').mockResolvedValue(AHD_RECON);
+
+    await imageService.decodeForExport('/other.orf');
+
+    expect(api().decodeRawFile).toHaveBeenCalledWith('/other.orf', AHD_RECON);
+  });
+
+  it('falls back to DEFAULT_RAW_DECODE_OPTIONS for a non-current file with nothing persisted', async () => {
+    jest.spyOn(imageService, 'getCurrentImage').mockReturnValue(null);
+    jest.spyOn(editPersistenceService, 'getSavedRawDecodeOptions').mockResolvedValue(null);
+
+    await imageService.decodeForExport('/other.orf');
+
+    expect(api().decodeRawFile).toHaveBeenCalledWith('/other.orf', DEFAULT_RAW_DECODE_OPTIONS);
   });
 });

@@ -133,9 +133,11 @@ export class RawImageService {
    * the demosaic / highlight controls.
    *
    * Flow: guard (RAW only, not already running) → raise `reDecoding` → re-decode via the
-   * same native→wasm→embedded fallback chain (loadRawImage) → REPLACE the working base +
-   * before/after original snapshot + session cache → apply & persist the options → clear the
-   * pipeline cache and reprocess so the module edits re-apply → lower `reDecoding`.
+   * same native→wasm→embedded fallback chain (loadRawImage) → refresh the session cache →
+   * re-check that the user hasn't switched to a different image during the (async) decode,
+   * bailing out if so → REPLACE the working base + before/after original snapshot → apply &
+   * persist the options → clear the pipeline cache and reprocess so the module edits re-apply
+   * → lower `reDecoding`.
    *
    * History integrity (Step 4 decision): a re-decode does NOT push a checkpoint and does NOT
    * touch the History timeline. Decode options are a property of the base image, orthogonal to
@@ -159,10 +161,9 @@ export class RawImageService {
       logger.info(`Re-decoding RAW base for ${current.filePath} with`, options);
       const rawData = await this.loadRawImage(current.filePath, undefined, options);
 
-      // Replace the working base image + the before/after original snapshot, and refresh the
-      // session cache entry so a later cache-hit reopen returns these re-decoded pixels.
-      imageService.updateCurrentImageData(rawData.data, rawData.width, rawData.height);
-      imageService.setOriginalImage(new Float32Array(rawData.data), rawData.width, rawData.height);
+      // Refresh the session cache entry so a later cache-hit reopen of THIS path returns these
+      // re-decoded pixels. This is always correct regardless of what's on screen now, since it's
+      // keyed by current.filePath (the file that was actually decoded), not the live image.
       imageCacheService.set(
         current.filePath,
         rawData.data,
@@ -171,6 +172,21 @@ export class RawImageService {
         undefined,
         { isRaw: true, ...rawData.metadata },
       );
+
+      // The decode above is async — the user may have switched to a different image while it
+      // was in flight. Re-check identity before touching anything else: every remaining
+      // mutation (working base, original snapshot, store options, persistence, pipeline
+      // reprocessing) targets "the current image" and would corrupt whatever is now on screen
+      // if it's no longer the image we just decoded.
+      const stillCurrent = imageService.getCurrentImage();
+      if (!stillCurrent || stillCurrent.filePath !== current.filePath) {
+        logger.info(`Re-decode of ${current.filePath} discarded: current image changed during decode`);
+        return;
+      }
+
+      // Replace the working base image + the before/after original snapshot.
+      imageService.updateCurrentImageData(rawData.data, rawData.width, rawData.height);
+      imageService.setOriginalImage(new Float32Array(rawData.data), rawData.width, rawData.height);
 
       // Apply the options to the store (source of truth for the panel) and persist them
       // (scheduleSave writes serialize(), which embeds rawDecodeOptions into the edit state).
