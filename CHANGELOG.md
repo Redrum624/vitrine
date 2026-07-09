@@ -4,6 +4,13 @@ All notable changes to **Photo Editor Pro** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.13.1] - 2026-07-09
+
+### Fixed
+- **The RAW Decode panel now actually appears (v1.13.0 shipped it invisible).** Cause: the panel gated its visibility on the Zustand store's `currentImage`, but this app keeps the open image in App-local React state and never populates that store field (a code comment even notes it), so the gate was always false and the panel — the headline v1.13.0 feature — never rendered for any file. Fix: App threads its live `currentImage` down through `AdjustmentPanel` to `RawDecodePanel` as a prop (the prop is required on `AdjustmentPanel`, so the compiler now guarantees the wiring); the panel's own RAW-only extension check is unchanged. A regression test drives the panel through the prop, and the earlier test that masked the bug by writing the unused store field was corrected. Affects: `src/components/Panels/RawDecodePanel.tsx`, `src/components/Panels/AdjustmentPanel.tsx`, `src/App.tsx`.
+- **Changing a RAW decode option now actually updates the image on screen.** Cause: the GPU preview keeps its source texture resident and only re-uploaded it when the image path or preview dimensions changed — but a re-decode keeps both identical (only the demosaic/highlight pixels differ), so the pipeline kept rendering the previous decode even though the re-decode ran. Fix: a `baseImageVersion` counter is bumped whenever the working base pixels are replaced in place (RAW re-decode, upscale, rotate/flip) and folded into the GPU source-upload key, forcing the new pixels to upload. Affects: `src/stores/appStore.ts`, `src/services/ImageService.ts`, `src/components/Panels/AdjustmentPanel.tsx`.
+- **A failed RAW re-decode now shows an error instead of a silent unhandled rejection.** Cause: the panel called the async `reDecode` fire-and-forget; if the whole native→wasm→embedded chain failed it rejected with no `.catch`, giving the user no feedback and an unhandled promise rejection. Fix: re-decode failures surface a notification. Affects: `src/components/Panels/RawDecodePanel.tsx`.
+
 ## [1.13.0] - 2026-07-09
 
 ### Added
