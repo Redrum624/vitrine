@@ -112,24 +112,52 @@ class EditPersistenceService {
     return true;
   }
 
-  /** Load + apply saved edits for an image path. Returns true if anything was restored. */
-  async restoreForPath(path: string, width: number, height: number): Promise<boolean> {
-    let restored = false;
+  /**
+   * Fetch the full saved edit state for an image path in ONE IPC read — decode options
+   * AND module edits live in the same durable store entry. The image-open flow reads this
+   * once up front (before decode): the decode options seed the base decode, and the same
+   * state is then applied (restoreState) BEFORE the first pipeline pass — so persisted edits
+   * render on the first pass, with no second read, no double pass, and no unedited flash.
+   */
+  async getSavedEditState(path: string): Promise<EditState | null> {
     try {
-      const state = window.electronAPI?.storeGet
+      return window.electronAPI?.storeGet
         ? await window.electronAPI.storeGet<EditState>(this.keyForPath(path))
         : null;
+    } catch (e) {
+      logger.warn('getSavedEditState failed', e);
+      return null;
+    }
+  }
+
+  /**
+   * Apply a PRE-FETCHED edit state to the (already-reset) pipeline at width×height and
+   * seed the persistence baseline. Synchronous — NO IPC (the state was already read by
+   * getSavedEditState). Pass `null` for a pristine image (nothing to restore) to still
+   * seed the baseline so no spurious save fires. The open flow calls this from
+   * ImageService's beforeNotify hook so edits apply BEFORE the first pipeline pass.
+   * `logPath` only labels the "Restored saved edits" log line. Returns true if edits applied.
+   */
+  restoreState(state: EditState | null, width: number, height: number, logPath = ''): boolean {
+    let restored = false;
+    try {
       if (state) {
         restored = this.restore(state, width, height);
-        if (restored) logger.info(`Restored saved edits for ${path}`);
+        if (restored) logger.info(`Restored saved edits for ${logPath}`);
       }
     } catch (e) {
-      logger.warn('restoreForPath failed', e);
+      logger.warn('restoreState failed', e);
     }
-    // Baseline = the post-load state. Edits are persisted only once the state differs,
+    // Baseline = the post-restore state. Edits are persisted only once the state differs,
     // so unedited images and the load-triggered reprocess never write a spurious save.
     this.baseline = JSON.stringify(this.serialize());
     return restored;
+  }
+
+  /** Load + apply saved edits for an image path (one IPC read). Returns true if anything was restored. */
+  async restoreForPath(path: string, width: number, height: number): Promise<boolean> {
+    const state = await this.getSavedEditState(path);
+    return this.restoreState(state, width, height, path);
   }
 
   /**
@@ -140,15 +168,7 @@ class EditPersistenceService {
    * serialize() embedding useAppStore's rawDecodeOptions into the durable edit state.
    */
   async getSavedRawDecodeOptions(path: string): Promise<RawDecodeOptions | null> {
-    try {
-      const state = window.electronAPI?.storeGet
-        ? await window.electronAPI.storeGet<EditState>(this.keyForPath(path))
-        : null;
-      return state?.rawDecodeOptions ?? null;
-    } catch (e) {
-      logger.warn('getSavedRawDecodeOptions failed', e);
-      return null;
-    }
+    return (await this.getSavedEditState(path))?.rawDecodeOptions ?? null;
   }
 
   /** Debounced save of the current image's edits — call after any edit. */

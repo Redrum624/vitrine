@@ -771,9 +771,16 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
       setImageLoading(true);
       setDisplayImage(image);
 
-      // Load this image's saved RAW decode options (or defaults) into the store BEFORE decoding,
-      // so ImageService.loadImage decodes the base with the user's last-chosen demosaic/highlights.
-      const savedDecodeOptions = await editPersistenceService.getSavedRawDecodeOptions(image.path);
+      // Fetch this image's FULL saved edit state (decode options + module edits) in ONE IPC
+      // read, up front — BEFORE decoding. Decode options AND the per-image edits live in the
+      // same durable store entry, so one round-trip yields both. The decode options seed the
+      // store below so ImageService decodes the base with the user's last-chosen
+      // demosaic/highlights; the module edits are applied (in the beforeNotify hook below)
+      // BEFORE the first pipeline pass. This replaces the old two-read flow (this read for
+      // options + a second restoreForPath AFTER the load), where edits restored ~350ms after
+      // the first pass — a visible unedited-image flash and a redundant second pass on every
+      // edited photo.
+      const savedState = await editPersistenceService.getSavedEditState(image.path);
 
       // The user may have switched to a different image while the above await was in
       // flight (rapid filmstrip/gallery clicks) — bail before writing decode options
@@ -785,17 +792,26 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
         logger.info(`Image load of ${image.path} discarded: superseded before decode options resolved`);
         return;
       }
-      useAppStore.getState().setRawDecodeOptions(savedDecodeOptions ?? DEFAULT_RAW_DECODE_OPTIONS);
+      useAppStore.getState().setRawDecodeOptions(savedState?.rawDecodeOptions ?? DEFAULT_RAW_DECODE_OPTIONS);
 
-      // Load image using ImageService (will use cache if available)
-      await imageService.loadImage(image.path);
+      // Load the image. The beforeNotify hook fires synchronously once the base is decoded
+      // (real dimensions known) but BEFORE ImageService notifies its load listeners — the
+      // point that triggers the first pipeline pass. Seeding the restored module params there
+      // makes that first pass render the EDITED image directly: one pass, no unedited flash.
+      // The identity guard mirrors ImageService's own generation guard (belt-and-suspenders: a
+      // superseded decode never reaches its notify, so this hook won't run for a stale image),
+      // and local-adjustment geometry restores against the REAL decoded dimensions.
+      await imageService.loadImage(image.path, (decoded) => {
+        if (activeLoadPathRef.current !== image.path) return;
+        editPersistenceService.restoreState(savedState, decoded.width, decoded.height, image.path);
+      });
 
       // The decode above is async — the user may have switched to a different image
       // while it was in flight (rapid filmstrip/gallery clicks). Re-check identity
-      // before touching any per-image state below: setImageDimensions/restoreForPath/
-      // checkpoint history all target THIS image and would corrupt whatever is now
-      // actually on screen if a newer loadImage call for a different image completed
-      // in the meantime (mirrors RawImageService.reDecode's stillCurrent guard).
+      // before touching any per-image state below: setImageDimensions and checkpoint
+      // history all target THIS image and would corrupt whatever is now actually on
+      // screen if a newer loadImage call for a different image completed in the meantime
+      // (mirrors RawImageService.reDecode's stillCurrent guard).
       const decoded = imageService.getCurrentImage();
       if (!decoded || decoded.filePath !== image.path) {
         logger.info(`Image load of ${image.path} discarded: current image changed during decode`);
@@ -806,8 +822,9 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
       // dimensions are known — upgrade the shared map so the gallery/dock tile
       // stops showing format-only meta (fix round 1, Critical review finding).
       useAppStore.getState().setImageDimensions(image.id, { width: decoded.width, height: decoded.height });
-      const restored = await editPersistenceService.restoreForPath(image.path, decoded.width, decoded.height);
-      if (restored) useAppStore.getState().triggerReprocessing();
+      // NOTE: saved edits were already restored in the beforeNotify hook above — BEFORE the
+      // first pipeline pass — so there is no restoreForPath / triggerReprocessing here. That
+      // post-load restore + reprocess was the redundant SECOND pass that flashed the unedited image.
       // Load this image's checkpoint history; seed an "Opened" baseline if empty.
       await checkpointService.loadForPath(image.path);
       if (checkpointService.getCheckpoints().length === 0) checkpointService.record('Opened');

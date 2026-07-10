@@ -2,9 +2,9 @@
  * Regression test for a stale-write race in `Canvas.loadImage`.
  *
  * `loadImage` awaits `imageService.loadImage(image.path)` and then, using the
- * closure's OWN `image` param (not re-checked), writes `setImageDimensions`,
- * `editPersistenceService.restoreForPath`, and `checkpointService.loadForPath`
- * for that image. If the user switches to a different image while the first
+ * closure's OWN `image` param (not re-checked), writes `setImageDimensions` and
+ * `checkpointService.loadForPath` for that image (and, in the beforeNotify hook,
+ * `editPersistenceService.restoreState`). If the user switches to a different image while the first
  * decode is still in flight (rapid filmstrip/gallery clicks), the first call's
  * awaited `imageService.loadImage` can resolve AFTER a second, newer call has
  * already finished and become the one on screen — `imageService.currentImage`
@@ -39,6 +39,8 @@ jest.mock('../services/EditPersistenceService', () => ({
   editPersistenceService: {
     flush: jest.fn(),
     scheduleSave: jest.fn(),
+    getSavedEditState: jest.fn(async () => null),
+    restoreState: jest.fn(() => false),
     getSavedRawDecodeOptions: jest.fn(async () => null),
     restoreForPath: jest.fn(async () => false),
   },
@@ -77,8 +79,8 @@ describe('Canvas.loadImage — mid-flight image-switch race', () => {
   beforeEach(() => {
     useAppStore.setState({ imageDimensions: {} });
     jest.clearAllMocks();
-    (editPersistenceService.getSavedRawDecodeOptions as jest.Mock).mockResolvedValue(null);
-    (editPersistenceService.restoreForPath as jest.Mock).mockResolvedValue(false);
+    (editPersistenceService.getSavedEditState as jest.Mock).mockResolvedValue(null);
+    (editPersistenceService.restoreState as jest.Mock).mockReturnValue(false);
     (checkpointService.getCheckpoints as jest.Mock).mockReturnValue([{ id: 1 }]);
   });
 
@@ -90,17 +92,26 @@ describe('Canvas.loadImage — mid-flight image-switch race', () => {
     let current: { filePath: string; width: number; height: number } | null = null;
     let resolveA: () => void = () => {};
 
-    (imageService.loadImage as jest.Mock).mockImplementation((path: string) => {
+    // Thread the beforeNotify hook exactly like the real ImageService: it only fires when
+    // this decode is still current (the generation guard), so a superseded load never seeds
+    // its (stale) edits — mirroring ImageService returning before notify for a stale gen.
+    (imageService.loadImage as jest.Mock).mockImplementation((path: string, beforeNotify?: (r: unknown) => void) => {
       const myGeneration = ++generation;
       if (path === IMG_A.path) {
         return new Promise<void>((resolve) => {
           resolveA = () => {
-            if (myGeneration === generation) current = { filePath: path, width: 111, height: 222 };
+            if (myGeneration === generation) {
+              current = { filePath: path, width: 111, height: 222 };
+              beforeNotify?.(current);
+            }
             resolve();
           };
         });
       }
-      if (myGeneration === generation) current = { filePath: path, width: 20, height: 10 };
+      if (myGeneration === generation) {
+        current = { filePath: path, width: 20, height: 10 };
+        beforeNotify?.(current);
+      }
       return Promise.resolve();
     });
     (imageService.getCurrentImage as jest.Mock).mockImplementation(() => current);
@@ -129,14 +140,16 @@ describe('Canvas.loadImage — mid-flight image-switch race', () => {
     // no restore/checkpoint-history clobber of B's just-loaded state with A's.
     expect(useAppStore.getState().imageDimensions[IMG_A.id]).toBeUndefined();
     expect((checkpointService.loadForPath as jest.Mock).mock.calls.map((c) => c[0])).not.toContain(IMG_A.path);
-    expect((editPersistenceService.restoreForPath as jest.Mock).mock.calls.map((c) => c[0])).not.toContain(IMG_A.path);
+    // Restore now happens in the beforeNotify hook (restoreState); it must not have run for
+    // the superseded image A (logPath arg is the 4th param).
+    expect((editPersistenceService.restoreState as jest.Mock).mock.calls.map((c) => c[3])).not.toContain(IMG_A.path);
   });
 });
 
 /**
  * Regression test for a SECOND, EARLIER race in the same `loadImage`: the
- * `setRawDecodeOptions` store write (Canvas.tsx ~:710-722) happens after awaiting
- * `editPersistenceService.getSavedRawDecodeOptions(image.path)` but BEFORE
+ * `setRawDecodeOptions` store write happens after awaiting the single full-edit-state
+ * read `editPersistenceService.getSavedEditState(image.path)` but BEFORE
  * `imageService.loadImage(image.path)` even starts — i.e. before ImageService's own
  * generation guard (exercised by the test above) ever comes into play. If the user
  * switches images while that earlier await is in flight, the stale call would
@@ -144,7 +157,7 @@ describe('Canvas.loadImage — mid-flight image-switch race', () => {
  * decode the stale image with the wrong (newer image's) options in the store.
  *
  * Fixed by `activeLoadPathRef`, set synchronously at the very top of `loadImage`
- * (before any await) and re-checked right after `getSavedRawDecodeOptions` resolves —
+ * (before any await) and re-checked right after `getSavedEditState` resolves —
  * mirrors the post-decode identity guard's pattern one step earlier in the flow.
  */
 describe('Canvas.loadImage — mid-flight setRawDecodeOptions race (pre-decode)', () => {
@@ -159,21 +172,25 @@ describe('Canvas.loadImage — mid-flight setRawDecodeOptions race (pre-decode)'
     // pointing at a stale local `current` closure otherwise, crashing Canvas's redraw
     // effect on mount here).
     (imageService.getCurrentImage as jest.Mock).mockReturnValue(null);
-    (editPersistenceService.restoreForPath as jest.Mock).mockResolvedValue(false);
+    (editPersistenceService.restoreState as jest.Mock).mockReturnValue(false);
     (checkpointService.getCheckpoints as jest.Mock).mockReturnValue([{ id: 1 }]);
   });
 
   it("does not let a superseded image's saved decode options land after a newer image already set its own", async () => {
-    let resolveA: (opts: RawDecodeOptions) => void = () => {};
-    (editPersistenceService.getSavedRawDecodeOptions as jest.Mock).mockImplementation((path: string) => {
+    // Decode options now arrive as part of the single full-edit-state read (getSavedEditState).
+    const stateFor = (opts: RawDecodeOptions) => ({ version: 1, modules: {}, rawDecodeOptions: opts });
+    let resolveA: (state: unknown) => void = () => {};
+    (editPersistenceService.getSavedEditState as jest.Mock).mockImplementation((path: string) => {
       if (path === IMG_A.path) {
-        return new Promise<RawDecodeOptions>((resolve) => { resolveA = resolve; });
+        return new Promise((resolve) => { resolveA = resolve; });
       }
-      return Promise.resolve(B_OPTIONS);
+      return Promise.resolve(stateFor(B_OPTIONS));
     });
-    (imageService.loadImage as jest.Mock).mockImplementation((path: string) => {
+    (imageService.loadImage as jest.Mock).mockImplementation((path: string, beforeNotify?: (r: unknown) => void) => {
       if (path === IMG_B.path) {
-        (imageService.getCurrentImage as jest.Mock).mockReturnValue({ filePath: IMG_B.path, width: 20, height: 10 });
+        const decoded = { filePath: IMG_B.path, width: 20, height: 10 };
+        (imageService.getCurrentImage as jest.Mock).mockReturnValue(decoded);
+        beforeNotify?.(decoded);
       }
       return Promise.resolve();
     });
@@ -190,8 +207,8 @@ describe('Canvas.loadImage — mid-flight setRawDecodeOptions race (pre-decode)'
     await new Promise((r) => setTimeout(r, 0));
     expect(useAppStore.getState().rawDecodeOptions).toEqual(B_OPTIONS);
 
-    // Now resolve A's stale getSavedRawDecodeOptions call.
-    resolveA(A_OPTIONS);
+    // Now resolve A's stale getSavedEditState call.
+    resolveA(stateFor(A_OPTIONS));
     await new Promise((r) => setTimeout(r, 0));
     await new Promise((r) => setTimeout(r, 0));
 
@@ -215,14 +232,16 @@ describe('Canvas.loadImage — post-decode setImageDimensions write (clean path,
     useAppStore.setState({ imageDimensions: {} });
     jest.clearAllMocks();
     (imageService.getCurrentImage as jest.Mock).mockReturnValue(null);
-    (editPersistenceService.getSavedRawDecodeOptions as jest.Mock).mockResolvedValue(null);
-    (editPersistenceService.restoreForPath as jest.Mock).mockResolvedValue(false);
+    (editPersistenceService.getSavedEditState as jest.Mock).mockResolvedValue(null);
+    (editPersistenceService.restoreState as jest.Mock).mockReturnValue(false);
     (checkpointService.getCheckpoints as jest.Mock).mockReturnValue([{ id: 1 }]);
   });
 
   it("writes the decoded width/height under the loaded image's id once loadImage resolves", async () => {
-    (imageService.loadImage as jest.Mock).mockImplementation(async (path: string) => {
-      (imageService.getCurrentImage as jest.Mock).mockReturnValue({ filePath: path, width: 4000, height: 3000 });
+    (imageService.loadImage as jest.Mock).mockImplementation(async (path: string, beforeNotify?: (r: unknown) => void) => {
+      const decoded = { filePath: path, width: 4000, height: 3000 };
+      (imageService.getCurrentImage as jest.Mock).mockReturnValue(decoded);
+      beforeNotify?.(decoded);
     });
 
     render(<Canvas onFitWindow={() => {}} onActualSize={() => {}} onZoomIn={() => {}} onZoomOut={() => {}} zoom={1} currentImage={IMG_A} />);

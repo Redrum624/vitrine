@@ -72,7 +72,15 @@ export class ImageService {
     });
   }
 
-  async loadImage(filePath: string): Promise<ImageData> {
+  /**
+   * @param beforeNotify Optional synchronous hook fired right AFTER the base is decoded (so the
+   *   real dimensions are known) but BEFORE notifyImageLoaded() runs — the load listeners that
+   *   trigger the first pipeline pass. The open flow uses it to seed restored per-image edits so
+   *   the first pass renders the edited image directly (no unedited-defaults flash, no double
+   *   pass). Only fires when this decode is still current (the generation guard skips it for a
+   *   superseded load, so it never seeds a stale image).
+   */
+  async loadImage(filePath: string, beforeNotify?: (result: ImageData) => void): Promise<ImageData> {
     const thisGeneration = ++this.loadGeneration;
     this.bakedUpscale = null; // Clear baked marker on any fresh image load
 
@@ -110,9 +118,11 @@ export class ImageService {
           // Snapshot the original for instant before/after comparison
           this.snapshotOriginal(result);
           logger.info(`Image loaded from base cache: ${result.width}x${result.height} - skipping decode`);
+          // Seed restored per-image edits BEFORE notifying (so the first pass renders edited).
+          beforeNotify?.(result);
           // Behave like a fresh load minus the decode: notify listeners so the histogram/adjustment
-          // panels reprocess. (For an image with no saved edits, this notify is the ONLY reprocess
-          // trigger — the Canvas open flow only calls triggerReprocessing when saved edits restore.)
+          // panels reprocess. This notify is the single reprocess trigger for the open — the edits
+          // (if any) are already applied by the hook above, so no second pass is needed.
           this.notifyImageLoaded();
           return result;
         }
@@ -213,6 +223,9 @@ export class ImageService {
         this.currentImage = result;
         // Snapshot the original for instant before/after comparison
         this.snapshotOriginal(result);
+        // Seed restored per-image edits BEFORE notifying, so the first pipeline pass triggered
+        // by the load listeners renders the edited image directly (no unedited-defaults flash).
+        beforeNotify?.(result);
         this.notifyImageLoaded();
         return result;
       },

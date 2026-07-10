@@ -37,6 +37,8 @@ jest.mock('../services/EditPersistenceService', () => ({
   editPersistenceService: {
     flush: jest.fn(),
     scheduleSave: jest.fn(),
+    getSavedEditState: jest.fn(async () => null),
+    restoreState: jest.fn(() => false),
     getSavedRawDecodeOptions: jest.fn(async () => null),
     restoreForPath: jest.fn(async () => false),
   },
@@ -96,8 +98,8 @@ describe('Canvas — skips the stale full-res base draw during an image switch',
   beforeEach(() => {
     jest.clearAllMocks();
     useAppStore.setState({ processedImageData: null, renderMode: 'cpu', imageDimensions: {} });
-    (editPersistenceService.getSavedRawDecodeOptions as jest.Mock).mockResolvedValue(null);
-    (editPersistenceService.restoreForPath as jest.Mock).mockResolvedValue(false);
+    (editPersistenceService.getSavedEditState as jest.Mock).mockResolvedValue(null);
+    (editPersistenceService.restoreState as jest.Mock).mockReturnValue(false);
     (checkpointService.getCheckpoints as jest.Mock).mockReturnValue([{ id: 1 }]);
 
     ctx = {
