@@ -118,15 +118,20 @@ function ToolbarOverflowMenu({ items }: { items: OverflowItem[] }) {
     };
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        e.stopPropagation();
+        // Other Escape handlers (the dock's collapse) also listen on document;
+        // stopPropagation() cannot suppress same-target siblings, so consume
+        // the key with stopImmediatePropagation, registered in the CAPTURE
+        // phase so it runs before bubble-phase document listeners regardless
+        // of registration order.
+        e.stopImmediatePropagation();
         setOpen(false);
       }
     };
     document.addEventListener('mousedown', onDown);
-    document.addEventListener('keydown', onKeyDown);
+    document.addEventListener('keydown', onKeyDown, true);
     return () => {
       document.removeEventListener('mousedown', onDown);
-      document.removeEventListener('keydown', onKeyDown);
+      document.removeEventListener('keydown', onKeyDown, true);
     };
   }, [open]);
 
