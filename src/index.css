@@ -426,3 +426,17 @@ body {
 .glass-dock-thumb:hover:not(.is-current):not(.is-in-selection) {
   border-color: rgba(255, 255, 255, 0.25);
 }
+
+/* ---------------------------------------------------------------------- */
+/* Gallery grid (Task 7): tile hover lift + border brighten. Selected tiles */
+/* keep their accent outline/glow on hover (same rule the dock uses).       */
+/* ---------------------------------------------------------------------- */
+.glass-gallery-tile {
+  transition: transform 180ms ease, border-color 180ms ease;
+}
+.glass-gallery-tile:hover {
+  transform: translateY(-3px);
+}
+.glass-gallery-tile:hover:not(.is-selected) {
+  border-color: rgba(255, 255, 255, 0.25);
+}

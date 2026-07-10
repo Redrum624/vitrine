@@ -18,6 +18,7 @@ import { ThumbnailPanel } from '../components/Panels/ThumbnailPanel';
 const setSelection = jest.fn();
 const toggleImageSelection = jest.fn();
 const setImageRating = jest.fn();
+const setViewMode = jest.fn();
 
 const images = [
   { id: 'img1', path: '/p/1.jpg', name: '1.jpg' },
@@ -36,6 +37,7 @@ function setup(over: Partial<Record<string, unknown>> = {}) {
     toggleImageSelection,
     ratingFilter: 0,
     alignmentAxisX: null,
+    setViewMode,
     ...over,
   });
   const onImageSelect = jest.fn();

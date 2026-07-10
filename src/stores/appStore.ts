@@ -93,6 +93,18 @@ interface AppStore extends AppState {
   // the footer's segmented control, the filmstrip dock, and (Task 7) the gallery grid.
   ratingFilter: number;
   setRatingFilter: (n: number) => void;
+  // View mode (Task 7, Glass · Sectioned 5a): 'develop' is the editing workspace
+  // (default); 'gallery' is the library grid. Toggled by the toolbar's Develop|Gallery
+  // segmented (shown in both views) and the filmstrip dock's Gallery chip. Selection/
+  // rating/filter state all live in this SAME store regardless of viewMode, so
+  // round-tripping between the two views never loses the current selection.
+  viewMode: 'develop' | 'gallery';
+  setViewMode: (mode: 'develop' | 'gallery') => void;
+  // Gallery grid sort direction for the toolbar's "Sort: Capture time" chip.
+  // false (default) = newest first. ImageFileInfo carries no EXIF capture-time
+  // field, so `dateModified` (file mtime) is the actual sort key.
+  gallerySortAscending: boolean;
+  toggleGallerySortDirection: () => void;
   // Multi-image selection
   selectedImageIds: string[];
   selectionAnchorId: string | null;
@@ -142,6 +154,8 @@ export const useAppStore = create<AppStore>((set) => ({
   referenceImageName: null,
   imageRatings: {},
   ratingFilter: 0,
+  viewMode: 'develop',
+  gallerySortAscending: false,
   selectedImageIds: [],
   selectionAnchorId: null,
   exportProgress: null,
@@ -220,6 +234,10 @@ export const useAppStore = create<AppStore>((set) => ({
   })),
 
   setRatingFilter: (n) => set({ ratingFilter: n }),
+
+  setViewMode: (mode) => set({ viewMode: mode }),
+
+  toggleGallerySortDirection: () => set((state) => ({ gallerySortAscending: !state.gallerySortAscending })),
 
   setSelection: (ids, anchorId) => set(() => ({
     selectedImageIds: ids,

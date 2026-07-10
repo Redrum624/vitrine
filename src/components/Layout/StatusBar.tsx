@@ -1,6 +1,8 @@
 import { useAppStore } from '../../stores/appStore';
 import { Segmented } from '../Controls/Segmented';
 import { StarRating } from '../common/StarRating';
+import type { ImageFileInfo } from '../../services/FileSystemService';
+import { formatGalleryFooterLeft } from '../../utils/gallerySelection';
 
 interface StatusBarProps {
   currentImage?: {
@@ -17,6 +19,9 @@ interface StatusBarProps {
     modulesActive: number;
     totalModules: number;
   };
+  /** Gallery mode only (Task 7): the open folder's full image list, for the
+   * left-side `path · N images · N RAW · total size` summary. */
+  images?: ImageFileInfo[];
 }
 
 /** Rating-filter segmented control values: '0' = All, '1'-'5' = >= N stars. */
@@ -78,23 +83,30 @@ const getMemoryInfo = (): string => {
   return '';
 };
 
-export function StatusBar({ currentImage, processingStats }: StatusBarProps) {
-  const { imageRatings, setImageRating, ratingFilter, setRatingFilter } = useAppStore();
+export function StatusBar({ currentImage, processingStats, images }: StatusBarProps) {
+  const { imageRatings, setImageRating, ratingFilter, setRatingFilter, viewMode, alignmentAxisX, selectedImageIds } = useAppStore();
   const memoryInfo = getMemoryInfo();
   const currentRating = currentImage ? (imageRatings[currentImage.id] ?? 0) : 0;
+  const isGallery = viewMode === 'gallery';
+
+  // Rider (Task 6 review): in Develop the cluster centers on the LIVE alignment
+  // axis (falls back to window-center until first measured); in Gallery there is
+  // no axis (no photo region), so it always centers on the window.
+  const clusterLeft = isGallery ? '50%' : (alignmentAxisX ?? '50%');
 
   return (
     <div
       className="relative flex items-center justify-between px-4 text-xs no-select"
       style={{ height: '32px', borderTop: '1px solid var(--border)', backgroundColor: 'var(--gray-850)', color: 'var(--gray-400)' }}
     >
-      {/* Left — file info */}
+      {/* Left — file info (Develop) or folder summary (Gallery) */}
       <div className="flex items-center">
-        <span>{formatStatusBarFileInfo(currentImage)}</span>
+        <span>{isGallery ? formatGalleryFooterLeft(images ?? []) : formatStatusBarFileInfo(currentImage)}</span>
       </div>
 
-      {/* Center (window-centered) — rating filter segmented + current photo's rating */}
-      <div className="absolute flex items-center gap-3" style={{ left: '50%', top: '50%', transform: 'translate(-50%, -50%)' }}>
+      {/* Center — rating filter segmented + current photo's rating. Axis-centered
+          in Develop, window-centered in Gallery (see clusterLeft above). */}
+      <div className="absolute flex items-center gap-3" style={{ left: clusterLeft, top: '50%', transform: 'translate(-50%, -50%)' }}>
         <Segmented<RatingFilterValue>
           options={RATING_FILTER_OPTIONS}
           value={String(ratingFilter ?? 0) as RatingFilterValue}
@@ -114,13 +126,18 @@ export function StatusBar({ currentImage, processingStats }: StatusBarProps) {
         )}
       </div>
 
-      {/* Right — processing stats (accent) then memory */}
+      {/* Right — Gallery: selected count (accent) then memory. Develop: processing
+          stats (accent) then memory. */}
       <div className="flex items-center space-x-3">
-        {processingStats && (
-          <span style={{ color: 'var(--accent)' }}>
-            {processingStats.modulesActive}/{processingStats.totalModules} modules
-            {processingStats.processingTime > 0 ? ` · ${processingStats.processingTime.toFixed(1)} ms` : ''}
-          </span>
+        {isGallery ? (
+          <span style={{ color: 'var(--accent)' }}>{selectedImageIds?.length ?? 0} selected</span>
+        ) : (
+          processingStats && (
+            <span style={{ color: 'var(--accent)' }}>
+              {processingStats.modulesActive}/{processingStats.totalModules} modules
+              {processingStats.processingTime > 0 ? ` · ${processingStats.processingTime.toFixed(1)} ms` : ''}
+            </span>
+          )
         )}
         {memoryInfo && <span>{memoryInfo}</span>}
       </div>

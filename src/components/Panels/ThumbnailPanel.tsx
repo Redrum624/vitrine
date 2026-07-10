@@ -6,6 +6,7 @@ import { useAppStore } from '../../stores/appStore';
 import { logger } from '../../utils/Logger';
 import { ChipButton } from '../Controls/ChipButton';
 import { DOCK_BOTTOM } from '../../layout/photoRegion';
+import { filterImagesByRating, handleImageClick, isRawImage } from '../../utils/gallerySelection';
 
 interface ThumbnailPanelProps {
   images: ImageFileInfo[];
@@ -16,10 +17,6 @@ interface ThumbnailPanelProps {
   /** Open the multi-export flow for the currently selected images. */
   onExportSelected?: () => void;
 }
-
-const RAW_EXTENSIONS = ['cr2', 'cr3', 'nef', 'nrw', 'arw', 'sr2', 'srf', 'orf', 'dng', 'raf', 'rw2', 'pef', 'srw', 'x3f', 'raw'];
-const isRawImage = (img: ImageFileInfo): boolean =>
-  RAW_EXTENSIONS.includes((img.name.split('.').pop() || '').toLowerCase());
 
 /**
  * Cap for the thumbnail data-URL cache. Without a bound, browsing a folder with
@@ -120,18 +117,19 @@ export function ThumbnailPanel({
     toggleImageSelection,
     ratingFilter: ratingFilterRaw,
     alignmentAxisX,
+    setViewMode,
   } = useAppStore();
   // The rating filter now lives in the store (shared with the footer's segmented
-  // control and, in Task 7, the gallery grid) — default to "All" if a mock/store
-  // snapshot doesn't carry it yet.
+  // control and the gallery grid) — default to "All" if a mock/store snapshot
+  // doesn't carry it yet.
   const ratingFilter = ratingFilterRaw ?? 0;
   const selectedSet = new Set(selectedImageIds ?? []);
   const selectedCount = selectedImageIds?.length ?? 0;
 
-  const filteredImages = useMemo(() => {
-    if (ratingFilter === 0) return images;
-    return images.filter(img => (imageRatings[img.id] || 0) >= ratingFilter);
-  }, [images, imageRatings, ratingFilter]);
+  const filteredImages = useMemo(
+    () => filterImagesByRating(images, imageRatings, ratingFilter),
+    [images, imageRatings, ratingFilter],
+  );
 
   // Load thumbnail for an image
   const loadThumbnail = useCallback(async (image: ImageFileInfo) => {
@@ -338,36 +336,17 @@ export function ThumbnailPanel({
     }
   };
 
+  // Shared with the Gallery grid (Task 7) — see gallerySelection.ts's doc comment
+  // for the full shift/ctrl/plain semantics this delegates to.
   const handleThumbnailClick = (image: ImageFileInfo, e: React.MouseEvent) => {
-    if (e.shiftKey) {
-      // Contiguous range from the anchor to the clicked thumbnail (display order).
-      const anchorId = selectionAnchorId ?? selectedImage?.id ?? image.id;
-      const aIdx = filteredImages.findIndex(i => i.id === anchorId);
-      const bIdx = filteredImages.findIndex(i => i.id === image.id);
-      if (aIdx === -1 || bIdx === -1) {
-        setSelection([image.id], image.id);
-        return;
-      }
-      const [lo, hi] = aIdx <= bIdx ? [aIdx, bIdx] : [bIdx, aIdx];
-      const rangeIds = filteredImages.slice(lo, hi + 1).map(i => i.id);
-      setSelection(rangeIds, anchorId);
-      return;
-    }
-    if (e.ctrlKey || e.metaKey) {
-      // Toggle membership without disturbing the canvas.
-      toggleImageSelection(image.id);
-      return;
-    }
-    // Plain click on the SOLE already-selected thumbnail clears its checkmark
-    // (re-click toggles the selection off; the image stays on the canvas).
-    if (selectedSet.size === 1 && selectedSet.has(image.id)) {
-      setSelection([], null);
-      return;
-    }
-    // Plain click: load to canvas and collapse the selection to just this image.
-    onImageSelect(image);
-    loadThumbnail(image); // no-op if already loaded/loading
-    setSelection([image.id], image.id);
+    handleImageClick(
+      image,
+      { shiftKey: e.shiftKey, ctrlKey: e.ctrlKey, metaKey: e.metaKey },
+      filteredImages,
+      selectedImage?.id,
+      { selectedImageIds: selectedImageIds ?? [], selectionAnchorId },
+      { setSelection, toggleImageSelection, onImageSelect, loadThumbnail },
+    );
   };
 
   const handleScroll = () => loadVisibleThumbnails();
@@ -532,9 +511,9 @@ export function ThumbnailPanel({
 
       <div style={{ width: '1px', height: `${DOCK_THUMB_HEIGHT - 12}px`, background: 'var(--glass-border)', flexShrink: 0 }} />
 
-      {/* Gallery button (stub — Task 7 wires up viewMode) stacked above the "i / N" count. */}
+      {/* Gallery button — switches to the library grid (Task 7) — stacked above the "i / N" count. */}
       <div className="flex flex-col items-stretch" style={{ gap: '6px' }}>
-        <ChipButton dashed radius={10} onClick={() => { /* Task 7: switch viewMode to 'gallery' */ }} title="Open the gallery grid">
+        <ChipButton dashed radius={10} onClick={() => setViewMode('gallery')} title="Open the gallery grid">
           <LayoutGrid className="w-3.5 h-3.5" style={{ marginRight: 6 }} />
           Gallery
         </ChipButton>

@@ -57,6 +57,14 @@ export const PHOTO_INSET_BOTTOM = 150;
 /** Drop shadow applied to the letterboxed photo (spec §3). */
 export const PHOTO_SHADOW = '0 40px 120px rgba(0, 0, 0, 0.7)';
 
+/**
+ * Gallery grid insets (Task 7, 5a): left/right/bottom clear the workspace edge by
+ * the same 24px every other floating chrome piece uses; top is taller (72) to
+ * clear the window-centered toolbar pill (no alignment axis in this view).
+ */
+export const GALLERY_GRID_INSET = 24;
+export const GALLERY_GRID_INSET_TOP = 72;
+
 export interface FilenameChipInfo {
   name: string;
   current: number; // 1-based position

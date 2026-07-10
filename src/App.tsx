@@ -7,6 +7,7 @@ import { Canvas } from './components/Layout/Canvas';
 import { AdjustmentPanel } from './components/Panels/AdjustmentPanel';
 import { HistogramPanel } from './components/Panels/HistogramPanel';
 import { ThumbnailPanel } from './components/Panels/ThumbnailPanel';
+import { GalleryView } from './components/Gallery/GalleryView';
 import { SettingsPanel } from './components/Panels/SettingsPanel';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ExportDialog } from './components/Dialogs/ExportDialog';
@@ -32,6 +33,7 @@ import {
   CHROME_TOP, CHIP_LEFT, RIGHT_COLUMN_OFFSET, RIGHT_COLUMN_WIDTH, RIGHT_COLUMN_GAP, RIGHT_COLUMN_BOTTOM,
   PHOTO_INSET_LEFT, PHOTO_INSET_RIGHT, PHOTO_INSET_TOP, PHOTO_INSET_BOTTOM, formatFilenameChip,
 } from './layout/photoRegion';
+import { formatGalleryFolderChip } from './utils/gallerySelection';
 import { editPersistenceService } from './services/EditPersistenceService';
 import { checkpointService } from './services/CheckpointService';
 import { logger } from './utils/Logger';
@@ -282,7 +284,7 @@ export function imageFileInfoFromOpenedPath(filePath: string): ImageFileInfo {
 }
 
 function App() {
-  const { setViewport, resetZoom, viewport, processedImageData, setSelectedTool: storeSetSelectedTool, showGrid, showRulers, showOriginal, toggleGrid, toggleRulers, toggleOriginal, referenceMode, referenceImageUrl, referenceImageName, toggleReferenceMode, setReferenceImage, lastProcessingTimeMs, modulesActive, modulesTotal, alignmentAxisX, setAlignmentAxisX } = useAppStore();
+  const { setViewport, resetZoom, viewport, processedImageData, setSelectedTool: storeSetSelectedTool, showGrid, showRulers, showOriginal, toggleGrid, toggleRulers, toggleOriginal, referenceMode, referenceImageUrl, referenceImageName, toggleReferenceMode, setReferenceImage, lastProcessingTimeMs, modulesActive, modulesTotal, alignmentAxisX, setAlignmentAxisX, viewMode, selectedImageIds } = useAppStore();
   const [selectedTool, setSelectedToolLocal] = useState<string | null>('file-explorer'); // Default to file explorer
 
   // Wrapper to update both local state and store
@@ -720,6 +722,39 @@ function App() {
     }
   }, [currentImage]);
 
+  // Opens the multi-export flow for the current selection (≥2 images) — shared by
+  // the filmstrip dock's "Export N" button and the Gallery toolbar's Export… button.
+  const handleExportSelected = useCallback(() => {
+    const ids = useAppStore.getState().selectedImageIds;
+    const paths = ids
+      .map((id) => availableImages.find((img) => img.id === id)?.path)
+      .filter((p): p is string => !!p);
+    if (paths.length >= 2) {
+      setMultiExportPaths(paths);
+      setIsExportDialogOpen(true);
+    }
+  }, [availableImages]);
+
+  // Opens the native folder picker and loads the result via the existing
+  // folder-load path — shared by the Welcome screen's "Open Folder" and the
+  // Gallery toolbar's "Open Folder" button.
+  const handleOpenFolder = useCallback(() => {
+    void openFolderFromDialog({
+      isElectron: () => electronService.isElectron(),
+      showOpenDialog: (options) => {
+        if (!window.electronAPI?.showOpenDialog) {
+          return Promise.resolve({ canceled: true, filePaths: [] });
+        }
+        return window.electronAPI.showOpenDialog(options);
+      },
+      getFolderContents: (folderPath) => fileSystemService.getFolderContents(folderPath),
+      onFolderSelected: handleFolderSelected,
+      setWelcomeVisible: setIsWelcomeVisible,
+      showSuccess,
+      showError,
+    });
+  }, [handleFolderSelected, showSuccess, showError]);
+
   // Convert raw file paths (from showOpenDialog) into ImageFileInfo[] by
   // statting each file. Mirrors the shape handleFolderSelected receives so the
   // batch queue can consume them. getFileStats fans out per file via Promise.all.
@@ -968,8 +1003,12 @@ function App() {
       action: () => useAppStore.getState().toggleOriginal()
     });
 
-    // Star rating: 1-5 set the rating on the current image, 0 clears it.
+    // Star rating: 1-5 set the rating on the current image, 0 clears it. Disabled
+    // in Gallery mode — GalleryView owns 1-5/0 there (rates the whole selection
+    // instead of just the single current image); this guard prevents the two
+    // handlers double-firing on the same keypress.
     const applyRating = (rating: number) => {
+      if (useAppStore.getState().viewMode === 'gallery') return;
       const img = currentImageRef.current;
       if (!img) return;
       useAppStore.getState().setImageRating(img.id, rating);
@@ -1198,7 +1237,11 @@ function App() {
 
           {/* Photo region — the box the Canvas letterboxes inside. Insets derived
               from the floating chrome so nothing overlaps the photo. Splits 50/50
-              internally for Before/After and Reference modes. */}
+              internally for Before/After and Reference modes. Stays mounted (not
+              conditionally unmounted) when viewMode is 'gallery' — display:none only
+              — so the Canvas/decode state survives the round-trip AND the alignment-
+              axis ResizeObserver keeps observing the SAME node (a detach/reattach on
+              unmount would otherwise stop tracking window resizes while hidden). */}
           <div
             ref={photoRegionRef}
             className="absolute flex"
@@ -1207,6 +1250,7 @@ function App() {
               right: PHOTO_INSET_RIGHT,
               top: PHOTO_INSET_TOP,
               bottom: PHOTO_INSET_BOTTOM,
+              display: viewMode === 'develop' ? 'flex' : 'none',
             }}
           >
             {/* Before/After pane — left half shows original (only when showOriginal) */}
@@ -1287,10 +1331,39 @@ function App() {
             </div>
           </div>
 
-          {/* Floating filename chip — top-left: `name · i of N · zoom%`. A single
-              image loaded outside a folder listing (list total 0) clamps to "1 of 1"
-              rather than showing a stale/zero count. */}
-          {currentImage && (() => {
+          {/* Gallery grid (Task 7) — replaces the photo region when viewMode is
+              'gallery'. Stays mounted (visible toggle) so its own thumbnail cache
+              survives Develop ↔ Gallery round-trips, mirroring the dock. */}
+          <GalleryView
+            images={availableImages}
+            onImageSelect={setCurrentImage}
+            visible={viewMode === 'gallery'}
+          />
+
+          {/* Floating filename chip (Develop) — top-left: `name · i of N · zoom%`.
+              A single image loaded outside a folder listing (list total 0) clamps to
+              "1 of 1" rather than showing a stale/zero count. Gallery shows the
+              folder chip instead (mirrors the same top-left idiom). */}
+          {viewMode === 'gallery' ? (
+            <div
+              className="glass-chrome no-select"
+              style={{
+                position: 'absolute',
+                left: CHIP_LEFT,
+                top: CHROME_TOP,
+                borderRadius: '12px',
+                padding: '7px 13px',
+                fontSize: '12px',
+                fontWeight: 500,
+                color: 'var(--glass-text-chrome-primary)',
+                zIndex: 30,
+                pointerEvents: 'none',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {formatGalleryFolderChip(availableImages, selectedImageIds?.length ?? 0)}
+            </div>
+          ) : currentImage && (() => {
             const { current, total } = fileSystemService.getCurrentImageInfo();
             return (
               <div
@@ -1319,12 +1392,13 @@ function App() {
             );
           })()}
 
-          {/* Floating toolbar pill — top, centered on the alignment axis */}
+          {/* Floating toolbar pill — top, centered on the alignment axis in Develop;
+              window-centered in Gallery (no photo region / axis in that view). */}
           <div
             className="absolute"
             style={{
               top: CHROME_TOP,
-              left: alignmentAxisX ?? '50%',
+              left: viewMode === 'gallery' ? '50%' : (alignmentAxisX ?? '50%'),
               transform: 'translateX(-50%)',
               zIndex: 30,
             }}
@@ -1353,13 +1427,15 @@ function App() {
               showOriginal={showOriginal}
               onToggleReference={toggleReferenceMode}
               referenceMode={referenceMode}
+              onOpenFolder={handleOpenFolder}
+              onExportSelected={handleExportSelected}
             />
           </div>
 
           {/* Floating right column — histogram card (fixed) + module card (grows,
               scrolls inside, never clipped). Replaces the old 360px slide-in;
-              the canvas no longer moves. */}
-          {(selectedTool || histogramVisible) && (
+              the canvas no longer moves. Develop-only chrome — hidden in Gallery. */}
+          {viewMode === 'develop' && (selectedTool || histogramVisible) && (
             <div
               className="absolute flex flex-col"
               style={{
@@ -1404,31 +1480,27 @@ function App() {
             </div>
           )}
 
-          {/* Floating icon rail (positions itself: right 20, vertically centered) */}
-          <IconSidebar
-            selectedTool={selectedTool}
-            histogramVisible={histogramVisible}
-            onToolSelect={handleToolSelect}
-          />
+          {/* Floating icon rail (positions itself: right 20, vertically centered).
+              Develop-only chrome — hidden in Gallery. */}
+          {viewMode === 'develop' && (
+            <IconSidebar
+              selectedTool={selectedTool}
+              histogramVisible={histogramVisible}
+              onToolSelect={handleToolSelect}
+            />
+          )}
 
           {/* Floating filmstrip dock (positions itself: bottom 24, centered on the
-              alignment axis, hugs content — Glass · Sectioned, Task 6) */}
+              alignment axis, hugs content — Glass · Sectioned, Task 6). Develop-only
+              chrome — hidden in Gallery (stays mounted so its thumbnail cache
+              survives the round-trip, same as GalleryView's own cache). */}
           <ThumbnailPanel
             images={availableImages}
             selectedImage={currentImage || undefined}
             onImageSelect={setCurrentImage}
             onClose={() => setShowThumbnailPanel(false)}
-            visible={showThumbnailPanel}
-            onExportSelected={() => {
-              const ids = useAppStore.getState().selectedImageIds;
-              const paths = ids
-                .map((id) => availableImages.find((img) => img.id === id)?.path)
-                .filter((p): p is string => !!p);
-              if (paths.length >= 2) {
-                setMultiExportPaths(paths);
-                setIsExportDialogOpen(true);
-              }
-            }}
+            visible={showThumbnailPanel && viewMode === 'develop'}
+            onExportSelected={handleExportSelected}
           />
         </div>
       </div>
@@ -1449,6 +1521,7 @@ function App() {
           modulesActive: modulesActive,
           totalModules: modulesTotal
         }}
+        images={availableImages}
       />
 
       {/* Export Dialog */}
@@ -1568,22 +1641,7 @@ function App() {
         isVisible={isWelcomeVisible}
         onClose={() => setIsWelcomeVisible(false)}
         onOpenFile={() => electronService.isElectron() && electronService.openFile()}
-        onOpenFolder={() => {
-          void openFolderFromDialog({
-            isElectron: () => electronService.isElectron(),
-            showOpenDialog: (options) => {
-              if (!window.electronAPI?.showOpenDialog) {
-                return Promise.resolve({ canceled: true, filePaths: [] });
-              }
-              return window.electronAPI.showOpenDialog(options);
-            },
-            getFolderContents: (folderPath) => fileSystemService.getFolderContents(folderPath),
-            onFolderSelected: handleFolderSelected,
-            setWelcomeVisible: setIsWelcomeVisible,
-            showSuccess,
-            showError,
-          });
-        }}
+        onOpenFolder={handleOpenFolder}
         onOpenPresets={() => setIsPresetDialogOpen(true)}
       />
 
