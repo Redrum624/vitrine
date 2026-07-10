@@ -1,4 +1,18 @@
+import { useEffect, useState } from 'react';
+
 export function SettingsPanel() {
+  // Real app version via the same IPC source the splash and the MenuBar About
+  // dialog use (main.cjs 'get-app-version' reads package.json). The block used
+  // to hardcode "Version 1.0.0" and never updated across releases.
+  const [appVersion, setAppVersion] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    window.electronAPI?.getAppVersion?.()
+      .then((version) => { if (!cancelled) setAppVersion(version); })
+      .catch(() => { /* leave null — the line shows a placeholder */ });
+    return () => { cancelled = true; };
+  }, []);
+
   return (
     <div className="flex flex-col h-full" style={{ backgroundColor: 'var(--gray-900)' }}>
       {/* Header */}
@@ -135,8 +149,8 @@ export function SettingsPanel() {
             </h3>
             <div className="space-y-1 text-xs" style={{ color: 'var(--gray-400)' }}>
               <p>Photo Editor Pro</p>
-              <p>Version 1.0.0</p>
-              <p>© 2025 All rights reserved</p>
+              <p>Version {appVersion ?? '—'}</p>
+              <p>© {new Date().getFullYear()} All rights reserved</p>
             </div>
           </div>
         </div>
