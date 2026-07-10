@@ -3,28 +3,36 @@ import { estimateBytesPerPixel, estimateExportSizeBytes } from '../utils/exportS
 /**
  * Expectations are the EMPIRICAL calibration points measured against the app's
  * real encode path (sharp 0.34.5 with the exact electron/imageWriter.cjs
- * options) on a real photograph — see the table in exportSizeEstimate.ts.
- * The interpolator must pass exactly through the measured grid points.
+ * options). The lossy curves (JPEG/WebP/TIFF-jpeg) are the MIDPOINT of a
+ * smooth already-JPEG reference and a genuinely detailed RAW-decoded
+ * reference — see the table in exportSizeEstimate.ts. The interpolator must
+ * pass exactly through the measured grid points, and flat-clamp outside them.
+ * 24 unit tests total in this file.
  */
 describe('exportSizeEstimate — calibrated bytes/pixel model', () => {
   describe('JPEG (mozjpeg)', () => {
     it.each([
-      [60, 0.0383],
-      [75, 0.0565],
-      [85, 0.083],
-      [90, 0.1118],
-      [95, 0.1654],
-      [100, 0.4445],
+      [60, 0.0289],
+      [75, 0.0459],
+      [85, 0.0749],
+      [90, 0.1092],
+      [95, 0.1798],
+      [100, 0.5148],
     ])('q%i hits the measured %f B/px', (quality, bpp) => {
       expect(estimateBytesPerPixel({ format: 'jpeg', quality })).toBeCloseTo(bpp, 4);
     });
 
     it('interpolates linearly between grid points (q80 = midpoint of q75/q85)', () => {
-      expect(estimateBytesPerPixel({ format: 'jpeg', quality: 80 })).toBeCloseTo((0.0565 + 0.083) / 2, 4);
+      expect(estimateBytesPerPixel({ format: 'jpeg', quality: 80 })).toBeCloseTo((0.0459 + 0.0749) / 2, 4);
     });
 
     it('no longer produces the old 3x overestimate (q90 was 1.35 B/px)', () => {
       expect(estimateBytesPerPixel({ format: 'jpeg', quality: 90 })).toBeLessThan(0.2);
+    });
+
+    it('flat-clamps below the lowest measured grid point instead of extrapolating to a guessed anchor', () => {
+      const lowest = estimateBytesPerPixel({ format: 'jpeg', quality: 60 });
+      expect(estimateBytesPerPixel({ format: 'jpeg', quality: 1 })).toBeCloseTo(lowest, 6);
     });
   });
 
@@ -39,14 +47,18 @@ describe('exportSizeEstimate — calibrated bytes/pixel model', () => {
 
   describe('WebP', () => {
     it.each([
-      [75, 0.04],
-      [90, 0.0946],
-      [100, 0.2448],
+      [75, 0.0287],
+      [90, 0.1019],
+      [100, 0.285],
     ])('q%i hits the measured %f B/px', (quality, bpp) => {
       expect(estimateBytesPerPixel({ format: 'webp', quality })).toBeCloseTo(bpp, 4);
     });
     it('lossless uses the measured constant', () => {
       expect(estimateBytesPerPixel({ format: 'webp', quality: 90, lossless: true })).toBeCloseTo(0.91, 2);
+    });
+    it('flat-clamps below the lowest measured grid point instead of extrapolating to a guessed anchor', () => {
+      const lowest = estimateBytesPerPixel({ format: 'webp', quality: 75 });
+      expect(estimateBytesPerPixel({ format: 'webp', quality: 1 })).toBeCloseTo(lowest, 6);
     });
   });
 
@@ -64,8 +76,12 @@ describe('exportSizeEstimate — calibrated bytes/pixel model', () => {
       expect(estimateBytesPerPixel({ format: 'tiff', compression: 'zip', bitDepth: 16 })).toBeCloseTo(3.98, 2);
     });
     it('jpeg-in-tiff follows its own measured curve (libjpeg, not mozjpeg)', () => {
-      expect(estimateBytesPerPixel({ format: 'tiff', compression: 'jpeg', quality: 90 })).toBeCloseTo(0.2715, 4);
-      expect(estimateBytesPerPixel({ format: 'tiff', compression: 'jpeg', quality: 100 })).toBeCloseTo(1.1398, 4);
+      expect(estimateBytesPerPixel({ format: 'tiff', compression: 'jpeg', quality: 90 })).toBeCloseTo(0.3165, 4);
+      expect(estimateBytesPerPixel({ format: 'tiff', compression: 'jpeg', quality: 100 })).toBeCloseTo(1.2601, 4);
+    });
+    it('jpeg-in-tiff flat-clamps below the lowest measured grid point instead of extrapolating to a guessed anchor', () => {
+      const lowest = estimateBytesPerPixel({ format: 'tiff', compression: 'jpeg', quality: 60 });
+      expect(estimateBytesPerPixel({ format: 'tiff', compression: 'jpeg', quality: 1 })).toBeCloseTo(lowest, 6);
     });
   });
 
@@ -73,8 +89,8 @@ describe('exportSizeEstimate — calibrated bytes/pixel model', () => {
     it('scales bytes/pixel by the pixel count', () => {
       const pixels = 6000 * 4000; // 24 MP
       const bytes = estimateExportSizeBytes(pixels, { format: 'jpeg', quality: 90 });
-      expect(bytes).toBeCloseTo(pixels * 0.1118, 0);
-      // The old model said ~32 MB for a 24MP q90 JPEG; the calibrated one ~2.7 MB.
+      expect(bytes).toBeCloseTo(pixels * 0.1092, 0);
+      // The old (uncalibrated) model said ~32 MB for a 24MP q90 JPEG; the calibrated one ~2.6 MB.
       expect(bytes).toBeLessThan(5 * 1024 * 1024);
     });
 
@@ -86,7 +102,7 @@ describe('exportSizeEstimate — calibrated bytes/pixel model', () => {
     });
 
     it('defaults match the writer defaults (quality 90, 8-bit, tiff lzw)', () => {
-      expect(estimateBytesPerPixel({ format: 'jpeg' })).toBeCloseTo(0.1118, 4);
+      expect(estimateBytesPerPixel({ format: 'jpeg' })).toBeCloseTo(0.1092, 4);
       expect(estimateBytesPerPixel({ format: 'png' })).toBeCloseTo(2.04, 2);
       expect(estimateBytesPerPixel({ format: 'tiff' })).toBeCloseTo(1.54, 2);
     });
