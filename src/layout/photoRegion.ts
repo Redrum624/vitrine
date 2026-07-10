@@ -54,6 +54,34 @@ export const PHOTO_INSET_RIGHT = RIGHT_COLUMN_OFFSET + RIGHT_COLUMN_WIDTH + PHOT
 export const PHOTO_INSET_TOP = 68;
 export const PHOTO_INSET_BOTTOM = 150;
 
+/**
+ * Right inset when the floating right column (histogram/module card) is
+ * HIDDEN — i.e. `viewMode === 'develop' && !selectedTool && !histogramVisible`
+ * is false in App.tsx, the same gate that renders the column itself. The
+ * column no longer needs clearing, but the floating icon rail (IconSidebar)
+ * still does, so the photo can't simply match the left inset (24) — that
+ * would sit the photo's edge under the rail.
+ *
+ * Rail box width: 42px button tile + 8px horizontal padding ×2 + 1px
+ * `.glass-chrome` border ×2 = 60 (see IconSidebar.tsx's `railBtn` + the rail
+ * container's `padding: '10px 8px'`). The rail's left edge sits at
+ * RAIL_OFFSET + RAIL_BOX_WIDTH from the workspace's right edge; clearing it
+ * by PHOTO_RAIL_CLEARANCE (18 — more generous than the column's 8, since the
+ * rail buttons scale 1.06 on hover without reflowing the static layout box)
+ * gives the no-column right inset. This is the closest a derived value gets
+ * to "matching the left inset's 24px visual weight" without violating the
+ * no-overlap invariant (a literal 24 would sit 56px under the rail).
+ */
+export const RAIL_BOX_WIDTH = 60; // 42 (button) + 8*2 (h-padding) + 1*2 (border) — IconSidebar.tsx
+export const PHOTO_RAIL_CLEARANCE = 18;
+export const PHOTO_INSET_RIGHT_NO_COLUMN = RAIL_OFFSET + RAIL_BOX_WIDTH + PHOTO_RAIL_CLEARANCE; // 98
+
+/** Selects the right inset for the current right-column visibility (the same
+ *  `selectedTool || histogramVisible` gate App.tsx uses to render the column). */
+export function getPhotoInsetRight(columnVisible: boolean): number {
+  return columnVisible ? PHOTO_INSET_RIGHT : PHOTO_INSET_RIGHT_NO_COLUMN;
+}
+
 /** Drop shadow applied to the letterboxed photo (spec §3). */
 export const PHOTO_SHADOW = '0 40px 120px rgba(0, 0, 0, 0.7)';
 

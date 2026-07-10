@@ -12,10 +12,15 @@ import {
   formatFilenameChip,
   PHOTO_INSET_LEFT,
   PHOTO_INSET_RIGHT,
+  PHOTO_INSET_RIGHT_NO_COLUMN,
   PHOTO_INSET_TOP,
   PHOTO_INSET_BOTTOM,
+  PHOTO_RAIL_CLEARANCE,
+  RAIL_BOX_WIDTH,
+  RAIL_OFFSET,
   RIGHT_COLUMN_OFFSET,
   RIGHT_COLUMN_WIDTH,
+  getPhotoInsetRight,
 } from '../layout/photoRegion';
 
 describe('alignment axis store field', () => {
@@ -43,6 +48,28 @@ describe('photo-region insets', () => {
     // width-filling photo never sits under the column (spec §3 "nothing overlaps").
     expect(PHOTO_INSET_RIGHT).toBe(RIGHT_COLUMN_OFFSET + RIGHT_COLUMN_WIDTH + 8);
     expect(PHOTO_INSET_RIGHT).toBeGreaterThan(RIGHT_COLUMN_OFFSET + RIGHT_COLUMN_WIDTH);
+  });
+
+  describe('getPhotoInsetRight (Task 4/R4 — recenters when the right column closes)', () => {
+    it('uses the full column-clearing inset when the column is visible', () => {
+      expect(getPhotoInsetRight(true)).toBe(PHOTO_INSET_RIGHT);
+    });
+
+    it('shrinks to the rail-clearing inset when the column is hidden', () => {
+      expect(getPhotoInsetRight(false)).toBe(PHOTO_INSET_RIGHT_NO_COLUMN);
+      // Strictly smaller than the column-clearing inset — the photo recenters
+      // (more of the workspace becomes photo region) once the column closes.
+      expect(PHOTO_INSET_RIGHT_NO_COLUMN).toBeLessThan(PHOTO_INSET_RIGHT);
+    });
+
+    it('the no-column inset still fully clears the floating icon rail (no overlap)', () => {
+      // Rail's left edge sits RAIL_OFFSET + RAIL_BOX_WIDTH from the workspace's
+      // right edge; the photo's right edge (PHOTO_INSET_RIGHT_NO_COLUMN) must sit
+      // AT LEAST that far in, plus PHOTO_RAIL_CLEARANCE of breathing room.
+      expect(PHOTO_INSET_RIGHT_NO_COLUMN).toBe(RAIL_OFFSET + RAIL_BOX_WIDTH + PHOTO_RAIL_CLEARANCE);
+      const railLeftEdge = RAIL_OFFSET + RAIL_BOX_WIDTH;
+      expect(PHOTO_INSET_RIGHT_NO_COLUMN - railLeftEdge).toBeGreaterThanOrEqual(18);
+    });
   });
 });
 

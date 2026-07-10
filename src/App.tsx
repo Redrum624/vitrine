@@ -31,7 +31,7 @@ import { ImageFileInfo, fileSystemService } from './services/FileSystemService';
 import { useAppStore } from './stores/appStore';
 import {
   CHROME_TOP, CHIP_LEFT, RIGHT_COLUMN_OFFSET, RIGHT_COLUMN_WIDTH, RIGHT_COLUMN_GAP, RIGHT_COLUMN_BOTTOM,
-  PHOTO_INSET_LEFT, PHOTO_INSET_RIGHT, PHOTO_INSET_TOP, PHOTO_INSET_BOTTOM, formatFilenameChip,
+  PHOTO_INSET_LEFT, PHOTO_INSET_TOP, PHOTO_INSET_BOTTOM, formatFilenameChip, getPhotoInsetRight,
 } from './layout/photoRegion';
 import { formatGalleryFolderChip } from './utils/gallerySelection';
 import { editPersistenceService } from './services/EditPersistenceService';
@@ -1201,6 +1201,11 @@ function App() {
     };
   }, [setAlignmentAxisX, selectedTool, histogramVisible]);
 
+  // Same gate the floating right column (histogram/module card) renders under —
+  // when neither is visible, the photo region's right inset shrinks to just
+  // clear the icon rail instead of reserving the full column width (Task 4/R4).
+  const rightColumnVisible = !!(selectedTool || histogramVisible);
+
   return (
     <ErrorBoundary>
       <div className="h-screen flex flex-col bg-dark-900 text-dark-300">
@@ -1270,7 +1275,7 @@ function App() {
             className="absolute flex"
             style={{
               left: PHOTO_INSET_LEFT,
-              right: PHOTO_INSET_RIGHT,
+              right: getPhotoInsetRight(rightColumnVisible),
               top: PHOTO_INSET_TOP,
               bottom: PHOTO_INSET_BOTTOM,
               display: viewMode === 'develop' ? 'flex' : 'none',
