@@ -3,6 +3,7 @@ import { useAppStore } from '../../stores/appStore';
 import { ImageFileInfo } from '../../services/FileSystemService';
 import { imageService } from '../../services/ImageService';
 import { logger } from '../../utils/Logger';
+import { computePanBounds, clampPan } from '../../utils/panBounds';
 import { CropTransformOverlay } from '../Canvas/CropTransformOverlay';
 import { InteractiveCropHandles } from '../Canvas/InteractiveCropHandles';
 import { imageProcessingPipeline } from '../../services/ImageProcessingPipeline';
@@ -939,25 +940,19 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
     }
 
     const canvas = canvasRef.current;
-    const container = containerRef.current;
-    if (!canvas || !container) return;
+    if (!canvas) return;
 
-    // Calculate how much the image extends beyond the visible area
-    const containerRect = container.getBoundingClientRect();
-    const displayWidth = canvas.offsetWidth * viewport.zoom;
-    const displayHeight = canvas.offsetHeight * viewport.zoom;
+    // The zoomed image is drawn scaled INSIDE the canvas element and clipped by
+    // it, so the pan viewport is the CANVAS box — not the photo-region
+    // container. Clamping against the container locked horizontal panning for
+    // height-constrained photos (their displayed width never exceeded the
+    // region width, so the X bound computed 0 while Y worked by coincidence).
+    // Bounds use canvas.width/height (internal pixels) to match the space the
+    // draw consumes panX/panY in.
+    const { maxPanX, maxPanY } = computePanBounds(canvas.width, canvas.height, viewport.zoom);
 
-    // Calculate maximum pan boundaries
-    // The image can only be panned until its edges meet the canvas edges
-    const maxPanX = Math.max(0, (displayWidth - containerRect.width) / 2);
-    const maxPanY = Math.max(0, (displayHeight - containerRect.height) / 2);
-
-    let newPanX = e.clientX - lastPan.x;
-    let newPanY = e.clientY - lastPan.y;
-
-    // Clamp pan values to keep image edges at canvas edges
-    newPanX = Math.max(-maxPanX, Math.min(maxPanX, newPanX));
-    newPanY = Math.max(-maxPanY, Math.min(maxPanY, newPanY));
+    const newPanX = clampPan(e.clientX - lastPan.x, maxPanX);
+    const newPanY = clampPan(e.clientY - lastPan.y, maxPanY);
 
     setViewport({ panX: newPanX, panY: newPanY });
   };
