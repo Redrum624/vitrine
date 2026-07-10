@@ -4,6 +4,8 @@ import { ToneCurveModule, ToneCurveParams } from '../../modules/ToneCurveModule'
 import { logger } from '../../utils/Logger';
 import { autoAdjustService } from '../../services/AutoAdjustService';
 import { imageService } from '../../services/ImageService';
+import { notificationService } from '../../services/NotificationService';
+import { guardDeveloping } from '../../utils/developingGuard';
 import { SliderRow } from '../Controls/SliderRow';
 import { Segmented } from '../Controls/Segmented';
 import { ChipButton } from '../Controls/ChipButton';
@@ -303,6 +305,9 @@ export const ToneCurveModuleComponent: React.FC<ToneCurveModuleComponentProps> =
   // Image-aware auto tone curve — lifted verbatim from the old inner-header ⚡
   // button so the card header's Auto keeps identical semantics (Task 2).
   const handleAuto = useCallback(() => {
+    // Reads currentImage pixels directly — during the progressive-open developing window
+    // that's the graded preview, not the neutral full-res base (L3 review round 2).
+    if (guardDeveloping(notificationService.info.bind(notificationService), 'Auto Tone Curve')) return;
     const img = imageService.getCurrentImage();
     if (!img) return;
     const stats = autoAdjustService.analyse(img.data, img.width, img.height);

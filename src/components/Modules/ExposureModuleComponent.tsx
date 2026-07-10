@@ -5,6 +5,8 @@ import { ExposureModule } from '../../modules/ExposureModule';
 import { DelayedInputControl } from '../Controls/DelayedInputControl';
 import { autoAdjustService } from '../../services/AutoAdjustService';
 import { imageService } from '../../services/ImageService';
+import { notificationService } from '../../services/NotificationService';
+import { guardDeveloping } from '../../utils/developingGuard';
 
 interface ExposureModuleComponentProps {
   module: ExposureModule;
@@ -62,6 +64,9 @@ export function ExposureModuleComponent({
         <div className="flex items-center space-x-1">
           <button
             onClick={() => {
+              // Reads currentImage pixels directly — during the progressive-open developing
+              // window that's the graded preview, not the neutral full-res base (L3 review round 2).
+              if (guardDeveloping(notificationService.info.bind(notificationService), 'Auto Exposure')) return;
               const img = imageService.getCurrentImage();
               if (!img) return;
               const stats = autoAdjustService.analyse(img.data, img.width, img.height);

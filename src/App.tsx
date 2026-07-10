@@ -51,6 +51,7 @@ import { styleAnalysisService } from './services/StyleAnalysisService';
 import { autoAdjustService } from './services/AutoAdjustService';
 import { imageProcessingPipeline } from './services/ImageProcessingPipeline';
 import { PrintDialog } from './components/Dialogs/PrintDialog';
+import { guardDeveloping } from './utils/developingGuard';
 
 // Import pipeline tests for development
 if (process.env.NODE_ENV === 'development') {
@@ -66,24 +67,13 @@ const MODULE_IDS = new Set(['crop', 'basicadj', 'whitebalance', 'tonecurve', 'en
 const isModuleTool = (tool: string) => MODULE_IDS.has(tool);
 
 /**
- * Blocks pixel-analysis and print actions while a progressive RAW open's background full
- * decode is still running (`developing`). During that window `imageService.getCurrentImage()`
- * returns the camera-graded embedded PREVIEW, not the neutral full-res base — Auto
- * Levels/Contrast/Color/All, Copy Style and Print all read `.data` directly and would BAKE the
- * preview's stats into persistent params/fingerprints (or print low-res pixels) that then wrongly
- * apply once the full decode swaps in (L3 review round 1, important #1/#2).
- *
- * Returns true (blocked — caller must no-op) after showing an info notification; false when it's
- * safe for the caller to proceed. Exported so the gate itself is unit-testable without rendering
- * the full App component graph (mirrors openFolderFromDialog below).
+ * Re-exported from utils/developingGuard.ts (round 2 of the L3 review — moved out of App.tsx so
+ * module components can use the same gate without importing the top-level App component). See
+ * that module for the full rationale. Re-exported here too so the gate stays unit-testable
+ * without rendering the full App component graph (mirrors openFolderFromDialog below), and so
+ * existing imports of `guardDeveloping` from './App' keep working unchanged.
  */
-export function guardDeveloping(showInfo: (title: string, message: string) => void, action: string): boolean {
-  if (useAppStore.getState().developing) {
-    showInfo(action, 'Full quality still developing — try again in a moment');
-    return true;
-  }
-  return false;
-}
+export { guardDeveloping };
 
 /**
  * Renders the cached original (pre-edit) image for the Before/After split view.

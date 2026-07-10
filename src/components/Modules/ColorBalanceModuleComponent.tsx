@@ -7,6 +7,8 @@ import { Segmented } from '../Controls/Segmented';
 import { logger } from '../../utils/Logger';
 import { autoAdjustService } from '../../services/AutoAdjustService';
 import { imageService } from '../../services/ImageService';
+import { notificationService } from '../../services/NotificationService';
+import { guardDeveloping } from '../../utils/developingGuard';
 import { useRegisterModuleCardActions, type RegisterModuleCardActions } from '../Controls/moduleCardActions';
 
 interface ColorBalanceModuleComponentProps {
@@ -187,6 +189,9 @@ export const ColorBalanceModuleComponent: React.FC<ColorBalanceModuleComponentPr
   // Image-aware auto colour balance — lifted verbatim from the old inner-header
   // ⚡ button so the card header's Auto keeps identical semantics (Task 2).
   const handleAuto = useCallback(() => {
+    // Reads currentImage pixels directly — during the progressive-open developing window
+    // that's the graded preview, not the neutral full-res base (L3 review round 2).
+    if (guardDeveloping(notificationService.info.bind(notificationService), 'Auto Color Balance')) return;
     const img = imageService.getCurrentImage();
     if (!img) { logger.warn('No image for auto color balance'); return; }
     const stats = autoAdjustService.analyse(img.data, img.width, img.height);

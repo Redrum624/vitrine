@@ -27,6 +27,8 @@ import type { ReactNode } from 'react';
 import type { ImageFileInfo } from '../../services/FileSystemService';
 import { imageProcessingPipeline } from '../../services/ImageProcessingPipeline';
 import { imageService } from '../../services/ImageService';
+import { notificationService } from '../../services/NotificationService';
+import { guardDeveloping } from '../../utils/developingGuard';
 import { progressivePreviewService } from '../../services/ProgressivePreviewService';
 import { adaptiveDebounceService } from '../../services/AdaptiveDebounceService';
 import { useAppStore } from '../../stores/appStore';
@@ -494,6 +496,9 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
   }, [processCurrentImageRealTime]);
 
   const handleAutoWhiteBalance = useCallback(() => {
+    // Reads currentImage pixels directly — during the progressive-open developing window
+    // that's the graded preview, not the neutral full-res base (L3 review round 2).
+    if (guardDeveloping(notificationService.info.bind(notificationService), 'Auto White Balance')) return;
     const currentImage = imageService.getCurrentImage();
     if (!currentImage || !whiteBalanceModule) return;
 
