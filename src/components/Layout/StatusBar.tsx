@@ -3,6 +3,7 @@ import { Segmented } from '../Controls/Segmented';
 import { StarRating } from '../common/StarRating';
 import type { ImageFileInfo } from '../../services/FileSystemService';
 import { formatGalleryFooterLeft } from '../../utils/gallerySelection';
+import { getDisplayFormat } from '../../utils/imageFormat';
 
 interface StatusBarProps {
   currentImage?: {
@@ -87,13 +88,18 @@ const formatFileSize = (bytes: number): string => {
  * below). */
 export function formatStatusBarFileInfoParts(currentImage: StatusBarProps['currentImage']): { primary: string; meta: string } {
   if (!currentImage) return { primary: 'No image loaded', meta: '' };
-  const { name, width, height, type, size } = currentImage;
+  const { name, width, height, size } = currentImage;
   const metaParts: string[] = [];
   if (width && height) {
     metaParts.push(`${width} × ${height}`);
     metaParts.push(`${((width * height) / 1000000).toFixed(1)} MP`);
   }
-  if (type) metaParts.push(type.toUpperCase());
+  // Derived from the file name's extension (not the raw `type`, which can be a
+  // MIME string like "image/jpeg" for folder-scanned images — see Task B2) so
+  // the footer always shows a clean, camera/photo-app-familiar label ("JPG",
+  // "ORF") regardless of which producer built this ImageFileInfo.
+  const format = getDisplayFormat(name);
+  if (format) metaParts.push(format);
   if (size) metaParts.push(formatFileSize(size));
   return { primary: name, meta: metaParts.join(' · ') };
 }

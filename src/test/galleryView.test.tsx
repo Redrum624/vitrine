@@ -33,6 +33,7 @@ const resetStore = () => {
     selectionAnchorId: null,
     gallerySortAscending: false,
     alignmentAxisX: null,
+    imageDimensions: {},
   });
 };
 
@@ -92,6 +93,39 @@ describe('GalleryView grid', () => {
   it('renders nothing while not visible', () => {
     const { container } = render(<GalleryView images={images} onImageSelect={jest.fn()} visible={false} />);
     expect(container).toBeEmptyDOMElement();
+  });
+});
+
+describe('GalleryView tile meta — real dimensions from the thumbnail decode (Task B2)', () => {
+  // Folder-scanned ImageFileInfo carries no `dimensions` (no per-file decode at
+  // scan time). The CHEAPEST correct fix: the thumbnail `<img>` GalleryView
+  // already renders decodes the image anyway (to paint it) — capturing its
+  // `naturalWidth`/`naturalHeight` via `onLoad` is free (no extra IPC/decode)
+  // and is written to the shared `imageDimensions` store map so the tile's own
+  // meta line reacts once it's known, without mutating the `images` prop list.
+  it('shows "W × H · FMT" once the rendered thumbnail reports its natural size', async () => {
+    const widthSpy = jest.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(1400);
+    const heightSpy = jest.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(900);
+    (window.electronAPI!.readImageAsDataURL as jest.Mock).mockResolvedValue('data:image/jpeg;base64,aaaa');
+    try {
+      render(<GalleryView images={images} onImageSelect={jest.fn()} visible={true} />);
+      await waitFor(() => expect(getTile('img1').querySelector('img')).toBeInTheDocument());
+
+      // No dimensions known yet — format-only meta (same as the "GalleryView grid" test above).
+      expect(getTile('img1')).toHaveTextContent('JPG');
+      expect(getTile('img1')).not.toHaveTextContent('×');
+
+      const img = getTile('img1').querySelector('img') as HTMLImageElement;
+      Object.defineProperty(img, 'naturalWidth', { value: 4000, configurable: true });
+      Object.defineProperty(img, 'naturalHeight', { value: 3000, configurable: true });
+      fireEvent.load(img);
+
+      await waitFor(() => expect(getTile('img1')).toHaveTextContent('4000 × 3000'));
+      expect(getTile('img1')).toHaveTextContent('JPG');
+    } finally {
+      widthSpy.mockRestore();
+      heightSpy.mockRestore();
+    }
   });
 });
 

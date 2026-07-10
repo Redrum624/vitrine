@@ -10,7 +10,7 @@
 import { render, screen, fireEvent } from '@testing-library/react';
 import { useAppStore } from '../stores/appStore';
 import { ThumbnailPanel } from '../components/Panels/ThumbnailPanel';
-import { StatusBar } from '../components/Layout/StatusBar';
+import { StatusBar, formatStatusBarFileInfoParts } from '../components/Layout/StatusBar';
 import type { ImageFileInfo } from '../services/FileSystemService';
 
 const images = [
@@ -109,6 +109,33 @@ describe('StatusBar footer — rating filter segmented + current photo rating cl
     fireEvent.click(screen.getByTestId('star-4'));
     expect(useAppStore.getState().imageRatings['img1']).toBe(4);
     expect(window.electronAPI!.writeImageRating).toHaveBeenCalledWith('/p/1.jpg', 4);
+  });
+});
+
+describe('StatusBar footer — clean format label (Task B2, folder-scanned MIME-ish `type` bug)', () => {
+  // Folder-scanned images carry a MIME-ish `type` ("image/jpeg") that used to be
+  // rendered via `type.toUpperCase()` -> "IMAGE/JPEG". The footer meta must show
+  // the clean, camera/photo-app-familiar format label instead ("JPG"), derived
+  // from the file name's extension via getDisplayFormat rather than the raw
+  // `type` string.
+  it('shows "JPG" (not "IMAGE/JPEG") for a folder-scanned image whose `type` is a MIME string', () => {
+    const currentImage = { id: 'img1', path: '/p/1.jpg', name: '1.jpg', width: 800, height: 600, size: 12345, type: 'image/jpeg' };
+    const { meta } = formatStatusBarFileInfoParts(currentImage);
+    expect(meta).toContain('JPG');
+    expect(meta).not.toContain('IMAGE/JPEG');
+  });
+
+  it('renders "JPG" in the live footer for a MIME-typed current image', () => {
+    const currentImage = { id: 'img1', path: '/p/1.jpg', name: '1.jpg', width: 800, height: 600, size: 12345, type: 'image/jpeg' };
+    render(<StatusBar currentImage={currentImage} />);
+    expect(screen.getByText(/JPG/)).toBeInTheDocument();
+    expect(screen.queryByText(/IMAGE\/JPEG/)).not.toBeInTheDocument();
+  });
+
+  it('shows the clean RAW extension label ("ORF") for a RAW file, not its raw extension echo', () => {
+    const currentImage = { id: 'img2', path: '/p/2.orf', name: '2.orf', width: 4000, height: 3000, size: 1, type: 'image/x-olympus-orf' };
+    const { meta } = formatStatusBarFileInfoParts(currentImage);
+    expect(meta).toContain('ORF');
   });
 });
 

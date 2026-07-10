@@ -118,6 +118,7 @@ export function ThumbnailPanel({
     ratingFilter: ratingFilterRaw,
     alignmentAxisX,
     setViewMode,
+    setImageDimensions,
   } = useAppStore();
   // The rating filter now lives in the store (shared with the footer's segmented
   // control and the gallery grid) — default to "All" if a mock/store snapshot
@@ -453,6 +454,17 @@ export function ThumbnailPanel({
                     className="w-full h-full object-cover rounded"
                     style={{ borderRadius: '9px' }}
                     draggable={false}
+                    onLoad={(e) => {
+                      // Free byproduct of the decode the browser already performs to
+                      // paint this thumbnail — no extra IPC/decode (Task B2). Feeds the
+                      // shared `imageDimensions` store map so the Gallery grid's tile
+                      // meta can show real dimensions even before its own lazy loader
+                      // reaches this image.
+                      const { naturalWidth, naturalHeight } = e.currentTarget;
+                      if (naturalWidth && naturalHeight) {
+                        setImageDimensions(image.id, { width: naturalWidth, height: naturalHeight });
+                      }
+                    }}
                   />
                 ) : (
                   <div

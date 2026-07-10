@@ -1,4 +1,5 @@
 import type { ImageFileInfo } from '../services/FileSystemService';
+import { getDisplayFormat } from './imageFormat';
 
 /**
  * Shared, pure helpers used by BOTH the filmstrip dock (`ThumbnailPanel`) and the
@@ -149,12 +150,21 @@ export function formatGalleryFooterLeft(images: ImageFileInfo[]): string {
   return `${path} · ${images.length} image${images.length === 1 ? '' : 's'} · ${rawCount} RAW · ${formatBytes(totalSize)}`;
 }
 
-/** Gallery tile's meta line: `W × H · FMT` (dimensions aren't populated for a
- * folder-scanned ImageFileInfo today, so this falls back to the format alone —
- * same fallback FileBrowser already uses for its own file-row subtitle). */
-export function formatGalleryTileMeta(image: ImageFileInfo): string {
+/** Gallery tile's meta line: `W × H · FMT` once dimensions are known (either
+ * `image.dimensions` or `dimensionsOverride` — the shared `imageDimensions`
+ * store map GalleryView/ThumbnailPanel populate lazily from a thumbnail decode,
+ * see Task B2); falls back to the format alone before that (same fallback
+ * FileBrowser already uses for its own file-row subtitle). The format label is
+ * derived from the file extension via `getDisplayFormat`, never the raw
+ * `format`/`type` string, so a MIME-ish or over-literal value ("image/jpeg",
+ * "JPEG") always renders as the clean "JPG". */
+export function formatGalleryTileMeta(
+  image: ImageFileInfo,
+  dimensionsOverride?: { width: number; height: number },
+): string {
+  const dims = dimensionsOverride ?? image.dimensions;
   const parts: string[] = [];
-  if (image.dimensions) parts.push(`${image.dimensions.width} × ${image.dimensions.height}`);
-  parts.push((image.format || '').toUpperCase());
+  if (dims) parts.push(`${dims.width} × ${dims.height}`);
+  parts.push(getDisplayFormat(image.format || image.name));
   return parts.join(' · ');
 }

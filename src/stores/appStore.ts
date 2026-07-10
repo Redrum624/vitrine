@@ -113,6 +113,16 @@ interface AppStore extends AppState {
   setSelection: (ids: string[], anchorId?: string | null) => void;
   toggleImageSelection: (id: string) => void;
   clearSelection: () => void;
+  // Real pixel dimensions learned lazily from a thumbnail decode (Task B2):
+  // folder-scanned ImageFileInfo carries no `dimensions` (no per-file decode at
+  // scan time), so the dock/gallery thumbnail loaders capture the decoded
+  // `<img>`'s naturalWidth/naturalHeight (a free byproduct of the browser
+  // decode it already performs to paint the thumbnail) and record it here,
+  // keyed by image id. Kept as a separate store map — not a mutation of the
+  // `images` list App-local state owns — so GalleryView/StatusBar react to it
+  // without either loader needing to touch that list.
+  imageDimensions: Record<string, { width: number; height: number }>;
+  setImageDimensions: (id: string, dims: { width: number; height: number }) => void;
   // Export progress
   exportProgress: { current: number; total: number; currentName: string; cancelRequested: boolean } | null;
   startExportProgress: (total: number) => void;
@@ -161,6 +171,7 @@ export const useAppStore = create<AppStore>((set) => ({
   selectedImageIds: [],
   selectionAnchorId: null,
   exportProgress: null,
+  imageDimensions: {},
 
   triggerReprocessing: () => set((state) => ({
     processingVersion: state.processingVersion + 1
@@ -260,6 +271,12 @@ export const useAppStore = create<AppStore>((set) => ({
     selectedImageIds: [],
     selectionAnchorId: null,
   })),
+
+  setImageDimensions: (id, dims) => set((state) => {
+    const existing = state.imageDimensions[id];
+    if (existing && existing.width === dims.width && existing.height === dims.height) return state;
+    return { imageDimensions: { ...state.imageDimensions, [id]: dims } };
+  }),
 
   startExportProgress: (total) => set(() => ({
     exportProgress: { current: 0, total, currentName: '', cancelRequested: false },

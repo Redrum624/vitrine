@@ -74,6 +74,8 @@ export function GalleryView({ images, onImageSelect, visible }: GalleryViewProps
     toggleImageSelection,
     setViewMode,
     gallerySortAscending,
+    imageDimensions,
+    setImageDimensions,
   } = useAppStore();
 
   const sortedFilteredImages = useMemo(() => {
@@ -281,7 +283,20 @@ export function GalleryView({ images, onImageSelect, visible }: GalleryViewProps
                       <div className="w-5 h-5 border-2 rounded-full animate-spin" style={{ borderColor: 'var(--gray-600)', borderTopColor: 'var(--white)' }} />
                     </div>
                   ) : thumbnail ? (
-                    <img src={thumbnail} alt={image.name} className="w-full h-full object-cover" draggable={false} />
+                    <img
+                      src={thumbnail}
+                      alt={image.name}
+                      className="w-full h-full object-cover"
+                      draggable={false}
+                      onLoad={(e) => {
+                        // Free byproduct of the decode the browser already performs to
+                        // paint this thumbnail — no extra IPC/decode (Task B2).
+                        const { naturalWidth, naturalHeight } = e.currentTarget;
+                        if (naturalWidth && naturalHeight) {
+                          setImageDimensions(image.id, { width: naturalWidth, height: naturalHeight });
+                        }
+                      }}
+                    />
                   ) : (
                     <div
                       className="w-full h-full flex items-center justify-center"
@@ -333,7 +348,7 @@ export function GalleryView({ images, onImageSelect, visible }: GalleryViewProps
                           {image.name}
                         </div>
                         <div style={{ fontSize: 9.5, fontFamily: 'ui-monospace, monospace', color: 'var(--glass-text-secondary)' }}>
-                          {formatGalleryTileMeta(image)}
+                          {formatGalleryTileMeta(image, imageDimensions[image.id])}
                         </div>
                       </div>
                       <StarRating
