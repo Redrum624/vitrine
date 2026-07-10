@@ -109,17 +109,18 @@ export function ThumbnailPanel({
   const ratingsFetchedRef = useRef<Set<string>>(new Set());
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const selectedImageRef = useRef<HTMLDivElement>(null);
-  const {
-    imageRatings,
-    selectedImageIds,
-    selectionAnchorId,
-    setSelection,
-    toggleImageSelection,
-    ratingFilter: ratingFilterRaw,
-    alignmentAxisX,
-    setViewMode,
-    setImageDimensions,
-  } = useAppStore();
+  // Per-field selectors (not a whole-store `useAppStore()` subscription) — the dock
+  // only re-renders when one of ITS OWN fields actually changes, not on every store
+  // update elsewhere (e.g. Develop-only fields like rawDecodeOptions/viewport).
+  const imageRatings = useAppStore((s) => s.imageRatings);
+  const selectedImageIds = useAppStore((s) => s.selectedImageIds);
+  const selectionAnchorId = useAppStore((s) => s.selectionAnchorId);
+  const setSelection = useAppStore((s) => s.setSelection);
+  const toggleImageSelection = useAppStore((s) => s.toggleImageSelection);
+  const ratingFilterRaw = useAppStore((s) => s.ratingFilter);
+  const alignmentAxisX = useAppStore((s) => s.alignmentAxisX);
+  const setViewMode = useAppStore((s) => s.setViewMode);
+  const setImageDimensions = useAppStore((s) => s.setImageDimensions);
   // The rating filter now lives in the store (shared with the footer's segmented
   // control and the gallery grid) — default to "All" if a mock/store snapshot
   // doesn't carry it yet.

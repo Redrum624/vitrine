@@ -64,19 +64,20 @@ export function GalleryView({ images, onImageSelect, visible }: GalleryViewProps
     if (!visible) wasVisibleRef.current = false;
   }, [visible]);
 
-  const {
-    imageRatings,
-    setImageRating,
-    ratingFilter,
-    selectedImageIds,
-    selectionAnchorId,
-    setSelection,
-    toggleImageSelection,
-    setViewMode,
-    gallerySortAscending,
-    imageDimensions,
-    setImageDimensions,
-  } = useAppStore();
+  // Per-field selectors (not a whole-store `useAppStore()` subscription) — GalleryView
+  // only re-renders when one of ITS OWN fields actually changes, not on every store
+  // update elsewhere (e.g. Develop-only fields like rawDecodeOptions/viewport).
+  const imageRatings = useAppStore((s) => s.imageRatings);
+  const setImageRating = useAppStore((s) => s.setImageRating);
+  const ratingFilter = useAppStore((s) => s.ratingFilter);
+  const selectedImageIds = useAppStore((s) => s.selectedImageIds);
+  const selectionAnchorId = useAppStore((s) => s.selectionAnchorId);
+  const setSelection = useAppStore((s) => s.setSelection);
+  const toggleImageSelection = useAppStore((s) => s.toggleImageSelection);
+  const setViewMode = useAppStore((s) => s.setViewMode);
+  const gallerySortAscending = useAppStore((s) => s.gallerySortAscending);
+  const imageDimensions = useAppStore((s) => s.imageDimensions);
+  const setImageDimensions = useAppStore((s) => s.setImageDimensions);
 
   const sortedFilteredImages = useMemo(() => {
     const filtered = filterImagesByRating(images, imageRatings, ratingFilter ?? 0);
