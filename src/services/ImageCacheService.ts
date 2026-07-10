@@ -113,6 +113,12 @@ export class ImageCacheService {
    * OVERWRITES the prior entry rather than leaving a stale one behind. There is therefore at
    * most one base entry per path and it always reflects the most recent decode. The REAL
    * width/height are kept in the entry payload so getBase() reconstructs correct dimensions.
+   *
+   * Practical bound: the total budget is DEFAULT_MAX_SIZE (500MB), and a single entry larger
+   * than that is refused outright rather than evicting the whole cache to make room (see
+   * setWithKey). In practice this comfortably holds ONE large RAW base (e.g. a 40MP+ Float32
+   * RGBA decode); switching between several such large RAWs in the same session may still
+   * re-decode more than once. Accepted design limit, not a bug.
    */
   setBase(
     filePath: string,
@@ -133,6 +139,16 @@ export class ImageCacheService {
   ): void {
     const size = imageData.byteLength;
     const now = Date.now();
+
+    // An entry larger than the entire cache budget can never be satisfied by cleanup()'s
+    // eviction loop (its break condition — current size at/under target — is unreachable
+    // when the incoming entry alone exceeds maxSize), so it would evict every other entry
+    // and still get stored. Refuse it instead: the caller (typically a RAW reopen) simply
+    // decodes fresh, and every other cached entry survives untouched.
+    if (size > this.maxSize) {
+      logger.debug(`Cache: Refusing oversized entry ${key} (${this.formatBytes(size)} > ${this.formatBytes(this.maxSize)} max) — not cached`);
+      return;
+    }
 
     // Check if we need to make space
     if (this.shouldCleanup(size)) {

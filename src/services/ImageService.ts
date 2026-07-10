@@ -102,7 +102,8 @@ export class ImageService {
             fileName: filePath.split(/[/\\]/).pop() || 'unknown',
             filePath,
             isRaw: cacheEntry.metadata?.isRaw as boolean,
-            metadata: cacheEntry.metadata
+            metadata: cacheEntry.metadata,
+            autoAdjustmentResult: cacheEntry.metadata?.autoAdjustmentResult as RAWDetectionResult | undefined
           };
 
           this.currentImage = result;

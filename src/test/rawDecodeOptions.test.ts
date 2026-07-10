@@ -168,11 +168,11 @@ describe('RawImageService.reDecode', () => {
 
     await rawImageService.reDecode(AHD_RECON);
 
-    // Only the still-valid base-cache write for the file that was ACTUALLY decoded may proceed —
-    // it's keyed by the original path and is correct data to have cached for a later reopen.
-    expect(cacheSet).toHaveBeenCalledWith(
-      '/photo.orf', expect.any(Float32Array), 4, 2, expect.objectContaining({ isRaw: true }),
-    );
+    // The base-cache write must NOT happen either: it is gated by the same identity check as
+    // the store options/persistence. If it ran unconditionally, the cache would hold the new
+    // (Y-options) pixels for '/photo.orf' while the persisted options for that path stayed at
+    // the old (X) value — a silent mismatch discovered only on a later reopen of '/photo.orf'.
+    expect(cacheSet).not.toHaveBeenCalled();
 
     // Nothing about the newly-selected image (now the one on screen) is touched.
     expect(upd).not.toHaveBeenCalled();

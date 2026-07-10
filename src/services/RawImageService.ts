@@ -133,9 +133,9 @@ export class RawImageService {
    * the demosaic / highlight controls.
    *
    * Flow: guard (RAW only, not already running) → raise `reDecoding` → re-decode via the
-   * same native→wasm→embedded fallback chain (loadRawImage) → refresh the session cache →
-   * re-check that the user hasn't switched to a different image during the (async) decode,
-   * bailing out if so → REPLACE the working base + before/after original snapshot → apply &
+   * same native→wasm→embedded fallback chain (loadRawImage) → re-check that the user hasn't
+   * switched to a different image during the (async) decode, bailing out if so → refresh the
+   * session cache + REPLACE the working base + before/after original snapshot → apply &
    * persist the options → clear the pipeline cache and reprocess so the module edits re-apply
    * → lower `reDecoding`.
    *
@@ -161,30 +161,32 @@ export class RawImageService {
       logger.info(`Re-decoding RAW base for ${current.filePath} with`, options);
       const rawData = await this.loadRawImage(current.filePath, undefined, options);
 
-      // Overwrite the session BASE cache entry for THIS path so a later reopen serves these
-      // re-decoded pixels instead of running a fresh decode. It shares the exact key that
-      // ImageService.loadImage reads (setBase/getBase), so the hit is guaranteed — and because
-      // it OVERWRITES the same key, the cache never serves pixels from stale decode options.
-      // Keyed by current.filePath (the file actually decoded), so it's correct regardless of
-      // what's on screen now (the identity re-check below guards the live-image mutations).
-      imageCacheService.setBase(
-        current.filePath,
-        rawData.data,
-        rawData.width,
-        rawData.height,
-        { isRaw: true, ...rawData.metadata },
-      );
-
       // The decode above is async — the user may have switched to a different image while it
       // was in flight. Re-check identity before touching anything else: every remaining
-      // mutation (working base, original snapshot, store options, persistence, pipeline
-      // reprocessing) targets "the current image" and would corrupt whatever is now on screen
-      // if it's no longer the image we just decoded.
+      // mutation (base cache, working base, original snapshot, store options, persistence,
+      // pipeline reprocessing) targets "the current image" and would corrupt whatever is now
+      // on screen — or desync the cache from the persisted decode options — if it's no longer
+      // the image we just decoded.
       const stillCurrent = imageService.getCurrentImage();
       if (!stillCurrent || stillCurrent.filePath !== current.filePath) {
         logger.info(`Re-decode of ${current.filePath} discarded: current image changed during decode`);
         return;
       }
+
+      // Overwrite the session BASE cache entry for THIS path so a later reopen serves these
+      // re-decoded pixels instead of running a fresh decode. It shares the exact key that
+      // ImageService.loadImage reads (setBase/getBase), so the hit is guaranteed — and because
+      // it OVERWRITES the same key, the cache never serves pixels from stale decode options.
+      // Written together with store.setRawDecodeOptions/scheduleSave below, both gated by the
+      // identity check above, so the cached pixels and the persisted options can never diverge:
+      // either both update together, or neither does.
+      imageCacheService.setBase(
+        current.filePath,
+        rawData.data,
+        rawData.width,
+        rawData.height,
+        { isRaw: true, autoAdjustmentResult: undefined, ...rawData.metadata },
+      );
 
       // Replace the working base image + the before/after original snapshot.
       imageService.updateCurrentImageData(rawData.data, rawData.width, rawData.height);
