@@ -126,7 +126,7 @@ export class ImageService {
           // these from per-image persistence (or DEFAULT_RAW_DECODE_OPTIONS) BEFORE calling
           // loadImage, so the initial decode matches the user's last-chosen demosaic/highlights.
           const decodeOptions = useAppStore.getState().rawDecodeOptions;
-          const rawData = await rawImageService.loadRawImage(filePath, undefined, decodeOptions);
+          const rawData = await rawImageService.loadRawImage(filePath, decodeOptions);
 
           // Validate dimensions
           const dimensionValidation = ValidationService.validateDimensions(rawData.width, rawData.height);
@@ -471,7 +471,7 @@ export class ImageService {
         ? useAppStore.getState().rawDecodeOptions
         : (await editPersistenceService.getSavedRawDecodeOptions(filePath)) ?? DEFAULT_RAW_DECODE_OPTIONS;
 
-      const rawData = await rawImageService.loadRawImage(filePath, undefined, decodeOptions);
+      const rawData = await rawImageService.loadRawImage(filePath, decodeOptions);
 
       const dimensionValidation = ValidationService.validateDimensions(rawData.width, rawData.height);
       if (!dimensionValidation.valid) {

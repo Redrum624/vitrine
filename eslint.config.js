@@ -128,7 +128,6 @@ export default [
       'release/**',
       'out/**',
       'wasm-build/**',
-      'public/wasm/**/*.js',
       'public/workers/**/*.js',
       'public/libraw/**',
       'e2e/**',

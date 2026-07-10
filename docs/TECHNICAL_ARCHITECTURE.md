@@ -63,7 +63,6 @@ ImageProcessingPipeline      // Orchestrates all processing operations
 LibRawService               // Professional RAW processing via WebAssembly
 ├── AutoRawAdjustmentService // Intelligent parameter detection
 ├── CameraProfileService    // Camera-specific color profiles
-├── AdvancedDemosaicingService // High-quality debayering algorithms
 ├── NoiseReductionService   // Wavelet-based noise reduction
 └── RawHistogramService     // True RAW histogram analysis
 ```

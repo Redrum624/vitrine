@@ -37,7 +37,7 @@ it('decodes RAW at full resolution for export and never uses the thumbnail IPC',
 
   // No image is currently open and nothing is persisted for this path (electronAPI.storeGet is
   // not stubbed here), so decodeForExport falls back to DEFAULT_RAW_DECODE_OPTIONS.
-  expect(loadRawImage).toHaveBeenCalledWith('C:/x/p.orf', undefined, DEFAULT_RAW_DECODE_OPTIONS);
+  expect(loadRawImage).toHaveBeenCalledWith('C:/x/p.orf', DEFAULT_RAW_DECODE_OPTIONS);
   expect(result.width).toBe(200);
   expect(result.height).toBe(100);
   expect(result.data).toBe(data);

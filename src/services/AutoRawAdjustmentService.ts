@@ -84,7 +84,7 @@ export class AutoRawAdjustmentService {
       }
 
       // Load RAW image to analyze metadata
-      const rawData = await rawImageService.loadRawImageWithHistogram(filePath, {}, {
+      const rawData = await rawImageService.loadRawImageWithHistogram(filePath, {
         generateHistogram: true,
         bins: 256,
         bitDepth: 16

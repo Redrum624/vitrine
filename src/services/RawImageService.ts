@@ -1,5 +1,4 @@
 import { logger } from '../utils/Logger';
-import { advancedRawProcessor, AdvancedRawProcessingOptions } from './AdvancedRawProcessor';
 import { libRawService, LibRawOptions, ProcessedRawData } from './LibRawService';
 import { cameraProfileService } from './CameraProfileService';
 import { rawHistogramService, HistogramData } from './RawHistogramService';
@@ -67,7 +66,6 @@ export class RawImageService {
 
   async loadRawImage(
     filePath: string,
-    options?: Partial<AdvancedRawProcessingOptions>,
     decodeOptions?: RawDecodeOptions,
   ): Promise<RawImageData> {
     try {
@@ -76,37 +74,16 @@ export class RawImageService {
 
       const extension = filePath.toLowerCase().substring(filePath.lastIndexOf('.'));
 
-      // Try LibRaw WebAssembly processing first
-      try {
-        logger.debug('Attempting LibRaw WebAssembly processing...');
-        const rawData = await this.decodeRawFile(filePath, extension, decodeOptions);
+      // Decode via the fallback chain owned by decodeRawFile: the Electron main process
+      // (native dcraw_emu → libraw-wasm/Node → embedded-JPEG last resort — see
+      // electron/rawDecoder.cjs), or, in a no-IPC/browser context, the renderer LibRawService.
+      // decodeOptions (demosaic + highlight mode) are threaded through to the native/wasm rungs.
+      const rawData = await this.decodeRawFile(filePath, extension, decodeOptions);
 
-        const loadTime = performance.now() - startTime;
-        logger.info(`RAW image loaded with LibRaw in ${loadTime.toFixed(2)}ms: ${rawData.width}x${rawData.height}`);
+      const loadTime = performance.now() - startTime;
+      logger.info(`RAW image loaded in ${loadTime.toFixed(2)}ms: ${rawData.width}x${rawData.height}`);
 
-        return rawData;
-      } catch (libRawError: unknown) {
-        const errorMessage = libRawError instanceof Error ? libRawError.message : String(libRawError);
-        logger.warn(`LibRaw processing failed for ${extension.toUpperCase()} file:`, errorMessage);
-        logger.info('Attempting fallback processing...');
-
-        // Fallback to old advanced processor if available
-        try {
-          const rawData = await advancedRawProcessor.processRawFile(filePath, options);
-          const loadTime = performance.now() - startTime;
-          logger.info(`RAW image loaded with fallback processor in ${loadTime.toFixed(2)}ms: ${rawData.width}x${rawData.height}`);
-          logger.warn('Note: Fallback processor was used. For best results, ensure LibRaw WebAssembly module is properly installed.');
-          return rawData;
-        } catch (advancedError) {
-          const advErrorMessage = advancedError instanceof Error ? advancedError.message : String(advancedError);
-          logger.error('All RAW processing methods failed:', {
-            libRawError: errorMessage,
-            advancedProcessorError: advErrorMessage
-          });
-          throw new Error(`Failed to process ${extension.toUpperCase()} RAW file. LibRaw error: ${errorMessage}. Advanced processor error: ${advErrorMessage}`);
-        }
-      }
-
+      return rawData;
     } catch (error) {
       logger.error(`Failed to load RAW image: ${filePath}`, error);
       throw error;
@@ -146,7 +123,7 @@ export class RawImageService {
     store.setReDecoding(true);
     try {
       logger.info(`Re-decoding RAW base for ${current.filePath} with`, options);
-      const rawData = await this.loadRawImage(current.filePath, undefined, options);
+      const rawData = await this.loadRawImage(current.filePath, options);
 
       // The decode above is async — the user may have switched to a different image while it
       // was in flight. Re-check identity before touching anything else: every remaining
@@ -715,7 +692,6 @@ export class RawImageService {
    */
   async loadRawImageWithHistogram(
     filePath: string,
-    options?: Partial<AdvancedRawProcessingOptions>,
     histogramOptions?: {
       generateHistogram?: boolean;
       bins?: number;
@@ -724,7 +700,7 @@ export class RawImageService {
       highlightThreshold?: number;
     }
   ): Promise<RawImageData> {
-    const rawData = await this.loadRawImage(filePath, options);
+    const rawData = await this.loadRawImage(filePath);
 
     // Generate histogram if requested
     if (histogramOptions?.generateHistogram !== false) {
