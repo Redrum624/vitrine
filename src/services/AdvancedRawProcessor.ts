@@ -34,27 +34,10 @@ export interface AdvancedRawProcessingOptions {
   sharpening: number;
 }
 
-export interface CameraProfile {
-  make: string;
-  model: string;
-  colorMatrix1: number[];
-  colorMatrix2: number[];
-  forwardMatrix1?: number[];
-  forwardMatrix2?: number[];
-  dngColorSpace: number;
-  calibrationMatrix1?: number[];
-  calibrationMatrix2?: number[];
-  toneCurve?: number[];
-  baselineExposure: number;
-  baselineNoise: number;
-  baselineSharpness: number;
-}
-
 export class AdvancedRawProcessor {
   private static instance: AdvancedRawProcessor;
   private libRaw: LibRawWasm | null = null;
   private isInitialized = false;
-  private cameraProfiles: Map<string, CameraProfile> = new Map();
 
   static getInstance(): AdvancedRawProcessor {
     if (!AdvancedRawProcessor.instance) {
@@ -81,9 +64,6 @@ export class AdvancedRawProcessor {
 
       await this.libRaw.initialize();
 
-      // Load camera profiles
-      await this.loadCameraProfiles();
-
       const initTime = performance.now() - startTime;
       logger.info(`Advanced RAW Processor initialized in ${initTime.toFixed(2)}ms`);
 
@@ -92,71 +72,6 @@ export class AdvancedRawProcessor {
       logger.error('Failed to initialize Advanced RAW Processor:', error);
       throw error;
     }
-  }
-
-  private async loadCameraProfiles(): Promise<void> {
-    logger.info('Loading camera profiles...');
-
-    // Olympus profiles
-    this.cameraProfiles.set('Olympus:OM-D E-M1 Mark III', {
-      make: 'Olympus',
-      model: 'OM-D E-M1 Mark III',
-      colorMatrix1: [
-        1.0234, -0.2973, -0.1261,
-        -0.3180, 1.4419, -0.1239,
-        -0.0421, -0.4434, 1.4855
-      ],
-      colorMatrix2: [
-        1.1234, -0.3973, -0.2261,
-        -0.4180, 1.5419, -0.2239,
-        -0.1421, -0.5434, 1.5855
-      ],
-      dngColorSpace: 0,
-      baselineExposure: 0.0,
-      baselineNoise: 1.0,
-      baselineSharpness: 1.0
-    });
-
-    this.cameraProfiles.set('Olympus:OM-D E-M1 Mark II', {
-      make: 'Olympus',
-      model: 'OM-D E-M1 Mark II',
-      colorMatrix1: [
-        0.9876, -0.2645, -0.1231,
-        -0.3045, 1.4123, -0.1078,
-        -0.0387, -0.4123, 1.4510
-      ],
-      colorMatrix2: [
-        1.0876, -0.3645, -0.2231,
-        -0.4045, 1.5123, -0.2078,
-        -0.1387, -0.5123, 1.5510
-      ],
-      dngColorSpace: 0,
-      baselineExposure: 0.0,
-      baselineNoise: 1.0,
-      baselineSharpness: 1.0
-    });
-
-    // Canon profiles
-    this.cameraProfiles.set('Canon:EOS R5', {
-      make: 'Canon',
-      model: 'EOS R5',
-      colorMatrix1: [
-        1.3460, -0.5371, -0.1309,
-        -0.2268, 1.1932, 0.0333,
-        -0.0205, 0.1002, 0.9197
-      ],
-      colorMatrix2: [
-        1.4460, -0.6371, -0.2309,
-        -0.3268, 1.2932, -0.0667,
-        -0.1205, 0.0002, 1.0197
-      ],
-      dngColorSpace: 0,
-      baselineExposure: 0.0,
-      baselineNoise: 1.0,
-      baselineSharpness: 1.2
-    });
-
-    logger.info(`Loaded ${this.cameraProfiles.size} camera profiles`);
   }
 
   async processRawFile(
@@ -440,41 +355,11 @@ export class AdvancedRawProcessor {
     };
   }
 
-  async getSupportedFormats(): Promise<string[]> {
-    if (!this.isInitialized) {
-      await this.initialize();
-    }
-    return this.libRaw?.getSupportedFormats() || [];
-  }
-
-  getDefaultProcessingOptions(): AdvancedRawProcessingOptions {
-    return {
-      demosaicQuality: 'good',
-      whiteBalanceMode: 'camera',
-      exposureCompensation: 0.0,
-      highlightRecovery: true,
-      shadowBoost: false,
-      colorSpace: 'sRGB',
-      outputBitDepth: 16,
-      outputSize: 'full',
-      useManufacturerProfile: true,
-      applyLensCorrections: false,
-      denoiseThreshold: 0.0,
-      chromaDenoiseThreshold: 0.0,
-      sharpening: 0.0
-    };
-  }
-
-  getCameraProfile(make: string, model: string): CameraProfile | null {
-    return this.cameraProfiles.get(`${make}:${model}`) || null;
-  }
-
   dispose(): void {
     if (this.libRaw) {
       this.libRaw.dispose();
       this.libRaw = null;
     }
-    this.cameraProfiles.clear();
     this.isInitialized = false;
   }
 }
