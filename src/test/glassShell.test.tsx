@@ -4,7 +4,7 @@
  * live layout: the axis store field, the derived photo-region insets, the
  * filename-chip composer, and the Toolbar's Auto All primary.
  */
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent, within } from '@testing-library/react';
 import { useAppStore } from '../stores/appStore';
 import { Toolbar } from '../components/Layout/Toolbar';
 import { electronService } from '../services/ElectronService';
@@ -79,5 +79,90 @@ describe('Toolbar (floating pill)', () => {
   it('keeps the zoom cluster readout in sync with the zoom prop', () => {
     render(<Toolbar hasImage zoom={0.5} />);
     expect(screen.getByText('50%')).toBeInTheDocument();
+  });
+});
+
+describe('Toolbar responsive collapse (Develop pill overflow menu)', () => {
+  const setInnerWidth = (w: number) => {
+    Object.defineProperty(window, 'innerWidth', { writable: true, configurable: true, value: w });
+  };
+
+  beforeEach(() => {
+    jest.spyOn(electronService, 'isElectron').mockReturnValue(true);
+    useAppStore.setState({ viewMode: 'develop' });
+  });
+  afterEach(() => {
+    jest.restoreAllMocks();
+    setInnerWidth(1024); // restore jsdom default
+  });
+
+  it('keeps the secondary actions inline at a wide window (no overflow menu)', () => {
+    setInnerWidth(1920);
+    render(
+      <Toolbar hasImage zoom={1} onPrint={jest.fn()} onCopyStyle={jest.fn()} onPasteStyle={jest.fn()} hasStyleClipboard onToggleReference={jest.fn()} />,
+    );
+    expect(screen.getByRole('button', { name: 'Print' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /copy style/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /paste style/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Reference' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /more actions/i })).toBeNull();
+  });
+
+  it('collapses the secondary actions into the overflow menu at a narrow window', () => {
+    setInnerWidth(1200);
+    render(
+      <Toolbar hasImage zoom={1} onPrint={jest.fn()} onCopyStyle={jest.fn()} onPasteStyle={jest.fn()} onToggleReference={jest.fn()} />,
+    );
+    // Pulled out of the pill (not inline)…
+    expect(screen.queryByRole('button', { name: 'Print' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /copy style/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /paste style/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Reference' })).toBeNull();
+    // …into the overflow chip; primary + kept actions stay inline.
+    expect(screen.getByRole('button', { name: /more actions/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /auto all/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /before \/ after/i })).toBeInTheDocument();
+    expect(screen.getByText('Fit')).toBeInTheDocument();
+  });
+
+  it('opens the overflow popover and dispatches each secondary action', () => {
+    setInnerWidth(1200);
+    const onPrint = jest.fn();
+    const onCopyStyle = jest.fn();
+    const onPasteStyle = jest.fn();
+    const onToggleReference = jest.fn();
+    render(
+      <Toolbar hasImage zoom={1} onPrint={onPrint} onCopyStyle={onCopyStyle} onPasteStyle={onPasteStyle} hasStyleClipboard onToggleReference={onToggleReference} />,
+    );
+
+    expect(screen.queryByRole('menu')).toBeNull(); // closed initially
+
+    fireEvent.click(screen.getByRole('button', { name: /more actions/i }));
+    expect(screen.getByRole('menu')).toBeInTheDocument();
+
+    fireEvent.click(within(screen.getByRole('menu')).getByRole('menuitem', { name: 'Print' }));
+    expect(onPrint).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('menu')).toBeNull(); // click closes the popover
+
+    fireEvent.click(screen.getByRole('button', { name: /more actions/i }));
+    fireEvent.click(within(screen.getByRole('menu')).getByRole('menuitem', { name: /copy style/i }));
+    expect(onCopyStyle).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole('button', { name: /more actions/i }));
+    fireEvent.click(within(screen.getByRole('menu')).getByRole('menuitem', { name: /paste style/i }));
+    expect(onPasteStyle).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole('button', { name: /more actions/i }));
+    fireEvent.click(within(screen.getByRole('menu')).getByRole('menuitem', { name: 'Reference' }));
+    expect(onToggleReference).toHaveBeenCalledTimes(1);
+  });
+
+  it('closes the overflow popover on an outside click', () => {
+    setInnerWidth(1200);
+    render(<Toolbar hasImage zoom={1} onPrint={jest.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: /more actions/i }));
+    expect(screen.getByRole('menu')).toBeInTheDocument();
+    fireEvent.mouseDown(document.body);
+    expect(screen.queryByRole('menu')).toBeNull();
   });
 });

@@ -1373,6 +1373,7 @@ function App() {
             const { current, total } = fileSystemService.getCurrentImageInfo();
             return (
               <div
+                data-testid="filename-chip"
                 className="glass-chrome no-select"
                 style={{
                   position: 'absolute',

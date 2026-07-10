@@ -361,16 +361,26 @@ export function ThumbnailPanel({
 
   return (
     <div
-      className="glass-chrome absolute flex items-center no-select"
+      className="absolute no-select"
       style={{
         bottom: DOCK_BOTTOM,
         left: alignmentAxisX ?? '50%',
         transform: 'translateX(-50%)',
+        zIndex: 30,
+        maxWidth: 'calc(100% - 48px)',
+      }}
+    >
+    {/* Inner surface carries the entrance rise (§5: dock +120ms). It is a SEPARATE
+        node from the axis-centering wrapper above because dcRise animates
+        `transform` (translateY 10→0) and, filling both, would otherwise clobber and
+        freeze the outer translateX(-50%) centering. */}
+    <div
+      className="glass-chrome dc-rise flex items-center no-select"
+      style={{
         borderRadius: 'var(--radius-dock)',
         padding: '10px 14px',
         gap: '10px',
-        zIndex: 30,
-        maxWidth: 'calc(100% - 48px)',
+        animationDelay: '120ms',
       }}
     >
       {/* Chevron: previous image */}
@@ -534,6 +544,7 @@ export function ThumbnailPanel({
           </div>
         )}
       </div>
+    </div>
     </div>
   );
 }

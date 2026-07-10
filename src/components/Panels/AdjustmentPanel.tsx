@@ -676,8 +676,13 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
             so it's a no-op render for non-RAW files. */}
         <RawDecodePanel currentImage={currentImage} />
 
-        {/* Unified module card (Glass · Sectioned §4): header chrome + body. */}
-        <div className="glass-card dc-rise" style={{ overflow: 'hidden' }}>
+        {/* Unified module card (Glass · Sectioned §4): header chrome + body.
+            Entrance stagger (§5): the module card rises +70ms after the histogram
+            card (0ms). This div lives OUTSIDE the per-module remount key
+            (`${id}-${paramSync}`, on the inner module components only), so the rise
+            plays once per panel mount — switching modules or bumping
+            externalParamsVersion re-keys the body, not this card, so it never replays. */}
+        <div className="glass-card dc-rise" style={{ overflow: 'hidden', animationDelay: '70ms' }}>
           <ModuleCardHeader
             icon={getModuleIcon()}
             title={getModuleTitle()}

@@ -1,8 +1,10 @@
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { electronService } from '../../services/ElectronService';
 import { useAppStore } from '../../stores/appStore';
 import { Segmented } from '../Controls/Segmented';
 import { ChipButton } from '../Controls/ChipButton';
+import { CHIP_LEFT } from '../../layout/photoRegion';
 
 interface ToolbarProps {
   onExport?: () => void;
@@ -81,8 +83,138 @@ const toggleActive: CSSProperties = {
   color: 'var(--accent)',
 };
 
+/**
+ * innerWidth below which the Develop pill's secondary actions collapse into the
+ * overflow menu when a live measurement isn't available yet (jsdom / first frame).
+ * Derived from the measured collision: the full pill starts overlapping the
+ * filename chip at ~1745px innerWidth (see task-8-report.md). The real app path
+ * uses the geometric measurement below; this is only the unmeasured fallback.
+ */
+const COLLAPSE_INNERWIDTH_FALLBACK = 1745;
+
+interface OverflowItem {
+  label: string;
+  onClick?: () => void;
+  disabled?: boolean;
+  active?: boolean;
+  title?: string;
+}
+
+/**
+ * Overflow "⋯" chip for the responsive-collapsed Develop pill (G5 review): a
+ * simple glass popover holding the secondary actions (Print, Copy Style, Paste
+ * Style, Reference). Every item keeps its original handler and disabled/active
+ * state; click-outside closes. The items also have menu-bar homes, so no keyboard
+ * flow depends on this popover.
+ */
+function ToolbarOverflowMenu({ items }: { items: OverflowItem[] }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as HTMLElement)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [open]);
+
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <button
+        type="button"
+        aria-label="More actions"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+        className="glass-pill-btn"
+        style={pillIconBtn}
+        title="More actions"
+      >
+        ⋯
+      </button>
+      {open && (
+        <div
+          role="menu"
+          className="glass-chrome"
+          style={{
+            position: 'absolute',
+            top: 'calc(100% + 8px)',
+            right: 0,
+            borderRadius: '10px',
+            padding: '5px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '2px',
+            minWidth: '150px',
+            zIndex: 40,
+          }}
+        >
+          {items.map((item) => (
+            <button
+              key={item.label}
+              type="button"
+              role="menuitem"
+              disabled={item.disabled}
+              onClick={() => {
+                item.onClick?.();
+                setOpen(false);
+              }}
+              className="glass-pill-btn"
+              style={{ ...pillBtn, justifyContent: 'flex-start', width: '100%', ...(item.active ? toggleActive : null) }}
+              title={item.title}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function Toolbar({ onExport, onPrint, onBatchProcess, onUndo: _onUndo, onRedo: _onRedo, canUndo: _canUndo = false, canRedo: _canRedo = false, onZoomIn, onZoomOut, onFitWindow, onActualSize, zoom = 1, onAutoAll, onCopyStyle, onPasteStyle, hasStyleClipboard = false, hasImage = false, onToggleOriginal, showOriginal = false, onToggleReference, referenceMode = false, onOpenFolder, onExportSelected }: ToolbarProps) {
   const { viewMode, setViewMode, selectedImageIds, gallerySortAscending, toggleGallerySortDirection } = useAppStore();
+
+  // Responsive collapse (Develop pill only, G5 review): when the full pill would
+  // overlap the filename chip (or run off the left edge), the secondary actions move
+  // into the overflow menu. The pill is axis-centered (App positions it at the axis
+  // with translateX(-50%)), so its measured CENTER is stable regardless of collapse;
+  // we cache the EXPANDED width and decide from "would the full pill overlap?" —
+  // which prevents a collapse↔expand feedback loop. Unmeasured (jsdom / first frame)
+  // falls back to an innerWidth heuristic so the code path stays unit-testable.
+  const containerRef = useRef<HTMLDivElement>(null);
+  const fullWidthRef = useRef(0);
+  const [collapsed, setCollapsed] = useState(false);
+
+  useLayoutEffect(() => {
+    if (viewMode !== 'develop') return;
+    const measure = () => {
+      const el = containerRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      if (rect.width === 0) {
+        setCollapsed(window.innerWidth < COLLAPSE_INNERWIDTH_FALLBACK);
+        return;
+      }
+      if (!collapsed) fullWidthRef.current = rect.width; // cache only the expanded width
+      const centerX = rect.left + rect.width / 2; // == axis, unchanged by collapse
+      const fullWidth = fullWidthRef.current || rect.width;
+      const fullLeft = centerX - fullWidth / 2;
+      const chip = document.querySelector('[data-testid="filename-chip"]') as HTMLElement | null;
+      const chipRight = chip ? chip.getBoundingClientRect().right : CHIP_LEFT;
+      setCollapsed(fullLeft < chipRight + 16); // 16px min clearance to the chip
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    if (containerRef.current) ro.observe(containerRef.current);
+    window.addEventListener('resize', measure);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', measure);
+    };
+  }, [collapsed, viewMode]);
 
   if (!electronService.isElectron()) return <div />;
 
@@ -127,7 +259,6 @@ export function Toolbar({ onExport, onPrint, onBatchProcess, onUndo: _onUndo, on
             fontWeight: 600,
             color: '#0b0b0c',
             background: 'var(--accent)',
-            boxShadow: '0 0 0 1px var(--accent-ring), 0 6px 20px rgba(59, 130, 246, 0.35)',
           }}
           title="Batch process multiple images"
         >
@@ -142,6 +273,7 @@ export function Toolbar({ onExport, onPrint, onBatchProcess, onUndo: _onUndo, on
 
   return (
     <div
+      ref={containerRef}
       className="glass-chrome flex items-center no-select"
       style={{ borderRadius: '14px', padding: '6px 8px', gap: '3px' }}
     >
@@ -151,13 +283,17 @@ export function Toolbar({ onExport, onPrint, onBatchProcess, onUndo: _onUndo, on
       <button onClick={onExport} className="glass-pill-btn" style={pillBtn} title="Export Image">
         Export
       </button>
-      <button onClick={onPrint} disabled={!hasImage} className="glass-pill-btn" style={pillBtn} title="Print Image (Ctrl+P)">
-        Print
-      </button>
+      {/* Print — secondary; moves to the overflow menu when collapsed. */}
+      {!collapsed && (
+        <button onClick={onPrint} disabled={!hasImage} className="glass-pill-btn" style={pillBtn} title="Print Image (Ctrl+P)">
+          Print
+        </button>
+      )}
 
       <div style={divider} />
 
-      {/* Auto All — the solid-accent primary (mirrors Enhance's Apply). */}
+      {/* Auto All — the solid-accent primary (mirrors Enhance's Apply). Kept inline
+          at every width. */}
       <button
         onClick={onAutoAll}
         disabled={!hasImage}
@@ -168,7 +304,6 @@ export function Toolbar({ onExport, onPrint, onBatchProcess, onUndo: _onUndo, on
           fontWeight: 600,
           color: '#0b0b0c',
           background: 'var(--accent)',
-          boxShadow: '0 0 0 1px var(--accent-ring), 0 6px 20px rgba(59, 130, 246, 0.35)',
         }}
         title="Auto-adjust all modules based on image analysis"
       >
@@ -180,21 +315,26 @@ export function Toolbar({ onExport, onPrint, onBatchProcess, onUndo: _onUndo, on
 
       <div style={divider} />
 
-      <button onClick={onCopyStyle} disabled={!hasImage} className="glass-pill-btn" style={pillBtn} title="Analyse and copy the style of the current photo">
-        Copy Style
-      </button>
-      <button
-        onClick={onPasteStyle}
-        disabled={!hasImage || !hasStyleClipboard}
-        className="glass-pill-btn"
-        style={pillBtn}
-        title={hasStyleClipboard ? 'Apply the copied style to the current photo' : 'Copy a style first'}
-      >
-        Paste Style
-      </button>
+      {/* Copy/Paste Style — secondary; move to the overflow menu when collapsed. */}
+      {!collapsed && (
+        <>
+          <button onClick={onCopyStyle} disabled={!hasImage} className="glass-pill-btn" style={pillBtn} title="Analyse and copy the style of the current photo">
+            Copy Style
+          </button>
+          <button
+            onClick={onPasteStyle}
+            disabled={!hasImage || !hasStyleClipboard}
+            className="glass-pill-btn"
+            style={pillBtn}
+            title={hasStyleClipboard ? 'Apply the copied style to the current photo' : 'Copy a style first'}
+          >
+            Paste Style
+          </button>
+          <div style={divider} />
+        </>
+      )}
 
-      <div style={divider} />
-
+      {/* Before/After — kept inline (has the B shortcut and is a primary compare). */}
       <button
         onClick={onToggleOriginal}
         disabled={!hasImage}
@@ -204,15 +344,18 @@ export function Toolbar({ onExport, onPrint, onBatchProcess, onUndo: _onUndo, on
       >
         Before / After
       </button>
-      <button
-        onClick={onToggleReference}
-        disabled={!hasImage}
-        className="glass-pill-btn"
-        style={{ ...pillBtn, ...(referenceMode ? toggleActive : null) }}
-        title="Compare with a reference photo"
-      >
-        Reference
-      </button>
+      {/* Reference — secondary; moves to the overflow menu when collapsed. */}
+      {!collapsed && (
+        <button
+          onClick={onToggleReference}
+          disabled={!hasImage}
+          className="glass-pill-btn"
+          style={{ ...pillBtn, ...(referenceMode ? toggleActive : null) }}
+          title="Compare with a reference photo"
+        >
+          Reference
+        </button>
+      )}
 
       <div style={divider} />
 
@@ -230,6 +373,22 @@ export function Toolbar({ onExport, onPrint, onBatchProcess, onUndo: _onUndo, on
       </button>
       <button onClick={onZoomIn} className="glass-pill-btn" style={pillIconBtn} title="Zoom In">+</button>
       <button onClick={onFitWindow} className="glass-pill-btn" style={pillBtn} title="Fit to Window">Fit</button>
+
+      {/* Overflow "⋯" — only when collapsed; holds the secondary actions that were
+          pulled out of the pill. All keep working; all have menu-bar homes too. */}
+      {collapsed && (
+        <>
+          <div style={divider} />
+          <ToolbarOverflowMenu
+            items={[
+              { label: 'Print', onClick: onPrint, disabled: !hasImage, title: 'Print Image (Ctrl+P)' },
+              { label: 'Copy Style', onClick: onCopyStyle, disabled: !hasImage, title: 'Analyse and copy the style of the current photo' },
+              { label: 'Paste Style', onClick: onPasteStyle, disabled: !hasImage || !hasStyleClipboard, title: hasStyleClipboard ? 'Apply the copied style to the current photo' : 'Copy a style first' },
+              { label: 'Reference', onClick: onToggleReference, disabled: !hasImage, active: referenceMode, title: 'Compare with a reference photo' },
+            ]}
+          />
+        </>
+      )}
     </div>
   );
 }

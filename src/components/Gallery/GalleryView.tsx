@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
 import { Check } from 'lucide-react';
 import { ImageFileInfo } from '../../services/FileSystemService';
 import { useAppStore } from '../../stores/appStore';
@@ -45,6 +45,24 @@ export function GalleryView({ images, onImageSelect, visible }: GalleryViewProps
 
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
+
+  // Entrance stagger (§5: gallery tiles rise +20ms each). GATED to the gallery
+  // ENTRY (visible false→true) — NOT to virtualized scroll-remounts — so scrolling
+  // never re-triggers the rise, and the tile's hover translateY isn't frozen by the
+  // filling dcRise (it animates `transform`). Cap the stagger at 400ms so huge
+  // folders don't stall the first screen. useLayoutEffect arms the flag before paint
+  // so tiles never flash un-animated first.
+  const [entranceAnimating, setEntranceAnimating] = useState(false);
+  const wasVisibleRef = useRef(false);
+  useLayoutEffect(() => {
+    if (visible && !wasVisibleRef.current) {
+      wasVisibleRef.current = true;
+      setEntranceAnimating(true);
+      const t = setTimeout(() => setEntranceAnimating(false), 900); // 400ms max stagger + 380ms rise + slack
+      return () => clearTimeout(t);
+    }
+    if (!visible) wasVisibleRef.current = false;
+  }, [visible]);
 
   const {
     imageRatings,
@@ -232,7 +250,7 @@ export function GalleryView({ images, onImageSelect, visible }: GalleryViewProps
         <>
           <div style={{ height: topSpacerHeight }} aria-hidden="true" />
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(420px, 1fr))', gap: GRID_GAP }}>
-            {visibleImages.map((image) => {
+            {visibleImages.map((image, localIndex) => {
               const isSelected = selectedImageIds?.includes(image.id) ?? false;
               const thumbnail = thumbnails.get(image.id);
               const isLoading = loadingThumbnails.has(image.id);
@@ -241,7 +259,7 @@ export function GalleryView({ images, onImageSelect, visible }: GalleryViewProps
                   key={image.id}
                   data-image-id={image.id}
                   data-selected={isSelected || undefined}
-                  className={`glass-gallery-tile relative cursor-pointer ${isSelected ? 'is-selected' : ''}`}
+                  className={`glass-gallery-tile relative cursor-pointer ${isSelected ? 'is-selected' : ''}${entranceAnimating ? ' dc-rise' : ''}`}
                   style={{
                     borderRadius: 14,
                     background: '#141418',
@@ -251,6 +269,7 @@ export function GalleryView({ images, onImageSelect, visible }: GalleryViewProps
                     boxShadow: isSelected ? '0 0 18px rgba(59, 130, 246, 0.45)' : '0 4px 14px rgba(0, 0, 0, 0.35)',
                     overflow: 'hidden',
                     aspectRatio: '1 / 1',
+                    animationDelay: entranceAnimating ? `${Math.min(localIndex * 20, 400)}ms` : undefined,
                   }}
                   onClick={(e) => handleTileClick(image, e)}
                   onDoubleClick={handleTileDoubleClick}
