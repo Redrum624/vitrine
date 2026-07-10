@@ -1,5 +1,4 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import type { CSSProperties } from 'react';
 import {
   Download,
   Image,
@@ -11,8 +10,10 @@ import {
 } from 'lucide-react';
 import { GlassModal } from './GlassModal';
 import { ChipButton } from '../Controls/ChipButton';
+import { AccentButton } from '../Controls/AccentButton';
 import { SectionLabel } from '../Controls/SectionLabel';
 import SliderControl from '../Controls/SliderControl';
+import { inputStyle, selectStyle, infoBoxStyle } from './glassFormStyles';
 import { ExportOptions, ExportPreset, exportService } from '../../services/ExportService';
 import { imageService } from '../../services/ImageService';
 import { resolveExportSource } from './resolveExportSource';
@@ -40,35 +41,6 @@ type TabType = 'format' | 'dimensions' | 'color';
  *  JPEG/WebP are 8-bit only. Used to default Bit Depth to the format maximum. */
 const maxBitDepthForFormat = (format: ExportOptions['format']): 8 | 16 =>
   format === 'png' || format === 'tiff' ? 16 : 8;
-
-// Shared glass-card select look (see RawDecodePanel.tsx for the precedent on
-// keeping real native <select>s restyled with the token palette).
-const selectStyle: CSSProperties = {
-  width: '100%',
-  fontSize: 12,
-  padding: '6px 8px',
-  borderRadius: 8,
-  border: '1px solid rgba(255,255,255,.1)',
-  background: 'rgba(255,255,255,.04)',
-  color: 'var(--glass-text-label)',
-};
-
-const inputStyle: CSSProperties = {
-  width: '100%',
-  fontSize: 12,
-  padding: '6px 8px',
-  borderRadius: 8,
-  border: '1px solid rgba(255,255,255,.1)',
-  background: 'rgba(255,255,255,.04)',
-  color: 'var(--glass-text-label)',
-};
-
-const infoBoxStyle: CSSProperties = {
-  padding: 12,
-  borderRadius: 10,
-  background: 'rgba(0,0,0,.3)',
-  border: '1px solid var(--glass-border)',
-};
 
 export const ExportDialog: React.FC<ExportDialogProps> = ({
   isOpen,
@@ -665,19 +637,9 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
           >
             Cancel
           </button>
-          <button
-            type="button"
+          <AccentButton
             onClick={handleExport}
             disabled={isExporting || validationErrors.length > 0}
-            className="inline-flex items-center justify-center gap-2"
-            style={{
-              padding: '9px 18px', borderRadius: 11,
-              border: '1px solid var(--accent-ring)',
-              background: 'var(--accent)', color: '#0b0b0c', fontSize: 12.5, fontWeight: 700,
-              cursor: isExporting || validationErrors.length > 0 ? 'not-allowed' : 'pointer',
-              opacity: isExporting || validationErrors.length > 0 ? 0.6 : 1,
-              boxShadow: isExporting || validationErrors.length > 0 ? 'none' : '0 2px 18px var(--accent-ring)',
-            }}
           >
             {isExporting ? (
               <>
@@ -693,7 +655,7 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
                 {isMulti ? `Export ${multiPaths!.length}` : 'Export'}
               </>
             )}
-          </button>
+          </AccentButton>
         </div>
       </div>
 

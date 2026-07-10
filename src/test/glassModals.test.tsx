@@ -94,4 +94,36 @@ describe('GlassModal', () => {
     );
     expect(screen.queryByRole('button', { name: /close/i })).not.toBeInTheDocument();
   });
+
+  it('does not close on Escape or an overlay click unless a dialog opts in (no imposed close semantics)', () => {
+    const onClose = jest.fn();
+    const { container } = render(
+      <GlassModal isOpen title="Export Image" onClose={onClose}>
+        <div>body</div>
+      </GlassModal>
+    );
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(onClose).not.toHaveBeenCalled();
+
+    // The scrim is the outermost rendered element; clicking it (not the card)
+    // must not dismiss the dialog by default.
+    fireEvent.click(container.firstElementChild as HTMLElement);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('closes on an overlay click when closeOnOverlayClick is set, but not on a click inside the card', () => {
+    const onClose = jest.fn();
+    render(
+      <GlassModal isOpen title="Export Image" onClose={onClose} closeOnOverlayClick>
+        <div>body</div>
+      </GlassModal>
+    );
+
+    fireEvent.click(screen.getByText('body'));
+    expect(onClose).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('dialog').parentElement as HTMLElement);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
 });

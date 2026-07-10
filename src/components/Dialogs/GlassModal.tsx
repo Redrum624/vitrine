@@ -26,12 +26,21 @@ export interface GlassModalProps {
    *  ImageSize is a small fixed-width card) — passed straight through. */
   cardClassName?: string;
   cardStyle?: CSSProperties;
-  /** Default body slot is padded + independently scrollable. Set false for
-   *  dialogs that manage their own internal scroll regions (e.g. a
-   *  non-scrolling sidebar next to scrollable tab content). */
+  /** Default body slot is independently scrollable but NOT padded — each
+   *  consumer pads its own content (via bodyStyle/bodyClassName or padding
+   *  inside children). Set false for dialogs that manage their own internal
+   *  scroll regions (e.g. a non-scrolling sidebar next to scrollable tab
+   *  content). */
   scrollBody?: boolean;
   bodyClassName?: string;
   bodyStyle?: CSSProperties;
+  /** Opt-in click-outside-to-dismiss on the scrim (calls `onClose`). Default
+   *  false — most dialogs in this app only ever exposed an explicit close
+   *  button. MenuBar's About dialog is the one existing exception (it already
+   *  dismissed on an outside click before this port), so it passes `true`
+   *  here to keep that exact behavior; every other consumer leaves this
+   *  unset. Clicks inside the card never bubble to the scrim regardless. */
+  closeOnOverlayClick?: boolean;
 }
 
 /**
@@ -48,12 +57,15 @@ export interface GlassModalProps {
  * translucent enough to read as "glass", opaque enough to stay legible over
  * any image). Decided once here rather than per-dialog.
  *
- * Close/Escape/click-outside semantics are deliberately NOT imposed here: this
- * app's existing dialogs only ever expose an explicit close button (no
- * Escape or click-outside-to-dismiss anywhere in the codebase today), so
- * adding either here would be a new behavior, not a re-skin. Consumers keep
- * wiring exactly the close affordances they already have; GlassModal just
- * renders the close chip when `onClose` is supplied.
+ * Escape is deliberately NOT imposed here: this app's existing dialogs only
+ * ever expose an explicit close button (no Escape-to-dismiss anywhere in the
+ * codebase today), so adding it here would be a new behavior, not a re-skin.
+ * Click-outside is opt-in per dialog via `closeOnOverlayClick` (default off,
+ * for the same reason) — MenuBar's About dialog is the one existing
+ * exception that already dismissed on an outside click, so it opts in to
+ * keep that exact behavior. Consumers otherwise keep wiring exactly the
+ * close affordances they already have; GlassModal just renders the close
+ * chip when `onClose` is supplied.
  */
 export function GlassModal({
   isOpen,
@@ -69,6 +81,7 @@ export function GlassModal({
   scrollBody = true,
   bodyClassName = '',
   bodyStyle,
+  closeOnOverlayClick = false,
 }: GlassModalProps) {
   const titleId = useId();
 
@@ -82,6 +95,7 @@ export function GlassModal({
         backdropFilter: 'blur(8px)',
         WebkitBackdropFilter: 'blur(8px)',
       }}
+      onClick={closeOnOverlayClick && onClose ? onClose : undefined}
     >
       <div
         role="dialog"
@@ -89,6 +103,7 @@ export function GlassModal({
         aria-labelledby={titleId}
         className={`glass-card dc-rise flex flex-col ${cardClassName}`}
         style={{ background: 'rgba(15,15,19,.92)', overflow: 'hidden', ...cardStyle }}
+        onClick={(e) => e.stopPropagation()}
       >
         <div
           className="flex items-center flex-shrink-0"

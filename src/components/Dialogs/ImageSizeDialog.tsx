@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
-import type { CSSProperties } from 'react';
 import { Link, Unlink } from 'lucide-react';
 import { GlassModal } from './GlassModal';
+import { AccentButton } from '../Controls/AccentButton';
+import { inputStyle } from './glassFormStyles';
 
 interface ImageSizeDialogProps {
   isOpen: boolean;
@@ -11,16 +12,6 @@ interface ImageSizeDialogProps {
   currentHeight: number;
   mode: 'imageSize' | 'canvasSize';
 }
-
-const inputStyle: CSSProperties = {
-  width: '100%',
-  fontSize: 12,
-  padding: '6px 8px',
-  borderRadius: 8,
-  border: '1px solid rgba(255,255,255,.1)',
-  background: 'rgba(255,255,255,.04)',
-  color: 'var(--glass-text-label)',
-};
 
 export function ImageSizeDialog({
   isOpen,
@@ -79,21 +70,9 @@ export function ImageSizeDialog({
       >
         Cancel
       </button>
-      <button
-        type="button"
-        onClick={handleApply}
-        disabled={!hasImage}
-        style={{
-          padding: '9px 18px', borderRadius: 11,
-          border: '1px solid var(--accent-ring)',
-          background: 'var(--accent)', color: '#0b0b0c', fontSize: 12.5, fontWeight: 700,
-          cursor: hasImage ? 'pointer' : 'not-allowed',
-          opacity: hasImage ? 1 : 0.5,
-          boxShadow: hasImage ? '0 2px 18px var(--accent-ring)' : 'none',
-        }}
-      >
+      <AccentButton onClick={handleApply} disabled={!hasImage}>
         Apply
-      </button>
+      </AccentButton>
     </div>
   );
 

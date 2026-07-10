@@ -508,3 +508,29 @@ body {
   background: rgba(255, 255, 255, 0.06);
   color: var(--glass-text-title);
 }
+
+/* Primary footer button (Export, Apply, Create and Start Batch Job, ...):
+   solid accent with a 0 2px 18px glow — smaller/tighter than the toolbar's
+   .glass-pill-primary since this sits inside a modal footer, not the floating
+   chrome. Base glow lives here (not inline) so :hover can widen it. Backs
+   src/components/Controls/AccentButton.tsx. */
+.glass-modal-btn-primary {
+  background: var(--accent);
+  color: #0b0b0c;
+  border: 1px solid var(--accent-ring);
+  box-shadow: 0 2px 18px var(--accent-ring);
+  transition: transform 150ms ease, filter 150ms ease, box-shadow 150ms ease;
+}
+.glass-modal-btn-primary:hover:not(:disabled) {
+  filter: brightness(1.08);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 22px var(--accent-ring);
+}
+.glass-modal-btn-primary:active:not(:disabled) {
+  transform: scale(0.98);
+}
+.glass-modal-btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  box-shadow: none;
+}

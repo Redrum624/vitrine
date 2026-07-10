@@ -11,6 +11,7 @@ import { SectionLabel } from '../components/Controls/SectionLabel';
 import { ChipButton } from '../components/Controls/ChipButton';
 import { Segmented } from '../components/Controls/Segmented';
 import { SliderRow } from '../components/Controls/SliderRow';
+import { AccentButton } from '../components/Controls/AccentButton';
 
 describe('SectionLabel', () => {
   it('renders the label text in accent color with the fading hairline', () => {
@@ -251,5 +252,47 @@ describe('SliderRow', () => {
       fireEvent.keyDown(input, { key: 'Enter' });
       expect(onChange).toHaveBeenCalledWith(2);
     });
+  });
+});
+
+// Glass Modals (Task 2): the shared solid-accent modal-footer primary,
+// extracted from 3 inlined copies in ExportDialog/BatchProcessingDialog/
+// ImageSizeDialog (see src/components/Controls/AccentButton.tsx).
+describe('AccentButton', () => {
+  it('renders its children and fires onClick when enabled', () => {
+    const onClick = jest.fn();
+    render(<AccentButton onClick={onClick}>Export</AccentButton>);
+    const btn = screen.getByRole('button', { name: 'Export' });
+    fireEvent.click(btn);
+    expect(onClick).toHaveBeenCalledTimes(1);
+  });
+
+  it('carries the shared solid-accent primary look', () => {
+    render(<AccentButton onClick={() => {}}>Apply</AccentButton>);
+    const btn = screen.getByRole('button', { name: 'Apply' });
+    expect(btn).toHaveClass('glass-modal-btn-primary');
+    expect(btn).toHaveStyle({ borderRadius: '11px', fontSize: '12.5px', fontWeight: '700' });
+  });
+
+  it('is disabled and does not fire onClick when disabled is set', () => {
+    const onClick = jest.fn();
+    render(
+      <AccentButton onClick={onClick} disabled>
+        Export
+      </AccentButton>
+    );
+    const btn = screen.getByRole('button', { name: 'Export' });
+    expect(btn).toBeDisabled();
+    fireEvent.click(btn);
+    expect(onClick).not.toHaveBeenCalled();
+  });
+
+  it('stretches full-width when fullWidth is set', () => {
+    render(
+      <AccentButton onClick={() => {}} fullWidth>
+        Create and Start Batch Job
+      </AccentButton>
+    );
+    expect(screen.getByRole('button', { name: 'Create and Start Batch Job' })).toHaveClass('w-full');
   });
 });

@@ -14,8 +14,10 @@ import {
 } from 'lucide-react';
 import { GlassModal } from './GlassModal';
 import { ChipButton } from '../Controls/ChipButton';
+import { AccentButton } from '../Controls/AccentButton';
 import { SectionLabel } from '../Controls/SectionLabel';
 import SliderControl from '../Controls/SliderControl';
+import { inputStyle, statBoxStyle } from './glassFormStyles';
 import { BatchJob, BatchPreset, batchProcessingService } from '../../services/BatchProcessingService';
 import { ImageFileInfo } from '../../services/FileSystemService';
 
@@ -41,23 +43,6 @@ const mergeUnique = (existing: ImageFileInfo[], incoming: ImageFileInfo[]): Imag
     }
   }
   return merged;
-};
-
-const statBoxStyle: React.CSSProperties = {
-  padding: 12,
-  borderRadius: 10,
-  background: 'rgba(0,0,0,.3)',
-  border: '1px solid var(--glass-border)',
-};
-
-const inputStyle: React.CSSProperties = {
-  width: '100%',
-  fontSize: 12,
-  padding: '6px 8px',
-  borderRadius: 8,
-  border: '1px solid rgba(255,255,255,.1)',
-  background: 'rgba(255,255,255,.04)',
-  color: 'var(--glass-text-label)',
 };
 
 export const BatchProcessingDialog: React.FC<BatchProcessingDialogProps> = ({
@@ -418,23 +403,15 @@ export const BatchProcessingDialog: React.FC<BatchProcessingDialogProps> = ({
       </div>
 
       <div className="pt-2">
-        <button
-          type="button"
+        <AccentButton
           onClick={handleCreateJob}
           disabled={!selectedPreset || selectedImages.length === 0}
-          className="w-full inline-flex items-center justify-center gap-2"
-          style={{
-            padding: 11, borderRadius: 11,
-            border: '1px solid var(--accent-ring)',
-            background: 'var(--accent)', color: '#0b0b0c', fontSize: 12.5, fontWeight: 700,
-            cursor: (!selectedPreset || selectedImages.length === 0) ? 'not-allowed' : 'pointer',
-            opacity: (!selectedPreset || selectedImages.length === 0) ? 0.5 : 1,
-            boxShadow: (!selectedPreset || selectedImages.length === 0) ? 'none' : '0 2px 18px var(--accent-ring)',
-          }}
+          fullWidth
+          style={{ padding: 11 }}
         >
           <Plus size={15} />
           Create and Start Batch Job
-        </button>
+        </AccentButton>
       </div>
     </div>
   );
