@@ -34,6 +34,7 @@ import {
   PHOTO_INSET_LEFT, PHOTO_INSET_TOP, PHOTO_INSET_BOTTOM, formatFilenameChip, getPhotoInsetRight,
 } from './layout/photoRegion';
 import { formatGalleryFolderChip } from './utils/gallerySelection';
+import { computeViewportGeometry } from './utils/viewportGeometry';
 import { editPersistenceService } from './services/EditPersistenceService';
 import { checkpointService } from './services/CheckpointService';
 import { logger } from './utils/Logger';
@@ -67,15 +68,12 @@ const isModuleTool = (tool: string) => MODULE_IDS.has(tool);
 /**
  * Renders the cached original (pre-edit) image for the Before/After split view.
  *
- * The pane mirrors Canvas.tsx's transform exactly so both sides track the same
- * region when the user zooms or pans:
- *   ctx.translate(centerX + scaledPanX, centerY + scaledPanY)
- *   ctx.drawImage(offscreen, …, -displayW/2, -displayH/2, displayW, displayH)
- *
- * panX/panY from the store are in Canvas's internal coordinate space (preview
- * pixels).  Because OriginalPane uses the FULL original resolution as its
- * internal canvas size, we scale the pan values by (original / preview) so
- * that the same image fraction stays centred in both panes.
+ * The pane mirrors Canvas.tsx's viewport-canvas geometry (Task R5) so both sides
+ * track the same region when the user zooms or pans: it fits the original into its
+ * own pane, then runs computeViewportGeometry with its OWN fit/container and a pan
+ * converted from the shared main-canvas-space pan by (fitOrig / mainCanvasFit). At
+ * zoom > fit the pane grows up to its box and pans the original within it; at
+ * zoom ≤ fit it is pixel-identical to before.
  *
  * NOTE: this is deliberately NOT applied to the Reference-mode <img> block —
  * the reference image must remain viewport-independent (no transform).
@@ -88,7 +86,7 @@ function OriginalPane() {
   // only do the expensive conversion once per image (not on every pan/zoom).
   const offscreenRef = useRef<HTMLCanvasElement | null>(null);
 
-  const { viewport, processedImageData } = useAppStore();
+  const { viewport, processedImageData, mainCanvasFit } = useAppStore();
 
   // Build the offscreen canvas once when this component mounts.
   // The parent re-keys us (key={currentImage?.id ?? 'none'}) on image switch,
@@ -130,64 +128,54 @@ function OriginalPane() {
     const imageWidth = offscreen.width;
     const imageHeight = offscreen.height;
 
-    // Internal canvas resolution = full original image dimensions (same as
-    // Canvas.tsx uses preview dimensions for its internal resolution).
-    // Guard: assigning canvas.width/height always reallocates and clears the
-    // pixel buffer. The size never changes between redraws for the same image
-    // (the component is keyed on image id), so skip the reset when unchanged.
-    if (canvas.width !== imageWidth) canvas.width = imageWidth;
-    if (canvas.height !== imageHeight) canvas.height = imageHeight;
-
-    // CSS sizing: fit image to container while preserving aspect ratio.
-    // Mirrors the sizing logic in Canvas.tsx redrawCanvas().
-    // p-5 = 20 px padding on each side → subtract 40 px from each dimension.
+    // Fit the original into the padded container (p-5 = 20 px on each side). This is the
+    // fit-rect (content at zoom 1) for THIS pane.
     const rect = container.getBoundingClientRect();
     const availW = Math.max(1, rect.width - 40);
     const availH = Math.max(1, rect.height - 40);
     const imageAspect = imageWidth / imageHeight;
     const containerAspect = availW / availH;
-    let cssW: number, cssH: number;
+    let fitW: number, fitH: number;
     if (imageAspect > containerAspect) {
-      cssW = availW;
-      cssH = availW / imageAspect;
+      fitW = availW; fitH = availW / imageAspect;
     } else {
-      cssH = availH;
-      cssW = availH * imageAspect;
+      fitH = availH; fitW = availH * imageAspect;
     }
-    canvas.style.width = `${Math.floor(cssW)}px`;
-    canvas.style.height = `${Math.floor(cssH)}px`;
 
-    // Background (matches Canvas.tsx background colour). Reset the transform
-    // first so the fillRect always covers the full buffer regardless of any
-    // accumulated state from prior redraws (since we no longer rely on the
-    // canvas.width assignment to auto-clear the buffer each frame).
+    // Convert the shared (main-canvas-space, CSS px) pan into THIS pane's CSS px so the
+    // same image fraction is centered in both panes, then run the SAME viewport-canvas
+    // geometry as the main Canvas (Task R5): the pane grows from its fit-rect up to its
+    // own available box when zoomed in and pans the original within it.
+    const convX = mainCanvasFit.width > 0 ? fitW / mainCanvasFit.width : 1;
+    const convY = mainCanvasFit.height > 0 ? fitH / mainCanvasFit.height : 1;
+    const geom = computeViewportGeometry(
+      fitW, fitH, availW, availH,
+      viewport.zoom, viewport.panX * convX, viewport.panY * convY,
+    );
+
+    // Buffer stays at original resolution (sOrig = original px per fit CSS px) so zoom ≤ 1
+    // is crisp and pixel-identical to before; it grows with the viewport when zoomed in.
+    const sOrig = imageWidth / fitW;
+    const bufW = Math.max(1, Math.round(geom.viewportW * sOrig));
+    const bufH = Math.max(1, Math.round(geom.viewportH * sOrig));
+    if (canvas.width !== bufW) canvas.width = bufW;
+    if (canvas.height !== bufH) canvas.height = bufH;
+    canvas.style.width = `${Math.round(geom.viewportW)}px`;
+    canvas.style.height = `${Math.round(geom.viewportH)}px`;
+
+    // Background (matches Canvas.tsx). Reset transform so fillRect covers the whole buffer.
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.fillStyle = '#0d0d0d';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // Pan scaling: viewport.panX/panY are produced by mouse drag on Canvas and
-    // are effectively in Canvas's internal (preview-pixel) coordinate space.
-    // Scale them to OriginalPane's internal (original-pixel) space so the same
-    // image fraction is centred in both panes.
-    const pd = processedImageData as { width?: number; height?: number } | null;
-    const previewW = (pd && typeof pd === 'object' && 'width' in pd) ? (pd as { width: number }).width : imageWidth;
-    const previewH = (pd && typeof pd === 'object' && 'height' in pd) ? (pd as { height: number }).height : imageHeight;
-    const scaledPanX = viewport.panX * (imageWidth / previewW);
-    const scaledPanY = viewport.panY * (imageHeight / previewH);
-
-    // Apply the same transform as Canvas.tsx drawLoadedImage():
-    //   ctx.translate(centerX + panX, centerY + panY)
-    //   ctx.drawImage(src, 0,0,w,h, -dW/2,-dH/2, dW,dH)
-    const centerX = canvas.width / 2;
-    const centerY = canvas.height / 2;
-    const displayW = canvas.width * viewport.zoom;
-    const displayH = canvas.height * viewport.zoom;
-
-    ctx.save();
-    ctx.translate(centerX + scaledPanX, centerY + scaledPanY);
-    ctx.drawImage(offscreen, 0, 0, imageWidth, imageHeight, -displayW / 2, -displayH / 2, displayW, displayH);
-    ctx.restore();
-  }, [viewport, processedImageData]);
+    // Draw the original at the viewport-relative content rect (buffer px), matching the
+    // main Canvas's drawGeomRef math.
+    ctx.drawImage(
+      offscreen,
+      0, 0, imageWidth, imageHeight,
+      geom.offsetX * sOrig, geom.offsetY * sOrig, geom.contentW * sOrig, geom.contentH * sOrig,
+    );
+  }, [viewport, processedImageData, mainCanvasFit]);
 
   return (
     <div ref={containerRef} className="w-full h-full flex items-center justify-center p-5 relative">

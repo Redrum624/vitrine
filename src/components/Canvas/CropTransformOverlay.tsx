@@ -20,9 +20,14 @@ interface CropTransformOverlayProps {
     panY: number;
   };
 
-  // Canvas display dimensions (CSS size)
+  // Canvas display dimensions (CSS size) — the VIEWPORT box (canvas element).
   canvasDisplayWidth: number;
   canvasDisplayHeight: number;
+
+  // Content (fit-rect) base the image scales by (viewport-canvas model, Task R5):
+  // content = contentWidth × zoom. Defaults to canvasDisplay* (⇒ pre-R5 behaviour).
+  contentWidth?: number;
+  contentHeight?: number;
 
   // Show overlay only in preview mode
   showOverlay: boolean;
@@ -51,9 +56,14 @@ export function CropTransformOverlay({
   viewport,
   canvasDisplayWidth,
   canvasDisplayHeight,
+  contentWidth,
+  contentHeight,
   showOverlay,
   showRotationGrid = false
 }: CropTransformOverlayProps) {
+  // Content base for image scaling (fit-rect); the box stays canvasDisplay* (viewport).
+  const contentW = contentWidth ?? canvasDisplayWidth;
+  const contentH = contentHeight ?? canvasDisplayHeight;
   const overlayRef = useRef<HTMLCanvasElement>(null);
 
   // Show if either full overlay is enabled OR rotation grid is requested
@@ -91,9 +101,10 @@ export function CropTransformOverlay({
     // Calculate crop region in canvas coordinates
     // The image is centered in the canvas with zoom applied
 
-    // Calculate where the image is rendered on the canvas
-    const scaledImageWidth = canvasDisplayWidth * viewport.zoom;
-    const scaledImageHeight = canvasDisplayHeight * viewport.zoom;
+    // Calculate where the image is rendered on the canvas. Content scales by the fit-rect
+    // (contentW/H); the box is the viewport (canvasDisplay*).
+    const scaledImageWidth = contentW * viewport.zoom;
+    const scaledImageHeight = contentH * viewport.zoom;
 
     // Image position (top-left corner)
     const imageX = (canvasDisplayWidth - scaledImageWidth) / 2 + viewport.panX;
@@ -326,6 +337,8 @@ export function CropTransformOverlay({
     viewport,
     canvasDisplayWidth,
     canvasDisplayHeight,
+    contentW,
+    contentH,
     showOverlay,
     showRotationGrid,
     shouldShow

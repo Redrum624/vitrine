@@ -3,7 +3,8 @@ import { useAppStore } from '../../stores/appStore';
 import { ImageFileInfo } from '../../services/FileSystemService';
 import { imageService } from '../../services/ImageService';
 import { logger } from '../../utils/Logger';
-import { computePanBounds, clampPan } from '../../utils/panBounds';
+import { computeViewportGeometry } from '../../utils/viewportGeometry';
+import { clampPan } from '../../utils/panBounds';
 import { CropTransformOverlay } from '../Canvas/CropTransformOverlay';
 import { InteractiveCropHandles } from '../Canvas/InteractiveCropHandles';
 import { imageProcessingPipeline } from '../../services/ImageProcessingPipeline';
@@ -55,7 +56,21 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
   const [imageLoading, setImageLoading] = useState(false);
   const [cropModule, setCropModule] = useState<CropPipelineModule | null>(null);
   const [showCropOverlay, setShowCropOverlay] = useState(false);
+  // Viewport-canvas model (Task R5). `canvasDimensions` is the VIEWPORT box (the canvas
+  // element, which grows from the fit-rect up to the photo region when zoomed in) — it
+  // drives the wrapper size, box-shadow, thirds-grid/rulers and the overlay boxes.
+  // `contentDimensions` is the fit-rect (content at zoom 1) — the base the overlays scale
+  // the image by (content = contentDimensions × zoom).
   const [canvasDimensions, setCanvasDimensions] = useState({ width: 0, height: 0 });
+  const [contentDimensions, setContentDimensions] = useState({ width: 0, height: 0 });
+  // Last computed fit-rect + container (CSS px), read by the pan-clamp mouse/wheel handlers
+  // without re-running the whole redraw. Set by redrawCanvas.
+  const fitRef = useRef<{ fitW: number; fitH: number; containerW: number; containerH: number } | null>(null);
+  // Dest rect (buffer px) for the current draw — where drawImage blits the source data
+  // inside the (viewport-sized) 2D buffer. Threaded from redrawCanvas to the draw fns.
+  const drawGeomRef = useRef<{ x: number; y: number; w: number; h: number } | null>(null);
+  // Fit + viewport (CSS px) for the GPU present buffer sizing, read by BOTH present sites.
+  const presentGeomRef = useRef<{ fitW: number; fitH: number; viewportW: number; viewportH: number } | null>(null);
   const [isCropHandleDragging, setIsCropHandleDragging] = useState(false);
   const [hasPendingCropChanges, setHasPendingCropChanges] = useState(false);
   const prevShowCropOverlay = useRef(showCropOverlay);
@@ -130,18 +145,13 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
       return;
     }
 
-    // Calculate display dimensions and position
-    const centerX = canvas.width / 2;
-    const centerY = canvas.height / 2;
-
-    // Since canvas is already sized to match image aspect ratio,
-    // we can draw the image to fill the entire canvas
-    let displayWidth = canvas.width;
-    let displayHeight = canvas.height;
-
-    // Apply zoom
-    displayWidth *= viewport.zoom;
-    displayHeight *= viewport.zoom;
+    // Viewport-model dest rect (buffer px) from redrawCanvas; legacy centered-scale
+    // fallback if geometry isn't set yet (this is the corrupt-data fallback path).
+    const dg = drawGeomRef.current;
+    const destX = dg ? dg.x : (canvas.width - canvas.width * viewport.zoom) / 2 + viewport.panX;
+    const destY = dg ? dg.y : (canvas.height - canvas.height * viewport.zoom) / 2 + viewport.panY;
+    const displayWidth = dg ? dg.w : canvas.width * viewport.zoom;
+    const displayHeight = dg ? dg.h : canvas.height * viewport.zoom;
 
     // Ensure display dimensions are valid
     if (displayWidth <= 0 || displayHeight <= 0) {
@@ -158,18 +168,12 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
     tempCanvas.height = imageHeight;
     tempCtx.putImageData(imgData, 0, 0);
 
-    // Draw the scaled image on the main canvas
+    // Draw the scaled image on the main canvas (top-left dest form)
     ctx.save();
-    ctx.translate(centerX + viewport.panX, centerY + viewport.panY);
-
-    // Ensure the image is drawn with correct aspect ratio
     ctx.drawImage(
       tempCanvas,
       0, 0, imageWidth, imageHeight,  // Source rectangle (full image)
-      -displayWidth / 2,              // Destination x
-      -displayHeight / 2,             // Destination y
-      displayWidth,                   // Destination width
-      displayHeight                   // Destination height
+      destX, destY, displayWidth, displayHeight,
     );
 
     ctx.restore();
@@ -286,61 +290,100 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
       canvasHeight = containerHeight;
     }
 
-    // Set canvas internal resolution to exact data size
-    canvas.width = Math.floor(canvasWidth);
-    canvas.height = Math.floor(canvasHeight);
-
-    // GL drawing-buffer size: in GPU mode, present() OWNS it (it sizes the buffer to the
-    // resident result resolution, which is the downsampled preview size — NOT this 2D
-    // canvas's full-res size). If we also wrote glCanvas.width here it would (a) fight
-    // present() over the size and (b) clear the buffer on the ~150ms histogram readback
-    // with no re-present → a black frame. So only mirror the buffer size in CPU mode.
-    // The CSS display size is mirrored unconditionally below so overlays always align.
+    // The GL canvas mirrors the 2D canvas's buffer (CPU mode only — in GPU mode present()
+    // OWNS the GL drawing buffer) and CSS size, so overlays align with whichever is shown.
     const glCanvas = glCanvasRef.current;
-    if (glCanvas && !(renderMode === 'gpu' && glAvailable)) {
-      glCanvas.width = canvas.width;
-      glCanvas.height = canvas.height;
-    }
 
-    // Calculate CSS display size to fit container while maintaining aspect ratio
-    let displayWidth, displayHeight;
     if (currentImageData && displayImage) {
-      const imageAspectRatio = canvas.width / canvas.height;
+      // ── Viewport-canvas geometry (Task R5) ─────────────────────────────────────────
+      // dataW/dataH: preview/source resolution (1:1 at zoom 1). fitW/fitH: the aspect-fit
+      // of the source into the photo region (fit-rect = content at zoom 1). The canvas
+      // element GROWS from the fit-rect up to the region as you zoom in, and the image
+      // pans within it (was: pinned at the fit-rect, so zoom-in clipped there).
+      const dataW = Math.max(1, Math.floor(canvasWidth));
+      const dataH = Math.max(1, Math.floor(canvasHeight));
+      const imageAspectRatio = dataW / dataH;
       const containerAspectRatio = containerWidth / containerHeight;
-
+      let fitW: number, fitH: number;
       if (imageAspectRatio > containerAspectRatio) {
-        // Image is wider - fit to width
-        displayWidth = containerWidth;
-        displayHeight = containerWidth / imageAspectRatio;
+        fitW = containerWidth;
+        fitH = containerWidth / imageAspectRatio;
       } else {
-        // Image is taller - fit to height
-        displayHeight = containerHeight;
-        displayWidth = containerHeight * imageAspectRatio;
+        fitH = containerHeight;
+        fitW = containerHeight * imageAspectRatio;
+      }
+
+      const geom = computeViewportGeometry(
+        fitW, fitH, containerWidth, containerHeight,
+        viewport.zoom, viewport.panX, viewport.panY,
+      );
+      fitRef.current = { fitW, fitH, containerW: containerWidth, containerH: containerHeight };
+
+      // Keep the STORED pan within the live bounds (after a zoom step or a region resize
+      // while zoomed) so the overlays — which read the store pan — track the clamped render.
+      // Converges in one extra frame; the mouse handler already clamps identically mid-drag.
+      if (Math.abs(geom.panX - viewport.panX) > 0.5 || Math.abs(geom.panY - viewport.panY) > 0.5) {
+        setViewport({ panX: geom.panX, panY: geom.panY });
+      }
+
+      // 2D buffer stays at data resolution (s = data px per fit CSS px) so zoom ≤ 1 stays
+      // pixel-identical (bufW = dataW there); it grows with the viewport when zoomed in.
+      const s = dataW / fitW;
+      const bufW = Math.max(1, Math.round(geom.viewportW * s));
+      const bufH = Math.max(1, Math.round(geom.viewportH * s));
+      canvas.width = bufW;
+      canvas.height = bufH;
+      if (glCanvas && !(renderMode === 'gpu' && glAvailable)) {
+        glCanvas.width = bufW;
+        glCanvas.height = bufH;
+      }
+
+      // Dest rect (buffer px): source data drawn at zoom, offset to the viewport-relative
+      // content top-left. Threaded to the draw fns via drawGeomRef.
+      drawGeomRef.current = {
+        x: geom.offsetX * s,
+        y: geom.offsetY * s,
+        w: dataW * viewport.zoom,
+        h: dataH * viewport.zoom,
+      };
+      presentGeomRef.current = { fitW, fitH, viewportW: geom.viewportW, viewportH: geom.viewportH };
+
+      const cssW = Math.round(geom.viewportW);
+      const cssH = Math.round(geom.viewportH);
+      canvas.style.width = `${cssW}px`;
+      canvas.style.height = `${cssH}px`;
+      if (glCanvas) {
+        glCanvas.style.width = `${cssW}px`;
+        glCanvas.style.height = `${cssH}px`;
+      }
+      // canvasDimensions = viewport box (wrapper/grid/rulers/overlay box);
+      // contentDimensions = fit-rect (overlay content-scale base).
+      setCanvasDimensions({ width: cssW, height: cssH });
+      setContentDimensions({ width: Math.round(fitW), height: Math.round(fitH) });
+      useAppStore.getState().setMainCanvasFit({ width: fitW, height: fitH });
+
+      if (DEBUG_CANVAS) {
+        console.log(`Canvas R5: fit=${fitW.toFixed(0)}x${fitH.toFixed(0)} viewport=${cssW}x${cssH} buffer=${bufW}x${bufH} zoom=${viewport.zoom.toFixed(2)} pan=(${geom.panX.toFixed(0)},${geom.panY.toFixed(0)})`);
       }
     } else {
-      displayWidth = canvas.width;
-      displayHeight = canvas.height;
-    }
-
-    // Set CSS size to fit container (browser will scale smoothly)
-    canvas.style.width = `${Math.floor(displayWidth)}px`;
-    canvas.style.height = `${Math.floor(displayHeight)}px`;
-
-    // Mirror the GL canvas's CSS display size so it overlaps the 2D canvas exactly.
-    if (glCanvas) {
-      glCanvas.style.width = `${Math.floor(displayWidth)}px`;
-      glCanvas.style.height = `${Math.floor(displayHeight)}px`;
-    }
-
-    // Update canvas dimensions state for overlay positioning
-    setCanvasDimensions({ width: Math.floor(displayWidth), height: Math.floor(displayHeight) });
-
-    if (DEBUG_CANVAS) {
-      console.log(`  Canvas element set to:
-    Internal: ${canvas.width}x${canvas.height}
-    CSS Display: ${canvas.style.width} x ${canvas.style.height}
-    Computed: ${window.getComputedStyle(canvas).width} x ${window.getComputedStyle(canvas).height}
-    Scale factor: ${(displayWidth / canvas.width).toFixed(2)}x`);
+      // No image / placeholder — buffer = container, CSS = buffer (legacy path).
+      canvas.width = Math.max(1, Math.floor(canvasWidth));
+      canvas.height = Math.max(1, Math.floor(canvasHeight));
+      if (glCanvas && !(renderMode === 'gpu' && glAvailable)) {
+        glCanvas.width = canvas.width;
+        glCanvas.height = canvas.height;
+      }
+      canvas.style.width = `${canvas.width}px`;
+      canvas.style.height = `${canvas.height}px`;
+      if (glCanvas) {
+        glCanvas.style.width = `${canvas.width}px`;
+        glCanvas.style.height = `${canvas.height}px`;
+      }
+      drawGeomRef.current = null;
+      presentGeomRef.current = null;
+      fitRef.current = null;
+      setCanvasDimensions({ width: canvas.width, height: canvas.height });
+      setContentDimensions({ width: canvas.width, height: canvas.height });
     }
 
     // In GPU mode the visible result is presented onto the GL canvas (a separate
@@ -511,20 +554,17 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
         // Reuse cached ImageData - just redraw with current viewport
         if (DEBUG_CANVAS) console.log('Canvas: ✅ Using cached render (data unchanged)');
 
-        // Canvas is already sized correctly - just use its dimensions
-        // No need to calculate aspect ratio fitting again
-        const baseWidth = canvas.width;
-        const baseHeight = canvas.height;
-
-        const scaledWidth = baseWidth * viewport.zoom;
-        const scaledHeight = baseHeight * viewport.zoom;
-        const x = (canvas.width - scaledWidth) / 2 + viewport.panX;
-        const y = (canvas.height - scaledHeight) / 2 + viewport.panY;
+        // Viewport-model dest rect (buffer px) from redrawCanvas; legacy centered-scale
+        // fallback if geometry isn't set yet.
+        const dg = drawGeomRef.current;
+        const scaledWidth = dg ? dg.w : canvas.width * viewport.zoom;
+        const scaledHeight = dg ? dg.h : canvas.height * viewport.zoom;
+        const x = dg ? dg.x : (canvas.width - scaledWidth) / 2 + viewport.panX;
+        const y = dg ? dg.y : (canvas.height - scaledHeight) / 2 + viewport.panY;
 
         if (DEBUG_CANVAS) {
           console.log(`🖼️ DRAWING (cached):
   Canvas: ${canvas.width}x${canvas.height}
-  BaseSize: ${baseWidth}x${baseHeight}
   Scaled: ${scaledWidth}x${scaledHeight}
   Position: (${x}, ${y})
   Source: ${imageInfo.width}x${imageInfo.height}`);
@@ -621,21 +661,17 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
       cache.lastDataHash = dataHash;
       if (DEBUG_CANVAS) console.log(`Canvas: 💾 Cached new render with hash: ${dataHash}`);
 
-      // Calculate display dimensions with zoom and pan
-      // Canvas is already sized correctly - just use its dimensions
-      // No need to calculate aspect ratio fitting again
-      const baseWidth = canvas.width;
-      const baseHeight = canvas.height;
-
-      const scaledWidth = baseWidth * viewport.zoom;
-      const scaledHeight = baseHeight * viewport.zoom;
-      const x = (canvas.width - scaledWidth) / 2 + viewport.panX;
-      const y = (canvas.height - scaledHeight) / 2 + viewport.panY;
+      // Viewport-model dest rect (buffer px) from redrawCanvas; legacy centered-scale
+      // fallback if geometry isn't set yet.
+      const dg = drawGeomRef.current;
+      const scaledWidth = dg ? dg.w : canvas.width * viewport.zoom;
+      const scaledHeight = dg ? dg.h : canvas.height * viewport.zoom;
+      const x = dg ? dg.x : (canvas.width - scaledWidth) / 2 + viewport.panX;
+      const y = dg ? dg.y : (canvas.height - scaledHeight) / 2 + viewport.panY;
 
       if (DEBUG_CANVAS) {
         console.log(`🖼️ DRAWING (new):
   Canvas: ${canvas.width}x${canvas.height}
-  BaseSize: ${baseWidth}x${baseHeight}
   Scaled: ${scaledWidth}x${scaledHeight}
   Position: (${x}, ${y})
   Source: ${imageInfo.width}x${imageInfo.height}`);
@@ -808,10 +844,16 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
     if (renderMode !== 'gpu' || !glAvailable) return;
     const glCanvas = glCanvasRef.current;
     if (!glCanvas) return;
+    const pg = presentGeomRef.current;
     gpuPreviewPipeline.present({
       zoom: viewport.zoom,
       panX: viewport.panX,
       panY: viewport.panY,
+      // Viewport-canvas geometry (Task R5): grow the GL buffer to the region when zoomed in.
+      fitCssW: pg?.fitW,
+      fitCssH: pg?.fitH,
+      viewportCssW: pg?.viewportW,
+      viewportCssH: pg?.viewportH,
       // Before/After is rendered by the dedicated <OriginalPane/> (App.tsx) — a separate
       // 50% pane that draws the PRISTINE imageService.getOriginalImage() snapshot — in
       // BOTH cpu and gpu modes. The GPU present split sampled srcTexture, which is the
@@ -833,11 +875,16 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
       if (st.renderMode !== 'gpu' || document.hidden) return;
       const glCanvas = glCanvasRef.current;
       if (!glCanvas) return;
+      const pg = presentGeomRef.current;
       gpuPreviewPipeline.present({
         zoom: st.viewport.zoom,
         panX: st.viewport.panX,
         panY: st.viewport.panY,
         splitX: -1,
+        fitCssW: pg?.fitW,
+        fitCssH: pg?.fitH,
+        viewportCssW: pg?.viewportW,
+        viewportCssH: pg?.viewportH,
       });
     };
     window.addEventListener('focus', repaint);
@@ -902,16 +949,20 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
     const x = clientX - canvasRect.left;
     const y = clientY - canvasRect.top;
 
-    // Calculate image bounds on canvas
-    const scaledImageWidth = canvas.offsetWidth * viewport.zoom;
-    const scaledImageHeight = canvas.offsetHeight * viewport.zoom;
-    const imageX = (canvas.offsetWidth - scaledImageWidth) / 2 + viewport.panX;
-    const imageY = (canvas.offsetHeight - scaledImageHeight) / 2 + viewport.panY;
+    // Image bounds = content (fit × zoom) centered in the viewport box (canvas element),
+    // pan applied. The box is the canvas element (viewport); the content scales by the
+    // fit-rect (contentDimensions), not the box (Task R5).
+    const boxW = canvas.offsetWidth;
+    const boxH = canvas.offsetHeight;
+    const contentW = (contentDimensions.width || boxW) * viewport.zoom;
+    const contentH = (contentDimensions.height || boxH) * viewport.zoom;
+    const imageX = (boxW - contentW) / 2 + viewport.panX;
+    const imageY = (boxH - contentH) / 2 + viewport.panY;
 
     // Check if click is within image bounds
-    return x >= imageX && x <= imageX + scaledImageWidth &&
-           y >= imageY && y <= imageY + scaledImageHeight;
-  }, [viewport]);
+    return x >= imageX && x <= imageX + contentW &&
+           y >= imageY && y <= imageY + contentH;
+  }, [viewport, contentDimensions]);
 
   // Handle window/container resize
   useEffect(() => {
@@ -949,6 +1000,16 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
     setLastPan({ x: e.clientX - viewport.panX, y: e.clientY - viewport.panY });
   };
 
+  // Symmetric pan bounds in CSS px for the given zoom, from the live fit-rect +
+  // container (viewport-canvas model, Task R5). Content = fit × zoom pans within the
+  // viewport = clamp(content, fit, container); the bound is half the overhang.
+  const cssPanBounds = useCallback((zoom: number) => {
+    const f = fitRef.current;
+    if (!f) return { maxPanX: 0, maxPanY: 0 };
+    const g = computeViewportGeometry(f.fitW, f.fitH, f.containerW, f.containerH, zoom, 0, 0);
+    return { maxPanX: g.maxPanX, maxPanY: g.maxPanY };
+  }, []);
+
   const handleMouseMove = (e: React.MouseEvent) => {
     if (!isDragging) return;
 
@@ -957,17 +1018,10 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
       return; // No panning at fit or 100% zoom
     }
 
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    // The zoomed image is drawn scaled INSIDE the canvas element and clipped by
-    // it, so the pan viewport is the CANVAS box — not the photo-region
-    // container. Clamping against the container locked horizontal panning for
-    // height-constrained photos (their displayed width never exceeded the
-    // region width, so the X bound computed 0 while Y worked by coincidence).
-    // Bounds use canvas.width/height (internal pixels) to match the space the
-    // draw consumes panX/panY in.
-    const { maxPanX, maxPanY } = computePanBounds(canvas.width, canvas.height, viewport.zoom);
+    // Pan is in CSS px (matches the screen-space mouse delta). Clamp to the content's
+    // overhang beyond the viewport box (both are the same model as the draw + overlays,
+    // so panning and the rendered image stay in lock-step in both axes).
+    const { maxPanX, maxPanY } = cssPanBounds(viewport.zoom);
 
     const newPanX = clampPan(e.clientX - lastPan.x, maxPanX);
     const newPanY = clampPan(e.clientY - lastPan.y, maxPanY);
@@ -1002,12 +1056,19 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
       if (newZoom <= 1.0) {
         setViewport({ zoom: newZoom, panX: 0, panY: 0 });
       } else {
-        setViewport({ zoom: newZoom });
+        // Re-clamp the existing pan to the NEW (smaller-at-lower-zoom) bounds so the
+        // content never detaches from a viewport edge after a zoom step.
+        const { maxPanX, maxPanY } = cssPanBounds(newZoom);
+        setViewport({
+          zoom: newZoom,
+          panX: clampPan(viewportRef.current.panX, maxPanX),
+          panY: clampPan(viewportRef.current.panY, maxPanY),
+        });
       }
     };
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
-  }, [setViewport]);
+  }, [setViewport, cssPanBounds]);
 
   return (
     <div className="h-full">
@@ -1145,6 +1206,8 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
                   viewport={viewport}
                   canvasDisplayWidth={canvasDimensions.width}
                   canvasDisplayHeight={canvasDimensions.height}
+                  contentWidth={contentDimensions.width}
+                  contentHeight={contentDimensions.height}
                   showOverlay={showCropOverlay}
                   showRotationGrid={isAdjustingRotation}
                 />
@@ -1182,6 +1245,8 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
                   viewport={viewport}
                   canvasDisplayWidth={canvasDimensions.width}
                   canvasDisplayHeight={canvasDimensions.height}
+                  contentWidth={contentDimensions.width}
+                  contentHeight={contentDimensions.height}
                   showHandles={showCropOverlay}
                   aspectRatio={cropModule.getCropModule().getAspectRatioValue()}
                   canvasRef={canvasRef}
@@ -1203,6 +1268,8 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
                 <LocalAdjustmentMaskOverlay
                   canvasRef={canvasRef}
                   viewport={viewport}
+                  contentWidth={contentDimensions.width}
+                  contentHeight={contentDimensions.height}
                   layerType={layer.type}
                   geometry={layer.geometry}
                   onGeometryChange={(geom) => {

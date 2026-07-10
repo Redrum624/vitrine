@@ -9,6 +9,11 @@ interface AppStore extends AppState {
   removeLayer: (layerId: string) => void;
   updateLayer: (layerId: string, updates: Partial<Layer>) => void;
   setViewport: (viewport: Partial<ViewportState>) => void;
+  // Main-canvas fit-rect (CSS px) published by Canvas.redrawCanvas so the before/after
+  // OriginalPane can convert the shared (main-canvas-space) pan into its own pane's
+  // pixels for the viewport-canvas model (Task R5).
+  mainCanvasFit: { width: number; height: number };
+  setMainCanvasFit: (fit: { width: number; height: number }) => void;
   setProcessedImageData: (data: Float32Array | ProcessedImageData | null) => void;
   toggleSidebar: () => void;
   resetZoom: () => void;
@@ -146,6 +151,7 @@ export const useAppStore = create<AppStore>((set) => ({
     panY: 0,
     rotation: 0,
   },
+  mainCanvasFit: { width: 0, height: 0 },
   sidebarCollapsed: false,
   isAdjustingRotation: false,
   processingVersion: 0,
@@ -228,6 +234,7 @@ export const useAppStore = create<AppStore>((set) => ({
     )
   })),
 
+  setMainCanvasFit: (fit) => set(() => ({ mainCanvasFit: fit })),
   setViewport: (viewport) => set((state) => ({
     viewport: { ...state.viewport, ...viewport }
   })),

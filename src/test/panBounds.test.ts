@@ -1,33 +1,38 @@
-// Regression: zoomed panning was locked horizontally (but not vertically) for
-// height-constrained photos because the clamp bounded pan against the photo
-// REGION's width instead of the canvas's own box. The pan viewport is the
-// canvas element (the zoomed draw is clipped by it), so bounds derive from the
-// canvas dimensions alone.
+// Viewport-canvas model (Task R5): the zoomed image ("content" = fit × zoom) is
+// centered inside a "viewport" box (the canvas element, which grows up to the photo
+// region) and pans within it. Bounds = half the content overhang beyond the viewport,
+// floored at 0 per axis. Superset of the earlier pan-clamp regression: horizontal
+// panning must be possible whenever the content is wider than the viewport.
 import { computePanBounds, clampPan } from '../utils/panBounds';
 
-describe('computePanBounds', () => {
-  it('allows panning in BOTH axes when zoomed in (the reported bug)', () => {
-    // Portrait photo fitted to a 1408x790 region: canvas ≈ 592x790.
-    // Old container-based math: maxPanX = max(0, (592*2 - 1408)/2) = 0 → locked.
-    const { maxPanX, maxPanY } = computePanBounds(592, 790, 2);
-    expect(maxPanX).toBeGreaterThan(0); // horizontal must be pannable
+describe('computePanBounds (content vs viewport)', () => {
+  it('bounds are half the content overhang beyond the viewport, per axis', () => {
+    // content 2370×1580 inside a 1408×790 viewport (a 3:2 photo zoomed 2× in a wide region)
+    const { maxPanX, maxPanY } = computePanBounds(2370, 1580, 1408, 790);
+    expect(maxPanX).toBe((2370 - 1408) / 2); // 481
+    expect(maxPanY).toBe((1580 - 790) / 2); // 395
+    expect(maxPanX).toBeGreaterThan(0);
     expect(maxPanY).toBeGreaterThan(0);
-    expect(maxPanX).toBe((592 * 2 - 592) / 2); // 296
-    expect(maxPanY).toBe((790 * 2 - 790) / 2); // 395
   });
 
-  it('scales bounds linearly with zoom', () => {
-    expect(computePanBounds(1000, 800, 1.5).maxPanX).toBe(250);
-    expect(computePanBounds(1000, 800, 3).maxPanX).toBe(1000);
+  it('floors an axis to 0 when content is NOT larger than the viewport there', () => {
+    // Portrait zoomed 2× but still narrower than the wide region: content 1184 ≤ viewport
+    // 1184 in X (no pan), but taller than the viewport in Y (pannable).
+    const { maxPanX, maxPanY } = computePanBounds(1184, 1580, 1184, 790);
+    expect(maxPanX).toBe(0); // fully visible horizontally → centered, no pan
+    expect(maxPanY).toBe((1580 - 790) / 2); // 395
   });
 
-  it('returns zero bounds at or below 100% zoom', () => {
-    expect(computePanBounds(1000, 800, 1)).toEqual({ maxPanX: 0, maxPanY: 0 });
-    expect(computePanBounds(1000, 800, 0.5)).toEqual({ maxPanX: 0, maxPanY: 0 });
+  it('returns zero bounds when content fits the viewport in both axes (zoom ≤ fit)', () => {
+    // At zoom ≤ 1 the viewport equals the fit-rect and content ≤ fit in both axes.
+    expect(computePanBounds(1185, 790, 1185, 790)).toEqual({ maxPanX: 0, maxPanY: 0 });
+    expect(computePanBounds(600, 400, 1185, 790)).toEqual({ maxPanX: 0, maxPanY: 0 });
   });
 
-  it('returns zero bounds for degenerate canvas sizes', () => {
-    expect(computePanBounds(0, 0, 2)).toEqual({ maxPanX: 0, maxPanY: 0 });
+  it('never returns a negative bound', () => {
+    const { maxPanX, maxPanY } = computePanBounds(100, 100, 400, 400);
+    expect(maxPanX).toBe(0);
+    expect(maxPanY).toBe(0);
   });
 });
 
@@ -36,5 +41,10 @@ describe('clampPan', () => {
     expect(clampPan(500, 296)).toBe(296);
     expect(clampPan(-500, 296)).toBe(-296);
     expect(clampPan(100, 296)).toBe(100);
+  });
+
+  it('clamps to 0 when there is no room to pan', () => {
+    expect(clampPan(250, 0)).toBeCloseTo(0, 10);
+    expect(clampPan(-250, 0)).toBeCloseTo(0, 10);
   });
 });

@@ -4,6 +4,11 @@ import { MaskGeometry } from '../../modules/LocalAdjustmentsModule';
 interface Props {
   canvasRef: React.RefObject<HTMLCanvasElement | null>;
   viewport: { zoom: number; panX: number; panY: number };
+  // Content (fit-rect) base the image scales by (viewport-canvas model, Task R5):
+  // content = contentWidth × zoom, centered in the canvas element (viewport) box.
+  // Defaults to the canvas element's own size (⇒ pre-R5 behaviour).
+  contentWidth?: number;
+  contentHeight?: number;
   layerType: 'radial_gradient' | 'linear_gradient';
   geometry: MaskGeometry;
   onGeometryChange: (geom: MaskGeometry) => void;
@@ -23,7 +28,7 @@ type LinearMode = 'create' | 'move' | 'rotate';
  * inside the canvas at offsetWidth*zoom, centred + panned).
  */
 export function LocalAdjustmentMaskOverlay({
-  canvasRef, viewport, layerType, geometry, onGeometryChange, onDragStart, onDragEnd, onDeselect,
+  canvasRef, viewport, contentWidth, contentHeight, layerType, geometry, onGeometryChange, onDragStart, onDragEnd, onDeselect,
 }: Props) {
   const draggingRef = useRef(false);
   const [liveGeom, setLiveGeom] = useState<MaskGeometry>(geometry);
@@ -39,10 +44,14 @@ export function LocalAdjustmentMaskOverlay({
   const metrics = () => {
     const canvas = canvasRef.current;
     if (!canvas) return null;
-    const scaledW = canvas.offsetWidth * viewport.zoom;
-    const scaledH = canvas.offsetHeight * viewport.zoom;
-    const imgX = (canvas.offsetWidth - scaledW) / 2 + viewport.panX;
-    const imgY = (canvas.offsetHeight - scaledH) / 2 + viewport.panY;
+    // Box = the canvas element (viewport). Content scales by the fit-rect (contentWidth),
+    // centered in the box + pan — matching the CPU/GPU draw (viewport-canvas model, R5).
+    const boxW = canvas.offsetWidth;
+    const boxH = canvas.offsetHeight;
+    const scaledW = (contentWidth ?? boxW) * viewport.zoom;
+    const scaledH = (contentHeight ?? boxH) * viewport.zoom;
+    const imgX = (boxW - scaledW) / 2 + viewport.panX;
+    const imgY = (boxH - scaledH) / 2 + viewport.panY;
     return { scaledW, scaledH, imgX, imgY };
   };
 

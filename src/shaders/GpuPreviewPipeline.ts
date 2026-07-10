@@ -816,7 +816,21 @@ export class GpuPreviewPipeline {
    * Before/after split: fragments with canvas-pixel x < splitX sample srcTexture
    * (original); others sample resultTexture (processed). Pass splitX < 0 to disable.
    */
-  present(opts: { zoom: number; panX: number; panY: number; splitX?: number }): void {
+  present(opts: {
+    zoom: number;
+    panX: number;
+    panY: number;
+    splitX?: number;
+    // Viewport-canvas geometry (Task R5, CSS px). When provided, the GL drawing buffer is
+    // sized to the VIEWPORT (which grows from the fit-rect up to the photo region as you
+    // zoom in) at result resolution, and the content (this.width×this.height × zoom) pans
+    // within it — matching the CPU path. Omitted ⇒ legacy behaviour (buffer = result size,
+    // content clipped at the fit-rect). At zoom ≤ 1 the two are identical.
+    fitCssW?: number;
+    fitCssH?: number;
+    viewportCssW?: number;
+    viewportCssH?: number;
+  }): void {
     const gl = this.gl;
     if (!gl || !this.attached) {
       logger.warn('[GPU-PIPELINE] present() called before a successful attach() — no-op');
@@ -844,11 +858,24 @@ export class GpuPreviewPipeline {
     // clears the drawing buffer, which on a viewport-only present would needlessly drop the
     // frame. (redrawCanvas no longer touches the GL drawing buffer in gpu mode — it owns
     // only the CSS display size — so there is no resize fight.)
+    // Viewport-canvas model (Task R5): size the drawing buffer to the VIEWPORT (CSS px)
+    // at result resolution R = this.width / fitCssW (result px per fit CSS px), and pan the
+    // content (this.width×this.height × zoom) within it. `R` also converts the CSS-px pan
+    // into buffer px. Without geometry, fall back to buffer = result size (legacy, clips at
+    // the fit-rect). At zoom ≤ 1 viewport == fit ⇒ buffer == this.width and this collapses
+    // to the legacy path exactly.
     const canvasEl = gl.canvas as HTMLCanvasElement;
-    if (this.width > 0 && this.height > 0 &&
-        (canvasEl.width !== this.width || canvasEl.height !== this.height)) {
-      canvasEl.width = this.width;
-      canvasEl.height = this.height;
+    const hasGeom =
+      opts.fitCssW != null && opts.fitCssW > 0 &&
+      opts.fitCssH != null && opts.fitCssH > 0 &&
+      opts.viewportCssW != null && opts.viewportCssH != null;
+    const R = hasGeom ? this.width / (opts.fitCssW as number) : 1;
+    const targetW = hasGeom ? Math.max(1, Math.round((opts.viewportCssW as number) * R)) : this.width;
+    const targetH = hasGeom ? Math.max(1, Math.round((opts.viewportCssH as number) * R)) : this.height;
+    if (targetW > 0 && targetH > 0 &&
+        (canvasEl.width !== targetW || canvasEl.height !== targetH)) {
+      canvasEl.width = targetW;
+      canvasEl.height = targetH;
     }
     const canvasW = canvasEl.width;
     const canvasH = canvasEl.height;
@@ -857,11 +884,13 @@ export class GpuPreviewPipeline {
       return;
     }
 
-    // ── Destination rect in canvas pixels (same formula as Canvas.tsx ~574-577) ──
-    const scaledW = canvasW * opts.zoom;
-    const scaledH = canvasH * opts.zoom;
-    const pixX = (canvasW - scaledW) / 2 + opts.panX;    // left edge
-    const pixY = (canvasH - scaledH) / 2 + opts.panY;    // top  edge (canvas-pixel, top-origin)
+    // ── Destination rect in buffer pixels ──
+    // Content = the full result texture scaled by zoom (NOT the buffer × zoom — the buffer
+    // is the viewport, which may exceed the content when zoomed in), centered + panned.
+    const scaledW = this.width * opts.zoom;
+    const scaledH = this.height * opts.zoom;
+    const pixX = (canvasW - scaledW) / 2 + opts.panX * R;    // left edge
+    const pixY = (canvasH - scaledH) / 2 + opts.panY * R;    // top  edge (canvas-pixel, top-origin)
 
     // ── Convert pixel rect to clip space (NDC [-1,1], bottom-left origin) ──
     // Canvas pixels: (0,0) top-left, (canvasW, canvasH) bottom-right

@@ -1,30 +1,27 @@
 /**
- * Pan bounds for the zoomed canvas.
+ * Pan bounds for the viewport-canvas model (Task R5).
  *
- * The zoomed image is drawn scaled by `zoom` INSIDE the canvas element's own
- * box and clipped by it (see Canvas redraw: scaledWidth = canvas.width * zoom,
- * positioned at (canvas.width - scaledWidth)/2 + panX). The pan viewport is
- * therefore the CANVAS box itself — not the surrounding photo-region container.
- * Clamping against the container locked horizontal panning for any photo that
- * is height-constrained in the letterbox (portrait/4:3 in the wide region):
- * the displayed width never exceeded the region width, so maxPanX computed 0
- * while vertical panning worked only because the fitted height ≈ region height.
+ * The zoomed image ("content", size = fit-rect × zoom) is drawn centered inside a
+ * "viewport" box (the canvas element, which grows from the fit-rect up to the photo
+ * region as you zoom in) and pans within it. The maximum pan in an axis is half the
+ * overhang of the content beyond the viewport; when the content is not larger than
+ * the viewport in that axis (e.g. a portrait zoomed but still narrower than the wide
+ * region, or any axis at zoom ≤ fit) the bound is 0 — the content is fully visible
+ * and stays centered.
  *
- * Bounds are in the same coordinate space as the canvas dimensions passed in
- * (use canvas.width/height — internal pixels — to match where panX/panY are
- * consumed by the draw).
+ * All four inputs share ONE coordinate space (CSS px in the model; the CPU/GPU
+ * renderers convert to their own buffer px). Content already includes the zoom
+ * factor — pass `fitW*zoom`, not `fitW`.
  */
 export function computePanBounds(
-  canvasWidth: number,
-  canvasHeight: number,
-  zoom: number,
+  contentWidth: number,
+  contentHeight: number,
+  viewportWidth: number,
+  viewportHeight: number,
 ): { maxPanX: number; maxPanY: number } {
-  if (zoom <= 1 || canvasWidth <= 0 || canvasHeight <= 0) {
-    return { maxPanX: 0, maxPanY: 0 };
-  }
   return {
-    maxPanX: (canvasWidth * zoom - canvasWidth) / 2,
-    maxPanY: (canvasHeight * zoom - canvasHeight) / 2,
+    maxPanX: Math.max(0, (contentWidth - viewportWidth) / 2),
+    maxPanY: Math.max(0, (contentHeight - viewportHeight) / 2),
   };
 }
 

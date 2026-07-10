@@ -25,9 +25,15 @@ interface InteractiveCropHandlesProps {
     panY: number;
   };
 
-  // Canvas display dimensions (CSS size)
+  // Canvas display dimensions (CSS size) — the VIEWPORT box (canvas element).
   canvasDisplayWidth: number;
   canvasDisplayHeight: number;
+
+  // Content (fit-rect) base the image scales by: content = contentWidth × zoom. In the
+  // viewport-canvas model (Task R5) the box (canvasDisplay*) grows with zoom while the
+  // content scales by the fit-rect. Defaults to canvasDisplay* (⇒ pre-R5 behaviour).
+  contentWidth?: number;
+  contentHeight?: number;
 
   // Show handles only in preview mode
   showHandles: boolean;
@@ -55,10 +61,15 @@ export function InteractiveCropHandles({
   viewport,
   canvasDisplayWidth,
   canvasDisplayHeight,
+  contentWidth,
+  contentHeight,
   showHandles,
   aspectRatio = null,
   canvasRef
 }: InteractiveCropHandlesProps) {
+  // Content base for image scaling (fit-rect); the box stays canvasDisplay* (viewport).
+  const contentW = contentWidth ?? canvasDisplayWidth;
+  const contentH = contentHeight ?? canvasDisplayHeight;
   const [isDragging, setIsDragging] = useState(false);
   const [dragHandle, setDragHandle] = useState<HandleType | null>(null);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
@@ -71,8 +82,8 @@ export function InteractiveCropHandles({
 
   // Calculate crop region in canvas pixel coordinates
   const getCropRect = useCallback(() => {
-    const scaledImageWidth = canvasDisplayWidth * viewport.zoom;
-    const scaledImageHeight = canvasDisplayHeight * viewport.zoom;
+    const scaledImageWidth = contentW * viewport.zoom;
+    const scaledImageHeight = contentH * viewport.zoom;
 
     const imageX = (canvasDisplayWidth - scaledImageWidth) / 2 + viewport.panX;
     const imageY = (canvasDisplayHeight - scaledImageHeight) / 2 + viewport.panY;
@@ -96,12 +107,12 @@ export function InteractiveCropHandles({
       scaledImageWidth,
       scaledImageHeight
     };
-  }, [cropParams, viewport, canvasDisplayWidth, canvasDisplayHeight]);
+  }, [cropParams, viewport, canvasDisplayWidth, canvasDisplayHeight, contentW, contentH]);
 
   // Convert canvas pixel coordinates to normalized crop coordinates
   const pixelToNormalized = useCallback((pixelX: number, pixelY: number, pixelWidth: number, pixelHeight: number) => {
-    const scaledImageWidth = canvasDisplayWidth * viewport.zoom;
-    const scaledImageHeight = canvasDisplayHeight * viewport.zoom;
+    const scaledImageWidth = contentW * viewport.zoom;
+    const scaledImageHeight = contentH * viewport.zoom;
 
     const imageX = (canvasDisplayWidth - scaledImageWidth) / 2 + viewport.panX;
     const imageY = (canvasDisplayHeight - scaledImageHeight) / 2 + viewport.panY;
@@ -118,7 +129,7 @@ export function InteractiveCropHandles({
       width: clampedWidth / scaledImageWidth,
       height: clampedHeight / scaledImageHeight
     };
-  }, [viewport, canvasDisplayWidth, canvasDisplayHeight]);
+  }, [viewport, canvasDisplayWidth, canvasDisplayHeight, contentW, contentH]);
 
   // Handle mouse down on handles
   const handleMouseDown = useCallback((e: React.MouseEvent, handle: HandleType) => {
