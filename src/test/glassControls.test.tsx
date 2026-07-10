@@ -336,6 +336,40 @@ describe('SliderRow', () => {
       fireEvent.keyDown(input, { key: 'Enter' });
       expect(onChange).toHaveBeenCalledWith(2);
     });
+
+    it('typingStep gives typed entry finer precision than the drag step (Saturation/Vibrance/Dehaze)', () => {
+      const onChange = jest.fn();
+      render(
+        <SliderRow
+          label="Saturation"
+          value={0}
+          defaultValue={0}
+          min={-1}
+          max={1}
+          step={0.05}
+          typingStep={0.01}
+          onChange={onChange}
+        />
+      );
+      fireEvent.click(screen.getByText('0'));
+      const input = screen.getByRole('spinbutton');
+      // Typed entry snaps to the finer typingStep (0.01), not the coarser drag step (0.05).
+      expect(input).toHaveAttribute('step', '0.01');
+      fireEvent.change(input, { target: { value: '0.33' } });
+      fireEvent.keyDown(input, { key: 'Enter' });
+      expect(onChange).toHaveBeenCalledWith(0.33);
+    });
+
+    it('defaults typingStep to step when omitted (no behavior change for existing consumers)', () => {
+      const onChange = jest.fn();
+      render(
+        <SliderRow label="Exposure" value={0} defaultValue={0} min={-2} max={2} step={0.01} onChange={onChange} />
+      );
+      const input = screen.queryByRole('spinbutton');
+      expect(input).not.toBeInTheDocument();
+      fireEvent.click(screen.getByText('0'));
+      expect(screen.getByRole('spinbutton')).toHaveAttribute('step', '0.01');
+    });
   });
 });
 

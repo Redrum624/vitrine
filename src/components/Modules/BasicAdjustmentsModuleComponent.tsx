@@ -233,6 +233,7 @@ export function BasicAdjustmentsModuleComponent({
       min={cfg.min}
       max={cfg.max}
       step={cfg.rangeStep ?? cfg.step ?? 0.01}
+      typingStep={cfg.step ?? 0.01}
       onChange={(v) => updateMaskBA(cfg.key, v)}
       formatValue={formatSigned}
       trackBackground={`linear-gradient(to right, ${cfg.gradient})`}
@@ -248,6 +249,7 @@ export function BasicAdjustmentsModuleComponent({
       min={cfg.min}
       max={cfg.max}
       step={cfg.rangeStep ?? cfg.step ?? 0.01}
+      typingStep={cfg.step ?? 0.01}
       onChange={(v) => updateParam(cfg.key, v)}
       formatValue={formatSigned}
       trackBackground={`linear-gradient(to right, ${cfg.gradient})`}

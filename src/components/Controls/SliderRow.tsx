@@ -14,6 +14,14 @@ interface SliderRowProps {
   min: number;
   max: number;
   step?: number;
+  /**
+   * Precision used ONLY by the click-to-edit numeric entry (typed value
+   * snapping/rounding) — dragging the thumb always uses `step`. Lets a
+   * consumer offer coarse drag increments (e.g. step 1) while still
+   * accepting fine-grained typed values (e.g. typingStep 0.01). Defaults to
+   * `step`, so consumers that don't pass it see no behavior change.
+   */
+  typingStep?: number;
   onChange: (value: number) => void;
   /** Formats the value chip text (e.g. "+0.35"); defaults to the raw number. */
   formatValue?: (value: number) => string;
@@ -51,6 +59,7 @@ export function SliderRow({
   min,
   max,
   step = 1,
+  typingStep,
   onChange,
   formatValue,
   trackBackground,
@@ -62,6 +71,7 @@ export function SliderRow({
 }: SliderRowProps) {
   const sliderId = useId();
   const labelId = `${sliderId}-label`;
+  const effectiveTypingStep = typingStep ?? step;
   const edited = value !== defaultValue;
   const chipText = formatValue ? formatValue(value) : `${value}`;
   const hasDetent = min < defaultValue && defaultValue < max;
@@ -80,10 +90,10 @@ export function SliderRow({
     const parsed = parseFloat(draft);
     if (!Number.isNaN(parsed)) {
       const clamped = Math.min(max, Math.max(min, parsed));
-      const snapped = step
-        ? Math.round((clamped - min) / step) * step + min
+      const snapped = effectiveTypingStep
+        ? Math.round((clamped - min) / effectiveTypingStep) * effectiveTypingStep + min
         : clamped;
-      const decimals = (step ? step.toString().split('.')[1] ?? '' : '').length;
+      const decimals = (effectiveTypingStep ? effectiveTypingStep.toString().split('.')[1] ?? '' : '').length;
       onChange(decimals > 0 ? parseFloat(snapped.toFixed(decimals)) : snapped);
     }
     setEditing(false);
@@ -105,7 +115,7 @@ export function SliderRow({
             value={draft}
             min={min}
             max={max}
-            step={step}
+            step={effectiveTypingStep}
             onChange={(e) => setDraft(e.target.value)}
             onBlur={commitEdit}
             onKeyDown={(e) => {
