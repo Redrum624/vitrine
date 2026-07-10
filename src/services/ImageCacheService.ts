@@ -32,14 +32,25 @@ export class ImageCacheService {
   private hitCount = 0;
   private missCount = 0;
 
+  // Dedicated budget for __BASE__ entries (RAW/regular decode base pixels), tracked and
+  // evicted completely independently from the shared `maxSize`/`currentSize` used by sized
+  // (generateKey) entries. See setBase()'s doc comment for the memory-sizing rationale — this
+  // is what lets the app hold 2-3 large RAW bases in the same session without a sized entry
+  // (e.g. a prefetch) ever stealing room from them, or vice versa.
+  private baseMaxSize: number;
+  private baseCurrentSize = 0;
+
   // Cache configuration
-  private readonly DEFAULT_MAX_SIZE = 500 * 1024 * 1024; // 500MB
+  private readonly DEFAULT_MAX_SIZE = 500 * 1024 * 1024; // 500MB — shared budget for sized/thumbnail entries
+  private readonly DEFAULT_BASE_MAX_SIZE = 700 * 1024 * 1024; // 700MB — dedicated budget for RAW/regular decode bases
   private readonly DEFAULT_MAX_ENTRIES = 100;
   private readonly CLEANUP_THRESHOLD = 0.9; // Start cleanup at 90% capacity
+  private readonly BASE_KEY_SUFFIX = '__BASE__';
 
-  constructor(maxSize?: number, maxEntries?: number) {
+  constructor(maxSize?: number, maxEntries?: number, baseMaxSize?: number) {
     this.maxSize = maxSize || this.DEFAULT_MAX_SIZE;
     this.maxEntries = maxEntries || this.DEFAULT_MAX_ENTRIES;
+    this.baseMaxSize = baseMaxSize || this.DEFAULT_BASE_MAX_SIZE;
   }
 
   static getInstance(): ImageCacheService {
@@ -73,7 +84,17 @@ export class ImageCacheService {
    * the key — that's what lets a reopen look the base up without knowing its dimensions.
    */
   private generateBaseKey(filePath: string): string {
-    return `${filePath}__BASE__`;
+    return `${filePath}${this.BASE_KEY_SUFFIX}`;
+  }
+
+  /**
+   * Whether a cache key belongs to the __BASE__ namespace (see generateBaseKey). Base entries
+   * are accounted and evicted against `baseMaxSize`/`baseCurrentSize`, entirely independent of
+   * the shared `maxSize`/`currentSize` used by sized (generateKey) entries — a base eviction
+   * can never take a sized/thumbnail entry, and vice versa.
+   */
+  private isBaseKey(key: string): boolean {
+    return key.endsWith(this.BASE_KEY_SUFFIX);
   }
 
   /**
@@ -114,12 +135,19 @@ export class ImageCacheService {
    * most one base entry per path and it always reflects the most recent decode. The REAL
    * width/height are kept in the entry payload so getBase() reconstructs correct dimensions.
    *
-   * Practical bound: the guard in setWithKey refuses a single entry larger than `this.maxSize`
-   * outright rather than evicting the whole cache to make room. `this.maxSize` defaults to
-   * DEFAULT_MAX_SIZE (500MB) unless the instance was constructed with a custom size. In
-   * practice the default comfortably holds ONE large RAW base (e.g. a 40MP+ Float32 RGBA
-   * decode); switching between several such large RAWs in the same session may still
-   * re-decode more than once. Accepted design limit, not a bug.
+   * Budget: base entries are accounted against a DEDICATED `baseMaxSize` (default
+   * DEFAULT_BASE_MAX_SIZE, 700MB) rather than the shared `maxSize` used by sized/thumbnail
+   * entries — a base write or eviction never touches, and is never touched by, the sized
+   * cache. Sizing rationale: a 20MP Float32 RGBA base is ~310MB, so 700MB holds TWO such
+   * bases (620MB) with room to spare below the 90% cleanup threshold (630MB) — an A→B→A
+   * switch between two large RAWs serves both from cache with zero re-decodes. Smaller RAWs
+   * (12-16MP) fit three or more automatically since accounting is size-based, not
+   * count-based. Beyond that, the LRU evicts the oldest base ONLY — sized/thumbnail entries
+   * are never affected by a base eviction. This ceiling is a deliberate memory trade-off: two
+   * resident bases (~620MB) plus the working copy, an undo/original snapshot, and GPU
+   * textures already puts a session in the 1.5-2GB range, which is the accepted cost for
+   * multi-image reopen speed. The guard in setWithKey refuses a single entry larger than its
+   * category's budget outright rather than evicting the whole cache to make room.
    */
   setBase(
     filePath: string,
@@ -140,20 +168,23 @@ export class ImageCacheService {
   ): void {
     const size = imageData.byteLength;
     const now = Date.now();
+    const isBase = this.isBaseKey(key);
+    const budget = isBase ? this.baseMaxSize : this.maxSize;
 
-    // An entry larger than the entire cache budget can never be satisfied by cleanup()'s
+    // An entry larger than its category's entire budget can never be satisfied by cleanup()'s
     // eviction loop (its break condition — current size at/under target — is unreachable
-    // when the incoming entry alone exceeds maxSize), so it would evict every other entry
-    // and still get stored. Refuse it instead: the caller (typically a RAW reopen) simply
-    // decodes fresh, and every other cached entry survives untouched.
-    if (size > this.maxSize) {
-      logger.debug(`Cache: Refusing oversized entry ${key} (${this.formatBytes(size)} > ${this.formatBytes(this.maxSize)} max) — not cached`);
+    // when the incoming entry alone exceeds the budget), so it would evict every other entry
+    // in that category and still get stored. Refuse it instead: the caller (typically a RAW
+    // reopen) simply decodes fresh, and every other cached entry (in EITHER category) survives
+    // untouched.
+    if (size > budget) {
+      logger.debug(`Cache: Refusing oversized ${isBase ? 'base ' : ''}entry ${key} (${this.formatBytes(size)} > ${this.formatBytes(budget)} ${isBase ? 'base ' : ''}max) — not cached`);
       return;
     }
 
-    // Check if we need to make space
-    if (this.shouldCleanup(size)) {
-      this.cleanup(size);
+    // Check if we need to make space (within this entry's own category only)
+    if (this.shouldCleanup(size, isBase)) {
+      this.cleanup(size, isBase);
     }
 
     // Create cache entry
@@ -172,14 +203,22 @@ export class ImageCacheService {
     // Remove existing entry if present
     if (this.cache.has(key)) {
       const existingEntry = this.cache.get(key)!;
-      this.currentSize -= existingEntry.size;
+      if (isBase) {
+        this.baseCurrentSize -= existingEntry.size;
+      } else {
+        this.currentSize -= existingEntry.size;
+      }
     }
 
     // Add new entry
     this.cache.set(key, entry);
-    this.currentSize += size;
+    if (isBase) {
+      this.baseCurrentSize += size;
+    } else {
+      this.currentSize += size;
+    }
 
-    logger.debug(`Cache: Stored image ${key} (${this.formatBytes(size)})`);
+    logger.debug(`Cache: Stored ${isBase ? 'base ' : ''}image ${key} (${this.formatBytes(size)})`);
     this.logCacheStats();
   }
 
@@ -265,10 +304,11 @@ export class ImageCacheService {
    */
   clear(): void {
     const entriesCount = this.cache.size;
-    const sizeFreed = this.currentSize;
+    const sizeFreed = this.currentSize + this.baseCurrentSize;
 
     this.cache.clear();
     this.currentSize = 0;
+    this.baseCurrentSize = 0;
     this.hitCount = 0;
     this.missCount = 0;
 
@@ -276,24 +316,34 @@ export class ImageCacheService {
   }
 
   /**
-   * Check if cleanup is needed
+   * Check if cleanup is needed for an incoming entry of the given category (base vs sized).
+   * Size is checked against that category's OWN budget/current-size — a base entry can never
+   * trigger cleanup of the sized budget, or vice versa. The entry-count ceiling (`maxEntries`)
+   * remains a shared, whole-cache backstop (both categories combined stay well under it in
+   * practice).
    */
-  private shouldCleanup(incomingSize: number): boolean {
-    const wouldExceedSize = (this.currentSize + incomingSize) > (this.maxSize * this.CLEANUP_THRESHOLD);
+  private shouldCleanup(incomingSize: number, isBase: boolean): boolean {
+    const currentSize = isBase ? this.baseCurrentSize : this.currentSize;
+    const budget = isBase ? this.baseMaxSize : this.maxSize;
+    const wouldExceedSize = (currentSize + incomingSize) > (budget * this.CLEANUP_THRESHOLD);
     const wouldExceedEntries = this.cache.size >= this.maxEntries;
 
     return wouldExceedSize || wouldExceedEntries;
   }
 
   /**
-   * Cleanup old or least used entries
+   * Cleanup old or least used entries — restricted to the SAME category (base vs sized) as the
+   * incoming entry. Candidates are filtered to that category before sorting, so a base
+   * eviction can only ever remove other base entries (never a sized/thumbnail entry) and vice
+   * versa; each category is evicted against its own budget.
    */
-  private cleanup(incomingSize: number): void {
-    const targetSize = this.maxSize * 0.7; // Clean to 70% capacity
+  private cleanup(incomingSize: number, isBase: boolean): void {
+    const budget = isBase ? this.baseMaxSize : this.maxSize;
+    const targetSize = budget * 0.7; // Clean to 70% capacity
     const targetEntries = Math.floor(this.maxEntries * 0.8); // Clean to 80% capacity
 
-    // Convert to array and sort by LRU criteria
-    const entries = Array.from(this.cache.entries());
+    // Convert to array (restricted to this entry's category) and sort by LRU criteria
+    const entries = Array.from(this.cache.entries()).filter(([key]) => this.isBaseKey(key) === isBase);
 
     // Sort by: last accessed (ascending) and access count (ascending)
     entries.sort(([, a], [, b]) => {
@@ -303,14 +353,15 @@ export class ImageCacheService {
 
     let removedCount = 0;
     let removedSize = 0;
+    const startSize = isBase ? this.baseCurrentSize : this.currentSize;
 
     for (const [key, entry] of entries) {
-      if (this.currentSize - removedSize <= targetSize &&
+      if (startSize - removedSize <= targetSize &&
           this.cache.size - removedCount <= targetEntries) {
         break;
       }
 
-      if (this.currentSize - removedSize + incomingSize <= this.maxSize) {
+      if (startSize - removedSize + incomingSize <= budget) {
         break;
       }
 
@@ -319,19 +370,32 @@ export class ImageCacheService {
       removedSize += entry.size;
     }
 
-    this.currentSize -= removedSize;
+    if (isBase) {
+      this.baseCurrentSize -= removedSize;
+    } else {
+      this.currentSize -= removedSize;
+    }
 
-    logger.info(`Cache: Cleaned up ${removedCount} entries, freed ${this.formatBytes(removedSize)}`);
+    logger.info(`Cache: Cleaned up ${removedCount} ${isBase ? 'base ' : ''}entries, freed ${this.formatBytes(removedSize)}`);
   }
 
   /**
-   * Calculate LRU score (lower = more likely to be evicted)
+   * Calculate LRU score (lower = more likely to be evicted).
+   *
+   * Bug fix (Task R2): the previous formula added a POSITIVE staleness term and a NEGATIVE
+   * access-count term, which made stale (long-untouched) entries score HIGHER — i.e. LESS
+   * likely to be evicted — and frequently-accessed entries score LOWER — i.e. MORE likely to
+   * be evicted. That is backwards from LRU (the entry untouched the longest should be evicted
+   * FIRST). It went undetected because the only prior eviction test asserted a new entry got
+   * stored, never WHICH existing entry was evicted. The dedicated base-budget tests added in
+   * this task assert eviction by identity ("the oldest base only"), which caught it.
    */
   private calculateLRUScore(entry: CacheEntry): number {
     const now = Date.now();
-    const ageScore = now - entry.lastAccessed; // Older = higher score
-    const accessScore = -entry.accessCount * 1000; // More accessed = lower score
-    return ageScore + accessScore;
+    const staleness = now - entry.lastAccessed; // Larger gap since last access = more stale
+    // Staleness pushes the score DOWN (more evictable); access count pushes it UP (protects
+    // frequently-used entries from eviction).
+    return entry.accessCount * 1000 - staleness;
   }
 
   /**
@@ -354,7 +418,9 @@ export class ImageCacheService {
 
     return {
       totalEntries: this.cache.size,
-      totalSize: this.currentSize,
+      // Combined footprint across both categories — sized/thumbnail entries plus RAW/regular
+      // decode bases — since this figure is meant to reflect the cache's total memory use.
+      totalSize: this.currentSize + this.baseCurrentSize,
       hitRate: Math.round(hitRate * 100) / 100,
       mostAccessed,
       oldestEntry
@@ -362,28 +428,34 @@ export class ImageCacheService {
   }
 
   /**
-   * Get cache utilization percentage
+   * Get cache utilization percentage (combined across both the sized and base budgets)
    */
   getUtilization(): { size: number; entries: number } {
     return {
-      size: Math.round((this.currentSize / this.maxSize) * 100),
+      size: Math.round(((this.currentSize + this.baseCurrentSize) / (this.maxSize + this.baseMaxSize)) * 100),
       entries: Math.round((this.cache.size / this.maxEntries) * 100)
     };
   }
 
   /**
-   * Set cache limits
+   * Set cache limits. `maxBaseSize` is optional and defaults back to DEFAULT_BASE_MAX_SIZE
+   * (700MB) when omitted, so existing 2-arg call sites (e.g. "restore defaults" in tests)
+   * reset the base budget too rather than leaving a previously-shrunk value in place.
    */
-  setLimits(maxSize: number, maxEntries: number): void {
+  setLimits(maxSize: number, maxEntries: number, maxBaseSize: number = this.DEFAULT_BASE_MAX_SIZE): void {
     this.maxSize = maxSize;
     this.maxEntries = maxEntries;
+    this.baseMaxSize = maxBaseSize;
 
-    // Trigger cleanup if necessary
-    if (this.currentSize > maxSize || this.cache.size > maxEntries) {
-      this.cleanup(0);
+    // Trigger cleanup if necessary, independently per category
+    if (this.currentSize > this.maxSize || this.cache.size > this.maxEntries) {
+      this.cleanup(0, false);
+    }
+    if (this.baseCurrentSize > this.baseMaxSize) {
+      this.cleanup(0, true);
     }
 
-    logger.info(`Cache: Updated limits to ${this.formatBytes(maxSize)} and ${maxEntries} entries`);
+    logger.info(`Cache: Updated limits to ${this.formatBytes(maxSize)} sized / ${this.formatBytes(maxBaseSize)} base / ${maxEntries} entries`);
   }
 
   /**

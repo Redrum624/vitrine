@@ -21,8 +21,9 @@ describe('ImageCacheService — oversized entry rejection', () => {
 
   it('refuses to store a single entry larger than maxSize, leaving other entries intact', () => {
     // Shrink the budget so a tiny Float32Array counts as "oversized" without allocating
-    // hundreds of megabytes just to exercise the guard.
-    imageCacheService.setLimits(1000, 100); // 1000-byte total budget
+    // hundreds of megabytes just to exercise the guard. Base entries are accounted against
+    // their OWN dedicated budget (Task R2), so it must be shrunk explicitly too.
+    imageCacheService.setLimits(1000, 100, 1000); // 1000-byte sized budget, 1000-byte base budget
 
     // A survivor entry that fits comfortably within the shrunk budget.
     const survivorData = new Float32Array(10); // 40 bytes
@@ -41,7 +42,7 @@ describe('ImageCacheService — oversized entry rejection', () => {
   });
 
   it('still evicts normally-sized entries via LRU when a fitting entry needs room', () => {
-    imageCacheService.setLimits(1000, 100);
+    imageCacheService.setLimits(1000, 100, 1000);
 
     const a = new Float32Array(50); // 200 bytes
     const b = new Float32Array(50); // 200 bytes
