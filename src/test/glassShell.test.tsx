@@ -165,4 +165,13 @@ describe('Toolbar responsive collapse (Develop pill overflow menu)', () => {
     fireEvent.mouseDown(document.body);
     expect(screen.queryByRole('menu')).toBeNull();
   });
+
+  it('closes the overflow popover on Escape (a11y minor, Fix round 1)', () => {
+    setInnerWidth(1200);
+    render(<Toolbar hasImage zoom={1} onPrint={jest.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: /more actions/i }));
+    expect(screen.getByRole('menu')).toBeInTheDocument();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('menu')).toBeNull();
+  });
 });

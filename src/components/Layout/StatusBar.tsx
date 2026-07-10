@@ -40,6 +40,37 @@ const RATING_FILTER_OPTIONS: { value: RatingFilterValue; label: string }[] = [
  * Glass · Sectioned design tokens ("Stars `#eab308`"). */
 const FOOTER_STAR_COLOR = '#eab308';
 
+/**
+ * Real half-width of the footer's center rating cluster (Segmented 6-way
+ * "All … ≥5★" + `gap-3` + 5-star `StarRating` — its widest state, Develop with
+ * a photo loaded), measured against the live app via a dev-mode Playwright
+ * probe at 1920×1080: cluster width ≈ 383.9px → half ≈ 192px (see
+ * task-8-report.md, "Fix round 1"). Padded to 195 + a 16px clearance so the
+ * CSS-`calc()` bounds below can never let the left/right groups reach under
+ * the cluster, at any supported window width (≥1024) in either view mode.
+ *
+ * A fixed constant (rather than a live JS/ResizeObserver measurement, as the
+ * Toolbar pill's collapse/clamp uses) is safe and preferred here: the
+ * cluster's *content* is a small, enumerable, developer-controlled set — not
+ * user text — so its rendered width doesn't grow unboundedly the way a file
+ * name or folder path can. The cluster's *position* (`clusterLeft` below) is
+ * already known synchronously (the live axis, or 50%), so `calc()` alone can
+ * derive the left/right groups' width budgets with no extra plumbing. The
+ * unbounded part (the file name / folder path) is instead handled by CSS
+ * ellipsis truncation inside that budget, not by trying to measure it.
+ */
+const CLUSTER_HALF_WIDTH = 195;
+const CLUSTER_CLEARANCE = 16;
+/** Matches the footer's own `px-4` (1rem/16px) horizontal padding: `left`/`right`
+ * (the CSS properties) are resolved from the cluster's position which is
+ * relative to the footer's OWN left edge (its border/padding box origin), but a
+ * `max-width` on the left/right GROUP divs bounds a box whose own edge already
+ * sits `FOOTER_PADDING_X` inside that origin (they're padded flex children, not
+ * padded themselves) — so the padding has to be subtracted a second time or the
+ * groups' far edge would land `FOOTER_PADDING_X` past the intended bound. */
+const FOOTER_PADDING_X = 16;
+const CLUSTER_EDGE_MARGIN = CLUSTER_HALF_WIDTH + CLUSTER_CLEARANCE + FOOTER_PADDING_X;
+
 // Format file size
 const formatFileSize = (bytes: number): string => {
   if (bytes === 0) return '0 B';
@@ -49,18 +80,28 @@ const formatFileSize = (bytes: number): string => {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
 };
 
+/** Splits the footer's left file-info into the variable-length `primary` label
+ * (the file name — unbounded user content) and a fixed-shape `meta` tail
+ * (`W × H · MP · FMT · size`), so the caller can let `primary` ellipsize first
+ * while `meta` stays visible (narrow-width footer fix, see `CLUSTER_HALF_WIDTH`
+ * below). */
+export function formatStatusBarFileInfoParts(currentImage: StatusBarProps['currentImage']): { primary: string; meta: string } {
+  if (!currentImage) return { primary: 'No image loaded', meta: '' };
+  const { name, width, height, type, size } = currentImage;
+  const metaParts: string[] = [];
+  if (width && height) {
+    metaParts.push(`${width} × ${height}`);
+    metaParts.push(`${((width * height) / 1000000).toFixed(1)} MP`);
+  }
+  if (type) metaParts.push(type.toUpperCase());
+  if (size) metaParts.push(formatFileSize(size));
+  return { primary: name, meta: metaParts.join(' · ') };
+}
+
 /** Composes the footer's left file-info line: `name · W × H · MP · FMT · size`. */
 export function formatStatusBarFileInfo(currentImage: StatusBarProps['currentImage']): string {
-  if (!currentImage) return 'No image loaded';
-  const { name, width, height, type, size } = currentImage;
-  const parts = [name];
-  if (width && height) {
-    parts.push(`${width} × ${height}`);
-    parts.push(`${((width * height) / 1000000).toFixed(1)} MP`);
-  }
-  if (type) parts.push(type.toUpperCase());
-  if (size) parts.push(formatFileSize(size));
-  return parts.join(' · ');
+  const { primary, meta } = formatStatusBarFileInfoParts(currentImage);
+  return meta ? `${primary} · ${meta}` : primary;
 }
 
 interface PerformanceWithMemory {
@@ -94,14 +135,48 @@ export function StatusBar({ currentImage, processingStats, images }: StatusBarPr
   // no axis (no photo region), so it always centers on the window.
   const clusterLeft = isGallery ? '50%' : (alignmentAxisX ?? '50%');
 
+  // Narrow-width footer fix (Fix round 1): bound the left/right groups' width so
+  // neither can ever reach under the center cluster, at any width ≥1024. Derived
+  // purely via CSS calc() from the cluster's own position (`clusterLeft`, a px
+  // number or '50%') and its fixed half-width budget (`CLUSTER_EDGE_MARGIN`) — no
+  // DOM measurement needed. Do NOT move the cluster itself; only these two
+  // siblings are bounded.
+  const clusterLeftCss = typeof clusterLeft === 'number' ? `${clusterLeft}px` : clusterLeft;
+  const leftGroupMaxWidth = `calc(${clusterLeftCss} - ${CLUSTER_EDGE_MARGIN}px)`;
+  const rightGroupMaxWidth = `calc(100% - ${clusterLeftCss} - ${CLUSTER_EDGE_MARGIN}px)`;
+  const fileInfoParts = formatStatusBarFileInfoParts(currentImage);
+
   return (
     <div
       className="relative flex items-center justify-between px-4 text-xs no-select"
       style={{ height: '32px', borderTop: '1px solid var(--border)', backgroundColor: 'var(--gray-850)', color: 'var(--gray-400)' }}
     >
-      {/* Left — file info (Develop) or folder summary (Gallery) */}
-      <div className="flex items-center">
-        <span>{isGallery ? formatGalleryFooterLeft(images ?? []) : formatStatusBarFileInfo(currentImage)}</span>
+      {/* Left — file info (Develop) or folder summary (Gallery). `min-w-0` +
+          `maxWidth`/`overflow:hidden` cap this group so it can shrink below its
+          content width (the flexbox truncation prerequisite) instead of pushing
+          into the cluster; the unbounded part (name/path) ellipsizes first. */}
+      <div className="flex items-center min-w-0" style={{ maxWidth: leftGroupMaxWidth, overflow: 'hidden' }}>
+        {isGallery ? (
+          <span className="truncate" style={{ minWidth: 0 }}>{formatGalleryFooterLeft(images ?? [])}</span>
+        ) : (
+          <>
+            {/* Name shrinks first (a hugely disproportionate flex-shrink factor —
+                the standard flexbox "shrink me before my sibling" trick: the
+                browser's shrink algorithm removes space proportional to
+                basis×shrink-factor, freezing an item at its 0 minimum once its
+                share is exhausted, THEN redistributes any remainder to the next
+                unfrozen item — see task-8-report.md, "Fix round 1"). */}
+            <span className="truncate" style={{ minWidth: 0, flexShrink: 9999 }}>{fileInfoParts.primary}</span>
+            {fileInfoParts.meta && (
+              // Meta only starts shrinking once the name has fully collapsed to
+              // 0 (flexShrink:1, small relative to the name's 9999) — and when it
+              // does, it ellipsizes too instead of being hard-clipped by the
+              // container's overflow:hidden (which is a plain visual cut, not an
+              // ellipsis).
+              <span className="truncate" style={{ minWidth: 0, flexShrink: 1 }}>{` · ${fileInfoParts.meta}`}</span>
+            )}
+          </>
+        )}
       </div>
 
       {/* Center — rating filter segmented + current photo's rating. Axis-centered
@@ -127,19 +202,19 @@ export function StatusBar({ currentImage, processingStats, images }: StatusBarPr
       </div>
 
       {/* Right — Gallery: selected count (accent) then memory. Develop: processing
-          stats (accent) then memory. */}
-      <div className="flex items-center space-x-3">
+          stats (accent) then memory. Same width-budget guard as the left group. */}
+      <div className="flex items-center space-x-3 min-w-0" style={{ maxWidth: rightGroupMaxWidth, overflow: 'hidden' }}>
         {isGallery ? (
-          <span style={{ color: 'var(--accent)' }}>{selectedImageIds?.length ?? 0} selected</span>
+          <span className="truncate" style={{ color: 'var(--accent)', minWidth: 0 }}>{selectedImageIds?.length ?? 0} selected</span>
         ) : (
           processingStats && (
-            <span style={{ color: 'var(--accent)' }}>
+            <span className="truncate" style={{ color: 'var(--accent)', minWidth: 0 }}>
               {processingStats.modulesActive}/{processingStats.totalModules} modules
               {processingStats.processingTime > 0 ? ` · ${processingStats.processingTime.toFixed(1)} ms` : ''}
             </span>
           )
         )}
-        {memoryInfo && <span>{memoryInfo}</span>}
+        {memoryInfo && <span style={{ flexShrink: 0, whiteSpace: 'nowrap' }}>{memoryInfo}</span>}
       </div>
     </div>
   );

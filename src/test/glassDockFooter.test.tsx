@@ -111,3 +111,65 @@ describe('StatusBar footer — rating filter segmented + current photo rating cl
     expect(window.electronAPI!.writeImageRating).toHaveBeenCalledWith('/p/1.jpg', 4);
   });
 });
+
+describe('StatusBar footer — left group never overlaps the center cluster at narrow widths (Fix round 1)', () => {
+  // A long name is exactly the unbounded-content case that used to overprint the
+  // window-centered cluster at ~1280px (packaged smoke evidence, task-8-report.md
+  // "Concerns"). jsdom has no real layout engine, so an exact geometry proof isn't
+  // possible here — this asserts the TRUNCATION MECHANISM is wired (ellipsizing
+  // span + a maxWidth budget derived from the cluster's own position), which is
+  // what makes overlap structurally impossible regardless of window width. The
+  // real-width geometry proof is the mandatory packaged/dev-mode smoke check
+  // (see task-8-report.md, "Fix round 1").
+  // This is the LAST describe block in the file, so the Gallery-mode `viewMode`
+  // set by the last test below doesn't need resetting for any later test.
+  const longName = 'P9190037-a-very-long-descriptive-filename-that-would-have-overprinted-the-rating-cluster.JPG';
+  const currentImage = { id: 'img1', path: '/p/1.jpg', name: longName, width: 5184, height: 3888, size: 9_961_472, type: 'jpg' };
+
+  it('gives the left group a calc()-derived maxWidth + overflow:hidden, and ellipsizes the name span first', () => {
+    useAppStore.setState({ alignmentAxisX: 408 }); // a real measured Develop axis (task-8-report.md)
+    render(<StatusBar currentImage={currentImage} />);
+
+    const nameSpan = screen.getByText(longName);
+    // The name (unbounded user content) gets the ellipsis treatment, can shrink
+    // below its own content width (min-width: 0 — the flexbox truncation
+    // prerequisite), and carries a hugely disproportionate flex-shrink factor so
+    // it absorbs available shrinkage before its meta sibling does.
+    expect(nameSpan).toHaveClass('truncate');
+    expect(nameSpan.style.minWidth).toMatch(/^0(px)?$/);
+    expect(nameSpan.style.flexShrink).toBe('9999');
+
+    const leftGroup = nameSpan.parentElement as HTMLElement;
+    // The group's width budget is derived from the cluster's own left position
+    // via calc(), not a hardcoded pixel value or a live DOM measurement.
+    expect(leftGroup.style.overflow).toBe('hidden');
+    expect(leftGroup.style.maxWidth).toMatch(/^calc\(408px - \d+px\)$/);
+
+    // The metadata tail (dimensions/format/size) only shrinks once the name has
+    // fully collapsed (a much smaller flex-shrink factor), and ellipsizes too
+    // instead of being hard-clipped by the container's overflow:hidden.
+    const metaSpan = screen.getByText(/5184 × 3888/);
+    expect(metaSpan).toHaveClass('truncate');
+    expect(metaSpan.style.flexShrink).toBe('1');
+
+    // The cluster itself is unmoved and still fully rendered alongside.
+    expect(screen.getByRole('tablist')).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'All' })).toBeInTheDocument();
+  });
+
+  it('also bounds the right group (processing stats + memory) symmetrically', () => {
+    useAppStore.setState({ alignmentAxisX: 408 });
+    render(<StatusBar currentImage={currentImage} processingStats={{ processingTime: 12.3, modulesActive: 3, totalModules: 11 }} />);
+    const statsSpan = screen.getByText(/modules/);
+    const rightGroup = statsSpan.parentElement as HTMLElement;
+    expect(rightGroup.style.overflow).toBe('hidden');
+    expect(rightGroup.style.maxWidth).toMatch(/^calc\(100% - 408px - \d+px\)$/);
+  });
+
+  it('centers on 50% (not a live axis) in Gallery mode, and the left group budget follows suit', () => {
+    useAppStore.setState({ alignmentAxisX: null, viewMode: 'gallery' });
+    render(<StatusBar images={[]} />);
+    const leftGroup = screen.getByText('No folder open').parentElement as HTMLElement;
+    expect(leftGroup.style.maxWidth).toMatch(/^calc\(50% - \d+px\)$/);
+  });
+});

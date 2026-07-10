@@ -116,8 +116,15 @@ function ToolbarOverflowMenu({ items }: { items: OverflowItem[] }) {
     const onDown = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as HTMLElement)) setOpen(false);
     };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
     document.addEventListener('mousedown', onDown);
-    return () => document.removeEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
   }, [open]);
 
   return (
