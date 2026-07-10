@@ -691,8 +691,11 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
             onReset={moduleActions?.reset}
           />
 
-          {/* Module bodies — unchanged for Task 2 (restyled in Tasks 3-4). */}
-          <div>
+          {/* Module bodies. Each wrapper below pads sides/top (px-5 pt-4); the
+              18px bottom padding (design spec card body: 14 16 18) lives HERE,
+              once, so the last control never sits flush against the card edge —
+              applied on the shared container instead of 10 individual wrappers. */}
+          <div className="pb-[18px]">
 
         {/* Crop Module */}
         {cropModule && selectedModule === 'crop' && (() => {
