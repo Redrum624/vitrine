@@ -4,6 +4,21 @@ All notable changes to **Photo Editor Pro** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.15.0] - 2026-07-10
+
+### Added
+- **Zooming in now uses the whole workspace.** The canvas grows up to the full photo region when zoomed past fit (previously the zoomed image stayed clipped inside the fitted rectangle), and the image pans within it — including in the Before/After split, where both panes now share the exact same viewport geometry. One shared geometry model drives the CPU draw, the GPU present, pan bounds, and every overlay (crop handles and masks keep tracking the image content at any zoom). Zoom at or below fit is unchanged. Affects: `src/utils/viewportGeometry.ts` (new), `src/utils/panBounds.ts`, `src/components/Layout/Canvas.tsx`, `src/App.tsx`, `src/shaders/GpuPreviewPipeline.ts`, overlay components.
+- **The photo recenters when the side panel closes.** The photo region's right inset now follows the module/histogram column's visibility instead of staying reserved, so the image takes the freed space (toolbar, dock, and footer follow the photo's center automatically). Affects: `src/layout/photoRegion.ts`, `src/App.tsx`.
+- **RAW switching is faster**: the session cache now holds multiple large RAW base images (dedicated 700 MB budget) so switching between big RAWs and back no longer re-decodes. Also fixed a long-standing cache bug where the eviction order was inverted (the newest, most-used entries were evicted first). Affects: `src/services/ImageCacheService.ts`.
+- Typed slider entry accepts finer precision than dragging (e.g. 0.01 steps for Saturation/Vibrance/Dehaze); the Export and Batch dialogs' sliders gained double-click-reset and click-to-type like the rest of the app.
+
+### Changed
+- **Auto White Balance treats slight RAW decode bias as "no cast"**: genuinely balanced RAW files now snap to exactly 6500 K / 0 tint instead of applying a small residual correction; real color casts still correct. Affects: `src/modules/WhiteBalanceModule.ts`.
+- History checkpoints show the absolute clock time inline (relative age moved to the tooltip), matching the design mock.
+- Nikon `.nrw` gallery thumbnails now use the RAW preview path.
+- Removed the non-functional renderer-side "WASM fallback" for RAW decoding — an audit proved it was a leftover mock that returned a fabricated gray image for any input; the real decode fallbacks (native → wasm → embedded JPEG, all in the main process) are unchanged. ~1,000 lines of dead code deleted across three services. Affects: `src/services/RawImageService.ts` and deletions.
+- New maintenance script `scripts/reset-smoke-fixtures.cjs` (dry-run by default) clears accumulated test edits from the smoke-fixture folder.
+
 ## [1.14.6] - 2026-07-10
 
 ### Fixed
