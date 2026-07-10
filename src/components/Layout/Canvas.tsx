@@ -21,6 +21,25 @@ import { PHOTO_SHADOW } from '../../layout/photoRegion';
 // Debug mode for canvas rendering - set to false for production
 const DEBUG_CANVAS = process.env.NODE_ENV === 'development';
 
+/**
+ * True when the base pixels ImageService currently holds belong to a DIFFERENT
+ * image than the one Canvas is displaying — i.e. an image switch is mid-flight and
+ * the incoming image has not finished decoding yet. In that window imageService
+ * still returns the PREVIOUS image's full-res buffer while `displayImage` is already
+ * the incoming file, and `processedImageData` has been cleared to null by loadImage.
+ * Without this guard redrawCanvas would blit that stale base at full resolution
+ * (~0.65-0.9s for a 20MP frame) — wasted work on the OLD photo that also delays the
+ * new decode dispatch. The render cache hash already embeds the file path (see
+ * drawLoadedImageOptimized); this is that same source-identity comparison hoisted so
+ * the stale draw is skipped and the cleared canvas is shown until the new data lands.
+ */
+export function isBaseImageStale(
+  loadedFilePath: string | undefined | null,
+  displayPath: string | undefined | null,
+): boolean {
+  return !!(loadedFilePath && displayPath && loadedFilePath !== displayPath);
+}
+
 interface CanvasProps {
   onFitWindow: () => void;
   onActualSize: () => void;
@@ -403,6 +422,13 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     if (currentImageData && displayImage) {
+      // Source-identity guard: during an image switch imageService still holds the
+      // PREVIOUS image's pixels (the new decode is in flight) while displayImage is
+      // already the incoming file and processedImageData was cleared to null. Skip the
+      // stale full-res base draw in that window — the canvas was just cleared above, so
+      // it stays blank until the new image's data lands (see isBaseImageStale).
+      const baseStale = isBaseImageStale(currentImageData.filePath, displayImage.path);
+
       // Use processed image data if available, otherwise use original
       if (processedImageData && typeof processedImageData === 'object' && 'data' in processedImageData) {
         // Handle new preview data structure
@@ -447,10 +473,14 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
         // Handle legacy data structure
         if (DEBUG_CANVAS) console.log('Canvas: Using legacy processed data', currentImageData.width, 'x', currentImageData.height);
         drawLoadedImageOptimized(ctx, canvas, currentImageData, processedImageData);
-      } else {
-        // Use original image data
+      } else if (!baseStale) {
+        // Use original image data (only when it belongs to the image being displayed)
         if (DEBUG_CANVAS) console.log('Canvas: Using original image data', currentImageData.width, 'x', currentImageData.height, 'channels detected');
         drawLoadedImageOptimized(ctx, canvas, currentImageData, currentImageData.data);
+      } else if (DEBUG_CANVAS) {
+        // Stale base + no processed data yet: skip the full-res redraw of the previous
+        // image, leave the cleared canvas until the incoming image's data arrives.
+        console.log(`Canvas: skipped stale base draw (${currentImageData.filePath}) while displaying ${displayImage.path}`);
       }
     } else {
       // Draw placeholder content

@@ -290,6 +290,14 @@ function App() {
     storeSetSelectedTool(tool);
   }, [storeSetSelectedTool]);
 
+  // Always-current ref to selectedTool, read by the once-registered keyboard-init
+  // effect's onSelectTool closure. This keeps selectedTool OUT of that effect's dep
+  // array so it registers shortcuts exactly once for the app's life instead of
+  // tearing down + re-initialising on every tool switch / image open (the wasteful
+  // destroy→register churn the profiler logged as a per-open "remount" block).
+  const selectedToolRef = useRef<string | null>(selectedTool);
+  useEffect(() => { selectedToolRef.current = selectedTool; }, [selectedTool]);
+
   // Initialize store with default selectedTool on mount
   useEffect(() => {
     storeSetSelectedTool('file-explorer');
@@ -984,7 +992,7 @@ function App() {
       onZoomActual: handleActualSize,
       onTogglePresets: () => setIsPresetDialogOpen(true),
       onToggleBatch: () => setIsBatchDialogOpen(true),
-      onSelectTool: (tool) => setSelectedTool(selectedTool === tool ? null : tool),
+      onSelectTool: (tool) => setSelectedTool(selectedToolRef.current === tool ? null : tool),
     });
 
     // Register all shortcuts
@@ -1078,11 +1086,19 @@ function App() {
       document.removeEventListener('keydown', onNumpadRating, true);
       keyboardShortcutsService.destroy();
     };
-  }, [selectedTool, setSelectedTool, currentImage]);
+    // Mount-only ([] deps): shortcuts register ONCE for the app's life. The two
+    // pieces of live state this effect reads (selectedTool via onSelectTool,
+    // currentImage via the rating handlers) are read through refs
+    // (selectedToolRef / currentImageRef), so an image switch or tool change is a
+    // pure state update — never a destroy→re-register cycle. setSelectedTool and
+    // the handler closures are all stable, so capturing them once is correct.
+    // (react-hooks/exhaustive-deps is disabled project-wide — see eslint.config.js.)
+  }, []);
 
-  // Show the welcome screen once for first-time users — on mount only. The effect
-  // above re-runs whenever selectedTool changes, which previously re-armed this
-  // timer on every right-sidebar icon click, making the modal pop up repeatedly.
+  // Show the welcome screen once for first-time users — on mount only ([] deps).
+  // Kept as its own mount-only effect (separate from the keyboard-init effect
+  // above, which is now also mount-only) so this one-shot timer can never be
+  // re-armed by a selectedTool/currentImage change and pop the modal up repeatedly.
   useEffect(() => {
     const welcomeDismissed = localStorage.getItem('photo-editor-welcome-dismissed');
     if (!welcomeDismissed && !imageService.getCurrentImage()) {
