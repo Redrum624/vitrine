@@ -175,36 +175,53 @@ function ToolbarOverflowMenu({ items }: { items: OverflowItem[] }) {
 }
 
 export function Toolbar({ onExport, onPrint, onBatchProcess, onUndo: _onUndo, onRedo: _onRedo, canUndo: _canUndo = false, canRedo: _canRedo = false, onZoomIn, onZoomOut, onFitWindow, onActualSize, zoom = 1, onAutoAll, onCopyStyle, onPasteStyle, hasStyleClipboard = false, hasImage = false, onToggleOriginal, showOriginal = false, onToggleReference, referenceMode = false, onOpenFolder, onExportSelected }: ToolbarProps) {
-  const { viewMode, setViewMode, selectedImageIds, gallerySortAscending, toggleGallerySortDirection } = useAppStore();
+  const { viewMode, setViewMode, selectedImageIds, gallerySortAscending, toggleGallerySortDirection, alignmentAxisX } = useAppStore();
 
-  // Responsive collapse (Develop pill only, G5 review): when the full pill would
-  // overlap the filename chip (or run off the left edge), the secondary actions move
-  // into the overflow menu. The pill is axis-centered (App positions it at the axis
-  // with translateX(-50%)), so its measured CENTER is stable regardless of collapse;
-  // we cache the EXPANDED width and decide from "would the full pill overlap?" —
-  // which prevents a collapse↔expand feedback loop. Unmeasured (jsdom / first frame)
-  // falls back to an innerWidth heuristic so the code path stays unit-testable.
+  // Responsive collapse + clamp (Develop pill only, G5 review). Two mechanisms
+  // guarantee the axis-centered pill never overlaps the filename chip at any width
+  // ≥ 1024 while staying on-axis wherever there is room:
+  //   1. COLLAPSE — when the FULL pill (on-axis) would overlap the chip, the
+  //      secondary actions (Print, Copy/Paste Style, Reference) fold into the
+  //      overflow menu, shrinking the pill so it fits on-axis in the mid range.
+  //   2. CLAMP — below the width where even the collapsed pill would overlap, the
+  //      pill is shifted right (translateX) so its left edge clears the chip. It
+  //      then reads slightly off-axis, but no-overlap is the hard constraint.
+  // The decision is derived from the STORE's alignmentAxisX (the actual centering
+  // source — App positions the pill at left:axis, translateX(-50%)), NOT the pill's
+  // measured left: that lags a frame behind the axis (a separate ResizeObserver
+  // drives it) and made the collapse mis-fire. Cached expanded width + axis-based
+  // math also prevent a collapse↔expand feedback loop. Unmeasured (jsdom / first
+  // frame) falls back to an innerWidth heuristic so the path stays unit-testable.
   const containerRef = useRef<HTMLDivElement>(null);
   const fullWidthRef = useRef(0);
   const [collapsed, setCollapsed] = useState(false);
+  const [shift, setShift] = useState(0);
+  const CHIP_CLEARANCE = 16;
 
   useLayoutEffect(() => {
-    if (viewMode !== 'develop') return;
+    if (viewMode !== 'develop') { setShift(0); return; }
     const measure = () => {
       const el = containerRef.current;
       if (!el) return;
       const rect = el.getBoundingClientRect();
-      if (rect.width === 0) {
+      if (rect.width === 0) { // jsdom / not laid out yet
         setCollapsed(window.innerWidth < COLLAPSE_INNERWIDTH_FALLBACK);
+        setShift(0);
         return;
       }
       if (!collapsed) fullWidthRef.current = rect.width; // cache only the expanded width
-      const centerX = rect.left + rect.width / 2; // == axis, unchanged by collapse
-      const fullWidth = fullWidthRef.current || rect.width;
-      const fullLeft = centerX - fullWidth / 2;
+      const axis = alignmentAxisX ?? (rect.left + rect.width / 2 - shift);
       const chip = document.querySelector('[data-testid="filename-chip"]') as HTMLElement | null;
       const chipRight = chip ? chip.getBoundingClientRect().right : CHIP_LEFT;
-      setCollapsed(fullLeft < chipRight + 16); // 16px min clearance to the chip
+      const minLeft = chipRight + CHIP_CLEARANCE;
+      // Collapse if the FULL pill, centered on the axis, would cross the chip.
+      const fullLeft = axis - (fullWidthRef.current || rect.width) / 2;
+      setCollapsed(fullLeft < minLeft);
+      // Clamp: shift right by however much the CURRENT (possibly collapsed) pill's
+      // on-axis left edge falls short of the chip. axis & rect.width are both
+      // shift-invariant, so this converges without oscillating.
+      const onAxisLeft = axis - rect.width / 2;
+      setShift(Math.max(0, minLeft - onAxisLeft));
     };
     measure();
     const ro = new ResizeObserver(measure);
@@ -214,7 +231,7 @@ export function Toolbar({ onExport, onPrint, onBatchProcess, onUndo: _onUndo, on
       ro.disconnect();
       window.removeEventListener('resize', measure);
     };
-  }, [collapsed, viewMode]);
+  }, [alignmentAxisX, collapsed, viewMode, shift]);
 
   if (!electronService.isElectron()) return <div />;
 
@@ -275,7 +292,7 @@ export function Toolbar({ onExport, onPrint, onBatchProcess, onUndo: _onUndo, on
     <div
       ref={containerRef}
       className="glass-chrome flex items-center no-select"
-      style={{ borderRadius: '14px', padding: '6px 8px', gap: '3px' }}
+      style={{ borderRadius: '14px', padding: '6px 8px', gap: '3px', transform: shift ? `translateX(${shift}px)` : undefined }}
     >
       <button onClick={() => electronService.openFile()} className="glass-pill-btn" style={pillBtn} title="Open Image">
         Open
