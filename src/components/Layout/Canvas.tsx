@@ -1076,6 +1076,7 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
           shows through the letterbox margins (Glass · Sectioned, Task 5). */}
       <div
         ref={containerRef}
+        data-pane-container="after"
         className="h-full relative overflow-hidden"
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
@@ -1099,6 +1100,7 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
           >
             <canvas
               ref={canvasRef}
+              data-pane="after"
               className={isDragging ? 'cursor-grabbing' : 'cursor-grab'}
               style={{
                 // Manual aspect ratio handling - no object-fit needed
@@ -1113,6 +1115,7 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
                 below sit above BOTH canvases. */}
             <canvas
               ref={glCanvasRef}
+              data-pane="after"
               className={isDragging ? 'cursor-grabbing' : 'cursor-grab'}
               style={{
                 position: 'absolute',

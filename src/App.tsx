@@ -86,7 +86,7 @@ function OriginalPane() {
   // only do the expensive conversion once per image (not on every pan/zoom).
   const offscreenRef = useRef<HTMLCanvasElement | null>(null);
 
-  const { viewport, processedImageData, mainCanvasFit } = useAppStore();
+  const { viewport, mainCanvasFit } = useAppStore();
 
   // Build the offscreen canvas once when this component mounts.
   // The parent re-keys us (key={currentImage?.id ?? 'none'}) on image switch,
@@ -113,9 +113,13 @@ function OriginalPane() {
     offscreenRef.current = offscreen;
   }, []);
 
-  // Redraw whenever the viewport (zoom/pan) or processed image changes.
-  // processedImageData is in deps because its .width/.height tell us the
-  // preview resolution used by Canvas, which we need for pan scaling.
+  // Redraw whenever the viewport (zoom/pan) or mainCanvasFit changes. mainCanvasFit
+  // is enough of a trigger by itself: Canvas.redrawCanvas() republishes it as a FRESH
+  // object (new reference) on every run, including runs caused by processedImageData
+  // changing (see Canvas.tsx's `[processedImageData, ...]` redraw effect) — so this
+  // effect already re-fires whenever the main canvas reprocesses, without needing
+  // processedImageData in its own deps (it was previously listed here but unused in
+  // the body — a stale carry-over from an earlier draft).
   useEffect(() => {
     const offscreen = offscreenRef.current;
     const canvas = canvasRef.current;
@@ -128,11 +132,15 @@ function OriginalPane() {
     const imageWidth = offscreen.width;
     const imageHeight = offscreen.height;
 
-    // Fit the original into the padded container (p-5 = 20 px on each side). This is the
-    // fit-rect (content at zoom 1) for THIS pane.
+    // Fit the original into the FULL pane rect — no padding. This must match the
+    // After canvas's box model (Canvas.tsx's redrawCanvas uses the full container
+    // rect, no inset) so both panes letterbox edge-to-edge identically and grow
+    // together at zoom > 1 (Task R5 review: this pane was previously inset by 40px,
+    // which under-filled its half of the split relative to After and read as "Before
+    // is cropped"). This is the fit-rect (content at zoom 1) for THIS pane.
     const rect = container.getBoundingClientRect();
-    const availW = Math.max(1, rect.width - 40);
-    const availH = Math.max(1, rect.height - 40);
+    const availW = Math.max(1, rect.width);
+    const availH = Math.max(1, rect.height);
     const imageAspect = imageWidth / imageHeight;
     const containerAspect = availW / availH;
     let fitW: number, fitH: number;
@@ -175,12 +183,13 @@ function OriginalPane() {
       0, 0, imageWidth, imageHeight,
       geom.offsetX * sOrig, geom.offsetY * sOrig, geom.contentW * sOrig, geom.contentH * sOrig,
     );
-  }, [viewport, processedImageData, mainCanvasFit]);
+  }, [viewport, mainCanvasFit]);
 
   return (
-    <div ref={containerRef} className="w-full h-full flex items-center justify-center p-5 relative">
+    <div ref={containerRef} data-pane-container="before" className="w-full h-full flex items-center justify-center relative">
       <canvas
         ref={canvasRef}
+        data-pane="before"
         style={{ display: 'block' }}
       />
       <div
