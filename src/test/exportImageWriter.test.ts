@@ -174,6 +174,36 @@ describe('imageWriter.writeImageFile', () => {
       writeImageFile(out, packRgba(corners8, Uint8Array), 'png', { width: 4, height: 4, channels: 4, bitDepth: 8 })
     ).rejects.toThrow(/mismatch/i);
   });
+
+  test('TIFF "zip" compression maps to sharp\'s deflate instead of throwing (regression)', async () => {
+    // The UI/estimator call this option 'zip', but sharp 0.34 only accepts
+    // 'deflate' for libtiff compression — passing 'zip' straight through used
+    // to throw (`Expected one of: none, jpeg, deflate, ...`) and fail every
+    // ZIP-compression TIFF export. A big flat-colour image compresses hard
+    // under real deflate, so comparing against an uncompressed control proves
+    // deflate actually ran (not just that 'zip' was silently ignored).
+    const w = 64, h = 64;
+    const px: number[][] = [];
+    for (let i = 0; i < w * h; i++) px.push([255, 0, 0, 255]); // flat red — highly compressible
+    const zipOut = path.join(tmpDir, 'zip.tiff');
+    const noneOut = path.join(tmpDir, 'none.tiff');
+
+    await expect(
+      writeImageFile(zipOut, packRgba(px, Uint8Array), 'tiff', {
+        width: w, height: h, channels: 4, bitDepth: 8, compression: 'zip'
+      })
+    ).resolves.toBe(true);
+    await writeImageFile(noneOut, packRgba(px, Uint8Array), 'tiff', {
+      width: w, height: h, channels: 4, bitDepth: 8, compression: 'none'
+    });
+
+    expect(fs.statSync(zipOut).size).toBeLessThan(fs.statSync(noneOut).size);
+
+    const { data, info } = await sharp(zipOut).raw().toBuffer({ resolveWithObject: true });
+    const read = makeReader(data, info);
+    expect(read(0, 0)).toBeCloseTo(1, 2); // red channel
+    expect(read(0, 1)).toBeCloseTo(0, 2); // green channel
+  });
 });
 
 describe('imageWriter metadata embedding', () => {

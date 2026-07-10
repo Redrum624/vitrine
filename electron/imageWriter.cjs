@@ -334,15 +334,22 @@ async function writeImageFile(filePath, imageData, format, options = {}) {
         progressive: options.progressive ?? false
       });
       break;
-    case 'tiff':
+    case 'tiff': {
+      // The UI/estimator use the user-facing label 'zip', but sharp's libtiff
+      // binding only accepts 'deflate' (no 'zip' name) — passing 'zip' straight
+      // through throws and the export fails. Map it at this boundary only; the
+      // UI keeps calling it 'zip'.
+      const requestedCompression = options.compression || 'lzw';
+      const tiffCompression = requestedCompression === 'zip' ? 'deflate' : requestedCompression;
       img = img.tiff({
-        compression: options.compression || 'lzw',
+        compression: tiffCompression,
         quality: options.quality ?? 90,
         // BigTIFF avoids the classic-TIFF 4GB / 0xFFFFFFFF offset limit on large
         // (e.g. 16-bit, high-MP) exports — "Maximum TIFF file size exceeded".
         bigtiff: true
       });
       break;
+    }
     case 'webp':
       img = img.webp({
         quality: options.quality ?? 80,
