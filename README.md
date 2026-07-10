@@ -1,8 +1,8 @@
 # Photo Editor Pro
 
-![Version](https://img.shields.io/badge/Version-1.14.1-blue)
+![Version](https://img.shields.io/badge/Version-1.14.2-blue)
 ![TypeScript](https://img.shields.io/badge/TypeScript-0_errors-blue)
-![Tests](https://img.shields.io/badge/Tests-1248_passing-brightgreen)
+![Tests](https://img.shields.io/badge/Tests-1262_passing-brightgreen)
 ![Lint](https://img.shields.io/badge/Lint-clean-brightgreen)
 ![GPU](https://img.shields.io/badge/GPU-WebGL2_accelerated-success)
 

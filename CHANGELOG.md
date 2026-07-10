@@ -4,6 +4,11 @@ All notable changes to **Photo Editor Pro** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.14.2] - 2026-07-10
+
+### Changed
+- **All dialogs and overlays restyled to the Glass UI.** Export, Batch Processing, Image Size, Presets, Print, Keyboard Shortcuts, the About dialog, and the Welcome screen now share one glass modal chrome (`GlassModal`): dimmed blurred scrim, glass card with the module-card header anatomy, solid-accent primary buttons (new shared `AccentButton`), token text colors, and the standard entrance animation (disabled under `prefers-reduced-motion`). Each dialog keeps exactly its previous open/close semantics (the About dialog remains the only one that closes on an outside click). Print's resolution and color-adjustment sliders adopt the standard slider row, gaining double-click-reset and click-to-type value entry consistent with the rest of the app. Behavior, IPC, and state flow are otherwise unchanged. Affects: `src/components/Dialogs/*`, `src/components/Layout/MenuBar.tsx`, `src/components/Welcome/WelcomeScreen.tsx`, `src/components/Controls/AccentButton.tsx`, `src/index.css`.
+
 ## [1.14.1] - 2026-07-10
 
 ### Changed
