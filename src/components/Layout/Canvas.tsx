@@ -705,19 +705,27 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
       // Load image using ImageService (will use cache if available)
       await imageService.loadImage(image.path);
 
-      // Restore previously-saved edits for this image, then reprocess so they show.
+      // The decode above is async — the user may have switched to a different image
+      // while it was in flight (rapid filmstrip/gallery clicks). Re-check identity
+      // before touching any per-image state below: setImageDimensions/restoreForPath/
+      // checkpoint history all target THIS image and would corrupt whatever is now
+      // actually on screen if a newer loadImage call for a different image completed
+      // in the meantime (mirrors RawImageService.reDecode's stillCurrent guard).
       const decoded = imageService.getCurrentImage();
-      if (decoded) {
-        // Now that the full image (including RAW) is actually decoded, its true
-        // dimensions are known — upgrade the shared map so the gallery/dock tile
-        // stops showing format-only meta (fix round 1, Critical review finding).
-        useAppStore.getState().setImageDimensions(image.id, { width: decoded.width, height: decoded.height });
-        const restored = await editPersistenceService.restoreForPath(image.path, decoded.width, decoded.height);
-        if (restored) useAppStore.getState().triggerReprocessing();
-        // Load this image's checkpoint history; seed an "Opened" baseline if empty.
-        await checkpointService.loadForPath(image.path);
-        if (checkpointService.getCheckpoints().length === 0) checkpointService.record('Opened');
+      if (!decoded || decoded.filePath !== image.path) {
+        logger.info(`Image load of ${image.path} discarded: current image changed during decode`);
+        return;
       }
+
+      // Now that the full image (including RAW) is actually decoded, its true
+      // dimensions are known — upgrade the shared map so the gallery/dock tile
+      // stops showing format-only meta (fix round 1, Critical review finding).
+      useAppStore.getState().setImageDimensions(image.id, { width: decoded.width, height: decoded.height });
+      const restored = await editPersistenceService.restoreForPath(image.path, decoded.width, decoded.height);
+      if (restored) useAppStore.getState().triggerReprocessing();
+      // Load this image's checkpoint history; seed an "Opened" baseline if empty.
+      await checkpointService.loadForPath(image.path);
+      if (checkpointService.getCheckpoints().length === 0) checkpointService.record('Opened');
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error loading image';
       logger.error('Failed to load image:', error);

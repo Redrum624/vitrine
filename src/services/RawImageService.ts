@@ -15,6 +15,7 @@ import { imageCacheService } from './ImageCacheService';
 import { editPersistenceService } from './EditPersistenceService';
 import { useAppStore } from '../stores/appStore';
 import { type RawDecodeOptions } from '../types/electron';
+import { RAW_EXTENSIONS_DOTTED } from '../utils/rawExtensions';
 
 export interface RawImageData {
   width: number;
@@ -43,25 +44,12 @@ export interface RawMetadata {
   [key: string]: unknown; // Index signature for Record compatibility
 }
 
-// Supported RAW formats
-const RAW_EXTENSIONS = [
-  '.orf',  // Olympus
-  '.cr2', '.cr3',  // Canon
-  '.nef',  // Nikon
-  '.arw', '.srf', '.sr2',  // Sony
-  '.dng',  // Adobe DNG
-  '.raf',  // Fujifilm
-  '.rw2',  // Panasonic
-  '.pef',  // Pentax
-  '.x3f',  // Sigma
-  '.mrw',  // Minolta
-  '.dcr', '.k25', '.kdc',  // Kodak
-  '.erf',  // Epson
-  '.mef',  // Mamiya
-  '.mos',  // Leaf
-  '.raw',  // Generic
-  '.rwl'   // Leica
-];
+// Supported RAW formats — sourced from the canonical `rawExtensions` module (shared
+// with gallerySelection.isRawImage) so detection and decode-routing never drift apart
+// again. See that module's doc comment for why the canonical list is a UNION rather
+// than either legacy array: it gains `.nrw`/`.srw` (previously undetected here) while
+// keeping every legacy LibRaw format this service already routed to decode.
+const RAW_EXTENSIONS = RAW_EXTENSIONS_DOTTED;
 
 export class RawImageService {
   private static instance: RawImageService;
@@ -711,106 +699,6 @@ export class RawImageService {
       logger.error(`Advanced demosaicing failed:`, error);
       throw error;
     }
-  }
-
-  /**
-   * Process RAW file with professional-grade settings
-   * This method combines LibRaw processing with advanced camera profiles and demosaicing
-   */
-  async processRawWithProfessionalQuality(
-    filePath: string,
-    options: {
-      demosaicAlgorithm?: 'VNG' | 'AHD' | 'LMMSE';
-      bayerPattern?: 'RGGB' | 'BGGR' | 'GRBG' | 'GBRG';
-      applyNoiseProfiling?: boolean;
-      applyLensCorrection?: boolean;
-      whiteBalanceMode?: 'camera' | 'auto' | 'daylight' | 'tungsten';
-      applyNoiseReduction?: boolean;
-      noiseReductionOptions?: Partial<NoiseReductionOptions>;
-    } = {}
-  ): Promise<RawImageData> {
-    logger.info(`Processing RAW file with professional quality settings: ${filePath}`);
-
-    const {
-      demosaicAlgorithm = 'VNG',
-      bayerPattern = 'RGGB',
-      whiteBalanceMode = 'camera',
-      applyNoiseReduction = false,
-      noiseReductionOptions = {}
-    } = options;
-
-    try {
-      // First, load the RAW file with standard processing
-      const rawData = await this.loadRawImage(filePath);
-
-      // Apply advanced demosaicing if requested
-      if (demosaicAlgorithm !== 'VNG') {
-        logger.info(`Applying advanced ${demosaicAlgorithm} demosaicing`);
-        rawData.data = await this.applyAdvancedDemosaicing(
-          rawData.data,
-          rawData.width,
-          rawData.height,
-          demosaicAlgorithm,
-          bayerPattern
-        );
-      }
-
-      // Apply camera-specific white balance if available
-      if (rawData.metadata.make && rawData.metadata.model) {
-        const cameraProfile = cameraProfileService.getProfile(rawData.metadata.make, rawData.metadata.model);
-        if (cameraProfile && whiteBalanceMode !== 'camera') {
-          const wbType = whiteBalanceMode as keyof typeof cameraProfile.whiteBalance;
-          rawData.data = cameraProfileService.applyCameraWhiteBalance(
-            rawData.data,
-            cameraProfile,
-            wbType
-          );
-        }
-
-        // Apply camera tone curve if available
-        if (cameraProfile && cameraProfile.toneCurve) {
-          rawData.data = cameraProfileService.applyCameraToneCurve(rawData.data, cameraProfile);
-        }
-      }
-
-      // Apply noise reduction if requested
-      if (applyNoiseReduction) {
-        logger.info('Applying noise reduction to RAW image');
-
-        const defaultNoiseOptions: NoiseReductionOptions = {
-          algorithm: 'wavelet',
-          strength: 25,
-          detail: 75,
-          chromaStrength: 20,
-          luminanceStrength: 30,
-          edgeThreshold: 0.1,
-          iterations: 1
-        };
-
-        const finalNoiseOptions = { ...defaultNoiseOptions, ...noiseReductionOptions };
-
-        rawData.data = await noiseReductionService.applyNoiseReduction(
-          rawData.data,
-          rawData.width,
-          rawData.height,
-          finalNoiseOptions
-        );
-      }
-
-      logger.info(`Professional RAW processing completed for ${filePath}`);
-      return rawData;
-
-    } catch (error) {
-      logger.error(`Professional RAW processing failed:`, error);
-      throw error;
-    }
-  }
-
-  /**
-   * Get available camera profiles
-   */
-  getAvailableCameraProfiles() {
-    return cameraProfileService.getAllProfiles();
   }
 
   /**

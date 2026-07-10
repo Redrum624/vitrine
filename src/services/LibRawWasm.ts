@@ -353,13 +353,6 @@ export class LibRawWasm {
     };
   }
 
-  async getSupportedFormats(): Promise<string[]> {
-    if (!this.isInitialized) {
-      await this.initialize();
-    }
-    return this.wasmModule?.supportedFormats || [];
-  }
-
   async getVersion(): Promise<string> {
     if (!this.isInitialized) {
       await this.initialize();

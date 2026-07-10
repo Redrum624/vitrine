@@ -1,5 +1,6 @@
 import type { ImageFileInfo } from '../services/FileSystemService';
 import { getDisplayFormat } from './imageFormat';
+import { RAW_EXTENSIONS } from './rawExtensions';
 
 /**
  * Shared, pure helpers used by BOTH the filmstrip dock (`ThumbnailPanel`) and the
@@ -10,7 +11,10 @@ import { getDisplayFormat } from './imageFormat';
 
 // ─── RAW detection (moved from ThumbnailPanel so both views share one definition) ──
 
-export const RAW_EXTENSIONS = ['cr2', 'cr3', 'nef', 'nrw', 'arw', 'sr2', 'srf', 'orf', 'dng', 'raf', 'rw2', 'pef', 'srw', 'x3f', 'raw'];
+// Re-exported for back-compat with any existing imports of this module's RAW_EXTENSIONS;
+// the canonical list now lives in `./rawExtensions` (see that file for why it's a union,
+// not the narrower list this module used to define on its own).
+export { RAW_EXTENSIONS };
 
 export const isRawImage = (img: ImageFileInfo): boolean =>
   RAW_EXTENSIONS.includes((img.name.split('.').pop() || '').toLowerCase());
