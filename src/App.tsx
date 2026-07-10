@@ -28,6 +28,10 @@ import { electronService } from './services/ElectronService';
 import { imageService } from './services/ImageService';
 import { ImageFileInfo, fileSystemService } from './services/FileSystemService';
 import { useAppStore } from './stores/appStore';
+import {
+  CHROME_TOP, CHIP_LEFT, RIGHT_COLUMN_OFFSET, RIGHT_COLUMN_WIDTH, RIGHT_COLUMN_GAP, RIGHT_COLUMN_BOTTOM,
+  PHOTO_INSET_LEFT, PHOTO_INSET_RIGHT, PHOTO_INSET_TOP, PHOTO_INSET_BOTTOM, formatFilenameChip,
+} from './layout/photoRegion';
 import { editPersistenceService } from './services/EditPersistenceService';
 import { checkpointService } from './services/CheckpointService';
 import { logger } from './utils/Logger';
@@ -278,7 +282,7 @@ export function imageFileInfoFromOpenedPath(filePath: string): ImageFileInfo {
 }
 
 function App() {
-  const { setViewport, resetZoom, viewport, processedImageData, setSelectedTool: storeSetSelectedTool, showGrid, showRulers, showOriginal, toggleGrid, toggleRulers, toggleOriginal, referenceMode, referenceImageUrl, referenceImageName, toggleReferenceMode, setReferenceImage, lastProcessingTimeMs, modulesActive, modulesTotal } = useAppStore();
+  const { setViewport, resetZoom, viewport, processedImageData, setSelectedTool: storeSetSelectedTool, showGrid, showRulers, showOriginal, toggleGrid, toggleRulers, toggleOriginal, referenceMode, referenceImageUrl, referenceImageName, toggleReferenceMode, setReferenceImage, lastProcessingTimeMs, modulesActive, modulesTotal, alignmentAxisX, setAlignmentAxisX } = useAppStore();
   const [selectedTool, setSelectedToolLocal] = useState<string | null>('file-explorer'); // Default to file explorer
 
   // Wrapper to update both local state and store
@@ -295,6 +299,12 @@ function App() {
   // Histogram state - independent from tool selection
   const [histogramVisible, setHistogramVisible] = useState(false);
   const lastActiveModuleRef = useRef<string | null>('basicadj');
+
+  // Full-bleed workspace + live photo region (Glass · Sectioned, Task 5). The
+  // alignment axis = horizontal center of the live photo-region rect; the
+  // floating toolbar pill centers on it (and the dock/footer in Task 6).
+  const workspaceRef = useRef<HTMLDivElement>(null);
+  const photoRegionRef = useRef<HTMLDivElement>(null);
 
   // Unified tool selection handler with histogram logic
   const handleToolSelect = useCallback((tool: string) => {
@@ -1106,6 +1116,29 @@ function App() {
     return () => window.removeEventListener('wheel', onWheel);
   }, []);
 
+  // Alignment axis: horizontal center (workspace-relative px) of the LIVE photo
+  // region. Recomputed on any workspace/region resize (ResizeObserver + window
+  // resize) and when the right column presence changes (deps below).
+  useEffect(() => {
+    const region = photoRegionRef.current;
+    const workspace = workspaceRef.current;
+    if (!region || !workspace) return;
+    const compute = () => {
+      const r = region.getBoundingClientRect();
+      const w = workspace.getBoundingClientRect();
+      if (r.width > 0) setAlignmentAxisX(r.left - w.left + r.width / 2);
+    };
+    compute();
+    const ro = new ResizeObserver(compute);
+    ro.observe(region);
+    ro.observe(workspace);
+    window.addEventListener('resize', compute);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', compute);
+    };
+  }, [setAlignmentAxisX, selectedTool, histogramVisible]);
+
   return (
     <ErrorBoundary>
       <div className="h-screen flex flex-col bg-dark-900 text-dark-300">
@@ -1151,99 +1184,29 @@ function App() {
         hasImage={!!imageService.getCurrentImage()}
       />
 
-      {/* Top Toolbar */}
-      <div className="toolbar">
-        <Toolbar
-          onExport={() => setIsExportDialogOpen(true)}
-          onPrint={handlePrint}
-          onBatchProcess={() => setIsBatchDialogOpen(true)}
-          onOpenPresets={() => setIsPresetDialogOpen(true)}
-          onShowHelp={() => setIsShortcutsDialogOpen(true)}
-          onUndo={doUndo}
-          onRedo={doRedo}
-          canUndo={canUndo}
-          canRedo={canRedo}
-          onZoomIn={handleZoomIn}
-          onZoomOut={handleZoomOut}
-          onFitWindow={handleFitWindow}
-          onActualSize={handleActualSize}
-          zoom={viewport.zoom}
-          onAutoAll={handleAutoAll}
-          onCopyStyle={handleCopyStyle}
-          onPasteStyle={handlePasteStyle}
-          hasStyleClipboard={hasStyleClipboard}
-          hasImage={!!imageService.getCurrentImage()}
-          onToggleOriginal={toggleOriginal}
-          showOriginal={showOriginal}
-          onToggleReference={toggleReferenceMode}
-          referenceMode={referenceMode}
-        />
-      </div>
-
-      {/* Main Content - 4-Column Layout */}
+      {/* Main Content — full-bleed workspace with floating glass chrome (Task 5) */}
       <div className="flex flex-1 flex-col overflow-hidden">
-        {/* Main workspace */}
-        <div className="flex flex-1 overflow-hidden relative">
+        {/* Full-bleed workspace: `--canvas-bg` between the menu bar and footer.
+            The photo region + all chrome float above it (absolute). */}
+        <div
+          ref={workspaceRef}
+          className="flex-1 relative overflow-hidden"
+          style={{ background: 'var(--canvas-bg)' }}
+        >
           {/* Multi-export progress (top-left overlay) */}
           <ExportProgressBar />
-          {/* Column 2: Right Panel - File Explorer, Settings, or Modules (360px) - Overlay panel */}
-          <div
-            className="absolute border-l flex-shrink-0 overflow-hidden flex flex-col"
-            style={{
-              right: '64px',
-              top: 0,
-              bottom: 0,
-              width: '360px',
-              transform: (selectedTool || histogramVisible) ? 'translateX(0)' : 'translateX(100%)',
-              borderLeftColor: 'var(--border)',
-              backgroundColor: 'var(--gray-900)',
-              transition: 'transform 300ms cubic-bezier(0.4, 0.0, 0.2, 1), box-shadow 300ms cubic-bezier(0.4, 0.0, 0.2, 1)',
-              boxShadow: (selectedTool || histogramVisible) ? '-2px 0 8px rgba(0,0,0,0.3)' : 'none',
-              zIndex: (selectedTool || histogramVisible) ? 10 : -1,
-              pointerEvents: (selectedTool || histogramVisible) ? 'auto' : 'none'
-            }}
-          >
-            {/* Histogram card — ABOVE the module card (spec order: histogram, then module). */}
-            {histogramVisible && (
-              <div
-                style={{
-                  flex: selectedTool ? '0 0 auto' : '1 1 auto',
-                  minHeight: 0,
-                  overflowY: 'auto',
-                  padding: '12px 12px 0 12px',
-                  backgroundColor: 'var(--gray-900)',
-                }}
-              >
-                <HistogramPanel />
-              </div>
-            )}
 
-            {/* Panel content (Controls / File / Settings) — fills the space BELOW the histogram */}
-            <div style={{ flex: selectedTool ? '1 1 0%' : '0 0 0%', minHeight: 0, overflow: 'hidden' }}>
-              <div style={{display: selectedTool === 'file-explorer' ? 'block' : 'none', height: '100%'}}>
-                <FileBrowser
-                  onImageSelected={handleImageSelected}
-                  onFolderSelected={handleFolderSelected}
-                />
-              </div>
-              <div style={{display: selectedTool === 'settings' ? 'block' : 'none', height: '100%'}}>
-                <SettingsPanel />
-              </div>
-              {/* Module panels */}
-              <div style={{display: selectedTool && !['file-explorer', 'settings'].includes(selectedTool) ? 'block' : 'none', height: '100%'}}>
-                <AdjustmentPanel selectedModule={selectedTool} currentImage={currentImage} />
-              </div>
-            </div>
-          </div>
-
-          {/* Column 1: Canvas (flex) — splits when referenceMode is active */}
+          {/* Photo region — the box the Canvas letterboxes inside. Insets derived
+              from the floating chrome so nothing overlaps the photo. Splits 50/50
+              internally for Before/After and Reference modes. */}
           <div
-            className="flex-1 canvas-container flex transition-all"
+            ref={photoRegionRef}
+            className="absolute flex"
             style={{
-              background: '#0a0a0a',
-              marginRight: (selectedTool || histogramVisible) ? '360px' : '0px',
-              transitionDuration: '300ms',
-              transitionTimingFunction: 'cubic-bezier(0.4, 0.0, 0.2, 1)'
+              left: PHOTO_INSET_LEFT,
+              right: PHOTO_INSET_RIGHT,
+              top: PHOTO_INSET_TOP,
+              bottom: PHOTO_INSET_BOTTOM,
             }}
           >
             {/* Before/After pane — left half shows original (only when showOriginal) */}
@@ -1307,34 +1270,136 @@ function App() {
               </div>
             )}
 
-            {/* Main canvas pane */}
-            <div
-              className="flex-1 flex items-center justify-center"
-              style={{ height: '100%' }}
-            >
-              <div
-                style={{
-                  width: 'calc(100% - 40px)',
-                  height: 'calc(100% - 40px)',
-                  border: '1px solid var(--border)',
-                  borderRadius: '4px',
-                  overflow: 'hidden',
-                  transition: 'all 300ms cubic-bezier(0.4, 0.0, 0.2, 1)'
-                }}
-              >
-                <Canvas
-                  onFitWindow={handleFitWindow}
-                  onActualSize={handleActualSize}
-                  onZoomIn={handleZoomIn}
-                  onZoomOut={handleZoomOut}
-                  zoom={viewport.zoom}
-                  currentImage={currentImage}
-                />
-              </div>
+            {/* Main canvas pane — the photo (drop shadow applied inside Canvas on
+                the letterbox wrapper so it hugs the image, not the region).
+                `min-w-0`/`min-h-0` are load-bearing: without them a flex child
+                keeps its intrinsic (canvas) size and refuses to shrink when the
+                region narrows, overflowing into the column and clipping the photo. */}
+            <div className="flex-1 min-w-0 min-h-0" style={{ height: '100%' }}>
+              <Canvas
+                onFitWindow={handleFitWindow}
+                onActualSize={handleActualSize}
+                onZoomIn={handleZoomIn}
+                onZoomOut={handleZoomOut}
+                zoom={viewport.zoom}
+                currentImage={currentImage}
+              />
             </div>
           </div>
 
-          {/* Column 3: Icon Sidebar (64px) - Right side */}
+          {/* Floating filename chip — top-left: `name · i of N · zoom%` */}
+          {currentImage && (
+            <div
+              className="glass-chrome no-select"
+              style={{
+                position: 'absolute',
+                left: CHIP_LEFT,
+                top: CHROME_TOP,
+                borderRadius: '12px',
+                padding: '7px 13px',
+                fontSize: '12px',
+                fontWeight: 500,
+                color: 'var(--glass-text-chrome-primary)',
+                zIndex: 30,
+                pointerEvents: 'none',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {formatFilenameChip({
+                name: currentImage.name,
+                current: fileSystemService.getCurrentImageInfo().current,
+                total: fileSystemService.getCurrentImageInfo().total,
+                zoom: viewport.zoom,
+              })}
+            </div>
+          )}
+
+          {/* Floating toolbar pill — top, centered on the alignment axis */}
+          <div
+            className="absolute"
+            style={{
+              top: CHROME_TOP,
+              left: alignmentAxisX ?? '50%',
+              transform: 'translateX(-50%)',
+              zIndex: 30,
+            }}
+          >
+            <Toolbar
+              onExport={() => setIsExportDialogOpen(true)}
+              onPrint={handlePrint}
+              onBatchProcess={() => setIsBatchDialogOpen(true)}
+              onOpenPresets={() => setIsPresetDialogOpen(true)}
+              onShowHelp={() => setIsShortcutsDialogOpen(true)}
+              onUndo={doUndo}
+              onRedo={doRedo}
+              canUndo={canUndo}
+              canRedo={canRedo}
+              onZoomIn={handleZoomIn}
+              onZoomOut={handleZoomOut}
+              onFitWindow={handleFitWindow}
+              onActualSize={handleActualSize}
+              zoom={viewport.zoom}
+              onAutoAll={handleAutoAll}
+              onCopyStyle={handleCopyStyle}
+              onPasteStyle={handlePasteStyle}
+              hasStyleClipboard={hasStyleClipboard}
+              hasImage={!!imageService.getCurrentImage()}
+              onToggleOriginal={toggleOriginal}
+              showOriginal={showOriginal}
+              onToggleReference={toggleReferenceMode}
+              referenceMode={referenceMode}
+            />
+          </div>
+
+          {/* Floating right column — histogram card (fixed) + module card (grows,
+              scrolls inside, never clipped). Replaces the old 360px slide-in;
+              the canvas no longer moves. */}
+          {(selectedTool || histogramVisible) && (
+            <div
+              className="absolute flex flex-col"
+              style={{
+                right: RIGHT_COLUMN_OFFSET,
+                top: CHROME_TOP,
+                bottom: RIGHT_COLUMN_BOTTOM,
+                width: RIGHT_COLUMN_WIDTH,
+                gap: RIGHT_COLUMN_GAP,
+                zIndex: 20,
+              }}
+            >
+              {/* Histogram card — content-driven height, above the module card. */}
+              {histogramVisible && (
+                <div style={{ flex: '0 0 auto' }}>
+                  <HistogramPanel />
+                </div>
+              )}
+
+              {/* Module slot — grows to fill; each panel scrolls internally.
+                  Panels stay mounted (display toggle) so their state persists. */}
+              {selectedTool && (
+                <div style={{ flex: '1 1 auto', minHeight: 0, position: 'relative' }}>
+                  <div style={{ display: selectedTool === 'file-explorer' ? 'block' : 'none', height: '100%' }}>
+                    <div className="glass-card" style={{ height: '100%', overflow: 'hidden' }}>
+                      <FileBrowser
+                        onImageSelected={handleImageSelected}
+                        onFolderSelected={handleFolderSelected}
+                      />
+                    </div>
+                  </div>
+                  <div style={{ display: selectedTool === 'settings' ? 'block' : 'none', height: '100%' }}>
+                    <div className="glass-card" style={{ height: '100%', overflowY: 'auto' }}>
+                      <SettingsPanel />
+                    </div>
+                  </div>
+                  {/* Module panels (AdjustmentPanel brings its own glass card). */}
+                  <div style={{ display: selectedTool && !['file-explorer', 'settings'].includes(selectedTool) ? 'block' : 'none', height: '100%' }}>
+                    <AdjustmentPanel selectedModule={selectedTool} currentImage={currentImage} />
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Floating icon rail (positions itself: right 20, vertically centered) */}
           <IconSidebar
             selectedTool={selectedTool}
             histogramVisible={histogramVisible}

@@ -62,6 +62,11 @@ interface AppStore extends AppState {
   // pixels changed and re-upload.
   baseImageVersion: number;
   bumpBaseImageVersion: () => void;
+  // Alignment axis: horizontal center (workspace-relative px) of the LIVE photo
+  // region. The floating toolbar pill centers on it now; the filmstrip dock and
+  // footer rating cluster will consume it in Task 6. null until first measured.
+  alignmentAxisX: number | null;
+  setAlignmentAxisX: (x: number | null) => void;
   // Live processing stats (surfaced in the StatusBar)
   lastProcessingTimeMs: number;
   modulesActive: number;
@@ -121,6 +126,7 @@ export const useAppStore = create<AppStore>((set) => ({
   renderMode: 'cpu',
   gpuResultVersion: 0,
   baseImageVersion: 0,
+  alignmentAxisX: null,
   lastProcessingTimeMs: 0,
   modulesActive: 0,
   modulesTotal: 0,
@@ -148,6 +154,8 @@ export const useAppStore = create<AppStore>((set) => ({
   setUpscaleMode: (v) => set({ upscaleMode: v }),
   setRawDecodeOptions: (opts) => set({ rawDecodeOptions: opts }),
   setReDecoding: (v) => set({ reDecoding: v }),
+
+  setAlignmentAxisX: (x) => set({ alignmentAxisX: x }),
 
   setRenderMode: (mode) => set({ renderMode: mode }),
 

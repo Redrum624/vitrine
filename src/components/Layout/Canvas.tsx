@@ -16,6 +16,7 @@ import { notificationService } from '../../services/NotificationService';
 import { StarRating } from '../common/StarRating';
 import { gpuPreviewPipeline } from '../../shaders/GpuPreviewPipeline';
 import { DEFAULT_RAW_DECODE_OPTIONS } from '../../types/electron';
+import { PHOTO_SHADOW } from '../../layout/photoRegion';
 
 // Debug mode for canvas rendering - set to false for production
 const DEBUG_CANVAS = process.env.NODE_ENV === 'development';
@@ -997,8 +998,9 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
   }, [setViewport]);
 
   return (
-    <div className="h-full bg-dark-900">
-      {/* Main Canvas Area */}
+    <div className="h-full">
+      {/* Main Canvas Area — transparent so the full-bleed workspace `--canvas-bg`
+          shows through the letterbox margins (Glass · Sectioned, Task 5). */}
       <div
         ref={containerRef}
         className="h-full relative overflow-hidden"
@@ -1015,7 +1017,11 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
             className="relative"
             style={{
               width: canvasDimensions.width > 0 ? canvasDimensions.width : 'auto',
-              height: canvasDimensions.height > 0 ? canvasDimensions.height : 'auto'
+              height: canvasDimensions.height > 0 ? canvasDimensions.height : 'auto',
+              // The letterboxed photo floats over the full-bleed workspace with a
+              // soft drop shadow (Glass · Sectioned §3). This wrapper is sized to
+              // the photo exactly, so the shadow hugs it (box-shadow, no filter).
+              boxShadow: canvasDimensions.width > 0 ? PHOTO_SHADOW : 'none',
             }}
           >
             <canvas
@@ -1244,17 +1250,8 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
           </>
         )}
 
-        {/* Image Info Overlay */}
-        {displayImage && (
-          <div className="absolute top-4 right-4 bg-dark-850/90 backdrop-blur-sm rounded-professional px-3 py-2 text-xs text-dark-300">
-            <div className="text-right">
-              <div className="font-medium">{displayImage.name}</div>
-              <div className="text-dark-400">
-                {fileSystemService.getCurrentImageInfo().current} of {fileSystemService.getCurrentImageInfo().total}
-              </div>
-            </div>
-          </div>
-        )}
+        {/* Image Info Overlay re-homed to the floating filename chip in App.tsx
+            (Glass · Sectioned, Task 5): `name · i of N · zoom%` top-left. */}
 
         {/* Star Rating Overlay (bottom-right) */}
         {displayImage && (

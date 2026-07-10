@@ -667,9 +667,10 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
   };
 
   return (
-    <div className="flex flex-col h-full" style={{width: '360px', backgroundColor: 'var(--gray-900)'}}>
-      {/* Module card lives in the current 360px overlay; the floating column is Task 5. */}
-      <div className="flex-1 overflow-y-auto" style={{ padding: '12px' }}>
+    <div className="flex flex-col h-full" style={{width: '100%', background: 'transparent'}}>
+      {/* Width-agnostic: the floating right column (App.tsx, Task 5) sets the 392px
+          slot width; the module card scrolls inside this body, never clipped. */}
+      <div className="flex-1 overflow-y-auto" style={{ padding: '0' }}>
 
         {/* RAW Decode — pinned above the module card; self-gates to RAW images only,
             so it's a no-op render for non-RAW files. */}

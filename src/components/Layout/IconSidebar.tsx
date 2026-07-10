@@ -1,4 +1,6 @@
+import type { CSSProperties, ReactNode } from 'react';
 import { HardDrive, Settings, BarChart3, Sun, Droplet, Activity, Crop, Palette, Focus, History, Sparkles } from 'lucide-react';
+import { RAIL_OFFSET } from '../../layout/photoRegion';
 
 interface IconSidebarProps {
   onToolSelect?: (tool: string) => void;
@@ -8,7 +10,7 @@ interface IconSidebarProps {
 
 interface Tool {
   id: string;
-  icon: string | React.ReactNode;
+  icon: ReactNode;
   name: string;
 }
 
@@ -24,142 +26,64 @@ const tools: Tool[] = [
   { id: 'history', icon: <History className="w-5 h-5" />, name: 'History' },
 ];
 
+// 42px tile, radius 12. Interactive hover (scale 1.06) lives in .glass-rail-btn
+// (index.css). Active = accent-soft tile + accent-ring border + accent glyph + glow.
+const railBtn: CSSProperties = {
+  width: '42px',
+  height: '42px',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  borderRadius: '12px',
+  border: '1px solid transparent',
+  background: 'transparent',
+  color: 'var(--glass-text-chrome-idle)',
+  cursor: 'pointer',
+};
+
+const railBtnActive: CSSProperties = {
+  background: 'var(--accent-soft)',
+  border: '1px solid var(--accent-ring)',
+  color: 'var(--accent)',
+  boxShadow: '0 0 14px rgba(59, 130, 246, 0.35)',
+};
+
+function RailButton({ active, icon, label, onClick }: { active: boolean; icon: ReactNode; label: string; onClick: () => void }) {
+  return (
+    <button
+      className={`glass-rail-btn${active ? ' is-active' : ''}`}
+      style={{ ...railBtn, ...(active ? railBtnActive : null) }}
+      onClick={onClick}
+      title={label}
+      aria-label={label}
+    >
+      {icon}
+    </button>
+  );
+}
+
 export function IconSidebar({ onToolSelect, selectedTool, histogramVisible }: IconSidebarProps) {
-  const handleToolClick = (toolId: string) => {
-    if (onToolSelect) {
-      onToolSelect(toolId);
-    }
-  };
+  const handleToolClick = (toolId: string) => onToolSelect?.(toolId);
 
   return (
-    <div className="bg-black border-r flex flex-col items-center" style={{width: '64px', padding: '20px 0', gap: '4px', borderRightColor: 'var(--border)'}}>
-      {/* Panel switchers - File Explorer and Modules */}
+    <div
+      className="glass-chrome absolute flex flex-col items-center no-select"
+      style={{ right: RAIL_OFFSET, top: '50%', transform: 'translateY(-50%)', borderRadius: '16px', padding: '10px 8px', gap: '6px', zIndex: 30 }}
+    >
       {tools.map((tool) => (
-        <button
+        <RailButton
           key={tool.id}
-          className={`
-            relative flex items-center justify-center
-            border cursor-pointer
-            ${selectedTool === tool.id
-              ? 'text-white'
-              : 'bg-transparent hover:text-dark-100'
-            }
-          `}
-          style={{
-            width: '48px',
-            height: '48px',
-            margin: '0 8px',
-            fontSize: '18px',
-            borderRadius: '4px',
-            transition: 'var(--transition-fast)',
-            backgroundColor: selectedTool === tool.id ? 'var(--gray-850)' : 'transparent',
-            borderColor: selectedTool === tool.id ? 'var(--border-light)' : 'transparent',
-            color: selectedTool === tool.id ? 'var(--white)' : 'var(--gray-400)'
-          }}
-          onMouseEnter={(e) => {
-            if (selectedTool !== tool.id) {
-              e.currentTarget.style.backgroundColor = 'var(--gray-900)';
-            }
-          }}
-          onMouseLeave={(e) => {
-            if (selectedTool !== tool.id) {
-              e.currentTarget.style.backgroundColor = 'transparent';
-            }
-          }}
+          active={selectedTool === tool.id}
+          icon={tool.icon}
+          label={tool.name}
           onClick={() => handleToolClick(tool.id)}
-          title={tool.name}
-          aria-label={tool.name}
-        >
-          {selectedTool === tool.id && (
-            <div className="absolute" style={{left: '-8px', top: '50%', transform: 'translateY(-50%)', width: '2px', height: '24px', backgroundColor: 'var(--white)'}} />
-          )}
-          {tool.icon}
-        </button>
+        />
       ))}
 
-      <div className="flex-1" />
+      <div style={{ width: '24px', height: '1px', background: 'var(--glass-border)', margin: '4px 0' }} />
 
-      {/* Histogram button */}
-      <button
-        className={`
-          relative flex items-center justify-center
-          border cursor-pointer
-          ${histogramVisible
-            ? 'text-white'
-            : 'bg-transparent hover:text-dark-100'
-          }
-        `}
-        style={{
-          width: '48px',
-          height: '48px',
-          margin: '0 8px 4px 8px',
-          fontSize: '18px',
-          borderRadius: '4px',
-          transition: 'var(--transition-fast)',
-          backgroundColor: histogramVisible ? 'var(--gray-850)' : 'transparent',
-          borderColor: histogramVisible ? 'var(--border-light)' : 'transparent',
-          color: histogramVisible ? 'var(--white)' : 'var(--gray-400)'
-        }}
-        onMouseEnter={(e) => {
-          if (!histogramVisible) {
-            e.currentTarget.style.backgroundColor = 'var(--gray-900)';
-          }
-        }}
-        onMouseLeave={(e) => {
-          if (!histogramVisible) {
-            e.currentTarget.style.backgroundColor = 'transparent';
-          }
-        }}
-        onClick={() => handleToolClick('histogram')}
-        title="Histogram"
-        aria-label="Histogram"
-      >
-        {histogramVisible && (
-          <div className="absolute" style={{left: '-8px', top: '50%', transform: 'translateY(-50%)', width: '2px', height: '24px', backgroundColor: 'var(--white)'}} />
-        )}
-        <BarChart3 className="w-5 h-5" />
-      </button>
-
-      {/* Settings button */}
-      <button
-        className={`
-          relative flex items-center justify-center
-          border cursor-pointer
-          ${selectedTool === 'settings'
-            ? 'text-white'
-            : 'bg-transparent hover:text-dark-100'
-          }
-        `}
-        style={{
-          width: '48px',
-          height: '48px',
-          margin: '0 8px',
-          fontSize: '18px',
-          borderRadius: '4px',
-          transition: 'var(--transition-fast)',
-          backgroundColor: selectedTool === 'settings' ? 'var(--gray-850)' : 'transparent',
-          borderColor: selectedTool === 'settings' ? 'var(--border-light)' : 'transparent',
-          color: selectedTool === 'settings' ? 'var(--white)' : 'var(--gray-400)'
-        }}
-        onMouseEnter={(e) => {
-          if (selectedTool !== 'settings') {
-            e.currentTarget.style.backgroundColor = 'var(--gray-900)';
-          }
-        }}
-        onMouseLeave={(e) => {
-          if (selectedTool !== 'settings') {
-            e.currentTarget.style.backgroundColor = 'transparent';
-          }
-        }}
-        onClick={() => handleToolClick('settings')}
-        title="Settings"
-        aria-label="Settings"
-      >
-        {selectedTool === 'settings' && (
-          <div className="absolute" style={{left: '-8px', top: '50%', transform: 'translateY(-50%)', width: '2px', height: '24px', backgroundColor: 'var(--white)'}} />
-        )}
-        <Settings className="w-5 h-5" />
-      </button>
+      <RailButton active={!!histogramVisible} icon={<BarChart3 className="w-5 h-5" />} label="Histogram" onClick={() => handleToolClick('histogram')} />
+      <RailButton active={selectedTool === 'settings'} icon={<Settings className="w-5 h-5" />} label="Settings" onClick={() => handleToolClick('settings')} />
     </div>
   );
 }

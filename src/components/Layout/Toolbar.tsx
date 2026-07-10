@@ -1,3 +1,4 @@
+import type { CSSProperties } from 'react';
 import { electronService } from '../../services/ElectronService';
 
 interface ToolbarProps {
@@ -27,168 +28,128 @@ interface ToolbarProps {
   referenceMode?: boolean;
 }
 
-export function Toolbar({ onExport, onPrint, onBatchProcess: _onBatchProcess, onOpenPresets: _onOpenPresets, onOpenPlugins: _onOpenPlugins, onShowHelp: _onShowHelp, onUndo, onRedo, canUndo = false, canRedo = false, onZoomIn, onZoomOut, onFitWindow, onActualSize, zoom = 1, onAutoAll, onCopyStyle, onPasteStyle, hasStyleClipboard = false, hasImage = false, onToggleOriginal, showOriginal = false, onToggleReference, referenceMode = false }: ToolbarProps) {
-  const btnClass = "bg-transparent border text-dark-300 flex items-center justify-center cursor-pointer hover:text-dark-100";
-  const btnStyle = {width: '32px', height: '32px', fontSize: '13px', borderRadius: '3px', borderColor: 'var(--border)', transition: 'var(--transition-fast)'};
+// Base layout for an idle pill button — interactive :hover/:disabled states come
+// from .glass-pill-btn in index.css (inline styles can't express pseudo-classes).
+const pillBtn: CSSProperties = {
+  height: '30px',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  padding: '0 10px',
+  gap: '5px',
+  fontSize: '12.5px',
+  borderRadius: '9px',
+  border: '1px solid transparent',
+  background: 'transparent',
+  color: 'var(--glass-text-chrome-primary)',
+  cursor: 'pointer',
+  whiteSpace: 'nowrap',
+};
+
+const pillIconBtn: CSSProperties = { ...pillBtn, width: '30px', padding: '0', fontSize: '15px' };
+
+const divider: CSSProperties = { width: '1px', height: '18px', margin: '0 4px', background: 'var(--glass-border)' };
+
+// A toggle that is "on" (Before/After, Reference) reads as an accent-soft tile.
+const toggleActive: CSSProperties = {
+  background: 'var(--accent-soft)',
+  border: '1px solid var(--accent-ring)',
+  color: 'var(--accent)',
+};
+
+export function Toolbar({ onExport, onPrint, onUndo: _onUndo, onRedo: _onRedo, canUndo: _canUndo = false, canRedo: _canRedo = false, onZoomIn, onZoomOut, onFitWindow, onActualSize, zoom = 1, onAutoAll, onCopyStyle, onPasteStyle, hasStyleClipboard = false, hasImage = false, onToggleOriginal, showOriginal = false, onToggleReference, referenceMode = false }: ToolbarProps) {
+  if (!electronService.isElectron()) return <div />;
 
   return (
-    <div className="flex items-center justify-between border-b no-select" style={{padding: '10px 20px', backgroundColor: 'var(--gray-900)', borderBottomColor: 'var(--border)'}}>
-      {/* Left side - File and Tools */}
-      <div className="flex items-center gap-1.5">
-        {electronService.isElectron() && (
-          <>
-            <button
-              onClick={() => electronService.openFile()}
-              className={btnClass}
-              style={{...btnStyle, width: 'auto', padding: '0 12px'}}
-              title="Open Image"
-            >
-              Open
-            </button>
-            <button
-              onClick={onExport}
-              className={btnClass}
-              style={{...btnStyle, width: 'auto', padding: '0 12px'}}
-              title="Export Image"
-            >
-              Export
-            </button>
-            <button
-              onClick={onPrint}
-              disabled={!hasImage}
-              className={`${btnClass} disabled:opacity-30 disabled:cursor-not-allowed`}
-              style={{...btnStyle, width: 'auto', padding: '0 12px'}}
-              title="Print Image (Ctrl+P)"
-            >
-              Print
-            </button>
+    <div
+      className="glass-chrome flex items-center no-select"
+      style={{ borderRadius: '14px', padding: '6px 8px', gap: '3px' }}
+    >
+      <button onClick={() => electronService.openFile()} className="glass-pill-btn" style={pillBtn} title="Open Image">
+        Open
+      </button>
+      <button onClick={onExport} className="glass-pill-btn" style={pillBtn} title="Export Image">
+        Export
+      </button>
+      <button onClick={onPrint} disabled={!hasImage} className="glass-pill-btn" style={pillBtn} title="Print Image (Ctrl+P)">
+        Print
+      </button>
 
-            <div style={{width: '1px', height: '24px', margin: '0 6px', backgroundColor: 'var(--border)'}} />
+      <div style={divider} />
 
-            <button
-              onClick={onUndo}
-              disabled={!canUndo}
-              className={`${btnClass} disabled:opacity-30 disabled:cursor-not-allowed`}
-              style={btnStyle}
-              title="Undo (Ctrl+Z)"
-            >
-              ↶
-            </button>
-            <button
-              onClick={onRedo}
-              disabled={!canRedo}
-              className={`${btnClass} disabled:opacity-30 disabled:cursor-not-allowed`}
-              style={btnStyle}
-              title="Redo (Ctrl+Shift+Z)"
-            >
-              ↷
-            </button>
+      {/* Auto All — the solid-accent primary (mirrors Enhance's Apply). */}
+      <button
+        onClick={onAutoAll}
+        disabled={!hasImage}
+        className="glass-pill-primary"
+        style={{
+          ...pillBtn,
+          padding: '0 14px',
+          fontWeight: 600,
+          color: '#0b0b0c',
+          background: 'var(--accent)',
+          boxShadow: '0 0 0 1px var(--accent-ring), 0 6px 20px rgba(59, 130, 246, 0.35)',
+        }}
+        title="Auto-adjust all modules based on image analysis"
+      >
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M8 2v2M8 12v2M2 8h2M12 8h2M4.2 4.2l1.4 1.4M10.4 10.4l1.4 1.4M4.2 11.8l1.4-1.4M10.4 5.6l1.4-1.4" />
+        </svg>
+        Auto All
+      </button>
 
-            <div style={{width: '1px', height: '24px', margin: '0 6px', backgroundColor: 'var(--border)'}} />
+      <div style={divider} />
 
-            <button
-              onClick={onAutoAll}
-              disabled={!hasImage}
-              className={`${btnClass} disabled:opacity-30 disabled:cursor-not-allowed`}
-              style={{...btnStyle, width: 'auto', padding: '0 12px', gap: '5px', display: 'flex'}}
-              title="Auto-adjust all modules based on image analysis"
-            >
-              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M8 2v2M8 12v2M2 8h2M12 8h2M4.2 4.2l1.4 1.4M10.4 10.4l1.4 1.4M4.2 11.8l1.4-1.4M10.4 5.6l1.4-1.4" />
-              </svg>
-              Auto All
-            </button>
+      <button onClick={onCopyStyle} disabled={!hasImage} className="glass-pill-btn" style={pillBtn} title="Analyse and copy the style of the current photo">
+        Copy Style
+      </button>
+      <button
+        onClick={onPasteStyle}
+        disabled={!hasImage || !hasStyleClipboard}
+        className="glass-pill-btn"
+        style={pillBtn}
+        title={hasStyleClipboard ? 'Apply the copied style to the current photo' : 'Copy a style first'}
+      >
+        Paste Style
+      </button>
 
-            <div style={{width: '1px', height: '24px', margin: '0 6px', backgroundColor: 'var(--border)'}} />
+      <div style={divider} />
 
-            <button
-              onClick={onCopyStyle}
-              disabled={!hasImage}
-              className={`${btnClass} disabled:opacity-30 disabled:cursor-not-allowed`}
-              style={{...btnStyle, width: 'auto', padding: '0 12px', gap: '5px', display: 'flex'}}
-              title="Analyse and copy the style of the current photo"
-            >
-              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="8" cy="8" r="6" />
-                <path d="M8 5v6M5 8h6" />
-              </svg>
-              Copy Style
-            </button>
-            <button
-              onClick={onPasteStyle}
-              disabled={!hasImage || !hasStyleClipboard}
-              className={`${btnClass} disabled:opacity-30 disabled:cursor-not-allowed`}
-              style={{...btnStyle, width: 'auto', padding: '0 12px', gap: '5px', display: 'flex'}}
-              title={hasStyleClipboard ? 'Apply the copied style to the current photo' : 'Copy a style first'}
-            >
-              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M4 4h5v5H4z" />
-                <path d="M7 7h5v5H7z" />
-              </svg>
-              Paste Style
-            </button>
+      <button
+        onClick={onToggleOriginal}
+        disabled={!hasImage}
+        className="glass-pill-btn"
+        style={{ ...pillBtn, ...(showOriginal ? toggleActive : null) }}
+        title="Toggle before/after comparison (B)"
+      >
+        Before / After
+      </button>
+      <button
+        onClick={onToggleReference}
+        disabled={!hasImage}
+        className="glass-pill-btn"
+        style={{ ...pillBtn, ...(referenceMode ? toggleActive : null) }}
+        title="Compare with a reference photo"
+      >
+        Reference
+      </button>
 
-            <div style={{width: '1px', height: '24px', margin: '0 6px', backgroundColor: 'var(--border)'}} />
+      <div style={divider} />
 
-            <button
-              onClick={onToggleOriginal}
-              disabled={!hasImage}
-              className={`${btnClass} disabled:opacity-30 disabled:cursor-not-allowed`}
-              style={{...btnStyle, width: 'auto', padding: '0 12px', gap: '5px', display: 'flex', backgroundColor: showOriginal ? 'var(--gray-700)' : 'transparent', color: showOriginal ? 'var(--white)' : undefined}}
-              title="Toggle before/after comparison (B)"
-            >
-              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="2" y="2" width="12" height="12" rx="1" />
-                <line x1="8" y1="2" x2="8" y2="14" />
-              </svg>
-              Before / After
-            </button>
-            <button
-              onClick={onToggleReference}
-              disabled={!hasImage}
-              className={`${btnClass} disabled:opacity-30 disabled:cursor-not-allowed`}
-              style={{...btnStyle, width: 'auto', padding: '0 12px', gap: '5px', display: 'flex', backgroundColor: referenceMode ? 'var(--gray-700)' : 'transparent', color: referenceMode ? 'var(--white)' : undefined}}
-              title="Compare with a reference photo"
-            >
-              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="1" y="2" width="6" height="12" rx="1" />
-                <rect x="9" y="2" width="6" height="12" rx="1" />
-              </svg>
-              Reference
-            </button>
-
-            <div style={{width: '1px', height: '24px', margin: '0 6px', backgroundColor: 'var(--border)'}} />
-
-            <button onClick={onZoomOut} className={btnClass} style={btnStyle} title="Zoom Out">−</button>
-            <span className="text-center font-mono" style={{fontSize: '11px', minWidth: '50px', fontVariantNumeric: 'tabular-nums', color: 'var(--gray-400)'}}>
-              {Math.round(zoom * 100)}%
-            </span>
-            <button onClick={onZoomIn} className={btnClass} style={btnStyle} title="Zoom In">+</button>
-
-            <div style={{width: '1px', height: '24px', margin: '0 6px', backgroundColor: 'var(--border)'}} />
-
-            <button
-              onClick={onFitWindow}
-              className={btnClass}
-              style={{...btnStyle, width: 'auto', padding: '0 12px'}}
-              title="Fit to Window"
-            >
-              Fit
-            </button>
-            <button
-              onClick={onActualSize}
-              className={btnClass}
-              style={{...btnStyle, width: 'auto', padding: '0 12px'}}
-              title="Actual Size (100%)"
-            >
-              1:1
-            </button>
-          </>
-        )}
-      </div>
-
-      {/* Right-side info removed: dimensions / MP / colour space were hardcoded
-          placeholders, and the real values live in the footer status bar. */}
+      {/* Zoom cluster at the right end. The % readout doubles as the 1:1 action
+          (click → Actual Size) — matches the reference pill (− 100% + Fit) while
+          keeping both the readout and the actual-size semantics. */}
+      <button onClick={onZoomOut} className="glass-pill-btn" style={pillIconBtn} title="Zoom Out">−</button>
+      <button
+        onClick={onActualSize}
+        className="glass-pill-btn font-mono"
+        style={{ ...pillBtn, padding: '0 6px', minWidth: '46px', fontSize: '11.5px', fontVariantNumeric: 'tabular-nums', color: 'var(--glass-text-chrome-idle)' }}
+        title="Actual Size — 100% (1:1)"
+      >
+        {Math.round(zoom * 100)}%
+      </button>
+      <button onClick={onZoomIn} className="glass-pill-btn" style={pillIconBtn} title="Zoom In">+</button>
+      <button onClick={onFitWindow} className="glass-pill-btn" style={pillBtn} title="Fit to Window">Fit</button>
     </div>
   );
 }

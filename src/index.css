@@ -372,3 +372,41 @@ body {
 .glass-slider-thumb.is-edited:hover::-moz-range-thumb {
   box-shadow: 0 0 0 4px var(--accent-ring);
 }
+
+/* ---------------------------------------------------------------------- */
+/* Floating chrome interactions (Task 5): toolbar pill + icon rail.        */
+/* :hover/:disabled can't be expressed inline, so the layout stays inline  */
+/* on each button and the interactive states live here.                    */
+/* ---------------------------------------------------------------------- */
+
+/* Toolbar pill buttons (idle text buttons + zoom cluster). */
+.glass-pill-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--glass-text-title);
+}
+.glass-pill-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+/* Auto All primary — solid accent with a soft glow (mirrors the Enhance Apply). */
+.glass-pill-primary:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+.glass-pill-primary:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Icon-rail tiles: 42px, radius 12, hover scale 1.06 (no edge-bar). Active
+   state (accent-soft tile + ring + glyph + glow) is applied inline. */
+.glass-rail-btn {
+  transition: transform 150ms ease, background-color 150ms ease, color 150ms ease, box-shadow 150ms ease;
+}
+.glass-rail-btn:hover {
+  transform: scale(1.06);
+}
+.glass-rail-btn:hover:not(.is-active) {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--glass-text-chrome-primary);
+}
