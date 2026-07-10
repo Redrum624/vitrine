@@ -12,7 +12,7 @@ import { GlassModal } from './GlassModal';
 import { ChipButton } from '../Controls/ChipButton';
 import { AccentButton } from '../Controls/AccentButton';
 import { SectionLabel } from '../Controls/SectionLabel';
-import SliderControl from '../Controls/SliderControl';
+import { SliderRow } from '../Controls/SliderRow';
 import { inputStyle, selectStyle, infoBoxStyle } from './glassFormStyles';
 import { ExportOptions, ExportPreset, exportService } from '../../services/ExportService';
 import { estimateExportSizeBytes } from '../../utils/exportSizeEstimate';
@@ -362,15 +362,15 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
       {/* Quality Settings */}
       {(exportOptions.format === 'jpeg' || exportOptions.format === 'webp') && (
         <div className="space-y-2">
-          <SliderControl
+          <SliderRow
             label="Quality"
             value={exportOptions.quality}
+            defaultValue={exportService.getDefaultOptions().quality}
             min={1}
             max={100}
             step={1}
             onChange={(value: number) => handleOptionChange('quality', value)}
-            className="text-sm"
-            showPercentage
+            formatValue={(v) => `${Math.round(v)}%`}
           />
         </div>
       )}

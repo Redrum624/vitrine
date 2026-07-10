@@ -16,7 +16,7 @@ import { GlassModal } from './GlassModal';
 import { ChipButton } from '../Controls/ChipButton';
 import { AccentButton } from '../Controls/AccentButton';
 import { SectionLabel } from '../Controls/SectionLabel';
-import SliderControl from '../Controls/SliderControl';
+import { SliderRow } from '../Controls/SliderRow';
 import { inputStyle, statBoxStyle } from './glassFormStyles';
 import { BatchJob, BatchPreset, batchProcessingService } from '../../services/BatchProcessingService';
 import { ImageFileInfo } from '../../services/FileSystemService';
@@ -421,18 +421,23 @@ export const BatchProcessingDialog: React.FC<BatchProcessingDialogProps> = ({
 
     return (
       <div className="space-y-6">
-        <div className="space-y-3">
+        <div className="space-y-2">
           <SectionLabel>Performance Settings</SectionLabel>
-          <SliderControl
+          <SliderRow
             label="Max Concurrent Jobs"
             value={2}
+            // BatchProcessingService.maxConcurrentJobs defaults to 2 — matches the
+            // hardcoded `value` above (this dialog doesn't read the service's live
+            // setting back, so both stay in lockstep with the service default).
+            defaultValue={2}
             min={1}
             max={5}
             step={1}
             onChange={(value: number) => batchProcessingService.setMaxConcurrentJobs(value)}
-            className="text-sm"
-            description="Higher values use more system resources"
           />
+          <div style={{ fontSize: 11, color: 'var(--glass-text-muted)' }}>
+            Higher values use more system resources
+          </div>
         </div>
 
         <div className="space-y-3">
