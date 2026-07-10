@@ -16,6 +16,7 @@ import { imageService } from '../services/ImageService';
 import { imageCacheService } from '../services/ImageCacheService';
 import { useAppStore } from '../stores/appStore';
 import { DEFAULT_RAW_DECODE_OPTIONS } from '../types/electron';
+import { guardDeveloping } from '../App';
 
 // Full native-decode IPC payload: 16-bit, 3-channel.
 const makeFullPayload = (w: number, h: number, fill: number) => {
@@ -159,5 +160,50 @@ describe('ImageService.loadImage — progressive RAW open', () => {
     expect(result.width).toBe(8);                   // full 16-bit decode dims
     expect(previewApi()).not.toHaveBeenCalled();    // preview path skipped for non-editor callers
     expect(useAppStore.getState().developing).toBe(false);
+  });
+
+  it('clears the developing flag immediately when switching to a warm/non-RAW image mid-background-decode (L3 review round 1, important #4)', async () => {
+    // Prime the base cache for B with a full decode (a "warm" reopen target).
+    await imageService.loadImage('/b.orf', undefined, () => {});
+    await flush();
+    expect(imageCacheService.getBase('/b.orf')?.width).toBe(8);
+
+    // Start a progressive RAW open on A — its full decode never resolves in this test, so
+    // without the fix `developing` would stay stuck true forever once we move away from A.
+    const fullA = deferred<ReturnType<typeof makeFullPayload>>();
+    decodeApi().mockImplementation(async (path: string) => (path === '/a.orf' ? fullA.promise : makeFullPayload(8, 4, 200)));
+    await imageService.loadImage('/a.orf', undefined, () => {});
+    expect(useAppStore.getState().developing).toBe(true);
+
+    // Switch to B (warm/cache-hit) while A's full decode is still pending — this must clear
+    // the affordance right away, not leave it stuck on.
+    await imageService.loadImage('/b.orf', undefined, () => {});
+    expect(useAppStore.getState().developing).toBe(false);
+
+    // A's stale full decode resolving later must not resurrect the affordance (generation guard).
+    fullA.resolve(makeFullPayload(10, 5, 50));
+    await flush();
+    expect(useAppStore.getState().developing).toBe(false);
+  });
+});
+
+describe('guardDeveloping — pixel-analysis/print action gate (L3 review round 1, important #1/#2)', () => {
+  afterEach(() => {
+    useAppStore.getState().setDeveloping(false);
+  });
+
+  it('blocks and shows an info notification while developing', () => {
+    useAppStore.getState().setDeveloping(true);
+    const showInfo = jest.fn();
+    expect(guardDeveloping(showInfo, 'Auto All')).toBe(true);
+    expect(showInfo).toHaveBeenCalledTimes(1);
+    expect(showInfo).toHaveBeenCalledWith('Auto All', expect.stringMatching(/developing/i));
+  });
+
+  it('lets the caller proceed (no notification) once the background decode has settled', () => {
+    useAppStore.getState().setDeveloping(false);
+    const showInfo = jest.fn();
+    expect(guardDeveloping(showInfo, 'Auto All')).toBe(false);
+    expect(showInfo).not.toHaveBeenCalled();
   });
 });

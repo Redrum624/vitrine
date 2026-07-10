@@ -54,6 +54,12 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
   multiPaths
 }) => {
   const isMulti = (multiPaths?.length ?? 0) > 0;
+  // Progressive RAW open: while the background full 16-bit decode is running, imageWidth/imageHeight
+  // above are seeded from the fast embedded PREVIEW (e.g. 2048px), not the true dims. The export
+  // pixel path itself always resolves the full-res source (resolveExportSource), so it's safe —
+  // but the Resize toggle below seeds width/height from these dims, which would silently downscale
+  // a full-res export to preview size. Disable just the toggle until the swap lands.
+  const developing = useAppStore((s) => s.developing);
   const [activeTab, setActiveTab] = useState<TabType>('format');
   const [selectedPreset, setSelectedPreset] = useState<string>('');
   const [exportOptions, setExportOptions] = useState<ExportOptions>(exportService.getDefaultOptions());
@@ -406,11 +412,18 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
           <div style={{ fontSize: 12.5, color: 'var(--glass-text-label)', marginTop: 6 }}>{imageWidth} × {imageHeight} pixels</div>
         </div>
 
-        {/* Resize Toggle */}
-        <label className="flex items-center gap-2 cursor-pointer" style={{ fontSize: 12.5, color: 'var(--glass-text-label)' }}>
+        {/* Resize Toggle — disabled while the background full-quality decode is still running:
+            imageWidth/imageHeight are the PREVIEW dims until it lands, and seeding the resize
+            fields from them would downscale the (otherwise full-res, safe) export. */}
+        <label
+          className="flex items-center gap-2 cursor-pointer"
+          style={{ fontSize: 12.5, color: 'var(--glass-text-label)', opacity: developing ? 0.5 : 1, cursor: developing ? 'not-allowed' : 'pointer' }}
+          title={developing ? 'Available when full quality finishes developing' : undefined}
+        >
           <input
             type="checkbox"
             checked={!!(exportOptions.width || exportOptions.height)}
+            disabled={developing}
             onChange={(e) => {
               if (e.target.checked) {
                 handleOptionChange('width', imageWidth);

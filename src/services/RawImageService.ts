@@ -141,8 +141,16 @@ export class RawImageService {
    * displayed options from the actual pixels. Keeping the timeline untouched means stepping
    * History before/after a re-decode only re-applies module edits (valid on ANY base): never a
    * stale-pixel restore, never a crash. The options change is still durably persisted.
+   *
+   * @param imageId Optional gallery/dock tile id (ImageFileInfo.id) for the image being
+   *   re-decoded. When a re-decode supersedes a still-in-flight progressive RAW open (the user
+   *   changed demosaic/highlights while the background full decode was running),
+   *   `ImageService.developFullDecode`'s decode-options guard bails BEFORE calling its
+   *   `onFullDecode` callback — so Canvas's gallery-tile dims write never happens for that image.
+   *   reDecode knows the true dims too, so it writes them here itself (L3 review round 1, minor
+   *   #5) — a no-op when the caller doesn't have an id (e.g. tests).
    */
-  async reDecode(options: RawDecodeOptions): Promise<void> {
+  async reDecode(options: RawDecodeOptions, imageId?: string): Promise<void> {
     const store = useAppStore.getState();
     const current = imageService.getCurrentImage();
 
@@ -185,6 +193,13 @@ export class RawImageService {
       // Replace the working base image + the before/after original snapshot.
       imageService.updateCurrentImageData(rawData.data, rawData.width, rawData.height);
       imageService.setOriginalImage(new Float32Array(rawData.data), rawData.width, rawData.height);
+
+      // Gallery/dock tile dims (see @param imageId doc above): write the true dims this
+      // re-decode just produced, so a superseded progressive-open swap never leaves the tile
+      // stuck at the preview's dims.
+      if (imageId) {
+        useAppStore.getState().setImageDimensions(imageId, { width: rawData.width, height: rawData.height });
+      }
 
       // Apply the options to the store (source of truth for the panel) and persist them
       // (scheduleSave writes serialize(), which embeds rawDecodeOptions into the edit state).

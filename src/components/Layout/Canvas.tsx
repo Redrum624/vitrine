@@ -833,7 +833,15 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
       // Now that the full image (including RAW) is actually decoded, its true
       // dimensions are known — upgrade the shared map so the gallery/dock tile
       // stops showing format-only meta (fix round 1, Critical review finding).
-      useAppStore.getState().setImageDimensions(image.id, { width: decoded.width, height: decoded.height });
+      // Skip while a progressive RAW open's background full decode is still running:
+      // `decoded` here is the fast embedded PREVIEW (e.g. 2048px), not the true dims — writing
+      // it would let the wrong size stick if the swap never lands. Leave the tile at
+      // format-only meta (the pre-L3 semantic) until the real dims are known: either the
+      // onFullDecode callback above fires them when the swap lands, or RawImageService.reDecode
+      // writes them itself if it supersedes the swap (L3 review round 1, minor #5).
+      if (!useAppStore.getState().developing) {
+        useAppStore.getState().setImageDimensions(image.id, { width: decoded.width, height: decoded.height });
+      }
       // NOTE: saved edits were already restored in the beforeNotify hook above — BEFORE the
       // first pipeline pass — so there is no restoreForPath / triggerReprocessing here. That
       // post-load restore + reprocess was the redundant SECOND pass that flashed the unedited image.

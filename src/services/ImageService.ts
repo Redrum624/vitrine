@@ -94,6 +94,14 @@ export class ImageService {
   ): Promise<ImageData> {
     const thisGeneration = ++this.loadGeneration;
     this.bakedUpscale = null; // Clear baked marker on any fresh image load
+    // Reset the "Developing full quality…" affordance for EVERY new load — synchronously, before
+    // any cache lookup or decode. Without this, switching away from a still-developing RAW (e.g.
+    // to a warm/cached or non-RAW image) left the affordance stuck on forever: it was only ever
+    // cleared by the PREVIOUS open's developFullDecode finally, which is generation-gated and
+    // therefore skips clearing once a newer load has started (by design, so a newer open's own
+    // flag isn't clobbered) — but nothing else was resetting it for the newer load. The cold-RAW
+    // progressive-open branch below re-sets it true right after, if this load takes that path.
+    useAppStore.getState().setDeveloping(false);
 
     const result = await errorHandlingService.withErrorHandling(
       async () => {
@@ -130,7 +138,13 @@ export class ImageService {
           this.snapshotOriginal(result);
           logger.info(`Image loaded from base cache: ${result.width}x${result.height} - skipping decode`);
           // Seed restored per-image edits BEFORE notifying (so the first pass renders edited).
-          beforeNotify?.(result);
+          // Guarded like notifyImageLoaded's listener loop: a throwing caller must not abort this
+          // load or skip the notify below.
+          try {
+            beforeNotify?.(result);
+          } catch (error) {
+            logger.error('Error in beforeNotify (cache-hit path):', error);
+          }
           // Behave like a fresh load minus the decode: notify listeners so the histogram/adjustment
           // panels reprocess. This notify is the single reprocess trigger for the open — the edits
           // (if any) are already applied by the hook above, so no second pass is needed.
@@ -182,7 +196,11 @@ export class ImageService {
               this.currentImage = previewResult;
               this.snapshotOriginal(previewResult);
               // Seed restored edits at PREVIEW dims (normalized geometry → re-bakes on the swap).
-              beforeNotify?.(previewResult);
+              try {
+                beforeNotify?.(previewResult);
+              } catch (error) {
+                logger.error('Error in beforeNotify (progressive-preview path):', error);
+              }
               this.notifyImageLoaded(); // FIRST PASS — edited preview on screen, fast
               useAppStore.getState().setDeveloping(true);
               // Background: await the full decode, then swap the base in place (guarded).
@@ -283,7 +301,11 @@ export class ImageService {
         this.snapshotOriginal(result);
         // Seed restored per-image edits BEFORE notifying, so the first pipeline pass triggered
         // by the load listeners renders the edited image directly (no unedited-defaults flash).
-        beforeNotify?.(result);
+        try {
+          beforeNotify?.(result);
+        } catch (error) {
+          logger.error('Error in beforeNotify (full-decode path):', error);
+        }
         this.notifyImageLoaded();
         return result;
       },

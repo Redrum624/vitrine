@@ -69,7 +69,7 @@ describe('RawDecodePanel', () => {
     render(<RawDecodePanel currentImage={RAW_IMAGE} />);
     fireEvent.click(screen.getByText('RAW Decode'));
     fireEvent.change(screen.getByLabelText('Demosaic'), { target: { value: 'ahd' } });
-    expect(rawImageService.reDecode).toHaveBeenCalledWith({ demosaic: 'ahd', highlightMode: 'blend' });
+    expect(rawImageService.reDecode).toHaveBeenCalledWith({ demosaic: 'ahd', highlightMode: 'blend' }, RAW_IMAGE.id);
   });
 
   it('selecting a highlight option invokes reDecode with the expected RawDecodeOptions', () => {
@@ -77,7 +77,7 @@ describe('RawDecodePanel', () => {
     render(<RawDecodePanel currentImage={RAW_IMAGE} />);
     fireEvent.click(screen.getByText('RAW Decode'));
     fireEvent.change(screen.getByLabelText('Highlights'), { target: { value: 'reconstruct' } });
-    expect(rawImageService.reDecode).toHaveBeenCalledWith({ demosaic: 'dcb', highlightMode: 'reconstruct' });
+    expect(rawImageService.reDecode).toHaveBeenCalledWith({ demosaic: 'dcb', highlightMode: 'reconstruct' }, RAW_IMAGE.id);
   });
 
   it('surfaces a notification when reDecode rejects (no unhandled rejection)', async () => {

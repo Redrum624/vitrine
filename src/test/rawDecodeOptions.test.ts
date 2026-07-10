@@ -182,6 +182,34 @@ describe('RawImageService.reDecode', () => {
     expect(useAppStore.getState().rawDecodeOptions).toEqual(DEFAULT_RAW_DECODE_OPTIONS);
     expect(useAppStore.getState().reDecoding).toBe(false);
   });
+
+  it('writes the gallery/dock tile dims for the given imageId (L3 review round 1, minor #5)', async () => {
+    jest.spyOn(imageService, 'getCurrentImage').mockReturnValue(makeRaw());
+    jest.spyOn(imageService, 'updateCurrentImageData').mockImplementation(() => {});
+    jest.spyOn(imageService, 'setOriginalImage').mockImplementation(() => {});
+    jest.spyOn(editPersistenceService, 'scheduleSave').mockImplementation(() => {});
+    useAppStore.setState({ imageDimensions: {} });
+
+    await rawImageService.reDecode(AHD_RECON, 'tile-id-1');
+
+    // reDecode always knows the true dims it just produced — write them under the caller's id.
+    // This is what closes the gap when a re-decode supersedes a still-in-flight progressive RAW
+    // open: developFullDecode's decode-options guard bails BEFORE calling onFullDecode, so
+    // Canvas never gets a chance to write the tile's dims for that swap.
+    expect(useAppStore.getState().imageDimensions['tile-id-1']).toEqual({ width: 4, height: 2 });
+  });
+
+  it('is a no-op on imageDimensions when no imageId is passed (backward compatible)', async () => {
+    jest.spyOn(imageService, 'getCurrentImage').mockReturnValue(makeRaw());
+    jest.spyOn(imageService, 'updateCurrentImageData').mockImplementation(() => {});
+    jest.spyOn(imageService, 'setOriginalImage').mockImplementation(() => {});
+    jest.spyOn(editPersistenceService, 'scheduleSave').mockImplementation(() => {});
+    useAppStore.setState({ imageDimensions: {} });
+
+    await rawImageService.reDecode(AHD_RECON);
+
+    expect(useAppStore.getState().imageDimensions).toEqual({});
+  });
 });
 
 describe('ImageService.decodeForExport — per-file RAW decode options', () => {

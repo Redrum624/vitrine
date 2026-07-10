@@ -197,8 +197,9 @@ describe('Canvas.loadImage — mid-flight setRawDecodeOptions race (pre-decode)'
 
     const { rerender } = render(<Canvas onFitWindow={() => {}} onActualSize={() => {}} onZoomIn={() => {}} onZoomOut={() => {}} zoom={1} currentImage={IMG_A} />);
 
-    // Let A's loadImage start and reach its (held-open) getSavedRawDecodeOptions await
-    // before switching to B — the exact "rapid click" scenario.
+    // Let A's loadImage start and reach its (held-open) getSavedEditState await — the single
+    // full-edit-state read that now carries both decode options and module edits — before
+    // switching to B — the exact "rapid click" scenario.
     await Promise.resolve();
     rerender(<Canvas onFitWindow={() => {}} onActualSize={() => {}} onZoomIn={() => {}} onZoomOut={() => {}} zoom={1} currentImage={IMG_B} />);
 
@@ -250,5 +251,69 @@ describe('Canvas.loadImage — post-decode setImageDimensions write (clean path,
     await new Promise((r) => setTimeout(r, 0));
 
     expect(useAppStore.getState().imageDimensions[IMG_A.id]).toEqual({ width: 4000, height: 3000 });
+  });
+});
+
+/**
+ * L3 review round 1, minor #5: while a progressive RAW open's background full decode is still
+ * running, `imageService.loadImage` returns the fast embedded PREVIEW (not the true dims). The
+ * post-`await` dims write in Canvas.loadImage must skip recording those preview dims — otherwise
+ * they can stick as the gallery/dock tile's dims if the swap never lands — and instead rely on
+ * the (already-wired) `onFullDecode` callback to write the TRUE dims once the swap does land.
+ */
+describe('Canvas.loadImage — progressive-open dims gating (developing window)', () => {
+  const IMG_C: ImageFileInfo = {
+    id: 'c', name: 'c.orf', path: '/c.orf', size: 100, format: 'orf', type: 'image',
+    lastModified: 0, dateModified: new Date(),
+  };
+
+  beforeEach(() => {
+    useAppStore.setState({ imageDimensions: {}, developing: false });
+    jest.clearAllMocks();
+    (imageService.getCurrentImage as jest.Mock).mockReturnValue(null);
+    (editPersistenceService.getSavedEditState as jest.Mock).mockResolvedValue(null);
+    (editPersistenceService.restoreState as jest.Mock).mockReturnValue(false);
+    (checkpointService.getCheckpoints as jest.Mock).mockReturnValue([{ id: 1 }]);
+  });
+
+  it('skips the post-load dims write while developing; onFullDecode writes the true dims once the swap lands', async () => {
+    useAppStore.getState().setDeveloping(true); // the fast preview is on screen; full decode pending
+
+    let fullDecodeCb: ((w: number, h: number) => void) | undefined;
+    (imageService.loadImage as jest.Mock).mockImplementation(
+      (path: string, beforeNotify?: (r: unknown) => void, onFullDecode?: (w: number, h: number) => void) => {
+        fullDecodeCb = onFullDecode;
+        const preview = { filePath: path, width: 4, height: 2 }; // preview dims, NOT the true dims
+        (imageService.getCurrentImage as jest.Mock).mockReturnValue(preview);
+        beforeNotify?.(preview);
+        return Promise.resolve(preview);
+      },
+    );
+
+    render(<Canvas onFitWindow={() => {}} onActualSize={() => {}} onZoomIn={() => {}} onZoomOut={() => {}} zoom={1} currentImage={IMG_C} />);
+    await new Promise((r) => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 0));
+
+    // Still developing when loadImage resolved — the preview's dims must NOT be recorded.
+    expect(useAppStore.getState().imageDimensions[IMG_C.id]).toBeUndefined();
+
+    // The background full decode lands: ImageService.developFullDecode fires onFullDecode with
+    // the TRUE dims — Canvas's existing (unconditional) wiring for that callback writes them.
+    fullDecodeCb?.(8, 4);
+    expect(useAppStore.getState().imageDimensions[IMG_C.id]).toEqual({ width: 8, height: 4 });
+  });
+
+  it('writes the dims normally (unchanged behavior) when the load is NOT progressive (developing stays false)', async () => {
+    (imageService.loadImage as jest.Mock).mockImplementation(async (path: string, beforeNotify?: (r: unknown) => void) => {
+      const decoded = { filePath: path, width: 20, height: 10 };
+      (imageService.getCurrentImage as jest.Mock).mockReturnValue(decoded);
+      beforeNotify?.(decoded);
+    });
+
+    render(<Canvas onFitWindow={() => {}} onActualSize={() => {}} onZoomIn={() => {}} onZoomOut={() => {}} zoom={1} currentImage={IMG_C} />);
+    await new Promise((r) => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(useAppStore.getState().imageDimensions[IMG_C.id]).toEqual({ width: 20, height: 10 });
   });
 });

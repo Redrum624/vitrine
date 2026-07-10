@@ -66,6 +66,26 @@ const MODULE_IDS = new Set(['crop', 'basicadj', 'whitebalance', 'tonecurve', 'en
 const isModuleTool = (tool: string) => MODULE_IDS.has(tool);
 
 /**
+ * Blocks pixel-analysis and print actions while a progressive RAW open's background full
+ * decode is still running (`developing`). During that window `imageService.getCurrentImage()`
+ * returns the camera-graded embedded PREVIEW, not the neutral full-res base — Auto
+ * Levels/Contrast/Color/All, Copy Style and Print all read `.data` directly and would BAKE the
+ * preview's stats into persistent params/fingerprints (or print low-res pixels) that then wrongly
+ * apply once the full decode swaps in (L3 review round 1, important #1/#2).
+ *
+ * Returns true (blocked — caller must no-op) after showing an info notification; false when it's
+ * safe for the caller to proceed. Exported so the gate itself is unit-testable without rendering
+ * the full App component graph (mirrors openFolderFromDialog below).
+ */
+export function guardDeveloping(showInfo: (title: string, message: string) => void, action: string): boolean {
+  if (useAppStore.getState().developing) {
+    showInfo(action, 'Full quality still developing — try again in a moment');
+    return true;
+  }
+  return false;
+}
+
+/**
  * Renders the cached original (pre-edit) image for the Before/After split view.
  *
  * The pane mirrors Canvas.tsx's viewport-canvas geometry (Task R5) so both sides
@@ -78,7 +98,7 @@ const isModuleTool = (tool: string) => MODULE_IDS.has(tool);
  * NOTE: this is deliberately NOT applied to the Reference-mode <img> block —
  * the reference image must remain viewport-independent (no transform).
  */
-function OriginalPane() {
+export function OriginalPane() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -86,11 +106,16 @@ function OriginalPane() {
   // only do the expensive conversion once per image (not on every pan/zoom).
   const offscreenRef = useRef<HTMLCanvasElement | null>(null);
 
-  const { viewport, mainCanvasFit } = useAppStore();
+  const { viewport, mainCanvasFit, baseImageVersion } = useAppStore();
 
-  // Build the offscreen canvas once when this component mounts.
-  // The parent re-keys us (key={currentImage?.id ?? 'none'}) on image switch,
-  // so [] deps are correct — it runs exactly once per image.
+  // Build the offscreen canvas when this component mounts AND whenever the base image is
+  // swapped in place (baseImageVersion bumps on every ImageService.updateCurrentImageData call —
+  // a progressive RAW open's background full-decode swap, or a RAW Decode re-decode). The parent
+  // re-keys us (key={currentImage?.id ?? 'none'}) on image SWITCH, so mount alone would cover a
+  // fresh open, but not a swap on the image that's already showing: without baseImageVersion in
+  // the deps, Before kept showing the graded embedded PREVIEW forever if the split stayed open
+  // across the swap (L3 review round 1, minor #6) — getOriginalImage() only returns the fresh
+  // (neutral, full-res) snapshot once we re-run this effect.
   useEffect(() => {
     const original = imageService.getOriginalImage();
     if (!original) return;
@@ -111,7 +136,7 @@ function OriginalPane() {
     }
     offCtx.putImageData(imgData, 0, 0);
     offscreenRef.current = offscreen;
-  }, []);
+  }, [baseImageVersion]);
 
   // Redraw whenever the viewport (zoom/pan) or mainCanvasFit changes. mainCanvasFit
   // is enough of a trigger by itself: Canvas.redrawCanvas() republishes it as a FRESH
@@ -281,7 +306,7 @@ export function imageFileInfoFromOpenedPath(filePath: string): ImageFileInfo {
 }
 
 function App() {
-  const { setViewport, resetZoom, viewport, processedImageData, setSelectedTool: storeSetSelectedTool, showGrid, showRulers, showOriginal, toggleGrid, toggleRulers, toggleOriginal, referenceMode, referenceImageUrl, referenceImageName, toggleReferenceMode, setReferenceImage, lastProcessingTimeMs, modulesActive, modulesTotal, alignmentAxisX, setAlignmentAxisX, viewMode, selectedImageIds } = useAppStore();
+  const { setViewport, resetZoom, viewport, processedImageData, setSelectedTool: storeSetSelectedTool, showGrid, showRulers, showOriginal, toggleGrid, toggleRulers, toggleOriginal, referenceMode, referenceImageUrl, referenceImageName, toggleReferenceMode, setReferenceImage, lastProcessingTimeMs, modulesActive, modulesTotal, alignmentAxisX, setAlignmentAxisX, viewMode, selectedImageIds, developing } = useAppStore();
   const [selectedTool, setSelectedToolLocal] = useState<string | null>('file-explorer'); // Default to file explorer
 
   // Wrapper to update both local state and store
@@ -377,7 +402,7 @@ function App() {
   const [hasStyleClipboard, setHasStyleClipboard] = useState(false);
   const [isPrintDialogOpen, setIsPrintDialogOpen] = useState(false);
   const [refDragOver, setRefDragOver] = useState(false);
-  const { notifications, remove: removeNotification, success: showSuccess, error: showError } = useNotifications();
+  const { notifications, remove: removeNotification, success: showSuccess, error: showError, info: showInfo } = useNotifications();
 
   // Keep the Undo/Redo enabled-state in sync with the checkpoint timeline. The History panel
   // (CheckpointService) IS the undo/redo history: every edit appends a checkpoint and every
@@ -520,6 +545,7 @@ function App() {
 
   // ─── Auto adjustments ─────────────────────────────────────────────────
   const handleAutoLevels = useCallback(() => {
+    if (guardDeveloping(showInfo, 'Auto Levels')) return;
     const img = imageService.getCurrentImage();
     if (!img) return;
     const stats = autoAdjustService.analyse(img.data, img.width, img.height);
@@ -534,9 +560,10 @@ function App() {
     useAppStore.getState().notifyExternalParamsChange();
     useAppStore.getState().triggerReprocessing();
     showSuccess('Auto Levels', 'Applied via tone curve');
-  }, [showSuccess]);
+  }, [showSuccess, showInfo]);
 
   const handleAutoContrast = useCallback(() => {
+    if (guardDeveloping(showInfo, 'Auto Contrast')) return;
     const img = imageService.getCurrentImage();
     if (!img) return;
     const stats = autoAdjustService.analyse(img.data, img.width, img.height);
@@ -550,9 +577,10 @@ function App() {
     useAppStore.getState().notifyExternalParamsChange();
     useAppStore.getState().triggerReprocessing();
     showSuccess('Auto Contrast', 'Applied via basic adjustments');
-  }, [showSuccess]);
+  }, [showSuccess, showInfo]);
 
   const handleAutoColor = useCallback(() => {
+    if (guardDeveloping(showInfo, 'Auto Color')) return;
     const img = imageService.getCurrentImage();
     if (!img) return;
     const stats = autoAdjustService.analyse(img.data, img.width, img.height);
@@ -573,7 +601,7 @@ function App() {
     useAppStore.getState().notifyExternalParamsChange();
     useAppStore.getState().triggerReprocessing();
     showSuccess('Auto Color', 'Applied via white balance + color balance');
-  }, [showSuccess]);
+  }, [showSuccess, showInfo]);
 
   // ─── Image resize ─────────────────────────────────────────────────────
   const handleImageResize = useCallback((newWidth: number, newHeight: number) => {
@@ -587,6 +615,7 @@ function App() {
 
   // ─── Auto All ──────────────────────────────────────────────────────────
   const handleAutoAll = useCallback(() => {
+    if (guardDeveloping(showInfo, 'Auto All')) return;
     const img = imageService.getCurrentImage();
     if (!img) { showError('Auto All', 'No image loaded'); return; }
 
@@ -654,16 +683,20 @@ function App() {
     useAppStore.getState().triggerReprocessing();
     showSuccess('Auto All', `Applied "${result.bucket}" style profile`);
     logger.info(`Auto All: all modules adjusted from user style profile (bucket=${result.bucket})`);
-  }, [showSuccess, showError]);
+  }, [showSuccess, showError, showInfo]);
 
   // ─── Print ─────────────────────────────────────────────────────────────
   const handlePrint = useCallback(() => {
     if (!imageService.getCurrentImage()) { showError('Print', 'No image loaded'); return; }
+    // A low-res print (rendered from the embedded preview) is a wrong artifact — block until
+    // the background full decode lands (L3 review round 1, important #2).
+    if (guardDeveloping(showInfo, 'Print')) return;
     setIsPrintDialogOpen(true);
-  }, [showError]);
+  }, [showError, showInfo]);
 
   // ─── Style copy / paste ────────────────────────────────────────────────
   const handleCopyStyle = useCallback(() => {
+    if (guardDeveloping(showInfo, 'Copy Style')) return;
     const fp = styleAnalysisService.copyStyle();
     if (fp) {
       setHasStyleClipboard(true);
@@ -671,13 +704,17 @@ function App() {
     } else {
       showError('Copy Style', 'No image loaded to analyse');
     }
-  }, [showSuccess, showError]);
+  }, [showSuccess, showError, showInfo]);
 
   const handlePasteStyle = useCallback(() => {
     if (!styleAnalysisService.hasStyle()) {
       showError('Paste Style', 'No style copied yet');
       return;
     }
+    // pasteStyle() analyses the CURRENT (target) image's pixels — during the developing window
+    // that's the graded preview, and the resulting histogram-match params would wrongly target
+    // it (L3 review round 1, important #1).
+    if (guardDeveloping(showInfo, 'Paste Style')) return;
     useAppStore.getState().setIsProcessing(true); // canvas spinner while applying
     const ok = styleAnalysisService.pasteStyle();
     if (ok) {
@@ -686,7 +723,7 @@ function App() {
       useAppStore.getState().setIsProcessing(false);
       showError('Paste Style', 'No target image loaded');
     }
-  }, [showSuccess, showError]);
+  }, [showSuccess, showError, showInfo]);
 
   // ─── Reference drop handler ────────────────────────────────────────────
   const handleReferenceDrop = useCallback(async (e: React.DragEvent) => {
@@ -1461,6 +1498,7 @@ function App() {
               onActualSize={handleActualSize}
               zoom={viewport.zoom}
               onAutoAll={handleAutoAll}
+              autoAllDeveloping={developing}
               onCopyStyle={handleCopyStyle}
               onPasteStyle={handlePasteStyle}
               hasStyleClipboard={hasStyleClipboard}

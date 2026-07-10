@@ -71,7 +71,7 @@ export function RawDecodePanel({ currentImage }: RawDecodePanelProps) {
   if (!isRaw) return null;
 
   const runReDecode = (options: RawDecodeOptions) => {
-    rawImageService.reDecode(options).catch((err) => {
+    rawImageService.reDecode(options, currentImage?.id).catch((err) => {
       notificationService.error(
         'RAW re-decode failed',
         err instanceof Error ? err.message : String(err),

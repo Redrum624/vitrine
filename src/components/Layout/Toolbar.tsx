@@ -23,6 +23,10 @@ interface ToolbarProps {
   onActualSize?: () => void;
   zoom?: number;
   onAutoAll?: () => void;
+  /** Progressive RAW open: background full decode still running — Auto All would bake the
+   *  graded preview's stats into persistent params. The handler itself gates this (the source
+   *  of truth); disabling the button too is a cheap, optional affordance (L3 review round 1). */
+  autoAllDeveloping?: boolean;
   onCopyStyle?: () => void;
   onPasteStyle?: () => void;
   hasStyleClipboard?: boolean;
@@ -190,7 +194,7 @@ function ToolbarOverflowMenu({ items }: { items: OverflowItem[] }) {
   );
 }
 
-export function Toolbar({ onExport, onPrint, onBatchProcess, onUndo: _onUndo, onRedo: _onRedo, canUndo: _canUndo = false, canRedo: _canRedo = false, onZoomIn, onZoomOut, onFitWindow, onActualSize, zoom = 1, onAutoAll, onCopyStyle, onPasteStyle, hasStyleClipboard = false, hasImage = false, onToggleOriginal, showOriginal = false, onToggleReference, referenceMode = false, onOpenFolder, onExportSelected }: ToolbarProps) {
+export function Toolbar({ onExport, onPrint, onBatchProcess, onUndo: _onUndo, onRedo: _onRedo, canUndo: _canUndo = false, canRedo: _canRedo = false, onZoomIn, onZoomOut, onFitWindow, onActualSize, zoom = 1, onAutoAll, autoAllDeveloping = false, onCopyStyle, onPasteStyle, hasStyleClipboard = false, hasImage = false, onToggleOriginal, showOriginal = false, onToggleReference, referenceMode = false, onOpenFolder, onExportSelected }: ToolbarProps) {
   const { viewMode, setViewMode, selectedImageIds, gallerySortAscending, toggleGallerySortDirection, alignmentAxisX } = useAppStore();
 
   // Responsive collapse + clamp (Develop pill only, G5 review). Two mechanisms
@@ -329,7 +333,7 @@ export function Toolbar({ onExport, onPrint, onBatchProcess, onUndo: _onUndo, on
           at every width. */}
       <button
         onClick={onAutoAll}
-        disabled={!hasImage}
+        disabled={!hasImage || autoAllDeveloping}
         className="glass-pill-primary"
         style={{
           ...pillBtn,
@@ -338,7 +342,7 @@ export function Toolbar({ onExport, onPrint, onBatchProcess, onUndo: _onUndo, on
           color: '#0b0b0c',
           background: 'var(--accent)',
         }}
-        title="Auto-adjust all modules based on image analysis"
+        title={autoAllDeveloping ? 'Full quality still developing — try again in a moment' : 'Auto-adjust all modules based on image analysis'}
       >
         <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
           <path d="M8 2v2M8 12v2M2 8h2M12 8h2M4.2 4.2l1.4 1.4M10.4 10.4l1.4 1.4M4.2 11.8l1.4-1.4M10.4 5.6l1.4-1.4" />
