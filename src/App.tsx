@@ -1287,32 +1287,37 @@ function App() {
             </div>
           </div>
 
-          {/* Floating filename chip — top-left: `name · i of N · zoom%` */}
-          {currentImage && (
-            <div
-              className="glass-chrome no-select"
-              style={{
-                position: 'absolute',
-                left: CHIP_LEFT,
-                top: CHROME_TOP,
-                borderRadius: '12px',
-                padding: '7px 13px',
-                fontSize: '12px',
-                fontWeight: 500,
-                color: 'var(--glass-text-chrome-primary)',
-                zIndex: 30,
-                pointerEvents: 'none',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              {formatFilenameChip({
-                name: currentImage.name,
-                current: fileSystemService.getCurrentImageInfo().current,
-                total: fileSystemService.getCurrentImageInfo().total,
-                zoom: viewport.zoom,
-              })}
-            </div>
-          )}
+          {/* Floating filename chip — top-left: `name · i of N · zoom%`. A single
+              image loaded outside a folder listing (list total 0) clamps to "1 of 1"
+              rather than showing a stale/zero count. */}
+          {currentImage && (() => {
+            const { current, total } = fileSystemService.getCurrentImageInfo();
+            return (
+              <div
+                className="glass-chrome no-select"
+                style={{
+                  position: 'absolute',
+                  left: CHIP_LEFT,
+                  top: CHROME_TOP,
+                  borderRadius: '12px',
+                  padding: '7px 13px',
+                  fontSize: '12px',
+                  fontWeight: 500,
+                  color: 'var(--glass-text-chrome-primary)',
+                  zIndex: 30,
+                  pointerEvents: 'none',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {formatFilenameChip({
+                  name: currentImage.name,
+                  current: total === 0 ? 1 : current,
+                  total: total === 0 ? 1 : total,
+                  zoom: viewport.zoom,
+                })}
+              </div>
+            );
+          })()}
 
           {/* Floating toolbar pill — top, centered on the alignment axis */}
           <div
@@ -1405,31 +1410,34 @@ function App() {
             histogramVisible={histogramVisible}
             onToolSelect={handleToolSelect}
           />
-        </div>
 
-        {/* Bottom Panel - Thumbnail Gallery */}
-        <ThumbnailPanel
-          images={availableImages}
-          selectedImage={currentImage || undefined}
-          onImageSelect={setCurrentImage}
-          onClose={() => setShowThumbnailPanel(false)}
-          visible={showThumbnailPanel}
-          onExportSelected={() => {
-            const ids = useAppStore.getState().selectedImageIds;
-            const paths = ids
-              .map((id) => availableImages.find((img) => img.id === id)?.path)
-              .filter((p): p is string => !!p);
-            if (paths.length >= 2) {
-              setMultiExportPaths(paths);
-              setIsExportDialogOpen(true);
-            }
-          }}
-        />
+          {/* Floating filmstrip dock (positions itself: bottom 24, centered on the
+              alignment axis, hugs content — Glass · Sectioned, Task 6) */}
+          <ThumbnailPanel
+            images={availableImages}
+            selectedImage={currentImage || undefined}
+            onImageSelect={setCurrentImage}
+            onClose={() => setShowThumbnailPanel(false)}
+            visible={showThumbnailPanel}
+            onExportSelected={() => {
+              const ids = useAppStore.getState().selectedImageIds;
+              const paths = ids
+                .map((id) => availableImages.find((img) => img.id === id)?.path)
+                .filter((p): p is string => !!p);
+              if (paths.length >= 2) {
+                setMultiExportPaths(paths);
+                setIsExportDialogOpen(true);
+              }
+            }}
+          />
+        </div>
       </div>
 
       {/* Bottom Status Bar */}
       <StatusBar
         currentImage={currentImage ? {
+          id: currentImage.id,
+          path: currentImage.path,
           name: currentImage.name,
           width: imageService.getCurrentImage()?.width,
           height: imageService.getCurrentImage()?.height,

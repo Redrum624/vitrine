@@ -1,8 +1,11 @@
-import { Image, Cpu, HardDrive, Zap, Activity } from 'lucide-react';
 import { useAppStore } from '../../stores/appStore';
+import { Segmented } from '../Controls/Segmented';
+import { StarRating } from '../common/StarRating';
 
 interface StatusBarProps {
   currentImage?: {
+    id: string;
+    path: string;
     name: string;
     width?: number;
     height?: number;
@@ -16,116 +19,110 @@ interface StatusBarProps {
   };
 }
 
-export function StatusBar({ currentImage, processingStats }: StatusBarProps) {
-  const { viewport: _viewport } = useAppStore();
+/** Rating-filter segmented control values: '0' = All, '1'-'5' = >= N stars. */
+type RatingFilterValue = '0' | '1' | '2' | '3' | '4' | '5';
 
-  // Format file size
-  const formatFileSize = (bytes: number): string => {
-    if (bytes === 0) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
-  };
+const RATING_FILTER_OPTIONS: { value: RatingFilterValue; label: string }[] = [
+  { value: '0', label: 'All' },
+  { value: '1', label: '≥1★' },
+  { value: '2', label: '≥2★' },
+  { value: '3', label: '≥3★' },
+  { value: '4', label: '≥4★' },
+  { value: '5', label: '≥5★' },
+];
 
-  // Format dimensions
-  const formatDimensions = (width?: number, height?: number): string => {
-    if (!width || !height) return 'No image';
-    const megapixels = ((width * height) / 1000000).toFixed(1);
-    return `${width} × ${height} (${megapixels} MP)`;
-  };
+/** Footer stars use a darker gold than the shared default (`#facc15`) per the
+ * Glass · Sectioned design tokens ("Stars `#eab308`"). */
+const FOOTER_STAR_COLOR = '#eab308';
 
-  // Get memory usage (if available)
-  const getMemoryInfo = (): string => {
-    if ('memory' in performance) {
-      const memory = (performance as PerformanceWithMemory).memory;
-      if (memory) {
-        const used = memory.usedJSHeapSize / 1024 / 1024;
-        return `${used.toFixed(1)} MB`;
-      }
-    }
-    return '';
-  };
+// Format file size
+const formatFileSize = (bytes: number): string => {
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+};
 
-  interface PerformanceWithMemory {
-    memory?: {
-      usedJSHeapSize: number;
-      totalJSHeapSize: number;
-      jsHeapSizeLimit: number;
-    };
+/** Composes the footer's left file-info line: `name · W × H · MP · FMT · size`. */
+export function formatStatusBarFileInfo(currentImage: StatusBarProps['currentImage']): string {
+  if (!currentImage) return 'No image loaded';
+  const { name, width, height, type, size } = currentImage;
+  const parts = [name];
+  if (width && height) {
+    parts.push(`${width} × ${height}`);
+    parts.push(`${((width * height) / 1000000).toFixed(1)} MP`);
   }
+  if (type) parts.push(type.toUpperCase());
+  if (size) parts.push(formatFileSize(size));
+  return parts.join(' · ');
+}
+
+interface PerformanceWithMemory {
+  memory?: {
+    usedJSHeapSize: number;
+    totalJSHeapSize: number;
+    jsHeapSizeLimit: number;
+  };
+}
+
+// Get memory usage (if available)
+const getMemoryInfo = (): string => {
+  if ('memory' in performance) {
+    const memory = (performance as PerformanceWithMemory).memory;
+    if (memory) {
+      const used = memory.usedJSHeapSize / 1024 / 1024;
+      return `${used.toFixed(1)} MB`;
+    }
+  }
+  return '';
+};
+
+export function StatusBar({ currentImage, processingStats }: StatusBarProps) {
+  const { imageRatings, setImageRating, ratingFilter, setRatingFilter } = useAppStore();
+  const memoryInfo = getMemoryInfo();
+  const currentRating = currentImage ? (imageRatings[currentImage.id] ?? 0) : 0;
 
   return (
-    <div className="h-6 border-t flex items-center justify-between px-4 text-xs no-select" style={{backgroundColor: 'var(--gray-850)', borderTopColor: 'var(--border)', color: 'var(--gray-400)'}}>
-      {/* Left side - Image info */}
-      <div className="flex items-center space-x-4">
-        <div className="flex items-center space-x-1">
-          <Image className="w-3 h-3" />
-          <span>
-            {currentImage ? currentImage.name : 'No image loaded'}
-          </span>
-        </div>
+    <div
+      className="relative flex items-center justify-between px-4 text-xs no-select"
+      style={{ height: '32px', borderTop: '1px solid var(--border)', backgroundColor: 'var(--gray-850)', color: 'var(--gray-400)' }}
+    >
+      {/* Left — file info */}
+      <div className="flex items-center">
+        <span>{formatStatusBarFileInfo(currentImage)}</span>
+      </div>
 
+      {/* Center (window-centered) — rating filter segmented + current photo's rating */}
+      <div className="absolute flex items-center gap-3" style={{ left: '50%', top: '50%', transform: 'translate(-50%, -50%)' }}>
+        <Segmented<RatingFilterValue>
+          options={RATING_FILTER_OPTIONS}
+          value={String(ratingFilter ?? 0) as RatingFilterValue}
+          onChange={(v) => setRatingFilter(Number(v))}
+        />
         {currentImage && (
-          <>
-            <div className="w-px h-3" style={{backgroundColor: 'var(--border-light)'}} />
-            <span>{formatDimensions(currentImage.width, currentImage.height)}</span>
-
-            {currentImage.size && (
-              <>
-                <div className="w-px h-3" style={{backgroundColor: 'var(--border-light)'}} />
-                <div className="flex items-center space-x-1">
-                  <HardDrive className="w-3 h-3" />
-                  <span>{formatFileSize(currentImage.size)}</span>
-                </div>
-              </>
-            )}
-
-            {currentImage.type && (
-              <>
-                <div className="w-px h-3" style={{backgroundColor: 'var(--border-light)'}} />
-                <span className="uppercase">{currentImage.type}</span>
-              </>
-            )}
-          </>
-        )}
-
-        {/* Processing stats */}
-        {processingStats && (
-          <>
-            <div className="w-px h-3" style={{backgroundColor: 'var(--border-light)'}} />
-            <div className="flex items-center space-x-1">
-              <Cpu className="w-3 h-3" />
-              <span>{processingStats.modulesActive}/{processingStats.totalModules} modules</span>
-            </div>
-
-            {processingStats.processingTime > 0 && (
-              <>
-                <div className="w-px h-3" style={{backgroundColor: 'var(--border-light)'}} />
-                <div className="flex items-center space-x-1">
-                  <Zap className="w-3 h-3" />
-                  <span>{processingStats.processingTime.toFixed(1)}ms</span>
-                </div>
-              </>
-            )}
-          </>
+          <StarRating
+            size={13}
+            color={FOOTER_STAR_COLOR}
+            rating={currentRating}
+            onRate={(r) => {
+              setImageRating(currentImage.id, r);
+              // Persist to the file (xmp:Rating) so it shows in OS file details.
+              window.electronAPI?.writeImageRating?.(currentImage.path, r);
+            }}
+          />
         )}
       </div>
 
-      {/* Right side - System info */}
-      <div className="flex items-center space-x-4">
-
-        {/* Memory usage */}
-        {getMemoryInfo() && (
-          <>
-            <div className="flex items-center space-x-1">
-              <Activity className="w-3 h-3" />
-              <span>{getMemoryInfo()}</span>
-            </div>
-            <div className="w-px h-3" style={{backgroundColor: 'var(--border-light)'}} />
-          </>
+      {/* Right — processing stats (accent) then memory */}
+      <div className="flex items-center space-x-3">
+        {processingStats && (
+          <span style={{ color: 'var(--accent)' }}>
+            {processingStats.modulesActive}/{processingStats.totalModules} modules
+            {processingStats.processingTime > 0 ? ` · ${processingStats.processingTime.toFixed(1)} ms` : ''}
+          </span>
         )}
-
+        {memoryInfo && <span>{memoryInfo}</span>}
       </div>
     </div>
   );

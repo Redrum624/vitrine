@@ -34,6 +34,8 @@ function setup(over: Partial<Record<string, unknown>> = {}) {
     selectionAnchorId: null,
     setSelection,
     toggleImageSelection,
+    ratingFilter: 0,
+    alignmentAxisX: null,
     ...over,
   });
   const onImageSelect = jest.fn();

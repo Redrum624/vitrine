@@ -410,3 +410,19 @@ body {
   background: rgba(255, 255, 255, 0.05);
   color: var(--glass-text-chrome-primary);
 }
+
+/* ---------------------------------------------------------------------- */
+/* Filmstrip dock (Task 6): thumbnail hover lift + border brighten.        */
+/* Selected (.is-current) and multi-selected (.is-in-selection) thumbs     */
+/* keep their accent treatment on hover — only the plain/idle thumbs       */
+/* brighten their border, per spec.                                       */
+/* ---------------------------------------------------------------------- */
+.glass-dock-thumb {
+  transition: transform 180ms ease, border-color 180ms ease;
+}
+.glass-dock-thumb:hover {
+  transform: translateY(-3px);
+}
+.glass-dock-thumb:hover:not(.is-current):not(.is-in-selection) {
+  border-color: rgba(255, 255, 255, 0.25);
+}

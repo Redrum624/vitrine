@@ -1,7 +1,6 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { useAppStore } from '../../stores/appStore';
-import { fileSystemService, ImageFileInfo } from '../../services/FileSystemService';
+import { ImageFileInfo } from '../../services/FileSystemService';
 import { imageService } from '../../services/ImageService';
 import { logger } from '../../utils/Logger';
 import { CropTransformOverlay } from '../Canvas/CropTransformOverlay';
@@ -13,7 +12,6 @@ import { CropPipelineModule } from '../../modules/CropPipelineModule';
 import { LocalAdjustmentsPipelineModule } from '../../modules/LocalAdjustmentsPipelineModule';
 import { LocalAdjustmentMaskOverlay } from '../Canvas/LocalAdjustmentMaskOverlay';
 import { notificationService } from '../../services/NotificationService';
-import { StarRating } from '../common/StarRating';
 import { gpuPreviewPipeline } from '../../shaders/GpuPreviewPipeline';
 import { DEFAULT_RAW_DECODE_OPTIONS } from '../../types/electron';
 import { PHOTO_SHADOW } from '../../layout/photoRegion';
@@ -40,7 +38,7 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
   const glCanvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasWrapperRef = useRef<HTMLDivElement>(null);
-  const { viewport, setViewport, processedImageData, isAdjustingRotation, selectedTool, triggerReprocessing, showGrid, showRulers, showOriginal, referenceMode, isProcessing, imageRatings, setImageRating, renderMode, gpuResultVersion, setRenderMode } = useAppStore();
+  const { viewport, setViewport, processedImageData, isAdjustingRotation, selectedTool, triggerReprocessing, showGrid, showRulers, showOriginal, isProcessing, renderMode, gpuResultVersion, setRenderMode } = useAppStore();
   // Whether attach() succeeded on this canvas (WebGL2 present available). When false the
   // app behaves exactly as before: GL canvas stays hidden and renderMode is forced 'cpu'.
   // Kept as React state (not just a ref) so JSX visibility re-renders when it changes.
@@ -741,17 +739,6 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
   }, [processedImageData, displayImage, renderMode, gpuResultVersion]);
 
 
-  const navigateImage = async (direction: 'next' | 'prev') => {
-    const newImage = direction === 'next'
-      ? fileSystemService.nextImage()
-      : fileSystemService.previousImage();
-
-    if (newImage) {
-      await loadImage(newImage);
-    }
-  };
-
-
   // Redraw the 2D canvas when viewport (pan/zoom) changes. In GPU mode the present()
   // effect above already handles viewport changes, so the 2D blit is a no-op; skip it
   // explicitly to avoid a spurious drawLoadedImageOptimized call on every pan event.
@@ -1230,47 +1217,14 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
           </div>
         )}
 
-        {/* Image Navigation Arrows (hidden in Before/After + Reference comparison) */}
-        {displayImage && !showOriginal && !referenceMode && (
-          <>
-            <button
-              onClick={() => navigateImage('prev')}
-              className="absolute left-4 top-1/2 transform -translate-y-1/2 p-2 bg-dark-800/80 hover:bg-dark-700/90 rounded-full text-dark-300 transition-professional backdrop-blur-sm"
-              disabled={imageLoading}
-            >
-              <ChevronLeft className="w-6 h-6" />
-            </button>
-            <button
-              onClick={() => navigateImage('next')}
-              className="absolute right-4 top-1/2 transform -translate-y-1/2 p-2 bg-dark-800/80 hover:bg-dark-700/90 rounded-full text-dark-300 transition-professional backdrop-blur-sm"
-              disabled={imageLoading}
-            >
-              <ChevronRight className="w-6 h-6" />
-            </button>
-          </>
-        )}
+        {/* Image Navigation Arrows re-homed to the floating filmstrip dock's chevrons
+            (Glass · Sectioned, Task 6) — ThumbnailPanel's handlePrevious/handleNext. */}
 
         {/* Image Info Overlay re-homed to the floating filename chip in App.tsx
             (Glass · Sectioned, Task 5): `name · i of N · zoom%` top-left. */}
 
-        {/* Star Rating Overlay (bottom-right) */}
-        {displayImage && (
-          <div
-            className="absolute bottom-4 right-4 flex items-center bg-dark-850/90 backdrop-blur-sm rounded-professional px-3 py-2"
-            title="Rate this photo — press 1-5 (0 to clear)"
-          >
-            <StarRating
-              size={24}
-              gap={6}
-              rating={imageRatings[displayImage.id] ?? 0}
-              onRate={(r) => {
-                setImageRating(displayImage.id, r);
-                // Persist to the file (xmp:Rating) so it shows in OS file details.
-                window.electronAPI?.writeImageRating?.(displayImage.path, r);
-              }}
-            />
-          </div>
-        )}
+        {/* Star Rating Overlay re-homed to the footer's rating cluster (Glass ·
+            Sectioned, Task 6) — StatusBar.tsx shows the current photo's rating. */}
 
         {/* Loading / Applying Indicator */}
         {(imageLoading || isProcessing) && (

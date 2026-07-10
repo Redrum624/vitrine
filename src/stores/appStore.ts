@@ -89,6 +89,10 @@ interface AppStore extends AppState {
   // Star ratings (1-5, 0 = unrated)
   imageRatings: Record<string, number>;
   setImageRating: (imageId: string, rating: number) => void;
+  // Shared rating filter (0 = All, 1-5 = show only images rated >= N). Consumed by
+  // the footer's segmented control, the filmstrip dock, and (Task 7) the gallery grid.
+  ratingFilter: number;
+  setRatingFilter: (n: number) => void;
   // Multi-image selection
   selectedImageIds: string[];
   selectionAnchorId: string | null;
@@ -137,6 +141,7 @@ export const useAppStore = create<AppStore>((set) => ({
   referenceImageUrl: null,
   referenceImageName: null,
   imageRatings: {},
+  ratingFilter: 0,
   selectedImageIds: [],
   selectionAnchorId: null,
   exportProgress: null,
@@ -213,6 +218,8 @@ export const useAppStore = create<AppStore>((set) => ({
   setImageRating: (imageId, rating) => set((state) => ({
     imageRatings: { ...state.imageRatings, [imageId]: rating }
   })),
+
+  setRatingFilter: (n) => set({ ratingFilter: n }),
 
   setSelection: (ids, anchorId) => set(() => ({
     selectedImageIds: ids,

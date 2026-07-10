@@ -6,6 +6,8 @@ interface ChipButtonProps {
   active?: boolean;
   /** Dashed-border variant (e.g. the dock's Gallery chip); solid on hover/active. */
   dashed?: boolean;
+  /** Corner radius override in px (default 9 — the standard chip radius). */
+  radius?: number;
   onClick?: () => void;
   disabled?: boolean;
   className?: string;
@@ -24,6 +26,7 @@ export function ChipButton({
   children,
   active = false,
   dashed = false,
+  radius = 9,
   onClick,
   disabled = false,
   className = '',
@@ -52,7 +55,7 @@ export function ChipButton({
       onMouseUp={() => setPressed(false)}
       style={{
         padding: '7px 11px',
-        borderRadius: 9,
+        borderRadius: radius,
         fontSize: 11.5,
         borderWidth: 1,
         borderStyle: dashed && !highlighted ? 'dashed' : 'solid',

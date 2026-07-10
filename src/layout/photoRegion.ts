@@ -30,6 +30,15 @@ export const RIGHT_COLUMN_BOTTOM = 24; // clearance above the dock so the module
 export const RAIL_OFFSET = 20; // distance from the workspace right edge
 
 /**
+ * Floating filmstrip dock (Task 6): bottom offset, hugs content, centered on the
+ * alignment axis. Thumbs are 88px tall; with the dock's 10px vertical padding
+ * (10 + 88 + 10 = 108) and this 24px bottom offset, the dock's top edge sits at
+ * 132px from the workspace bottom — 18px inside PHOTO_INSET_BOTTOM (150), which
+ * is the spec's minimum photo clearance.
+ */
+export const DOCK_BOTTOM = 24;
+
+/**
  * Photo-region insets (workspace-relative). The right inset must fully CLEAR the
  * floating right column so nothing ever overlaps the photo (spec §3's hard rule):
  * column offset (88) + column width (392) + an 8px clearance = 488. (The spec's

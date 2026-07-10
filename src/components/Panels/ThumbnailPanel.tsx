@@ -1,9 +1,11 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Download } from 'lucide-react';
-import { StarRating } from '../common/StarRating';
+import type { CSSProperties } from 'react';
+import { ChevronLeft, ChevronRight, Download, LayoutGrid } from 'lucide-react';
 import { ImageFileInfo } from '../../services/FileSystemService';
 import { useAppStore } from '../../stores/appStore';
 import { logger } from '../../utils/Logger';
+import { ChipButton } from '../Controls/ChipButton';
+import { DOCK_BOTTOM } from '../../layout/photoRegion';
 
 interface ThumbnailPanelProps {
   images: ImageFileInfo[];
@@ -38,17 +40,19 @@ export function evictOldestThumbnails(map: Map<string, string>, max = MAX_THUMBN
 }
 
 /**
- * Selection frame for a filmstrip thumbnail — ONE visual language (blue intensity
- * hierarchy). The current canvas image gets the strongest treatment (solid blue
- * border + subtle glow); other multi-selected images a dimmed blue border; the
- * rest a transparent border of the SAME width so thumbnails never shift size.
+ * Selection frame for a dock thumbnail — ONE visual language (blue intensity
+ * hierarchy). The current canvas image gets the strongest treatment (2px accent
+ * outline + an 18px accent glow, per the Glass · Sectioned dock spec); other
+ * multi-selected images a dimmed blue border; the rest a faint
+ * rgba(255,255,255,.09) border — all the SAME width so thumbnails never shift
+ * size (their width already differs by selection state; see ThumbnailPanel).
  */
 export function getThumbFrameStyle(isCurrent: boolean, inSelection: boolean): React.CSSProperties {
   if (isCurrent) {
     return {
       borderWidth: '2px',
       borderColor: '#3b82f6',
-      boxShadow: '0 0 0 1px rgba(59, 130, 246, 0.35)',
+      boxShadow: '0 0 18px rgba(59, 130, 246, 0.45)',
     };
   }
   if (inSelection) {
@@ -60,10 +64,32 @@ export function getThumbFrameStyle(isCurrent: boolean, inSelection: boolean): Re
   }
   return {
     borderWidth: '2px',
-    borderColor: 'transparent',
+    borderColor: 'rgba(255, 255, 255, 0.09)',
     boxShadow: 'none',
   };
 }
+
+/** Dock thumbnail dimensions (spec §3): the current/selected thumb is a narrow
+ * 66×88 tile; every other thumb is a wider ~114×88 tile. Height is constant. */
+const DOCK_THUMB_HEIGHT = 88;
+const DOCK_THUMB_WIDTH_CURRENT = 66;
+const DOCK_THUMB_WIDTH_OTHER = 114;
+
+// Base layout for the dock's chevron buttons — interactive :hover/:disabled states
+// come from .glass-pill-btn in index.css (same idiom as Toolbar.tsx / IconSidebar.tsx).
+const chevronBtn: CSSProperties = {
+  width: '30px',
+  height: '30px',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  borderRadius: '9px',
+  border: '1px solid transparent',
+  background: 'transparent',
+  color: 'var(--glass-text-chrome-idle)',
+  cursor: 'pointer',
+  flexShrink: 0,
+};
 
 export function ThumbnailPanel({
   images,
@@ -84,11 +110,21 @@ export function ThumbnailPanel({
   // Image ids whose on-disk rating we've already fetched, so we read each file's
   // xmp:Rating at most once even as scroll re-requests the same visible thumbnails.
   const ratingsFetchedRef = useRef<Set<string>>(new Set());
-  const [ratingFilter, setRatingFilter] = useState<number>(0); // 0 = show all
-  const [collapsed, setCollapsed] = useState(false); // filmstrip hidden/shown via the arrow toggle
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const selectedImageRef = useRef<HTMLDivElement>(null);
-  const { imageRatings, setImageRating, selectedImageIds, selectionAnchorId, setSelection, toggleImageSelection } = useAppStore();
+  const {
+    imageRatings,
+    selectedImageIds,
+    selectionAnchorId,
+    setSelection,
+    toggleImageSelection,
+    ratingFilter: ratingFilterRaw,
+    alignmentAxisX,
+  } = useAppStore();
+  // The rating filter now lives in the store (shared with the footer's segmented
+  // control and, in Task 7, the gallery grid) — default to "All" if a mock/store
+  // snapshot doesn't carry it yet.
+  const ratingFilter = ratingFilterRaw ?? 0;
   const selectedSet = new Set(selectedImageIds ?? []);
   const selectedCount = selectedImageIds?.length ?? 0;
 
@@ -345,160 +381,66 @@ export function ThumbnailPanel({
   const canGoNext = currentIndex < filteredImages.length - 1;
 
   return (
-    <div className="border-t flex flex-col" style={{backgroundColor: 'var(--gray-900)', borderTopColor: 'var(--border)', height: collapsed ? 'auto' : '140px'}}>
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-1 border-b" style={{borderBottomColor: 'var(--border)'}}>
-        <div className="flex items-center gap-4">
-          <h3 className="text-xs font-semibold uppercase tracking-wider" style={{color: 'var(--gray-500)'}}>
-            {filteredImages.length}{ratingFilter > 0 ? ` / ${images.length}` : ''} image{filteredImages.length !== 1 ? 's' : ''}
-          </h3>
-          {selectedImage && currentIndex >= 0 && (
-            <span className="text-xs font-mono" style={{color: 'var(--gray-400)'}}>
-              {currentIndex + 1} / {filteredImages.length}
-            </span>
-          )}
-          {/* Rating filter */}
-          <div className="flex items-center gap-0.5 ml-1">
-            {[0, 1, 2, 3, 4, 5].map((min) => (
-              <button
-                key={min}
-                onClick={() => setRatingFilter(min)}
-                className="px-1.5 py-0.5 text-xs rounded transition-colors"
-                style={{
-                  backgroundColor: ratingFilter === min ? 'var(--gray-700)' : 'transparent',
-                  color: ratingFilter === min ? 'var(--white)' : 'var(--gray-500)',
-                }}
-              >
-                {min === 0 ? 'All' : `≥${min}★`}
-              </button>
-            ))}
-          </div>
-          {/* Multi-export action — shown only when 2+ images are selected */}
-          {selectedCount >= 2 && (
-            <button
-              onClick={() => onExportSelected?.()}
-              className="flex items-center gap-1 px-2 py-0.5 text-xs rounded font-medium transition-colors"
-              style={{ backgroundColor: '#2563eb', color: 'white' }}
-              title="Export the selected images with the same settings"
-            >
-              <Download className="w-3 h-3" />
-              Export {selectedCount}
-            </button>
-          )}
-        </div>
+    <div
+      className="glass-chrome absolute flex items-center no-select"
+      style={{
+        bottom: DOCK_BOTTOM,
+        left: alignmentAxisX ?? '50%',
+        transform: 'translateX(-50%)',
+        borderRadius: 'var(--radius-dock)',
+        padding: '10px 14px',
+        gap: '10px',
+        zIndex: 30,
+        maxWidth: 'calc(100% - 48px)',
+      }}
+    >
+      {/* Chevron: previous image */}
+      <button
+        onClick={handlePrevious}
+        disabled={!canGoPrevious}
+        className="glass-pill-btn"
+        style={chevronBtn}
+        title="Previous image (←)"
+      >
+        <ChevronLeft className="w-4 h-4" />
+      </button>
 
-        <div className="flex items-center gap-2">
-          {/* Navigation Controls */}
-          <button
-            onClick={handlePrevious}
-            disabled={!canGoPrevious}
-            className="p-1.5 rounded border transition-all disabled:opacity-30 disabled:cursor-not-allowed"
-            style={{
-              backgroundColor: 'transparent',
-              borderColor: 'var(--border)',
-              color: 'var(--gray-400)',
-              cursor: canGoPrevious ? 'pointer' : 'not-allowed'
-            }}
-            onMouseEnter={(e) => {
-              if (canGoPrevious) {
-                e.currentTarget.style.backgroundColor = 'var(--gray-800)';
-                e.currentTarget.style.color = 'var(--white)';
-                e.currentTarget.style.cursor = 'pointer';
-              }
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = 'transparent';
-              e.currentTarget.style.color = 'var(--gray-400)';
-              e.currentTarget.style.cursor = canGoPrevious ? 'pointer' : 'not-allowed';
-            }}
-            title="Previous image (←)"
-          >
-            <ChevronLeft className="w-3.5 h-3.5" />
-          </button>
-
-          <button
-            onClick={handleNext}
-            disabled={!canGoNext}
-            className="p-1.5 rounded border transition-all disabled:opacity-30 disabled:cursor-not-allowed"
-            style={{
-              backgroundColor: 'transparent',
-              borderColor: 'var(--border)',
-              color: 'var(--gray-400)',
-              cursor: canGoNext ? 'pointer' : 'not-allowed'
-            }}
-            onMouseEnter={(e) => {
-              if (canGoNext) {
-                e.currentTarget.style.backgroundColor = 'var(--gray-800)';
-                e.currentTarget.style.color = 'var(--white)';
-                e.currentTarget.style.cursor = 'pointer';
-              }
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = 'transparent';
-              e.currentTarget.style.color = 'var(--gray-400)';
-              e.currentTarget.style.cursor = canGoNext ? 'pointer' : 'not-allowed';
-            }}
-            title="Next image (→)"
-          >
-            <ChevronRight className="w-3.5 h-3.5" />
-          </button>
-
-          <div style={{width: '1px', height: '20px', backgroundColor: 'var(--border)', margin: '0 4px'}} />
-
-          <button
-            onClick={() => setCollapsed(c => !c)}
-            className="p-1.5 rounded border transition-all"
-            style={{
-              backgroundColor: 'transparent',
-              borderColor: 'var(--border)',
-              color: 'var(--gray-400)',
-              cursor: 'pointer'
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = 'var(--gray-800)';
-              e.currentTarget.style.color = 'var(--white)';
-              e.currentTarget.style.cursor = 'pointer';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = 'transparent';
-              e.currentTarget.style.color = 'var(--gray-400)';
-              e.currentTarget.style.cursor = 'pointer';
-            }}
-            title={collapsed ? 'Show thumbnails' : 'Hide thumbnails'}
-          >
-            {collapsed ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-          </button>
-        </div>
-      </div>
-
-      {/* Thumbnail Strip */}
+      {/* Thumbnail strip — horizontal scroll, thumbs centered on the axis via the
+          dock's own centering (this inner strip just hugs its content). */}
       <div
         ref={scrollContainerRef}
-        className="flex-1 overflow-x-auto overflow-y-hidden px-4 py-2"
+        className="flex overflow-x-auto overflow-y-hidden"
         onScroll={handleScroll}
         style={{
           scrollbarWidth: 'thin',
           scrollbarColor: 'var(--gray-700) transparent',
-          display: collapsed ? 'none' : undefined
+          maxWidth: '640px',
         }}
       >
-        <div className="flex gap-2 h-full">
+        <div className="flex" style={{ gap: '8px' }}>
           {filteredImages.map((image) => {
             const isSelected = selectedImage?.id === image.id;
             const inSelection = selectedSet.has(image.id);
             const thumbnail = thumbnails.get(image.id);
             const isLoading = loadingThumbnails.has(image.id);
-            const rating = imageRatings[image.id] || 0;
+            const frameClass = [
+              'glass-dock-thumb',
+              isSelected ? 'is-current' : '',
+              !isSelected && inSelection ? 'is-in-selection' : '',
+            ].filter(Boolean).join(' ');
 
             return (
               <div
                 key={image.id}
                 ref={isSelected ? selectedImageRef : undefined}
                 data-image-id={image.id}
-                className="relative flex-shrink-0 rounded border cursor-pointer transition-all h-full"
+                className={`relative flex-shrink-0 rounded cursor-pointer ${frameClass}`}
                 style={{
-                  width: 'auto',
+                  width: isSelected ? DOCK_THUMB_WIDTH_CURRENT : DOCK_THUMB_WIDTH_OTHER,
+                  height: DOCK_THUMB_HEIGHT,
+                  borderRadius: '10px',
                   backgroundColor: 'var(--gray-800)',
+                  borderStyle: 'solid',
                   ...getThumbFrameStyle(isSelected, inSelection)
                 }}
                 draggable
@@ -509,16 +451,6 @@ export function ThumbnailPanel({
                   e.dataTransfer.effectAllowed = 'copy';
                 }}
                 onClick={(e) => handleThumbnailClick(image, e)}
-                onMouseEnter={(e) => {
-                  if (!isSelected && !inSelection) {
-                    e.currentTarget.style.borderColor = 'var(--border-light)';
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  if (!isSelected && !inSelection) {
-                    e.currentTarget.style.borderColor = 'transparent';
-                  }
-                }}
                 title={`${image.name} (${image.format})`}
               >
                 {isLoading ? (
@@ -529,8 +461,8 @@ export function ThumbnailPanel({
                   <img
                     src={thumbnail}
                     alt={image.name}
-                    className="h-full object-contain rounded"
-                    style={{ width: 'auto', maxWidth: '200px' }}
+                    className="w-full h-full object-cover rounded"
+                    style={{ borderRadius: '9px' }}
                     draggable={false}
                   />
                 ) : (
@@ -558,27 +490,70 @@ export function ThumbnailPanel({
                     RAW
                   </div>
                 )}
-
-                {/* Star rating overlay */}
-                <div
-                  className="absolute bottom-0 left-0 right-0 flex justify-center py-0.5"
-                  style={{ backgroundColor: 'rgba(0,0,0,0.45)' }}
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <StarRating
-                    size={10}
-                    rating={rating}
-                    onRate={(newRating) => {
-                      setImageRating(image.id, newRating);
-                      // Persist to the file (xmp:Rating) so it shows in OS file details.
-                      window.electronAPI?.writeImageRating?.(image.path, newRating);
-                    }}
-                  />
-                </div>
               </div>
             );
           })}
         </div>
+      </div>
+
+      {/* Chevron: next image */}
+      <button
+        onClick={handleNext}
+        disabled={!canGoNext}
+        className="glass-pill-btn"
+        style={chevronBtn}
+        title="Next image (→)"
+      >
+        <ChevronRight className="w-4 h-4" />
+      </button>
+
+      {/* Multi-export action — shown only when 2+ images are selected */}
+      {selectedCount >= 2 && (
+        <button
+          onClick={() => onExportSelected?.()}
+          className="flex items-center gap-1 whitespace-nowrap"
+          style={{
+            padding: '7px 11px',
+            borderRadius: 9,
+            fontSize: 11.5,
+            fontWeight: 600,
+            background: 'var(--accent)',
+            color: '#0b0b0c',
+            border: '1px solid transparent',
+            cursor: 'pointer',
+            flexShrink: 0,
+          }}
+          title="Export the selected images with the same settings"
+        >
+          <Download className="w-3 h-3" />
+          Export {selectedCount}
+        </button>
+      )}
+
+      <div style={{ width: '1px', height: `${DOCK_THUMB_HEIGHT - 12}px`, background: 'var(--glass-border)', flexShrink: 0 }} />
+
+      {/* Gallery button (stub — Task 7 wires up viewMode) stacked above the "i / N" count. */}
+      <div className="flex flex-col items-stretch" style={{ gap: '6px' }}>
+        <ChipButton dashed radius={10} onClick={() => { /* Task 7: switch viewMode to 'gallery' */ }} title="Open the gallery grid">
+          <LayoutGrid className="w-3.5 h-3.5" style={{ marginRight: 6 }} />
+          Gallery
+        </ChipButton>
+        {selectedImage && currentIndex >= 0 && (
+          <div
+            className="text-center"
+            style={{
+              fontFamily: 'ui-monospace, monospace',
+              fontSize: 11,
+              padding: '5px 10px',
+              borderRadius: 6,
+              background: 'rgba(255,255,255,.04)',
+              border: '1px solid rgba(255,255,255,.1)',
+              color: 'var(--glass-text-secondary)',
+            }}
+          >
+            {currentIndex + 1} / {filteredImages.length}
+          </div>
+        )}
       </div>
     </div>
   );
