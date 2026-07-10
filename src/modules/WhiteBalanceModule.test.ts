@@ -296,7 +296,7 @@ describe('WhiteBalanceModule', () => {
       const solvedTint = solveTintAt(solvedTemperature, mR, mG, mB);
       // No-cast dead-band mirror: tiny solved corrections snap to exactly 6500/0.
       const tempRatio = Math.max(solvedTemperature, 6500) / Math.min(solvedTemperature, 6500);
-      const noCast = tempRatio <= 1.08 && Math.abs(solvedTint) < 10;
+      const noCast = tempRatio <= 1.08 && Math.abs(solvedTint) < 30;
       return {
         solvedTemperature,
         solvedTint,
@@ -418,6 +418,40 @@ describe('WhiteBalanceModule', () => {
       const out = module.process(input, ctx);
       expect(out[0]).toBeCloseTo(0.6, 5);
       expect(out[2]).toBeCloseTo(0.62, 5);
+    });
+
+    it('snaps a RAW-measured near-gray magenta bias to 6500/0 (widened tint dead-band)', () => {
+      const w = 24, h = 24;
+      const ctx = { width: w, height: h, channels: 4 };
+      // Live-measured medians from an ORF (LibRaw sRGB output) that is already
+      // camera-correct: LibRaw's slight near-gray magenta bias solves a tint
+      // around +27, which used to escape the old ±10 dead-band and apply a
+      // token 6452K/+19.3 nudge instead of reporting "no cast".
+      const input = fill(w, h, 0.61, 0.575, 0.606);
+      const exp = expected(0.61, 0.575, 0.606);
+      expect(exp.solvedTint).toBeGreaterThan(10);   // outside the OLD ±10 bound…
+      expect(exp.solvedTint).toBeLessThan(30);      // …but inside the NEW ±30 bound
+      expect(exp.noCast).toBe(true);                // fixture sanity: in-band under the fix
+      module.autoDetectWhiteBalance(input, ctx);
+      expect(module.getParams().temperature).toBe(6500);
+      expect(module.getParams().tint).toBe(0);
+      expect(module.getParams().auto).toBe(true);
+      // Applying the result is an exact identity.
+      const out = module.process(input, ctx);
+      expect(out[0]).toBeCloseTo(0.61, 5);
+      expect(out[1]).toBeCloseTo(0.575, 5);
+      expect(out[2]).toBeCloseTo(0.606, 5);
+    });
+
+    it('still corrects a real green cast beyond the widened tint dead-band', () => {
+      const w = 24, h = 24;
+      const ctx = { width: w, height: h, channels: 4 };
+      const input = fill(w, h, 0.5, 0.6, 0.5); // green cast, solves tint ≈ -91
+      const exp = expected(0.5, 0.6, 0.5);
+      expect(Math.abs(exp.solvedTint)).toBeGreaterThan(30); // far outside the dead-band
+      module.autoDetectWhiteBalance(input, ctx);
+      expect(module.getParams().tint).toBeLessThan(0);
+      expect(module.getParams().tint).not.toBe(0);
     });
 
     it('uses the median — blown-out highlights do not drag the estimate toward neutral', () => {

@@ -69,9 +69,16 @@ const AUTO_WB_STRENGTH = 0.7;
  * exactly 6500K / 0 instead of a token nudge. A near-balanced image (e.g. camera
  * WB already correct) must read as "no cast detected", not drift a few percent
  * warmer or cooler on estimator noise.
+ *
+ * The tint bound is widened to 30 (was 10) to cover LibRaw's slight near-gray
+ * magenta bias on RAW sRGB output: a genuinely camera-correct RAW file measures
+ * a solved tint around +27 (medians ~R0.61/G0.575/B0.606), which used to escape
+ * the dead-band and apply a token 6452K/+19.3 nudge instead of a no-op. Real
+ * casts (e.g. a green-cast scene solving ≈ -91) are far outside this bound and
+ * still correct normally.
  */
 const AUTO_WB_DEADBAND_TEMP_RATIO = 1.08; // solved temp within 6500/1.08..6500*1.08
-const AUTO_WB_DEADBAND_TINT = 10;         // and |solved tint| below this
+const AUTO_WB_DEADBAND_TINT = 30;         // and |solved tint| below this
 
 export class WhiteBalanceModule {
   private params: WhiteBalanceParams = {
