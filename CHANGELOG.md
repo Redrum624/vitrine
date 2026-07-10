@@ -4,6 +4,18 @@ All notable changes to **Photo Editor Pro** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.14.0] - 2026-07-10
+
+### Added
+- **"Glass · Sectioned" UI — a full workspace redesign.** The editing workspace is now a full-bleed canvas with floating glass chrome: a toolbar pill (with **Auto All** as the primary action and a responsive overflow menu at narrow widths), a floating icon rail, a right column holding a standalone **histogram card** above the **module card**, a floating filmstrip dock (selected thumbnail highlighted with an accent outline, prev/next chevrons, image counter), and a 32-px footer whose center hosts the **rating filter and the current photo's star rating**. Nothing ever overlaps the photo; the toolbar, dock, and footer cluster all align to the photo's center axis and recompute on resize. Why: one consistent, premium card system across every adjustment module instead of ad-hoc per-module styling. Affects: `src/App.tsx`, `src/components/Layout/{Toolbar,IconSidebar,StatusBar}.tsx`, `src/components/Panels/{AdjustmentPanel,HistogramPanel,ThumbnailPanel}.tsx`, `src/components/photoRegion.ts`, `src/index.css`.
+- **Unified module card system.** Every module (Basic Adjustments, White Balance, Color Balance, Tone Curve, Crop, Enhance, Lens Corrections, Local Adjustments, History, RAW Decode) shares one anatomy: an accent icon-chip header with a live state subtitle (e.g. "Cloudy · 5900 K", "Develop · 2 edits active") and Auto ⚡ / Reset ↺ chips, accent section labels (TONE / PRESENCE / COLOR, RATIO / GEOMETRY, …), and shared slider rows with **click-to-edit value chips** (click the value to type an exact number; edited values highlight in accent), gradient tracks, center detents, and double-click reset. Built on a new shared controls library: `src/components/Controls/{SliderRow,SectionLabel,ChipButton,Segmented}.tsx`.
+- **Gallery view.** A library grid opened from the dock's Gallery button: virtualized, lazy-loading tiles with selection (click / Shift range / Ctrl toggle), RAW badges, per-tile star ratings, a rating filter shared with the Develop footer, folder summary in the toolbar and footer, **Batch Process** as the primary action, and double-click to open any photo in Develop. How to use: click **Gallery** in the filmstrip dock; double-click a tile to return to editing. Affects: `src/components/Gallery/GalleryView.tsx`, `src/stores/appStore.ts` (`viewMode`, `ratingFilter`).
+- **Entrance motion.** Cards and the dock rise in once per workspace mount with staggered timing (gallery tiles stagger in on entry); fully disabled under `prefers-reduced-motion`.
+
+### Changed
+- Rating controls moved: the rating filter and the current photo's stars live in the footer center (Develop) and on gallery tiles — no longer overlaid on the photo or filmstrip header. Prev/next moved from photo-edge overlays into the dock.
+- Known deviation from the design spec: the Gallery's "Del removes from folder" interaction is **deferred** — the app has no remove-from-folder flow, and a destructive file operation was deliberately not rushed into this release.
+
 ## [1.13.1] - 2026-07-09
 
 ### Fixed
