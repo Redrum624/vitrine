@@ -4,6 +4,14 @@ All notable changes to **Photo Editor Pro** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.14.5] - 2026-07-10
+
+### Fixed
+- **Export "Estimated size" is now realistic.** Cause: the estimate used invented per-format constants (e.g. JPEG ≈ 1.35 bytes/pixel at quality 90) that overshot real encoder output several-fold. Fix: the estimator was calibrated empirically — two reference photos (a camera JPEG and a RAW-decoded frame, both at full resolution) encoded through the app's actual sharp settings across the full format/quality grid, with per-format curves set at the midpoint of the two measurements (JPEG q90 ≈ 0.10 B/px; the measured table is documented in the code). Estimates carry an inherent ±20% content/resolution spread. Affects: `src/utils/exportSizeEstimate.ts` (new), `src/components/Dialogs/ExportDialog.tsx`.
+- **TIFF "ZIP (Lossless)" export works for the first time.** Cause: the writer passed the UI's `zip` value straight to sharp, which only accepts `deflate` — the option has thrown on every export since it was added. Fix: mapped at the writer boundary, with a regression test proving compression genuinely runs. Affects: `electron/imageWriter.cjs`.
+- **Settings → About shows the real version and current year.** Cause: the panel hardcoded "Version 1.0.0 / © 2025" since its creation. Fix: version via the same IPC the About dialog uses; year derived at render. Affects: `src/components/Panels/SettingsPanel.tsx`.
+- **Module panels no longer end flush at the card's bottom edge.** Cause: the module body wrappers had top/side padding only. Fix: the design's 18px bottom padding applied once on the shared container. Affects: `src/components/Panels/AdjustmentPanel.tsx`.
+
 ## [1.14.4] - 2026-07-10
 
 ### Fixed
