@@ -15,6 +15,7 @@ import { SectionLabel } from '../Controls/SectionLabel';
 import SliderControl from '../Controls/SliderControl';
 import { inputStyle, selectStyle, infoBoxStyle } from './glassFormStyles';
 import { ExportOptions, ExportPreset, exportService } from '../../services/ExportService';
+import { estimateExportSizeBytes } from '../../utils/exportSizeEstimate';
 import { imageService } from '../../services/ImageService';
 import { resolveExportSource } from './resolveExportSource';
 import { multiExportService } from '../../services/MultiExportService';
@@ -87,28 +88,16 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
       const outputHeight = exportOptions.height || imageHeight;
       const pixels = outputWidth * outputHeight;
 
-      let bytesPerPixel: number;
-      switch (exportOptions.format) {
-        case 'jpeg':
-          bytesPerPixel = 3 * (exportOptions.quality / 100) * 0.5;
-          break;
-        case 'png':
-          bytesPerPixel = exportOptions.bitDepth === 16 ? 8 : 4;
-          break;
-        case 'tiff':
-          bytesPerPixel = exportOptions.bitDepth === 16 ? 8 : 4;
-          if (exportOptions.compression === 'lzw' || exportOptions.compression === 'zip') {
-            bytesPerPixel *= 0.6;
-          }
-          break;
-        case 'webp':
-          bytesPerPixel = 3 * (exportOptions.quality / 100) * 0.4;
-          break;
-        default:
-          bytesPerPixel = 4;
-      }
-
-      const estimatedBytes = pixels * bytesPerPixel;
+      // Calibrated against the real sharp encode path — the old naive constants
+      // overestimated 2-12x (e.g. JPEG q90 claimed 1.35 B/px; measured 0.11).
+      // See src/utils/exportSizeEstimate.ts for the measured table.
+      const estimatedBytes = estimateExportSizeBytes(pixels, {
+        format: exportOptions.format,
+        quality: exportOptions.quality,
+        bitDepth: exportOptions.bitDepth,
+        compression: exportOptions.compression,
+        lossless: exportOptions.lossless,
+      });
       setEstimatedFileSize(formatFileSize(estimatedBytes));
     };
 
