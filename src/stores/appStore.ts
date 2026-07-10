@@ -234,6 +234,11 @@ export const useAppStore = create<AppStore>((set) => ({
     )
   })),
 
+  // LOAD-BEARING: always publish the fresh object reference, even when the values
+  // are unchanged. OriginalPane (before/after split) has no ResizeObserver of its
+  // own — it re-fits on region resizes ONLY because redrawCanvas republishes a new
+  // mainCanvasFit reference every run. Adding a value-equality dedupe here would
+  // silently break Before-pane resize tracking.
   setMainCanvasFit: (fit) => set(() => ({ mainCanvasFit: fit })),
   setViewport: (viewport) => set((state) => ({
     viewport: { ...state.viewport, ...viewport }

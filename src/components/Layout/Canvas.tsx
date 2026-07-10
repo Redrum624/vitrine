@@ -809,6 +809,15 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
   // Redraw the 2D canvas when viewport (pan/zoom) changes. In GPU mode the present()
   // effect above already handles viewport changes, so the 2D blit is a no-op; skip it
   // explicitly to avoid a spurious drawLoadedImageOptimized call on every pan event.
+  //
+  // LOAD-BEARING (GPU zoom-in sizing): even though this effect skips redrawCanvas in
+  // GPU mode, `viewport` being in redrawCanvas's OWN useCallback deps means each
+  // zoom/pan changes redrawCanvas's identity, which re-runs the ResizeObserver effect
+  // below ([redrawCanvas] deps), whose observe() initial delivery re-runs the sizing
+  // block that grows the canvas box at zoom>fit (viewport-canvas model). Removing
+  // `viewport` from redrawCanvas's deps, or narrowing the RO effect's deps to [],
+  // silently reverts GPU zoom-in to fit-rect clipping — only the packaged smoke
+  // would catch it.
   useEffect(() => {
     if (renderMode !== 'gpu') {
       redrawCanvas();
@@ -964,7 +973,12 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
            y >= imageY && y <= imageY + contentH;
   }, [viewport, contentDimensions]);
 
-  // Handle window/container resize
+  // Handle window/container resize.
+  // LOAD-BEARING: [redrawCanvas] deps are intentional — redrawCanvas's identity
+  // changes with `viewport`, so this effect re-subscribes per zoom/pan and the
+  // observe() initial delivery re-runs the sizing block. That is what grows the
+  // canvas box in GPU mode at zoom>fit (see the viewport effect above). Do NOT
+  // narrow these deps to [].
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;

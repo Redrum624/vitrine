@@ -97,7 +97,6 @@ Build:        Vite + TypeScript + ESLint
 
 #### RAW Processing
 - `LibRawService` - WebAssembly RAW processing
-- `AdvancedRawProcessor` - Professional RAW pipeline
 - `AutoRawAdjustmentService` - Intelligent auto-adjustments
 - `CameraProfileService` - Camera-specific optimization
 
