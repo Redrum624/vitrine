@@ -24,10 +24,16 @@
  * of scope here.
  *
  * Usage:
- *   node scripts/reset-smoke-fixtures.cjs [folder] [--dry-run]
+ *   node scripts/reset-smoke-fixtures.cjs [folder] [--force|--yes] [--dry-run]
  *
- *   folder     Defaults to C:\Users\<user>\Pictures\2024\2024-09-19
- *   --dry-run  Print what would be deleted without touching any files.
+ *   folder      Defaults to C:\Users\<user>\Pictures\2024\2024-09-19
+ *   --force,
+ *   --yes       Required to actually delete anything. WITHOUT one of these flags
+ *               the script always runs as a dry run (prints what it WOULD delete
+ *               and touches nothing) — this is the default, not opt-in.
+ *   --dry-run   Explicit dry-run flag. Redundant with the new default, but kept
+ *               as a safety net: it forces a dry run even if --force/--yes is
+ *               also passed.
  *
  * Runs as plain Node (no Electron) against the same userData path Electron computes
  * at runtime, so close the app before running this to avoid racing a live storeSet.
@@ -84,10 +90,22 @@ function planDeletions(storeDir, imagePaths) {
   }));
 }
 
-function main() {
-  const args = process.argv.slice(2);
-  const dryRun = args.includes('--dry-run');
+/**
+ * Pure CLI-arg parsing: the target folder + the effective dry-run flag.
+ * Dry-run-by-default (R4 rider — a prior run of this script deleted real
+ * fixture edit-state with no confirmation prompt): real deletion now requires
+ * an explicit --force or --yes. --dry-run is kept as an explicit override that
+ * always wins, even alongside --force/--yes.
+ */
+function parseArgs(args) {
+  const explicitDryRun = args.includes('--dry-run');
+  const force = args.includes('--force') || args.includes('--yes');
   const folder = args.find((a) => !a.startsWith('--')) || DEFAULT_FOLDER;
+  return { folder, dryRun: explicitDryRun || !force };
+}
+
+function main() {
+  const { folder, dryRun } = parseArgs(process.argv.slice(2));
 
   if (!fs.existsSync(folder) || !fs.statSync(folder).isDirectory()) {
     console.error(`Folder not found: ${folder}`);
@@ -98,6 +116,7 @@ function main() {
   const storeDir = getUserDataStoreDir();
   const images = listImageFiles(folder);
   console.log(`Found ${images.length} image file(s) under ${folder}`);
+  if (dryRun) console.log('Dry run — nothing will be deleted. Pass --force or --yes to actually delete.');
 
   const plan = planDeletions(storeDir, images);
   let deleted = 0;
@@ -122,6 +141,7 @@ module.exports = {
   IMAGE_EXTENSIONS,
   DEFAULT_FOLDER,
   APP_NAME,
+  parseArgs,
   keyForPath,
   storeFilePath,
   getUserDataStoreDir,

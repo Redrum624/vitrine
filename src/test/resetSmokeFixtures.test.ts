@@ -44,6 +44,34 @@ describe('reset-smoke-fixtures.cjs — key-matching logic', () => {
     }
   });
 
+  describe('parseArgs — dry-run-by-default (R4 rider: real deletion needs an explicit opt-in)', () => {
+    it('defaults to a dry run with no flags at all', () => {
+      expect(resetSmokeFixtures.parseArgs([]).dryRun).toBe(true);
+    });
+
+    it('defaults to a dry run even when a folder is given but no force/yes flag', () => {
+      expect(resetSmokeFixtures.parseArgs(['C:\\fixtures']).dryRun).toBe(true);
+    });
+
+    it('--force disables the dry run (real deletion)', () => {
+      expect(resetSmokeFixtures.parseArgs(['--force']).dryRun).toBe(false);
+    });
+
+    it('--yes disables the dry run (real deletion)', () => {
+      expect(resetSmokeFixtures.parseArgs(['--yes']).dryRun).toBe(false);
+    });
+
+    it('--dry-run always wins, even alongside --force/--yes', () => {
+      expect(resetSmokeFixtures.parseArgs(['--force', '--dry-run']).dryRun).toBe(true);
+      expect(resetSmokeFixtures.parseArgs(['--yes', '--dry-run']).dryRun).toBe(true);
+    });
+
+    it('picks the first non-flag argument as the folder, defaulting otherwise', () => {
+      expect(resetSmokeFixtures.parseArgs(['C:\\fixtures', '--force']).folder).toBe('C:\\fixtures');
+      expect(resetSmokeFixtures.parseArgs(['--force']).folder).toBe(resetSmokeFixtures.DEFAULT_FOLDER);
+    });
+  });
+
   describe('against a throwaway temp folder (never the real fixture folder)', () => {
     let tmpFolder: string;
 
