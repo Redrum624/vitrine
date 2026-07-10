@@ -4,6 +4,16 @@ All notable changes to **Photo Editor Pro** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.14.3] - 2026-07-10
+
+### Fixed
+- **Gallery: exporting a single selected photo now exports that photo.** Cause: the gallery toolbar's Export… only used the selection at 2+ selected tiles (and a downstream guard silently dropped 1-item selections), so a single ctrl-selected tile exported the photo on the canvas instead. Fix: in Gallery view any selection ≥1 exports the selection; the export dialog title now pluralizes correctly ("Export 1 Image"). Affects: `src/components/Layout/Toolbar.tsx`, `src/App.tsx`, `src/components/Dialogs/ExportDialog.tsx`.
+- **Footer and gallery tiles show real image metadata.** Cause: folder scans never recorded image dimensions and carried a MIME-ish type string, so the footer read "IMAGE/JPEG" and gallery tiles lacked `W × H`. Fix: dimensions are captured for free when thumbnails decode (and for RAW files — whose gallery previews are downscaled — when the photo is actually opened), and a single format helper renders clean labels (JPG, ORF, …) everywhere. Affects: `src/components/Layout/StatusBar.tsx`, `src/components/Gallery/GalleryView.tsx`, `src/components/Panels/ThumbnailPanel.tsx`, `src/components/Layout/Canvas.tsx`, `src/utils/imageFormat.ts`, `src/stores/appStore.ts`.
+
+### Changed
+- Removed the orphaned Advanced RAW module and its dead camera-profile infrastructure (unreachable from the UI since the M0 RAW rework; ~900 lines). The live RAW decode path is untouched. Affects: `src/components/Modules/AdvancedRawModule.tsx` (deleted), `src/services/AdvancedRawProcessor.ts`.
+- The Print dialog gained its first dedicated test contract.
+
 ## [1.14.2] - 2026-07-10
 
 ### Changed
