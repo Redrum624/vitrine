@@ -890,7 +890,7 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
 
         {selectedModule === 'history' && (
           <div className="px-5 pt-4">
-            <HistoryPanel />
+            <HistoryPanel onRegisterActions={setModuleActions} />
           </div>
         )}
           </div>

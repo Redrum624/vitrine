@@ -1,9 +1,27 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { RotateCcw, RotateCw, FlipHorizontal, FlipVertical, Zap, ChevronDown, ChevronUp } from 'lucide-react';
+import { RotateCcw, RotateCw, FlipHorizontal, FlipVertical, Zap, Maximize } from 'lucide-react';
 import { CropModule, CropParams, AspectRatio } from '../../modules/CropModule';
 import { logger } from '../../utils/Logger';
 import { useAppStore } from '../../stores/appStore';
 import { useRegisterModuleCardActions, type RegisterModuleCardActions } from '../Controls/moduleCardActions';
+import { SliderRow } from '../Controls/SliderRow';
+import { SectionLabel } from '../Controls/SectionLabel';
+import { ChipButton } from '../Controls/ChipButton';
+
+// Real AspectRatio option set (CropModule.ts) — the reference mockup shows a
+// simplified illustrative subset; every ratio the module supports stays reachable.
+const ASPECT_RATIO_OPTIONS: { value: AspectRatio; label: string }[] = [
+  { value: 'free', label: 'Free' },
+  { value: 'original', label: 'Original' },
+  { value: '1:1', label: '1:1' },
+  { value: '4:3', label: '4:3' },
+  { value: '3:2', label: '3:2' },
+  { value: '16:9', label: '16:9' },
+  { value: '9:16', label: '9:16' },
+  { value: '3:4', label: '3:4' },
+  { value: '2:3', label: '2:3' },
+  { value: 'custom', label: 'Custom' },
+];
 
 interface CropModuleComponentProps {
   module: CropModule;
@@ -25,7 +43,6 @@ export const CropModuleComponent: React.FC<CropModuleComponentProps> = ({
 }) => {
   const [params, setParams] = useState<CropParams>(module.getParams());
   const paramsRef = useRef<CropParams>(params);
-  const [isTransformExpanded, setIsTransformExpanded] = useState(true);
   const [isDetecting, setIsDetecting] = useState(false);
   const { setIsAdjustingRotation } = useAppStore();
 
@@ -69,6 +86,16 @@ export const CropModuleComponent: React.FC<CropModuleComponentProps> = ({
 
   const handleReset = useCallback(() => {
     module.resetParams();
+    const updatedParams = module.getParams();
+    paramsRef.current = updatedParams;
+    setParams(updatedParams);
+    onParamsChange(updatedParams);
+  }, [module, onParamsChange]);
+
+  // Restored from the pre-Task-2 header (dropped in 919f2da along with the whole
+  // inner header row) — lives in the card body now, as an "Uncrop" chip.
+  const handleUncrop = useCallback(() => {
+    module.uncrop();
     const updatedParams = module.getParams();
     paramsRef.current = updatedParams;
     setParams(updatedParams);
@@ -207,256 +234,150 @@ export const CropModuleComponent: React.FC<CropModuleComponentProps> = ({
   const cropPercentage = ((outputDims.width * outputDims.height) / (imageWidth * imageHeight) * 100).toFixed(1);
 
   return (
-    <div className="space-y-3">
-      {/* Aspect Ratio Selection */}
-      <div className="space-y-1.5">
-        <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Aspect Ratio</label>
-        <select
-          value={params.aspectRatio}
-          onChange={(e) => handleAspectRatioChange(e.target.value as AspectRatio)}
-          className="w-full text-sm rounded px-3 py-2 border"
-          style={{
-            backgroundColor: 'var(--gray-700)',
-            color: 'var(--white)',
-            borderColor: 'var(--border)'
-          }}
-        >
-          <option value="free">Free</option>
-          <option value="original">Original</option>
-          <option value="1:1">Square (1:1)</option>
-          <option value="4:3">Standard (4:3)</option>
-          <option value="3:2">Classic 35mm (3:2)</option>
-          <option value="16:9">Widescreen (16:9)</option>
-          <option value="3:4">Portrait 4:3</option>
-          <option value="2:3">Portrait 3:2</option>
-          <option value="9:16">Portrait 16:9</option>
-          <option value="custom">Custom</option>
-        </select>
-      </div>
-
-      {/* Custom Aspect Ratio */}
-      {params.aspectRatio === 'custom' && (
-        <div className="grid grid-cols-2 gap-1.5">
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Width</label>
-            <input
-              type="number"
-              value={params.customAspectWidth}
-              onChange={(e) => updateParams({ customAspectWidth: parseFloat(e.target.value) || 1 })}
-              min="0.1"
-              step="0.1"
-              className="w-full text-sm rounded px-3 py-2 border"
-              style={{
-                backgroundColor: 'var(--gray-700)',
-                color: 'var(--white)',
-                borderColor: 'var(--border)'
-              }}
-            />
-          </div>
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Height</label>
-            <input
-              type="number"
-              value={params.customAspectHeight}
-              onChange={(e) => updateParams({ customAspectHeight: parseFloat(e.target.value) || 1 })}
-              min="0.1"
-              step="0.1"
-              className="w-full text-sm rounded px-3 py-2 border"
-              style={{
-                backgroundColor: 'var(--gray-700)',
-                color: 'var(--white)',
-                borderColor: 'var(--border)'
-              }}
-            />
-          </div>
+    <div className="flex flex-col" style={{ gap: 16 }}>
+      {/* Ratio */}
+      <div className="flex flex-col" style={{ gap: 10 }}>
+        <SectionLabel>Ratio</SectionLabel>
+        <div className="grid grid-cols-3" style={{ gap: 6 }}>
+          {ASPECT_RATIO_OPTIONS.map((opt) => (
+            <ChipButton
+              key={opt.value}
+              active={params.aspectRatio === opt.value}
+              onClick={() => handleAspectRatioChange(opt.value)}
+            >
+              {opt.label}
+            </ChipButton>
+          ))}
         </div>
-      )}
 
-      {/* Transform Section */}
-      <div className="pt-3" style={{borderTop: '1px solid var(--border)'}}>
-        <button
-          onClick={() => setIsTransformExpanded(!isTransformExpanded)}
-          className="w-full flex items-center justify-between mb-3 text-sm transition-colors"
-          style={{
-            color: 'var(--white)'
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.color = 'var(--primary-300)';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.color = 'var(--white)';
-          }}
-        >
-          <div className="flex items-center gap-2">
-            <RotateCw className="w-4 h-4" style={{color: 'var(--green-400)'}} />
-            <span>Transform</span>
-          </div>
-          {isTransformExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-        </button>
-
-        {isTransformExpanded && (
-          <div className="space-y-3">
-            {/* Rotation Control */}
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Rotation</label>
-                <div className="flex items-center gap-1.5">
-                  <button
-                    onClick={() => rotateBy(-1)}
-                    className="p-1 rounded transition-colors"
-                    style={{
-                      backgroundColor: 'var(--gray-700)',
-                      color: 'var(--white)'
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.backgroundColor = 'var(--gray-600)';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.backgroundColor = 'var(--gray-700)';
-                    }}
-                    title="Rotate -1°"
-                  >
-                    <RotateCcw className="w-3 h-3" />
-                  </button>
-                  <span className="text-sm font-mono w-12 text-center" style={{color: 'var(--white)'}}>
-                    {params.angle.toFixed(1)}°
-                  </span>
-                  <button
-                    onClick={() => rotateBy(1)}
-                    className="p-1 rounded transition-colors"
-                    style={{
-                      backgroundColor: 'var(--gray-700)',
-                      color: 'var(--white)'
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.backgroundColor = 'var(--gray-600)';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.backgroundColor = 'var(--gray-700)';
-                    }}
-                    title="Rotate +1°"
-                  >
-                    <RotateCw className="w-3 h-3" />
-                  </button>
-                </div>
-              </div>
-
+        {params.aspectRatio === 'custom' && (
+          <div className="grid grid-cols-2" style={{ gap: 6 }}>
+            <div className="flex flex-col" style={{ gap: 4 }}>
+              <label style={{ fontSize: 11, fontWeight: 500, color: 'var(--glass-text-label)' }}>Width</label>
               <input
-                type="range"
-                min="-5"
-                max="5"
+                type="number"
+                value={params.customAspectWidth}
+                onChange={(e) => updateParams({ customAspectWidth: parseFloat(e.target.value) || 1 })}
+                min="0.1"
                 step="0.1"
-                value={params.angle}
-                onChange={(e) => handleRotationChange(parseFloat(e.target.value))}
-                onMouseDown={() => setIsAdjustingRotation(true)}
-                onMouseUp={handleRotationEnd}
-                onMouseLeave={handleRotationEnd}
-                onTouchStart={() => setIsAdjustingRotation(true)}
-                onTouchEnd={handleRotationEnd}
-                className="slider w-full"
+                style={{
+                  fontSize: 12,
+                  padding: '6px 8px',
+                  borderRadius: 8,
+                  border: '1px solid rgba(255,255,255,.1)',
+                  background: 'rgba(255,255,255,.04)',
+                  color: 'var(--glass-text-label)',
+                }}
               />
-
-              {/* Auto-straighten & Quick Rotation */}
-              <div className="grid grid-cols-4 gap-1.5 pt-1.5">
-                <button
-                  onClick={handleAutoStraighten}
-                  disabled={isDetecting || !hasProcessedData}
-                  className="col-span-4 flex items-center justify-center gap-1.5 px-3 py-2 text-xs rounded transition-colors shadow-sm"
-                  style={{
-                    background: 'linear-gradient(to right, #f59e0b, #eab308)',
-                    color: 'var(--white)',
-                    opacity: isDetecting || !hasProcessedData ? 0.3 : 1,
-                    cursor: isDetecting || !hasProcessedData ? 'not-allowed' : 'pointer'
-                  }}
-                  title="Auto-straighten based on horizon detection"
-                >
-                  {isDetecting ? (
-                    <>
-                      <div className="w-3 h-3 border-2 rounded-full animate-spin" style={{borderColor: 'var(--white)', borderTopColor: 'transparent'}} />
-                      Detecting...
-                    </>
-                  ) : (
-                    <>
-                      <Zap className="w-3 h-3" />
-                      Auto-Straighten
-                    </>
-                  )}
-                </button>
-                {[-5, -2, 2, 5].map((angle) => (
-                  <button
-                    key={angle}
-                    onClick={() => handleRotationChange(angle)}
-                    className="px-2 py-1.5 text-xs rounded transition-colors"
-                    style={{
-                      backgroundColor: 'var(--gray-700)',
-                      color: 'var(--gray-300)'
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.backgroundColor = 'var(--gray-600)';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.backgroundColor = 'var(--gray-700)';
-                    }}
-                  >
-                    {angle > 0 ? '+' : ''}{angle}°
-                  </button>
-                ))}
-              </div>
             </div>
-
-            {/* Flip Controls */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Flip</label>
-              <div className="grid grid-cols-2 gap-1.5">
-                <button
-                  onClick={handleFlipHorizontal}
-                  className={`flex items-center justify-center gap-1.5 px-3 py-2 text-xs rounded transition-colors ${
-                    params.flipHorizontal ? '' : ''
-                  }`}
-                  style={{
-                    backgroundColor: params.flipHorizontal ? '#22c55e' : 'var(--gray-700)',
-                    color: 'var(--white)'
-                  }}
-                >
-                  <FlipHorizontal className="w-4 h-4" />
-                  Horizontal
-                </button>
-                <button
-                  onClick={handleFlipVertical}
-                  className={`flex items-center justify-center gap-1.5 px-3 py-2 text-xs rounded transition-colors ${
-                    params.flipVertical ? '' : ''
-                  }`}
-                  style={{
-                    backgroundColor: params.flipVertical ? '#22c55e' : 'var(--gray-700)',
-                    color: 'var(--white)'
-                  }}
-                >
-                  <FlipVertical className="w-4 h-4" />
-                  Vertical
-                </button>
-              </div>
+            <div className="flex flex-col" style={{ gap: 4 }}>
+              <label style={{ fontSize: 11, fontWeight: 500, color: 'var(--glass-text-label)' }}>Height</label>
+              <input
+                type="number"
+                value={params.customAspectHeight}
+                onChange={(e) => updateParams({ customAspectHeight: parseFloat(e.target.value) || 1 })}
+                min="0.1"
+                step="0.1"
+                style={{
+                  fontSize: 12,
+                  padding: '6px 8px',
+                  borderRadius: 8,
+                  border: '1px solid rgba(255,255,255,.1)',
+                  background: 'rgba(255,255,255,.04)',
+                  color: 'var(--glass-text-label)',
+                }}
+              />
             </div>
-
           </div>
         )}
       </div>
 
-      {/* Output Info */}
-      <div className="text-xs space-y-1 pt-3" style={{borderTop: '1px solid var(--border)', color: 'var(--gray-500)'}}>
-        <div className="flex items-center justify-between">
-          <span>Original Size:</span>
-          <span style={{color: 'var(--white)'}}>{imageWidth} × {imageHeight}</span>
+      {/* Geometry */}
+      <div className="flex flex-col" style={{ gap: 12 }}>
+        <SectionLabel>Geometry</SectionLabel>
+
+        <SliderRow
+          label="Rotation"
+          value={params.angle}
+          defaultValue={0}
+          min={-5}
+          max={5}
+          step={0.1}
+          onChange={handleRotationChange}
+          formatValue={(v) => `${v >= 0 ? '+' : ''}${v.toFixed(1)}°`}
+          legend={{ left: '-5°', center: '0°', right: '+5°' }}
+          onDragStart={() => setIsAdjustingRotation(true)}
+          onDragEnd={handleRotationEnd}
+        />
+
+        <div className="grid grid-cols-3" style={{ gap: 6 }}>
+          <ChipButton onClick={() => rotateBy(-1)} title="Rotate -1°">
+            <RotateCcw size={13} />
+          </ChipButton>
+          <ChipButton
+            className="flex items-center gap-1.5"
+            onClick={handleAutoStraighten}
+            disabled={isDetecting || !hasProcessedData}
+            title="Auto-straighten based on horizon detection"
+          >
+            {isDetecting ? (
+              <span
+                className="animate-spin"
+                style={{ width: 12, height: 12, borderRadius: '50%', border: '2px solid rgba(255,255,255,.35)', borderTopColor: 'currentColor', flexShrink: 0 }}
+              />
+            ) : (
+              <Zap size={13} />
+            )}
+            {isDetecting ? 'Detecting…' : 'Auto-Straighten'}
+          </ChipButton>
+          <ChipButton onClick={() => rotateBy(1)} title="Rotate +1°">
+            <RotateCw size={13} />
+          </ChipButton>
         </div>
-        <div className="flex items-center justify-between">
-          <span>Output Size:</span>
-          <span style={{color: 'var(--white)'}}>{outputDims.width} × {outputDims.height}</span>
+
+        <div className="grid grid-cols-4" style={{ gap: 6 }}>
+          {[-5, -2, 2, 5].map((angle) => (
+            <ChipButton key={angle} onClick={() => handleRotationChange(angle)}>
+              {angle > 0 ? '+' : ''}{angle}°
+            </ChipButton>
+          ))}
         </div>
-        <div className="flex items-center justify-between">
-          <span>Crop Area:</span>
-          <span style={{color: 'var(--primary-400)'}}>{cropPercentage}%</span>
+
+        <div className="grid grid-cols-2" style={{ gap: 6 }}>
+          <ChipButton className="flex items-center gap-1.5" active={params.flipHorizontal} onClick={handleFlipHorizontal}>
+            <FlipHorizontal size={13} /> Flip H
+          </ChipButton>
+          <ChipButton className="flex items-center gap-1.5" active={params.flipVertical} onClick={handleFlipVertical}>
+            <FlipVertical size={13} /> Flip V
+          </ChipButton>
         </div>
+
+        {/* Uncrop — restored from the pre-Task-2 header (see handleUncrop above). */}
+        <ChipButton
+          className="flex items-center gap-1.5"
+          onClick={handleUncrop}
+          disabled={!module.isCropped()}
+          title="Uncrop to original"
+        >
+          <Maximize size={13} /> Uncrop
+        </ChipButton>
       </div>
 
+      {/* Output Info */}
+      <div className="flex flex-col" style={{ gap: 4, paddingTop: 12, borderTop: '1px solid var(--glass-border)', fontSize: 11 }}>
+        <div className="flex items-center justify-between">
+          <span style={{ color: 'var(--glass-text-muted)' }}>Original Size</span>
+          <span style={{ color: 'var(--glass-text-secondary)', fontFamily: 'ui-monospace, monospace' }}>{imageWidth} × {imageHeight}</span>
+        </div>
+        <div className="flex items-center justify-between">
+          <span style={{ color: 'var(--glass-text-muted)' }}>Output Size</span>
+          <span style={{ color: 'var(--glass-text-secondary)', fontFamily: 'ui-monospace, monospace' }}>{outputDims.width} × {outputDims.height}</span>
+        </div>
+        <div className="flex items-center justify-between">
+          <span style={{ color: 'var(--glass-text-muted)' }}>Crop Area</span>
+          <span style={{ color: 'var(--accent)', fontFamily: 'ui-monospace, monospace' }}>{cropPercentage}%</span>
+        </div>
+      </div>
     </div>
   );
 };

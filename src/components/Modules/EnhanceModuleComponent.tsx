@@ -1,6 +1,6 @@
 // src/components/Modules/EnhanceModuleComponent.tsx
 import { useCallback, useRef, useState } from 'react';
-import { ChevronDown, ChevronRight } from 'lucide-react';
+import type { CSSProperties } from 'react';
 import { EnhanceModule } from '../../modules/EnhanceModule';
 import { NoiseReductionModule, NoiseReductionParams } from '../../modules/NoiseReductionModule';
 import { EnhanceParams, DEFAULT_ENHANCE_PARAMS } from '../../utils/enhanceChain';
@@ -9,6 +9,9 @@ import { imageService } from '../../services/ImageService';
 import { imageProcessingPipeline } from '../../services/ImageProcessingPipeline';
 import { useAppStore } from '../../stores/appStore';
 import { useRegisterModuleCardActions, type RegisterModuleCardActions } from '../Controls/moduleCardActions';
+import { SectionLabel } from '../Controls/SectionLabel';
+import { ChipButton } from '../Controls/ChipButton';
+import { SliderRow } from '../Controls/SliderRow';
 
 interface Props {
   module: EnhanceModule;
@@ -29,7 +32,6 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
   const upscaleMode = useAppStore((s) => s.upscaleMode);
   const [error, setError] = useState<string | null>(null);
   const [revertVersion, setRevertVersion] = useState(0);
-  const [sectionOpen, setSectionOpen] = useState(false);
 
   const update = useCallback((patch: Partial<EnhanceParams>) => {
     setParams((prev) => ({ ...prev, ...patch }));
@@ -111,245 +113,170 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
   const selectedScaleInfeasible =
     params.upscale && feasibility[params.scale as 2 | 4]?.feasible === false;
 
+  // Mode tile look: idle vs active (accent-soft/ring/text), shared across the
+  // three toggles — same tokens ChipButton uses, just a taller stacked layout
+  // (dot indicator + label) that ChipButton itself doesn't model.
+  const modeTileStyle = (active: boolean): CSSProperties => ({
+    flex: 1,
+    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
+    padding: '10px 6px',
+    borderRadius: 9,
+    border: `1px solid ${active ? 'var(--accent-ring)' : 'rgba(255,255,255,.1)'}`,
+    background: active ? 'var(--accent-soft)' : 'rgba(255,255,255,.04)',
+    color: active ? 'var(--accent)' : 'var(--glass-text-secondary)',
+    fontSize: 11.5, fontWeight: 500, cursor: 'pointer',
+  });
+  const modeDotStyle = (active: boolean): CSSProperties => ({
+    width: 8, height: 8, borderRadius: '50%',
+    background: active ? 'var(--accent)' : 'rgba(255,255,255,.2)',
+    boxShadow: active ? '0 0 0 3px var(--accent-soft)' : undefined,
+  });
+
   return (
-    <div className="enhance-panel px-5 pt-4 space-y-4">
+    <div className="enhance-panel px-5 pt-4" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
       {/* Three mode toggles */}
       <div style={{ display: 'flex', gap: 8 }}>
-        {/* Noise Reduction toggle */}
-        <button
-          type="button"
-          aria-pressed={nrEnabled}
-          onClick={() => setNrEnabled((v) => !v)}
-          style={{
-            flex: 1,
-            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
-            padding: '10px 6px',
-            borderRadius: 9, border: `1px solid ${nrEnabled ? 'var(--primary-500)' : 'var(--border)'}`,
-            background: nrEnabled ? '#11254a' : 'var(--gray-800)',
-            color: nrEnabled ? '#dbe7ff' : 'var(--gray-300)',
-            fontSize: '0.74rem', fontWeight: 500, cursor: 'pointer',
-          }}
-        >
-          <span style={{
-            width: 8, height: 8, borderRadius: '50%',
-            background: nrEnabled ? 'var(--primary-500)' : 'var(--gray-600)',
-            boxShadow: nrEnabled ? '0 0 0 3px rgba(59,130,246,.25)' : undefined,
-          }} />
-          <span>Noise<br />Reduction</span>
+        <button type="button" aria-pressed={nrEnabled} onClick={() => setNrEnabled((v) => !v)} style={modeTileStyle(nrEnabled)}>
+          <span style={modeDotStyle(nrEnabled)} />
+          <span>Noise Reduction</span>
         </button>
 
-        {/* Sharpen toggle */}
-        <button
-          type="button"
-          aria-pressed={params.sharpen}
-          onClick={() => update({ sharpen: !params.sharpen })}
-          style={{
-            flex: 1,
-            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
-            padding: '10px 6px',
-            borderRadius: 9, border: `1px solid ${params.sharpen ? 'var(--primary-500)' : 'var(--border)'}`,
-            background: params.sharpen ? '#11254a' : 'var(--gray-800)',
-            color: params.sharpen ? '#dbe7ff' : 'var(--gray-300)',
-            fontSize: '0.74rem', fontWeight: 500, cursor: 'pointer',
-          }}
-        >
-          <span style={{
-            width: 8, height: 8, borderRadius: '50%',
-            background: params.sharpen ? 'var(--primary-500)' : 'var(--gray-600)',
-            boxShadow: params.sharpen ? '0 0 0 3px rgba(59,130,246,.25)' : undefined,
-          }} />
+        <button type="button" aria-pressed={params.sharpen} onClick={() => update({ sharpen: !params.sharpen })} style={modeTileStyle(params.sharpen)}>
+          <span style={modeDotStyle(params.sharpen)} />
           <span>Sharpen</span>
         </button>
 
-        {/* Upscale toggle */}
-        <button
-          type="button"
-          aria-pressed={params.upscale}
-          onClick={() => update({ upscale: !params.upscale })}
-          style={{
-            flex: 1,
-            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
-            padding: '10px 6px',
-            borderRadius: 9, border: `1px solid ${params.upscale ? 'var(--primary-500)' : 'var(--border)'}`,
-            background: params.upscale ? '#11254a' : 'var(--gray-800)',
-            color: params.upscale ? '#dbe7ff' : 'var(--gray-300)',
-            fontSize: '0.74rem', fontWeight: 500, cursor: 'pointer',
-          }}
-        >
-          <span style={{
-            width: 8, height: 8, borderRadius: '50%',
-            background: params.upscale ? 'var(--primary-500)' : 'var(--gray-600)',
-            boxShadow: params.upscale ? '0 0 0 3px rgba(59,130,246,.25)' : undefined,
-          }} />
+        <button type="button" aria-pressed={params.upscale} onClick={() => update({ upscale: !params.upscale })} style={modeTileStyle(params.upscale)}>
+          <span style={modeDotStyle(params.upscale)} />
           <span>Upscale</span>
         </button>
       </div>
 
       {/* Scale selector (only when Upscale on) */}
       {params.upscale && (
-        <>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: '.72rem', fontWeight: 500, color: 'var(--gray-300)', marginRight: 'auto' }}>Scale</span>
+        <div className="flex flex-col" style={{ gap: 8 }}>
+          <div className="flex items-center" style={{ gap: 8 }}>
+            <span style={{ fontSize: 11.5, fontWeight: 500, color: 'var(--glass-text-label)', marginRight: 'auto' }}>Scale</span>
             {upscaleMode && (
               <span
                 data-testid="upscale-mode-badge"
                 title="AI upscale uses your GPU when available; falls back to Standard otherwise."
                 style={{
-                  fontSize: '.62rem', fontWeight: 700, letterSpacing: '.04em', padding: '2px 7px',
+                  fontSize: 9.5, fontWeight: 700, letterSpacing: '.04em', padding: '2px 7px',
                   borderRadius: 999, textTransform: 'uppercase',
-                  background: upscaleMode === 'ai' ? 'rgba(59,130,246,.18)' : 'var(--gray-800)',
-                  color: upscaleMode === 'ai' ? '#9ec1ff' : 'var(--gray-300)',
-                  border: `1px solid ${upscaleMode === 'ai' ? 'var(--primary-500)' : 'var(--border)'}`,
+                  background: upscaleMode === 'ai' ? 'var(--accent-soft)' : 'rgba(255,255,255,.04)',
+                  color: upscaleMode === 'ai' ? 'var(--accent)' : 'var(--glass-text-secondary)',
+                  border: `1px solid ${upscaleMode === 'ai' ? 'var(--accent-ring)' : 'rgba(255,255,255,.1)'}`,
                 }}
               >
                 {upscaleMode === 'ai' ? 'AI' : 'Standard'}
               </span>
             )}
-            <div style={{ display: 'flex', border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
+            <div className="flex" style={{ gap: 4 }}>
               {([2, 4] as const).map((s) => {
                 const infeasible = feasibility[s]?.feasible === false;
                 return (
-                  <button key={s} type="button"
+                  <ChipButton
+                    key={s}
+                    active={params.scale === s}
                     disabled={infeasible}
                     title={infeasibleHint(s)}
-                    style={{
-                      padding: '5px 14px',
-                      background: params.scale === s ? 'var(--primary-600)' : 'var(--gray-800)',
-                      color: infeasible ? 'var(--gray-600)' : params.scale === s ? '#fff' : 'var(--gray-300)',
-                      border: 0,
-                      fontSize: '.78rem', cursor: infeasible ? 'not-allowed' : 'pointer', fontFamily: 'ui-monospace,monospace',
-                    }}
-                    onClick={() => update({ scale: s })}>{s}×</button>
+                    onClick={() => update({ scale: s })}
+                  >
+                    {s}×
+                  </ChipButton>
                 );
               })}
             </div>
           </div>
           {selectedScaleInfeasible && (
-            <div data-testid="upscale-infeasible-hint" style={{ fontSize: '.68rem', color: '#f87171', marginTop: -2 }}>
+            <div data-testid="upscale-infeasible-hint" style={{ fontSize: 10.5, color: '#f87171' }}>
               {infeasibleHint(params.scale as 2 | 4)}
             </div>
           )}
-          <div style={{ fontSize: '.68rem', color: 'var(--gray-400)', marginTop: -2 }}>
+          <div style={{ fontSize: 10.5, color: 'var(--glass-text-muted)' }}>
             AI super-resolution on your GPU when available, otherwise Standard (Lanczos).
           </div>
-        </>
+        </div>
       )}
 
-      {/* Detail & quality accordion */}
-      <div style={{ border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden' }}>
-        <div
-          style={{
-            padding: '9px 12px', background: 'var(--gray-800)',
-            display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer',
-          }}
-          onClick={() => setSectionOpen((v) => !v)}
-        >
-          {sectionOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-          <span className="text-xs font-medium" style={{ flex: 1 }}>Detail &amp; quality</span>
-          <button
-            type="button"
-            onClick={(e) => { e.stopPropagation(); resetSection(); }}
-            style={{
-              fontSize: '.7rem', color: 'var(--gray-400)', background: 'transparent',
-              border: 0, cursor: 'pointer', padding: '0 2px',
-            }}
-          >Reset</button>
-        </div>
-        {sectionOpen && (
-          <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 13 }}>
-            {/* NR strength */}
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-medium" style={{ color: '#9ec1ff' }}>Noise reduction strength</label>
-                <span className="text-xs font-mono" style={{ color: 'var(--gray-400)' }}>{nrStrength}</span>
-              </div>
-              <input
-                type="range" min={0} max={100} step={1} value={nrStrength}
-                onChange={(e) => setNrStrength(parseFloat(e.target.value))}
-                className="slider w-full"
-              />
-            </div>
+      {/* Detail & quality */}
+      <div className="flex flex-col" style={{ gap: 12 }}>
+        <SectionLabel>Detail & quality</SectionLabel>
 
-            <div style={{ height: 1, background: 'var(--border)', margin: '2px 0' }} />
+        <SliderRow
+          label="Noise reduction strength"
+          value={nrStrength}
+          defaultValue={50}
+          min={0}
+          max={100}
+          step={1}
+          onChange={setNrStrength}
+        />
+        <SliderRow
+          label="Sharpen strength"
+          value={params.sharpness}
+          defaultValue={DEFAULT_ENHANCE_PARAMS.sharpness}
+          min={0}
+          max={1}
+          step={0.05}
+          formatValue={(v) => v.toFixed(2)}
+          onChange={(v) => update({ sharpness: v })}
+        />
+        <SliderRow
+          label="Detail amount"
+          value={params.alpha}
+          defaultValue={DEFAULT_ENHANCE_PARAMS.alpha}
+          min={0}
+          max={1}
+          step={0.05}
+          formatValue={(v) => v.toFixed(2)}
+          onChange={(v) => update({ alpha: v })}
+        />
+        <SliderRow
+          label="Deblur radius"
+          value={params.psfSigma}
+          defaultValue={DEFAULT_ENHANCE_PARAMS.psfSigma}
+          min={0.5}
+          max={3}
+          step={0.1}
+          formatValue={(v) => `${v.toFixed(1)} px`}
+          onChange={(v) => update({ psfSigma: v })}
+        />
+        <SliderRow
+          label="Deblur iterations"
+          value={params.rlIters}
+          defaultValue={DEFAULT_ENHANCE_PARAMS.rlIters}
+          min={0}
+          max={30}
+          step={1}
+          onChange={(v) => update({ rlIters: v })}
+        />
 
-            {/* Sharpen strength */}
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-medium" style={{ color: 'var(--gray-300)' }}>Sharpen strength</label>
-                <span className="text-xs font-mono" style={{ color: 'var(--gray-400)' }}>{params.sharpness.toFixed(2)}</span>
-              </div>
-              <input
-                type="range" min={0} max={1} step={0.05} value={params.sharpness}
-                onChange={(e) => update({ sharpness: parseFloat(e.target.value) })}
-                className="slider w-full"
-              />
-            </div>
-
-            {/* Detail amount */}
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-medium" style={{ color: 'var(--gray-300)' }}>Detail amount</label>
-                <span className="text-xs font-mono" style={{ color: 'var(--gray-400)' }}>{params.alpha.toFixed(2)}</span>
-              </div>
-              <input
-                type="range" min={0} max={1} step={0.05} value={params.alpha}
-                onChange={(e) => update({ alpha: parseFloat(e.target.value) })}
-                className="slider w-full"
-              />
-            </div>
-
-            {/* Deblur radius */}
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-medium" style={{ color: 'var(--gray-300)' }}>Deblur radius</label>
-                <span className="text-xs font-mono" style={{ color: 'var(--gray-400)' }}>{params.psfSigma.toFixed(1)} px</span>
-              </div>
-              <input
-                type="range" min={0.5} max={3} step={0.1} value={params.psfSigma}
-                onChange={(e) => update({ psfSigma: parseFloat(e.target.value) })}
-                className="slider w-full"
-              />
-            </div>
-
-            {/* Deblur iterations */}
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-medium" style={{ color: 'var(--gray-300)' }}>Deblur iterations</label>
-                <span className="text-xs font-mono" style={{ color: 'var(--gray-400)' }}>{params.rlIters}</span>
-              </div>
-              <input
-                type="range" min={0} max={30} step={1} value={params.rlIters}
-                onChange={(e) => update({ rlIters: parseFloat(e.target.value) })}
-                className="slider w-full"
-              />
-            </div>
-
-            {/* Chroma cleanup */}
-            <label className="flex items-center gap-2 text-xs" style={{ color: 'var(--gray-300)', cursor: 'pointer' }}>
-              <input
-                type="checkbox"
-                checked={params.chromaClean}
-                onChange={(e) => update({ chromaClean: e.target.checked })}
-              />
-              Chroma cleanup
-            </label>
-          </div>
-        )}
+        <label className="flex items-center gap-2" style={{ fontSize: 11.5, color: 'var(--glass-text-label)', cursor: 'pointer' }}>
+          <input
+            type="checkbox"
+            checked={params.chromaClean}
+            onChange={(e) => update({ chromaClean: e.target.checked })}
+          />
+          Chroma cleanup
+        </label>
       </div>
 
-      {error && <div role="alert" className="text-red-400 text-xs">{error}</div>}
+      {error && <div role="alert" className="text-xs" style={{ color: '#f87171' }}>{error}</div>}
 
       {/* Apply button */}
       <button
         type="button"
         disabled={busy || selectedScaleInfeasible}
         style={{
-          width: '100%', padding: 11, borderRadius: 9,
-          border: '1px solid var(--primary-500, #3b82f6)',
-          background: 'var(--primary-600, #2563eb)', color: '#fff', fontSize: '.84rem', fontWeight: 600,
+          width: '100%', padding: 11, borderRadius: 11,
+          border: '1px solid var(--accent-ring)',
+          background: 'var(--accent)', color: '#0b0b0c', fontSize: 12.5, fontWeight: 700,
           cursor: busy ? 'wait' : selectedScaleInfeasible ? 'not-allowed' : 'pointer',
-          opacity: busy || selectedScaleInfeasible ? 0.75 : 1,
+          opacity: busy || selectedScaleInfeasible ? 0.6 : 1,
+          boxShadow: busy || selectedScaleInfeasible ? 'none' : '0 2px 18px var(--accent-ring)',
           display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
         }}
         onClick={handleApply}
@@ -359,7 +286,7 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
             className="animate-spin"
             style={{
               width: 14, height: 14, borderRadius: '50%',
-              border: '2px solid rgba(255,255,255,0.4)', borderTopColor: '#fff',
+              border: '2px solid rgba(11,11,12,0.35)', borderTopColor: '#0b0b0c',
               flexShrink: 0,
             }}
           />
@@ -374,8 +301,8 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
         <button
           type="button"
           style={{
-            width: '100%', padding: 8, borderRadius: 8, border: '1px solid var(--border)',
-            background: 'transparent', color: 'var(--gray-300)', fontSize: '.78rem', cursor: 'pointer',
+            width: '100%', padding: 8, borderRadius: 8, border: '1px solid rgba(255,255,255,.1)',
+            background: 'transparent', color: 'var(--glass-text-secondary)', fontSize: 11.5, cursor: 'pointer',
           }}
           onClick={() => { enhanceService.revert(); setRevertVersion((v) => v + 1); }}
         >
@@ -386,11 +313,11 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
       {/* In-session upscale note */}
       {params.upscale && (
         <div style={{
-          fontSize: '.7rem', color: 'var(--gray-400)', background: 'var(--gray-900)',
-          border: '1px solid var(--border)', borderRadius: 8, padding: '8px 10px',
+          fontSize: 10.5, color: 'var(--glass-text-secondary)', background: 'rgba(255,255,255,.03)',
+          border: '1px solid rgba(255,255,255,.1)', borderRadius: 8, padding: '8px 10px',
           display: 'flex', gap: 7,
         }}>
-          <span style={{ color: '#9ec1ff', flexShrink: 0 }}>ⓘ</span>
+          <span style={{ color: 'var(--accent)', flexShrink: 0 }}>ⓘ</span>
           <span>Upscale applies in this session; reopening the image returns the original.</span>
         </div>
       )}

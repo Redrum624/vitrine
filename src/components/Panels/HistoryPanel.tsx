@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react';
-import { RotateCcw, Trash2, Clock } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { RotateCcw } from 'lucide-react';
 import { checkpointService } from '../../services/CheckpointService';
 import { useAppStore } from '../../stores/appStore';
 import { imageProcessingPipeline } from '../../services/ImageProcessingPipeline';
+import { useRegisterModuleCardActions, type RegisterModuleCardActions } from '../Controls/moduleCardActions';
 
 function timeAgo(at: number, now: number): string {
   const s = Math.max(0, Math.floor((now - at) / 1000));
@@ -14,12 +15,18 @@ function timeAgo(at: number, now: number): string {
   return `${Math.floor(h / 24)}d ago`;
 }
 
+interface HistoryPanelProps {
+  /** Surfaces "Clear" as the unified card header's Reset ↺ (Task 4 — History had
+   * no chrome of its own pre-Task-2, so it wasn't wired in that pass). */
+  onRegisterActions?: RegisterModuleCardActions;
+}
+
 /**
  * History module: the per-image checkpoint timeline. Every committed edit is recorded
  * automatically; click any checkpoint to restore that state (the full list is kept).
  * Persisted per image and across sessions.
  */
-export function HistoryPanel() {
+export function HistoryPanel({ onRegisterActions }: HistoryPanelProps = {}) {
   const [, force] = useState(0);
   useEffect(() => checkpointService.subscribe(() => force((n) => n + 1)), []);
 
@@ -35,52 +42,45 @@ export function HistoryPanel() {
     }
   };
 
-  return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between pb-2" style={{ borderBottom: '1px solid var(--border)' }}>
-        <div className="flex items-center gap-2">
-          <Clock className="w-3 h-3" style={{ color: 'var(--gray-500)' }} />
-          <span className="text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--gray-500)', letterSpacing: '0.5px' }}>History</span>
-        </div>
-        {checkpoints.length > 0 && (
-          <button
-            onClick={() => checkpointService.clear()}
-            className="p-1.5 rounded border"
-            style={{ backgroundColor: 'transparent', borderColor: 'var(--border)', color: 'var(--gray-400)' }}
-            title="Clear history for this image"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-          </button>
-        )}
-      </div>
+  // Reset ↺ = Clear history (registered unconditionally — presence of the Reset
+  // chip is fixed per moduleCardActions' contract; clearing an already-empty
+  // list is a harmless no-op, same as clicking Reset on an unedited module).
+  const clear = useCallback(() => checkpointService.clear(), []);
+  useRegisterModuleCardActions(onRegisterActions, { reset: clear });
 
+  return (
+    <div className="flex flex-col" style={{ gap: 8 }}>
       {checkpoints.length === 0 ? (
-        <p className="text-xs" style={{ color: 'var(--gray-500)' }}>
+        <p className="text-xs" style={{ color: 'var(--glass-text-muted)' }}>
           No checkpoints yet. Every edit is recorded here automatically — once you adjust something, click a
           checkpoint to jump back to it. History is saved per image and kept between sessions.
         </p>
       ) : (
-        <div className="space-y-1">
+        <div className="flex flex-col" style={{ gap: 6 }}>
           {checkpoints.slice().reverse().map((cp) => {
             const isActive = cp.id === activeId;
             return (
               <button
                 key={cp.id}
                 onClick={() => restore(cp.id)}
-                className="w-full flex items-center justify-between px-3 py-2 rounded border text-left"
+                className="w-full flex items-center justify-between text-left"
                 style={{
-                  backgroundColor: isActive ? 'var(--gray-700)' : 'transparent',
-                  borderColor: isActive ? 'var(--primary-500)' : 'var(--border)',
+                  padding: '8px 10px',
+                  borderRadius: 10,
+                  background: isActive ? 'var(--accent-soft)' : 'rgba(255,255,255,.04)',
+                  borderWidth: 1,
+                  borderStyle: 'solid',
+                  borderColor: isActive ? 'var(--accent-ring)' : 'rgba(255,255,255,.1)',
                 }}
                 title={isActive ? 'Current state' : 'Restore this checkpoint'}
               >
-                <div className="flex flex-col">
-                  <span className="text-xs" style={{ color: 'var(--gray-200)' }}>{cp.label}</span>
-                  <span className="font-mono" style={{ color: 'var(--gray-500)', fontSize: '10px' }}>{timeAgo(cp.at, now)}</span>
+                <div className="flex flex-col" style={{ gap: 2 }}>
+                  <span style={{ fontSize: 11.5, color: isActive ? 'var(--accent)' : 'var(--glass-text-label)' }}>{cp.label}</span>
+                  <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: 10, color: 'var(--glass-text-muted)' }}>{timeAgo(cp.at, now)}</span>
                 </div>
                 {isActive
-                  ? <span className="text-xs" style={{ color: 'var(--primary-400)' }}>current</span>
-                  : <RotateCcw className="w-3 h-3" style={{ color: 'var(--gray-500)' }} />}
+                  ? <span style={{ fontSize: 10.5, color: 'var(--accent)' }}>current</span>
+                  : <RotateCcw size={13} style={{ color: 'var(--glass-text-muted)' }} />}
               </button>
             );
           })}

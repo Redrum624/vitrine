@@ -154,6 +154,46 @@ describe('SliderRow', () => {
     expect(screen.getByText('Warm')).toBeInTheDocument();
   });
 
+  describe('drag lifecycle hooks (onDragStart / onDragEnd)', () => {
+    it('fires onDragStart on mouse-down/touch-start and onDragEnd on mouse-up/leave/touch-end', () => {
+      const onDragStart = jest.fn();
+      const onDragEnd = jest.fn();
+      render(
+        <SliderRow
+          label="Rotation"
+          value={0}
+          defaultValue={0}
+          min={-5}
+          max={5}
+          step={0.1}
+          onChange={() => {}}
+          onDragStart={onDragStart}
+          onDragEnd={onDragEnd}
+        />
+      );
+      const input = screen.getByLabelText('Rotation');
+      fireEvent.mouseDown(input);
+      expect(onDragStart).toHaveBeenCalledTimes(1);
+      fireEvent.mouseUp(input);
+      expect(onDragEnd).toHaveBeenCalledTimes(1);
+      fireEvent.touchStart(input);
+      expect(onDragStart).toHaveBeenCalledTimes(2);
+      fireEvent.touchEnd(input);
+      expect(onDragEnd).toHaveBeenCalledTimes(2);
+    });
+
+    it('omitting the drag hooks is harmless (most sliders do not need them)', () => {
+      render(
+        <SliderRow label="Exposure" value={0} defaultValue={0} min={-2} max={2} step={0.05} onChange={() => {}} />
+      );
+      const input = screen.getByLabelText('Exposure');
+      expect(() => {
+        fireEvent.mouseDown(input);
+        fireEvent.mouseUp(input);
+      }).not.toThrow();
+    });
+  });
+
   describe('click-to-edit value chip', () => {
     it('turns the value chip into a numeric input on click, seeded with the raw value', () => {
       render(

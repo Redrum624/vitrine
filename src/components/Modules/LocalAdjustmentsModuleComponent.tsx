@@ -1,14 +1,17 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { Brush, Move, Circle, Layers, Trash2, Eye, EyeOff, Plus, Settings, RotateCcw } from 'lucide-react';
+import { Brush, Move, Circle, Layers, Trash2, Eye, EyeOff, Plus, Settings } from 'lucide-react';
 import {
   LocalAdjustmentLayer,
   LocalAdjustmentParams,
   BrushParameters,
   MaskGeometry
 } from '../../modules/LocalAdjustmentsModule';
-import { DelayedInputControl } from '../Controls/DelayedInputControl';
 import { logger } from '../../utils/Logger';
 import { useRegisterModuleCardActions, type RegisterModuleCardActions } from '../Controls/moduleCardActions';
+import { SectionLabel } from '../Controls/SectionLabel';
+import { ChipButton } from '../Controls/ChipButton';
+import { SliderRow } from '../Controls/SliderRow';
+import { Segmented } from '../Controls/Segmented';
 
 interface LocalAdjustmentsModuleComponentProps {
   parameters: LocalAdjustmentParams;
@@ -36,6 +39,27 @@ const DEFAULT_GEOMETRY: MaskGeometry = {
 
 type ToolType = 'brush' | 'eraser' | 'linear_gradient' | 'radial_gradient' | 'parametric';
 type TabType = 'tools' | 'layers' | 'adjustments' | 'masking';
+
+const TAB_OPTIONS: { value: TabType; label: React.ReactNode }[] = [
+  { value: 'tools', label: <span className="flex items-center" style={{ gap: 4 }}><Brush size={12} />Tools</span> },
+  { value: 'layers', label: <span className="flex items-center" style={{ gap: 4 }}><Layers size={12} />Layers</span> },
+  { value: 'adjustments', label: <span className="flex items-center" style={{ gap: 4 }}><Settings size={12} />Adjust</span> },
+  { value: 'masking', label: <span className="flex items-center" style={{ gap: 4 }}><Circle size={12} />Mask</span> },
+];
+
+const TOOL_OPTIONS: { key: ToolType; label: string; icon: React.ComponentType<{ size?: number }> }[] = [
+  { key: 'brush', label: 'Brush', icon: Brush },
+  { key: 'eraser', label: 'Eraser', icon: Circle },
+  { key: 'linear_gradient', label: 'Linear', icon: Move },
+  { key: 'radial_gradient', label: 'Radial', icon: Circle },
+];
+
+const NEW_LAYER_OPTIONS: { key: LocalAdjustmentLayer['type']; label: string; icon: React.ComponentType<{ size?: number }> }[] = [
+  { key: 'brush', label: 'Brush', icon: Brush },
+  { key: 'linear_gradient', label: 'Linear', icon: Move },
+  { key: 'radial_gradient', label: 'Radial', icon: Circle },
+  { key: 'parametric', label: 'Parametric', icon: Settings },
+];
 
 export const LocalAdjustmentsModuleComponent: React.FC<LocalAdjustmentsModuleComponentProps> = ({
   parameters,
@@ -117,10 +141,6 @@ export const LocalAdjustmentsModuleComponent: React.FC<LocalAdjustmentsModuleCom
     logger.debug(`LocalAdjustments ${key} updated:`, value);
   }, [handleParameterChangeRealTime]);
 
-  const resetParameter = useCallback((key: keyof LocalAdjustmentParams, defaultValue: number | number[]) => {
-    handleParameterChange(key, defaultValue);
-  }, [handleParameterChange]);
-
   // Real-time brush parameter update for smooth slider dragging
   const handleBrushParamChangeRealTime = useCallback((key: keyof BrushParameters, value: number) => {
     const newParams = { ...brushParamsRef.current, [key]: value };
@@ -133,10 +153,6 @@ export const LocalAdjustmentsModuleComponent: React.FC<LocalAdjustmentsModuleCom
     handleBrushParamChangeRealTime(key, value);
     logger.debug(`Brush ${key} updated:`, value);
   }, [handleBrushParamChangeRealTime]);
-
-  const resetBrushParam = useCallback((key: keyof BrushParameters, defaultValue: number) => {
-    handleBrushParamChange(key, defaultValue);
-  }, [handleBrushParamChange]);
 
   const createNewLayer = useCallback((type: LocalAdjustmentLayer['type']) => {
     const defaultNames = {
@@ -154,54 +170,58 @@ export const LocalAdjustmentsModuleComponent: React.FC<LocalAdjustmentsModuleCom
     setShowNewLayerDialog(false);
   }, [layers, onCreateLayer]);
 
-  const geomRow = (label: string, val: number, min: number, max: number, step: number, onCh: (v: number) => void) => (
-    <div className="space-y-1" key={label}>
-      <div className="flex items-center justify-between">
-        <span className="text-xs" style={{ color: 'var(--gray-300)' }}>{label}</span>
-        <span className="text-xs font-mono" style={{ color: 'var(--gray-500)' }}>{val.toFixed(2)}</span>
-      </div>
-      <input
-        type="range" min={min} max={max} step={step} value={val}
-        className="slider w-full"
-        onInput={(e) => onCh(parseFloat((e.target as HTMLInputElement).value))}
-        onChange={(e) => onCh(parseFloat(e.target.value))}
-      />
-    </div>
+  // Thin wrapper around SliderRow for the mask-geometry rows (Center/Radius/Start/End/Feather):
+  // 2-decimal display, double-click resets to the given DEFAULT_GEOMETRY field.
+  const geomRow = (label: string, val: number, min: number, max: number, step: number, defaultVal: number, onCh: (v: number) => void) => (
+    <SliderRow
+      key={label}
+      label={label}
+      value={val}
+      defaultValue={defaultVal}
+      min={min}
+      max={max}
+      step={step}
+      formatValue={(v) => v.toFixed(2)}
+      onChange={onCh}
+    />
   );
 
   const renderGeometry = () => {
     if (!activeLayer || (activeLayer.type !== 'radial_gradient' && activeLayer.type !== 'linear_gradient')) {
       return (
-        <div className="text-xs" style={{ color: 'var(--gray-400)' }}>
+        <div className="text-xs" style={{ color: 'var(--glass-text-muted)' }}>
           Add a Radial or Linear layer in the <strong>Layers</strong> tab to place a region, then shape it here and adjust its look in the <strong>Adjust</strong> tab.
         </div>
       );
     }
     const isRadial = activeLayer.type === 'radial_gradient';
     return (
-      <div className="space-y-2">
-        <label className="text-xs font-medium" style={{ color: 'var(--gray-300)' }}>
-          {isRadial ? 'Radial Shape (circle / oval)' : 'Linear Gradient'}
-        </label>
+      <div className="flex flex-col" style={{ gap: 12 }}>
+        <SectionLabel>{isRadial ? 'Radial Shape (circle / oval)' : 'Linear Gradient'}</SectionLabel>
         {isRadial ? (
           <>
-            {geomRow('Center X', localGeom.centerX, 0, 1, 0.01, (v) => updateGeom({ centerX: v }))}
-            {geomRow('Center Y', localGeom.centerY, 0, 1, 0.01, (v) => updateGeom({ centerY: v }))}
-            {geomRow('Radius X', localGeom.radiusX, 0.02, 1, 0.01, (v) => updateGeom({ radiusX: v }))}
-            {geomRow('Radius Y', localGeom.radiusY, 0.02, 1, 0.01, (v) => updateGeom({ radiusY: v }))}
-            {geomRow('Feather', localGeom.feather, 0.01, 1, 0.01, (v) => updateGeom({ feather: v }))}
+            {geomRow('Center X', localGeom.centerX, 0, 1, 0.01, DEFAULT_GEOMETRY.centerX, (v) => updateGeom({ centerX: v }))}
+            {geomRow('Center Y', localGeom.centerY, 0, 1, 0.01, DEFAULT_GEOMETRY.centerY, (v) => updateGeom({ centerY: v }))}
+            {geomRow('Radius X', localGeom.radiusX, 0.02, 1, 0.01, DEFAULT_GEOMETRY.radiusX, (v) => updateGeom({ radiusX: v }))}
+            {geomRow('Radius Y', localGeom.radiusY, 0.02, 1, 0.01, DEFAULT_GEOMETRY.radiusY, (v) => updateGeom({ radiusY: v }))}
+            {geomRow('Feather', localGeom.feather, 0.01, 1, 0.01, DEFAULT_GEOMETRY.feather, (v) => updateGeom({ feather: v }))}
           </>
         ) : (
           <>
-            {geomRow('Start X', localGeom.startX, 0, 1, 0.01, (v) => updateGeom({ startX: v }))}
-            {geomRow('Start Y', localGeom.startY, 0, 1, 0.01, (v) => updateGeom({ startY: v }))}
-            {geomRow('End X', localGeom.endX, 0, 1, 0.01, (v) => updateGeom({ endX: v }))}
-            {geomRow('End Y', localGeom.endY, 0, 1, 0.01, (v) => updateGeom({ endY: v }))}
-            {geomRow('Feather', localGeom.feather, 0.01, 1, 0.01, (v) => updateGeom({ feather: v }))}
+            {geomRow('Start X', localGeom.startX, 0, 1, 0.01, DEFAULT_GEOMETRY.startX, (v) => updateGeom({ startX: v }))}
+            {geomRow('Start Y', localGeom.startY, 0, 1, 0.01, DEFAULT_GEOMETRY.startY, (v) => updateGeom({ startY: v }))}
+            {geomRow('End X', localGeom.endX, 0, 1, 0.01, DEFAULT_GEOMETRY.endX, (v) => updateGeom({ endX: v }))}
+            {geomRow('End Y', localGeom.endY, 0, 1, 0.01, DEFAULT_GEOMETRY.endY, (v) => updateGeom({ endY: v }))}
+            {geomRow('Feather', localGeom.feather, 0.01, 1, 0.01, DEFAULT_GEOMETRY.feather, (v) => updateGeom({ feather: v }))}
           </>
         )}
-        <label className="flex items-center gap-2 text-xs cursor-pointer" style={{ color: 'var(--gray-300)' }}>
-          <input type="checkbox" checked={localGeom.invert} onChange={(e) => updateGeom({ invert: e.target.checked })} />
+        <label className="flex items-center gap-2 text-xs cursor-pointer" style={{ color: 'var(--glass-text-label)' }}>
+          <input
+            type="checkbox"
+            checked={localGeom.invert}
+            onChange={(e) => updateGeom({ invert: e.target.checked })}
+            style={{ accentColor: 'var(--accent)' }}
+          />
           Invert mask
         </label>
       </div>
@@ -209,295 +229,83 @@ export const LocalAdjustmentsModuleComponent: React.FC<LocalAdjustmentsModuleCom
   };
 
   const renderToolsTab = () => (
-    <div className="space-y-3">
-      <div className="space-y-1.5">
-        <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Tools</label>
-        <div className="grid grid-cols-2 gap-1.5">
-          {[
-            { key: 'brush', label: 'Brush', icon: Brush },
-            { key: 'eraser', label: 'Eraser', icon: Circle },
-            { key: 'linear_gradient', label: 'Linear', icon: Move },
-            { key: 'radial_gradient', label: 'Radial', icon: Circle }
-          ].map(({ key, label, icon: Icon }) => (
-            <button
-              key={key}
-              onClick={() => setActiveTool(key as ToolType)}
-              className="flex items-center gap-1.5 px-3 py-2 rounded text-xs transition-colors"
-              style={{
-                backgroundColor: activeTool === key ? 'var(--primary-600)' : 'var(--gray-700)',
-                color: 'var(--white)'
-              }}
-            >
-              <Icon className="w-3.5 h-3.5" />
+    <div className="flex flex-col" style={{ gap: 16 }}>
+      <div className="flex flex-col" style={{ gap: 10 }}>
+        <SectionLabel>Tools</SectionLabel>
+        <div className="grid grid-cols-2" style={{ gap: 6 }}>
+          {TOOL_OPTIONS.map(({ key, label, icon: Icon }) => (
+            <ChipButton key={key} className="flex items-center gap-1.5" active={activeTool === key} onClick={() => setActiveTool(key)}>
+              <Icon size={13} />
               {label}
-            </button>
+            </ChipButton>
           ))}
         </div>
       </div>
 
       {(activeTool === 'brush' || activeTool === 'eraser') && (
-        <div className="space-y-3">
-          <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Brush Settings</label>
+        <div className="flex flex-col" style={{ gap: 12 }}>
+          <SectionLabel>Brush Settings</SectionLabel>
 
-          {/* Size */}
-          <div className="space-y-1.5">
-            <div className="flex items-center justify-between">
-              <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Size</label>
-              <div className="flex items-center gap-1.5">
-                <DelayedInputControl
-                  value={localBrushParams.size}
-                  onChange={(value) => handleBrushParamChange('size', value)}
-                  min={1}
-                  max={500}
-                  step={1}
-                  precision={0}
-                />
-                <span className="text-xs font-mono" style={{color: 'var(--gray-500)', width: '20px'}}>px</span>
-                <button
-                  onClick={() => resetBrushParam('size', 50)}
-                  className="p-1 rounded"
-                  style={{
-                    backgroundColor: 'transparent',
-                    color: 'var(--gray-500)',
-                    transition: 'var(--transition-fast)'
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.backgroundColor = 'var(--gray-800)';
-                    e.currentTarget.style.color = 'var(--white)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.backgroundColor = 'transparent';
-                    e.currentTarget.style.color = 'var(--gray-500)';
-                  }}
-                  title="Reset"
-                >
-                  <RotateCcw className="w-3 h-3" />
-                </button>
-              </div>
-            </div>
-            <input
-              type="range"
-              min={1}
-              max={500}
-              step={1}
-              value={localBrushParams.size}
-              onInput={(e) => handleBrushParamChangeRealTime('size', parseFloat((e.target as HTMLInputElement).value))}
-              onChange={(e) => handleBrushParamChange('size', parseFloat(e.target.value))}
-              onDoubleClick={() => handleBrushParamChange('size', 50)}
-              className="slider w-full"
-              style={{
-                background: 'linear-gradient(to right, #6b7280, #3b82f6, #8b5cf6)',
-              }}
-              title="Double-click to reset to 50"
-            />
-          </div>
-
-          {/* Hardness */}
-          <div className="space-y-1.5">
-            <div className="flex items-center justify-between">
-              <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Hardness</label>
-              <div className="flex items-center gap-1.5">
-                <DelayedInputControl
-                  value={localBrushParams.hardness * 100}
-                  onChange={(value) => handleBrushParamChange('hardness', value / 100)}
-                  min={0}
-                  max={100}
-                  step={1}
-                  precision={0}
-                />
-                <span className="text-xs font-mono" style={{color: 'var(--gray-500)', width: '20px'}}>%</span>
-                <button
-                  onClick={() => resetBrushParam('hardness', 0.8)}
-                  className="p-1 rounded"
-                  style={{
-                    backgroundColor: 'transparent',
-                    color: 'var(--gray-500)',
-                    transition: 'var(--transition-fast)'
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.backgroundColor = 'var(--gray-800)';
-                    e.currentTarget.style.color = 'var(--white)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.backgroundColor = 'transparent';
-                    e.currentTarget.style.color = 'var(--gray-500)';
-                  }}
-                  title="Reset"
-                >
-                  <RotateCcw className="w-3 h-3" />
-                </button>
-              </div>
-            </div>
-            <input
-              type="range"
-              min={0}
-              max={1}
-              step={0.01}
-              value={localBrushParams.hardness}
-              onInput={(e) => handleBrushParamChangeRealTime('hardness', parseFloat((e.target as HTMLInputElement).value))}
-              onChange={(e) => handleBrushParamChange('hardness', parseFloat(e.target.value))}
-              onDoubleClick={() => handleBrushParamChange('hardness', 0.8)}
-              className="slider w-full"
-              style={{
-                background: 'linear-gradient(to right, #9ca3af, #1f2937)',
-              }}
-              title="Double-click to reset to 80%"
-            />
-          </div>
-
-          {/* Opacity */}
-          <div className="space-y-1.5">
-            <div className="flex items-center justify-between">
-              <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Opacity</label>
-              <div className="flex items-center gap-1.5">
-                <DelayedInputControl
-                  value={localBrushParams.opacity * 100}
-                  onChange={(value) => handleBrushParamChange('opacity', value / 100)}
-                  min={0}
-                  max={100}
-                  step={1}
-                  precision={0}
-                />
-                <span className="text-xs font-mono" style={{color: 'var(--gray-500)', width: '20px'}}>%</span>
-                <button
-                  onClick={() => resetBrushParam('opacity', 1.0)}
-                  className="p-1 rounded"
-                  style={{
-                    backgroundColor: 'transparent',
-                    color: 'var(--gray-500)',
-                    transition: 'var(--transition-fast)'
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.backgroundColor = 'var(--gray-800)';
-                    e.currentTarget.style.color = 'var(--white)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.backgroundColor = 'transparent';
-                    e.currentTarget.style.color = 'var(--gray-500)';
-                  }}
-                  title="Reset"
-                >
-                  <RotateCcw className="w-3 h-3" />
-                </button>
-              </div>
-            </div>
-            <input
-              type="range"
-              min={0}
-              max={1}
-              step={0.01}
-              value={localBrushParams.opacity}
-              onInput={(e) => handleBrushParamChangeRealTime('opacity', parseFloat((e.target as HTMLInputElement).value))}
-              onChange={(e) => handleBrushParamChange('opacity', parseFloat(e.target.value))}
-              onDoubleClick={() => handleBrushParamChange('opacity', 1.0)}
-              className="slider w-full"
-              style={{
-                background: 'linear-gradient(to right, rgba(107, 114, 128, 0.3), rgba(107, 114, 128, 1))',
-              }}
-              title="Double-click to reset to 100%"
-            />
-          </div>
-
-          {/* Flow */}
-          <div className="space-y-1.5">
-            <div className="flex items-center justify-between">
-              <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Flow</label>
-              <div className="flex items-center gap-1.5">
-                <DelayedInputControl
-                  value={localBrushParams.flow * 100}
-                  onChange={(value) => handleBrushParamChange('flow', value / 100)}
-                  min={0}
-                  max={100}
-                  step={1}
-                  precision={0}
-                />
-                <span className="text-xs font-mono" style={{color: 'var(--gray-500)', width: '20px'}}>%</span>
-                <button
-                  onClick={() => resetBrushParam('flow', 1.0)}
-                  className="p-1 rounded"
-                  style={{
-                    backgroundColor: 'transparent',
-                    color: 'var(--gray-500)',
-                    transition: 'var(--transition-fast)'
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.backgroundColor = 'var(--gray-800)';
-                    e.currentTarget.style.color = 'var(--white)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.backgroundColor = 'transparent';
-                    e.currentTarget.style.color = 'var(--gray-500)';
-                  }}
-                  title="Reset"
-                >
-                  <RotateCcw className="w-3 h-3" />
-                </button>
-              </div>
-            </div>
-            <input
-              type="range"
-              min={0}
-              max={1}
-              step={0.01}
-              value={localBrushParams.flow}
-              onInput={(e) => handleBrushParamChangeRealTime('flow', parseFloat((e.target as HTMLInputElement).value))}
-              onChange={(e) => handleBrushParamChange('flow', parseFloat(e.target.value))}
-              onDoubleClick={() => handleBrushParamChange('flow', 1.0)}
-              className="slider w-full"
-              style={{
-                background: 'linear-gradient(to right, #6b7280, #10b981)',
-              }}
-              title="Double-click to reset to 100%"
-            />
-          </div>
+          <SliderRow
+            label="Size" value={localBrushParams.size} defaultValue={50} min={1} max={500} step={1}
+            formatValue={(v) => `${Math.round(v)} px`}
+            trackBackground="linear-gradient(to right, #6b7280, #3b82f6, #8b5cf6)"
+            onChange={(v) => handleBrushParamChange('size', v)}
+          />
+          <SliderRow
+            label="Hardness" value={localBrushParams.hardness} defaultValue={0.8} min={0} max={1} step={0.01}
+            formatValue={(v) => `${Math.round(v * 100)}%`}
+            trackBackground="linear-gradient(to right, #9ca3af, #1f2937)"
+            onChange={(v) => handleBrushParamChange('hardness', v)}
+          />
+          <SliderRow
+            label="Opacity" value={localBrushParams.opacity} defaultValue={1.0} min={0} max={1} step={0.01}
+            formatValue={(v) => `${Math.round(v * 100)}%`}
+            trackBackground="linear-gradient(to right, rgba(107, 114, 128, 0.3), rgba(107, 114, 128, 1))"
+            onChange={(v) => handleBrushParamChange('opacity', v)}
+          />
+          <SliderRow
+            label="Flow" value={localBrushParams.flow} defaultValue={1.0} min={0} max={1} step={0.01}
+            formatValue={(v) => `${Math.round(v * 100)}%`}
+            trackBackground="linear-gradient(to right, #6b7280, #10b981)"
+            onChange={(v) => handleBrushParamChange('flow', v)}
+          />
         </div>
       )}
 
-      <div className="space-y-1.5 pt-2" style={{ borderTop: '1px solid var(--border)' }}>
-        <label className="text-xs font-medium" style={{ color: 'var(--gray-300)' }}>Shape &amp; Position</label>
+      <div className="flex flex-col" style={{ gap: 12, paddingTop: 4, borderTop: '1px solid var(--glass-border)' }}>
+        <SectionLabel>Shape &amp; Position</SectionLabel>
         {renderGeometry()}
       </div>
     </div>
   );
 
   const renderLayersTab = () => (
-    <div className="space-y-3">
-      <div className="flex justify-between items-center">
-        <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Layers</label>
-        <button
-          onClick={() => setShowNewLayerDialog(true)}
-          className="flex items-center gap-1 px-2 py-1 text-xs rounded transition-colors"
-          style={{
-            backgroundColor: 'var(--gray-700)',
-            color: 'var(--white)'
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.backgroundColor = 'var(--gray-600)';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.backgroundColor = 'var(--gray-700)';
-          }}
-        >
-          <Plus className="w-3 h-3" />
+    <div className="flex flex-col" style={{ gap: 12 }}>
+      <div className="flex items-center justify-between">
+        <SectionLabel className="flex-1">Layers</SectionLabel>
+        <ChipButton className="flex items-center gap-1.5 flex-shrink-0" onClick={() => setShowNewLayerDialog(true)}>
+          <Plus size={12} />
           New
-        </button>
+        </ChipButton>
       </div>
 
-      <div className="space-y-1.5 max-h-60 overflow-y-auto">
+      <div className="flex flex-col max-h-60 overflow-y-auto" style={{ gap: 6 }}>
         {layers.map((layer) => (
           <div
             key={layer.id}
             className="p-2 rounded"
             style={{
-              backgroundColor: 'var(--gray-700)',
-              border: `1px solid ${layer.id === activeLayerId ? 'var(--primary-500)' : 'transparent'}`
+              background: layer.id === activeLayerId ? 'var(--accent-soft)' : 'rgba(255,255,255,.04)',
+              border: `1px solid ${layer.id === activeLayerId ? 'var(--accent-ring)' : 'rgba(255,255,255,.1)'}`,
+              borderRadius: 9,
             }}
           >
             <div className="flex items-center justify-between mb-2">
               <button
                 onClick={() => onSetActiveLayer(layer.id)}
                 className="text-xs font-medium flex-1 text-left"
-                style={{color: 'var(--gray-200)'}}
+                style={{ color: 'var(--glass-text-label)' }}
               >
                 {layer.name}
               </button>
@@ -506,960 +314,196 @@ export const LocalAdjustmentsModuleComponent: React.FC<LocalAdjustmentsModuleCom
                 <button
                   onClick={() => onToggleLayer(layer.id, !layer.enabled)}
                   className="p-1 rounded"
-                  style={{color: layer.enabled ? 'var(--white)' : 'var(--gray-500)'}}
+                  style={{ color: layer.enabled ? 'var(--glass-text-title)' : 'var(--glass-text-muted)' }}
                 >
                   {layer.enabled ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
                 </button>
                 <button
                   onClick={() => onRemoveLayer(layer.id)}
                   className="p-1"
-                  style={{color: 'var(--red-400)'}}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.color = 'var(--red-300)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.color = 'var(--red-400)';
-                  }}
+                  style={{ color: '#f87171' }}
                 >
                   <Trash2 className="w-3 h-3" />
                 </button>
               </div>
             </div>
 
-            <div className="text-xs mb-2" style={{color: 'var(--gray-400)'}}>
+            <div className="text-xs mb-2" style={{ color: 'var(--glass-text-muted)' }}>
               {layer.type.replace('_', ' ')} • {layer.blendMode}
             </div>
 
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Opacity</span>
-                <span className="text-xs font-mono" style={{color: 'var(--gray-400)'}}>
-                  {(layer.opacity * 100).toFixed(0)}%
-                </span>
-              </div>
-              <input
-                type="range"
-                min={0}
-                max={1}
-                step={0.01}
-                value={layer.opacity}
-                onChange={(e) => onUpdateLayerOpacity(layer.id, parseFloat(e.target.value))}
-                className="slider w-full"
-                style={{
-                  background: 'linear-gradient(to right, rgba(107, 114, 128, 0.3), rgba(107, 114, 128, 1))',
-                }}
-              />
-            </div>
+            <SliderRow
+              label="Opacity" value={layer.opacity} defaultValue={1.0} min={0} max={1} step={0.01}
+              formatValue={(v) => `${Math.round(v * 100)}%`}
+              trackBackground="linear-gradient(to right, rgba(107, 114, 128, 0.3), rgba(107, 114, 128, 1))"
+              onChange={(v) => onUpdateLayerOpacity(layer.id, v)}
+            />
           </div>
         ))}
 
         {layers.length === 0 && (
-          <div className="text-xs text-center py-4" style={{color: 'var(--gray-400)'}}>
+          <div className="text-xs text-center py-4" style={{ color: 'var(--glass-text-muted)' }}>
             No layers yet. Click "New" to create your first adjustment layer.
           </div>
         )}
       </div>
 
       {showNewLayerDialog && (
-        <div className="space-y-2 p-3 rounded" style={{backgroundColor: 'var(--gray-800)', border: '1px solid var(--border)'}}>
-          <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Create New Layer</label>
+        <div className="flex flex-col" style={{ gap: 10, padding: 12, borderRadius: 10, background: 'rgba(255,255,255,.03)', border: '1px solid rgba(255,255,255,.1)' }}>
+          <SectionLabel>Create New Layer</SectionLabel>
 
-          <div className="grid grid-cols-2 gap-1.5">
-            {[
-              { key: 'brush', label: 'Brush', icon: Brush },
-              { key: 'linear_gradient', label: 'Linear', icon: Move },
-              { key: 'radial_gradient', label: 'Radial', icon: Circle },
-              { key: 'parametric', label: 'Parametric', icon: Settings }
-            ].map(({ key, label, icon: Icon }) => (
-              <button
-                key={key}
-                onClick={() => createNewLayer(key as LocalAdjustmentLayer['type'])}
-                className="flex items-center gap-1.5 px-3 py-2 text-xs rounded transition-colors"
-                style={{
-                  backgroundColor: 'var(--gray-700)',
-                  color: 'var(--white)'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = 'var(--gray-600)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = 'var(--gray-700)';
-                }}
-              >
-                <Icon className="w-3 h-3" />
+          <div className="grid grid-cols-2" style={{ gap: 6 }}>
+            {NEW_LAYER_OPTIONS.map(({ key, label, icon: Icon }) => (
+              <ChipButton key={key} className="flex items-center gap-1.5" onClick={() => createNewLayer(key)}>
+                <Icon size={13} />
                 {label}
-              </button>
+              </ChipButton>
             ))}
           </div>
 
-          <button
-            onClick={() => setShowNewLayerDialog(false)}
-            className="w-full px-3 py-2 text-xs rounded transition-colors"
-            style={{
-              backgroundColor: 'var(--gray-700)',
-              color: 'var(--white)'
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = 'var(--gray-600)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = 'var(--gray-700)';
-            }}
-          >
+          <ChipButton dashed onClick={() => setShowNewLayerDialog(false)}>
             Cancel
-          </button>
+          </ChipButton>
         </div>
       )}
     </div>
   );
 
   const renderAdjustmentsTab = () => (
-    <div className="space-y-3">
-      <div className="flex justify-between items-center">
-        <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Adjustments</label>
+    <div className="flex flex-col" style={{ gap: 12 }}>
+      <div className="flex items-center justify-between">
+        <SectionLabel className="flex-1">Adjustments</SectionLabel>
         {activeLayer && (
-          <span className="text-xs" style={{color: 'var(--gray-400)'}}>{activeLayer.name}</span>
+          <span className="text-xs flex-shrink-0" style={{ color: 'var(--glass-text-muted)' }}>{activeLayer.name}</span>
         )}
       </div>
 
       {!activeLayer ? (
-        <div className="text-xs text-center py-4" style={{color: 'var(--gray-400)'}}>
+        <div className="text-xs text-center py-4" style={{ color: 'var(--glass-text-muted)' }}>
           Select or create a layer to adjust its parameters.
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className="flex flex-col" style={{ gap: 16 }}>
           {/* Mask feather (also editable in the Tools > Shape section) */}
           {(activeLayer.type === 'radial_gradient' || activeLayer.type === 'linear_gradient') && (
-            <div className="space-y-1.5 pb-2" style={{ borderBottom: '1px solid var(--border)' }}>
-              <label className="text-xs font-medium" style={{ color: 'var(--gray-300)' }}>Mask Feather</label>
-              {geomRow('Feather', localGeom.feather, 0.01, 1, 0.01, (v) => updateGeom({ feather: v }))}
+            <div className="flex flex-col" style={{ gap: 8, paddingBottom: 8, borderBottom: '1px solid var(--glass-border)' }}>
+              <SectionLabel>Mask Feather</SectionLabel>
+              {geomRow('Feather', localGeom.feather, 0.01, 1, 0.01, DEFAULT_GEOMETRY.feather, (v) => updateGeom({ feather: v }))}
             </div>
           )}
 
-          {/* Exposure Section */}
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Exposure</label>
-
-            {/* Exposure */}
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Exposure</label>
-                <div className="flex items-center gap-1.5">
-                  <DelayedInputControl
-                    value={localParams.exposure}
-                    onChange={(value) => handleParameterChange('exposure', value)}
-                    min={-4}
-                    max={4}
-                    step={0.1}
-                    precision={2}
-                  />
-                  <span className="text-xs font-mono" style={{color: 'var(--gray-500)', width: '20px'}}>EV</span>
-                  <button
-                    onClick={() => resetParameter('exposure', 0)}
-                    className="p-1 rounded"
-                    style={{
-                      backgroundColor: 'transparent',
-                      color: 'var(--gray-500)',
-                      transition: 'var(--transition-fast)'
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.backgroundColor = 'var(--gray-800)';
-                      e.currentTarget.style.color = 'var(--white)';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.backgroundColor = 'transparent';
-                      e.currentTarget.style.color = 'var(--gray-500)';
-                    }}
-                    title="Reset"
-                  >
-                    <RotateCcw className="w-3 h-3" />
-                  </button>
-                </div>
-              </div>
-              <input
-                type="range"
-                min={-4}
-                max={4}
-                step={0.01}
-                value={localParams.exposure}
-                onInput={(e) => handleParameterChangeRealTime('exposure', parseFloat((e.target as HTMLInputElement).value))}
-                onChange={(e) => handleParameterChange('exposure', parseFloat(e.target.value))}
-                onDoubleClick={() => handleParameterChange('exposure', 0)}
-                className="slider w-full"
-                style={{
-                  background: 'linear-gradient(to right, #000000, #6b7280, #ffffff)',
-                }}
-                title="Double-click to reset to 0"
-              />
-            </div>
-
-            {/* Shadows */}
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Shadows</label>
-                <div className="flex items-center gap-1.5">
-                  <DelayedInputControl
-                    value={localParams.shadows}
-                    onChange={(value) => handleParameterChange('shadows', value)}
-                    min={-100}
-                    max={100}
-                    step={1}
-                    precision={0}
-                  />
-                  <button
-                    onClick={() => resetParameter('shadows', 0)}
-                    className="p-1 rounded"
-                    style={{
-                      backgroundColor: 'transparent',
-                      color: 'var(--gray-500)',
-                      transition: 'var(--transition-fast)'
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.backgroundColor = 'var(--gray-800)';
-                      e.currentTarget.style.color = 'var(--white)';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.backgroundColor = 'transparent';
-                      e.currentTarget.style.color = 'var(--gray-500)';
-                    }}
-                    title="Reset"
-                  >
-                    <RotateCcw className="w-3 h-3" />
-                  </button>
-                </div>
-              </div>
-              <input
-                type="range"
-                min={-100}
-                max={100}
-                step={1}
-                value={localParams.shadows}
-                onInput={(e) => handleParameterChangeRealTime('shadows', parseFloat((e.target as HTMLInputElement).value))}
-                onChange={(e) => handleParameterChange('shadows', parseFloat(e.target.value))}
-                onDoubleClick={() => handleParameterChange('shadows', 0)}
-                className="slider w-full"
-                style={{
-                  background: 'linear-gradient(to right, #000000, #6b7280)',
-                }}
-                title="Double-click to reset to 0"
-              />
-            </div>
-
-            {/* Highlights */}
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Highlights</label>
-                <div className="flex items-center gap-1.5">
-                  <DelayedInputControl
-                    value={localParams.highlights}
-                    onChange={(value) => handleParameterChange('highlights', value)}
-                    min={-100}
-                    max={100}
-                    step={1}
-                    precision={0}
-                  />
-                  <button
-                    onClick={() => resetParameter('highlights', 0)}
-                    className="p-1 rounded"
-                    style={{
-                      backgroundColor: 'transparent',
-                      color: 'var(--gray-500)',
-                      transition: 'var(--transition-fast)'
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.backgroundColor = 'var(--gray-800)';
-                      e.currentTarget.style.color = 'var(--white)';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.backgroundColor = 'transparent';
-                      e.currentTarget.style.color = 'var(--gray-500)';
-                    }}
-                    title="Reset"
-                  >
-                    <RotateCcw className="w-3 h-3" />
-                  </button>
-                </div>
-              </div>
-              <input
-                type="range"
-                min={-100}
-                max={100}
-                step={1}
-                value={localParams.highlights}
-                onInput={(e) => handleParameterChangeRealTime('highlights', parseFloat((e.target as HTMLInputElement).value))}
-                onChange={(e) => handleParameterChange('highlights', parseFloat(e.target.value))}
-                onDoubleClick={() => handleParameterChange('highlights', 0)}
-                className="slider w-full"
-                style={{
-                  background: 'linear-gradient(to right, #6b7280, #ffffff)',
-                }}
-                title="Double-click to reset to 0"
-              />
-            </div>
+          {/* Exposure */}
+          <div className="flex flex-col" style={{ gap: 12 }}>
+            <SectionLabel>Exposure</SectionLabel>
+            <SliderRow
+              label="Exposure" value={localParams.exposure} defaultValue={0} min={-4} max={4} step={0.01}
+              formatValue={(v) => `${v.toFixed(2)} EV`}
+              trackBackground="linear-gradient(to right, #000000, #6b7280, #ffffff)"
+              onChange={(v) => handleParameterChange('exposure', v)}
+            />
+            <SliderRow
+              label="Shadows" value={localParams.shadows} defaultValue={0} min={-100} max={100} step={1}
+              trackBackground="linear-gradient(to right, #000000, #6b7280)"
+              onChange={(v) => handleParameterChange('shadows', v)}
+            />
+            <SliderRow
+              label="Highlights" value={localParams.highlights} defaultValue={0} min={-100} max={100} step={1}
+              trackBackground="linear-gradient(to right, #6b7280, #ffffff)"
+              onChange={(v) => handleParameterChange('highlights', v)}
+            />
           </div>
 
-          {/* Color Section */}
-          <div className="space-y-1.5 pt-3" style={{borderTop: '1px solid var(--border)'}}>
-            <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Color</label>
-
-            {/* Temperature */}
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Temperature</label>
-                <div className="flex items-center gap-1.5">
-                  <DelayedInputControl
-                    value={localParams.temperature}
-                    onChange={(value) => handleParameterChange('temperature', value)}
-                    min={-100}
-                    max={100}
-                    step={1}
-                    precision={0}
-                  />
-                  <button
-                    onClick={() => resetParameter('temperature', 0)}
-                    className="p-1 rounded"
-                    style={{
-                      backgroundColor: 'transparent',
-                      color: 'var(--gray-500)',
-                      transition: 'var(--transition-fast)'
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.backgroundColor = 'var(--gray-800)';
-                      e.currentTarget.style.color = 'var(--white)';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.backgroundColor = 'transparent';
-                      e.currentTarget.style.color = 'var(--gray-500)';
-                    }}
-                    title="Reset"
-                  >
-                    <RotateCcw className="w-3 h-3" />
-                  </button>
-                </div>
-              </div>
-              <input
-                type="range"
-                min={-100}
-                max={100}
-                step={1}
-                value={localParams.temperature}
-                onInput={(e) => handleParameterChangeRealTime('temperature', parseFloat((e.target as HTMLInputElement).value))}
-                onChange={(e) => handleParameterChange('temperature', parseFloat(e.target.value))}
-                onDoubleClick={() => handleParameterChange('temperature', 0)}
-                className="slider w-full"
-                style={{
-                  background: 'linear-gradient(to right, #60a5fa, #e5e7eb, #fb923c)',
-                }}
-                title="Double-click to reset to 0"
-              />
-            </div>
-
-            {/* Tint */}
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Tint</label>
-                <div className="flex items-center gap-1.5">
-                  <DelayedInputControl
-                    value={localParams.tint}
-                    onChange={(value) => handleParameterChange('tint', value)}
-                    min={-100}
-                    max={100}
-                    step={1}
-                    precision={0}
-                  />
-                  <button
-                    onClick={() => resetParameter('tint', 0)}
-                    className="p-1 rounded"
-                    style={{
-                      backgroundColor: 'transparent',
-                      color: 'var(--gray-500)',
-                      transition: 'var(--transition-fast)'
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.backgroundColor = 'var(--gray-800)';
-                      e.currentTarget.style.color = 'var(--white)';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.backgroundColor = 'transparent';
-                      e.currentTarget.style.color = 'var(--gray-500)';
-                    }}
-                    title="Reset"
-                  >
-                    <RotateCcw className="w-3 h-3" />
-                  </button>
-                </div>
-              </div>
-              <input
-                type="range"
-                min={-100}
-                max={100}
-                step={1}
-                value={localParams.tint}
-                onInput={(e) => handleParameterChangeRealTime('tint', parseFloat((e.target as HTMLInputElement).value))}
-                onChange={(e) => handleParameterChange('tint', parseFloat(e.target.value))}
-                onDoubleClick={() => handleParameterChange('tint', 0)}
-                className="slider w-full"
-                style={{
-                  background: 'linear-gradient(to right, #f472b6, #9ca3af, #4ade80)',
-                }}
-                title="Double-click to reset to 0"
-              />
-            </div>
-
-            {/* Saturation */}
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Saturation</label>
-                <div className="flex items-center gap-1.5">
-                  <DelayedInputControl
-                    value={localParams.saturation}
-                    onChange={(value) => handleParameterChange('saturation', value)}
-                    min={-100}
-                    max={100}
-                    step={1}
-                    precision={0}
-                  />
-                  <button
-                    onClick={() => resetParameter('saturation', 0)}
-                    className="p-1 rounded"
-                    style={{
-                      backgroundColor: 'transparent',
-                      color: 'var(--gray-500)',
-                      transition: 'var(--transition-fast)'
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.backgroundColor = 'var(--gray-800)';
-                      e.currentTarget.style.color = 'var(--white)';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.backgroundColor = 'transparent';
-                      e.currentTarget.style.color = 'var(--gray-500)';
-                    }}
-                    title="Reset"
-                  >
-                    <RotateCcw className="w-3 h-3" />
-                  </button>
-                </div>
-              </div>
-              <input
-                type="range"
-                min={-100}
-                max={100}
-                step={1}
-                value={localParams.saturation}
-                onInput={(e) => handleParameterChangeRealTime('saturation', parseFloat((e.target as HTMLInputElement).value))}
-                onChange={(e) => handleParameterChange('saturation', parseFloat(e.target.value))}
-                onDoubleClick={() => handleParameterChange('saturation', 0)}
-                className="slider w-full"
-                style={{
-                  background: 'linear-gradient(to right, #6b7280, #3b82f6, #10b981, #eab308, #f97316, #ef4444)',
-                }}
-                title="Double-click to reset to 0"
-              />
-            </div>
-
-            {/* Vibrance */}
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Vibrance</label>
-                <div className="flex items-center gap-1.5">
-                  <DelayedInputControl
-                    value={localParams.vibrance}
-                    onChange={(value) => handleParameterChange('vibrance', value)}
-                    min={-100}
-                    max={100}
-                    step={1}
-                    precision={0}
-                  />
-                  <button
-                    onClick={() => resetParameter('vibrance', 0)}
-                    className="p-1 rounded"
-                    style={{
-                      backgroundColor: 'transparent',
-                      color: 'var(--gray-500)',
-                      transition: 'var(--transition-fast)'
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.backgroundColor = 'var(--gray-800)';
-                      e.currentTarget.style.color = 'var(--white)';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.backgroundColor = 'transparent';
-                      e.currentTarget.style.color = 'var(--gray-500)';
-                    }}
-                    title="Reset"
-                  >
-                    <RotateCcw className="w-3 h-3" />
-                  </button>
-                </div>
-              </div>
-              <input
-                type="range"
-                min={-100}
-                max={100}
-                step={1}
-                value={localParams.vibrance}
-                onInput={(e) => handleParameterChangeRealTime('vibrance', parseFloat((e.target as HTMLInputElement).value))}
-                onChange={(e) => handleParameterChange('vibrance', parseFloat(e.target.value))}
-                onDoubleClick={() => handleParameterChange('vibrance', 0)}
-                className="slider w-full"
-                style={{
-                  background: 'linear-gradient(to right, #6b7280, #ef4444, #f97316, #eab308, #10b981, #3b82f6, #8b5cf6)',
-                }}
-                title="Double-click to reset to 0"
-              />
-            </div>
+          {/* Color */}
+          <div className="flex flex-col" style={{ gap: 12 }}>
+            <SectionLabel>Color</SectionLabel>
+            <SliderRow
+              label="Temperature" value={localParams.temperature} defaultValue={0} min={-100} max={100} step={1}
+              trackBackground="linear-gradient(to right, #60a5fa, #e5e7eb, #fb923c)"
+              onChange={(v) => handleParameterChange('temperature', v)}
+            />
+            <SliderRow
+              label="Tint" value={localParams.tint} defaultValue={0} min={-100} max={100} step={1}
+              trackBackground="linear-gradient(to right, #f472b6, #9ca3af, #4ade80)"
+              onChange={(v) => handleParameterChange('tint', v)}
+            />
+            <SliderRow
+              label="Saturation" value={localParams.saturation} defaultValue={0} min={-100} max={100} step={1}
+              trackBackground="linear-gradient(to right, #6b7280, #3b82f6, #10b981, #eab308, #f97316, #ef4444)"
+              onChange={(v) => handleParameterChange('saturation', v)}
+            />
+            <SliderRow
+              label="Vibrance" value={localParams.vibrance} defaultValue={0} min={-100} max={100} step={1}
+              trackBackground="linear-gradient(to right, #6b7280, #ef4444, #f97316, #eab308, #10b981, #3b82f6, #8b5cf6)"
+              onChange={(v) => handleParameterChange('vibrance', v)}
+            />
           </div>
 
-          {/* Tone Section */}
-          <div className="space-y-1.5 pt-3" style={{borderTop: '1px solid var(--border)'}}>
-            <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Tone</label>
-
-            {/* Contrast */}
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Contrast</label>
-                <div className="flex items-center gap-1.5">
-                  <DelayedInputControl
-                    value={localParams.contrast}
-                    onChange={(value) => handleParameterChange('contrast', value)}
-                    min={-100}
-                    max={100}
-                    step={1}
-                    precision={0}
-                  />
-                  <button
-                    onClick={() => resetParameter('contrast', 0)}
-                    className="p-1 rounded"
-                    style={{
-                      backgroundColor: 'transparent',
-                      color: 'var(--gray-500)',
-                      transition: 'var(--transition-fast)'
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.backgroundColor = 'var(--gray-800)';
-                      e.currentTarget.style.color = 'var(--white)';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.backgroundColor = 'transparent';
-                      e.currentTarget.style.color = 'var(--gray-500)';
-                    }}
-                    title="Reset"
-                  >
-                    <RotateCcw className="w-3 h-3" />
-                  </button>
-                </div>
-              </div>
-              <input
-                type="range"
-                min={-100}
-                max={100}
-                step={1}
-                value={localParams.contrast}
-                onInput={(e) => handleParameterChangeRealTime('contrast', parseFloat((e.target as HTMLInputElement).value))}
-                onChange={(e) => handleParameterChange('contrast', parseFloat(e.target.value))}
-                onDoubleClick={() => handleParameterChange('contrast', 0)}
-                className="slider w-full"
-                style={{
-                  background: 'linear-gradient(to right, #6b7280, #ffffff)',
-                }}
-                title="Double-click to reset to 0"
-              />
-            </div>
-
-            {/* Brightness */}
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Brightness</label>
-                <div className="flex items-center gap-1.5">
-                  <DelayedInputControl
-                    value={localParams.brightness}
-                    onChange={(value) => handleParameterChange('brightness', value)}
-                    min={-100}
-                    max={100}
-                    step={1}
-                    precision={0}
-                  />
-                  <button
-                    onClick={() => resetParameter('brightness', 0)}
-                    className="p-1 rounded"
-                    style={{
-                      backgroundColor: 'transparent',
-                      color: 'var(--gray-500)',
-                      transition: 'var(--transition-fast)'
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.backgroundColor = 'var(--gray-800)';
-                      e.currentTarget.style.color = 'var(--white)';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.backgroundColor = 'transparent';
-                      e.currentTarget.style.color = 'var(--gray-500)';
-                    }}
-                    title="Reset"
-                  >
-                    <RotateCcw className="w-3 h-3" />
-                  </button>
-                </div>
-              </div>
-              <input
-                type="range"
-                min={-100}
-                max={100}
-                step={1}
-                value={localParams.brightness}
-                onInput={(e) => handleParameterChangeRealTime('brightness', parseFloat((e.target as HTMLInputElement).value))}
-                onChange={(e) => handleParameterChange('brightness', parseFloat(e.target.value))}
-                onDoubleClick={() => handleParameterChange('brightness', 0)}
-                className="slider w-full"
-                style={{
-                  background: 'linear-gradient(to right, #000000, #6b7280, #ffffff)',
-                }}
-                title="Double-click to reset to 0"
-              />
-            </div>
-
-            {/* Clarity */}
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Clarity</label>
-                <div className="flex items-center gap-1.5">
-                  <DelayedInputControl
-                    value={localParams.clarity}
-                    onChange={(value) => handleParameterChange('clarity', value)}
-                    min={-100}
-                    max={100}
-                    step={1}
-                    precision={0}
-                  />
-                  <button
-                    onClick={() => resetParameter('clarity', 0)}
-                    className="p-1 rounded"
-                    style={{
-                      backgroundColor: 'transparent',
-                      color: 'var(--gray-500)',
-                      transition: 'var(--transition-fast)'
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.backgroundColor = 'var(--gray-800)';
-                      e.currentTarget.style.color = 'var(--white)';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.backgroundColor = 'transparent';
-                      e.currentTarget.style.color = 'var(--gray-500)';
-                    }}
-                    title="Reset"
-                  >
-                    <RotateCcw className="w-3 h-3" />
-                  </button>
-                </div>
-              </div>
-              <input
-                type="range"
-                min={-100}
-                max={100}
-                step={1}
-                value={localParams.clarity}
-                onInput={(e) => handleParameterChangeRealTime('clarity', parseFloat((e.target as HTMLInputElement).value))}
-                onChange={(e) => handleParameterChange('clarity', parseFloat(e.target.value))}
-                onDoubleClick={() => handleParameterChange('clarity', 0)}
-                className="slider w-full"
-                style={{
-                  background: 'linear-gradient(to right, #6b7280, #10b981)',
-                }}
-                title="Double-click to reset to 0"
-              />
-            </div>
+          {/* Tone */}
+          <div className="flex flex-col" style={{ gap: 12 }}>
+            <SectionLabel>Tone</SectionLabel>
+            <SliderRow
+              label="Contrast" value={localParams.contrast} defaultValue={0} min={-100} max={100} step={1}
+              trackBackground="linear-gradient(to right, #6b7280, #ffffff)"
+              onChange={(v) => handleParameterChange('contrast', v)}
+            />
+            <SliderRow
+              label="Brightness" value={localParams.brightness} defaultValue={0} min={-100} max={100} step={1}
+              trackBackground="linear-gradient(to right, #000000, #6b7280, #ffffff)"
+              onChange={(v) => handleParameterChange('brightness', v)}
+            />
+            <SliderRow
+              label="Clarity" value={localParams.clarity} defaultValue={0} min={-100} max={100} step={1}
+              trackBackground="linear-gradient(to right, #6b7280, #10b981)"
+              onChange={(v) => handleParameterChange('clarity', v)}
+            />
           </div>
 
-          {/* Advanced Section */}
-          <div className="space-y-1.5 pt-3" style={{borderTop: '1px solid var(--border)'}}>
-            <button
-              onClick={() => setShowAdvanced(!showAdvanced)}
-              className="flex items-center justify-between w-full text-xs font-medium"
-              style={{color: 'var(--gray-300)'}}
-            >
-              Advanced Settings
-              <span style={{ transform: showAdvanced ? 'rotate(90deg)' : '', transition: 'var(--transition-fast)' }}>
-                ▶
-              </span>
-            </button>
+          {/* Advanced */}
+          <div className="flex flex-col" style={{ gap: 12, paddingTop: 4, borderTop: '1px solid var(--glass-border)' }}>
+            <ChipButton dashed onClick={() => setShowAdvanced(!showAdvanced)}>
+              {showAdvanced ? 'Hide' : 'Show'} advanced settings
+            </ChipButton>
 
             {showAdvanced && (
-              <div className="space-y-3 pl-2" style={{borderLeft: '2px solid var(--border)'}}>
-                {/* Hue Shift */}
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Hue Shift</label>
-                    <div className="flex items-center gap-1.5">
-                      <DelayedInputControl
-                        value={localParams.hueShift}
-                        onChange={(value) => handleParameterChange('hueShift', value)}
-                        min={-180}
-                        max={180}
-                        step={1}
-                        precision={0}
-                      />
-                      <span className="text-xs font-mono" style={{color: 'var(--gray-500)', width: '12px'}}>°</span>
-                      <button
-                        onClick={() => resetParameter('hueShift', 0)}
-                        className="p-1 rounded"
-                        style={{
-                          backgroundColor: 'transparent',
-                          color: 'var(--gray-500)',
-                          transition: 'var(--transition-fast)'
-                        }}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.backgroundColor = 'var(--gray-800)';
-                          e.currentTarget.style.color = 'var(--white)';
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.backgroundColor = 'transparent';
-                          e.currentTarget.style.color = 'var(--gray-500)';
-                        }}
-                        title="Reset"
-                      >
-                        <RotateCcw className="w-3 h-3" />
-                      </button>
-                    </div>
-                  </div>
-                  <input
-                    type="range"
-                    min={-180}
-                    max={180}
-                    step={1}
-                    value={localParams.hueShift}
-                    onInput={(e) => handleParameterChangeRealTime('hueShift', parseFloat((e.target as HTMLInputElement).value))}
-                    onChange={(e) => handleParameterChange('hueShift', parseFloat(e.target.value))}
-                    onDoubleClick={() => handleParameterChange('hueShift', 0)}
-                    className="slider w-full"
-                    style={{
-                      background: 'linear-gradient(to right, #ef4444, #f97316, #eab308, #10b981, #3b82f6, #8b5cf6, #ef4444)',
-                    }}
-                    title="Double-click to reset to 0"
-                  />
-                </div>
+              <div className="flex flex-col" style={{ gap: 12, paddingLeft: 8, borderLeft: '2px solid rgba(255,255,255,.1)' }}>
+                <SliderRow
+                  label="Hue Shift" value={localParams.hueShift} defaultValue={0} min={-180} max={180} step={1}
+                  formatValue={(v) => `${v}°`}
+                  trackBackground="linear-gradient(to right, #ef4444, #f97316, #eab308, #10b981, #3b82f6, #8b5cf6, #ef4444)"
+                  onChange={(v) => handleParameterChange('hueShift', v)}
+                />
 
-                {/* Color Balance */}
-                <div className="space-y-1.5">
-                  <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Color Balance</label>
-
-                  {/* Red */}
-                  <div className="space-y-1.5">
-                    <div className="flex items-center justify-between">
-                      <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Red</label>
-                      <div className="flex items-center gap-1.5">
-                        <DelayedInputControl
-                          value={localParams.colorBalance[0]}
-                          onChange={(value) => {
-                            const newBalance = [...localParams.colorBalance];
-                            newBalance[0] = value;
-                            handleParameterChange('colorBalance', newBalance);
-                          }}
-                          min={-1}
-                          max={1}
-                          step={0.01}
-                          precision={2}
-                        />
-                        <button
-                          onClick={() => {
-                            const newBalance = [...localParams.colorBalance];
-                            newBalance[0] = 0;
-                            handleParameterChange('colorBalance', newBalance);
-                          }}
-                          className="p-1 rounded"
-                          style={{
-                            backgroundColor: 'transparent',
-                            color: 'var(--gray-500)',
-                            transition: 'var(--transition-fast)'
-                          }}
-                          onMouseEnter={(e) => {
-                            e.currentTarget.style.backgroundColor = 'var(--gray-800)';
-                            e.currentTarget.style.color = 'var(--white)';
-                          }}
-                          onMouseLeave={(e) => {
-                            e.currentTarget.style.backgroundColor = 'transparent';
-                            e.currentTarget.style.color = 'var(--gray-500)';
-                          }}
-                          title="Reset"
-                        >
-                          <RotateCcw className="w-3 h-3" />
-                        </button>
-                      </div>
-                    </div>
-                    <input
-                      type="range"
-                      min={-1}
-                      max={1}
-                      step={0.01}
-                      value={localParams.colorBalance[0]}
-                      onInput={(e) => {
-                        const newBalance = [...localParams.colorBalance];
-                        newBalance[0] = parseFloat((e.target as HTMLInputElement).value);
-                        handleParameterChangeRealTime('colorBalance', newBalance);
-                      }}
-                      onChange={(e) => {
-                        const newBalance = [...localParams.colorBalance];
-                        newBalance[0] = parseFloat(e.target.value);
-                        handleParameterChange('colorBalance', newBalance);
-                      }}
-                      onDoubleClick={() => {
-                        const newBalance = [...localParams.colorBalance];
-                        newBalance[0] = 0;
-                        handleParameterChange('colorBalance', newBalance);
-                      }}
-                      className="slider w-full"
-                      style={{
-                        background: 'linear-gradient(to right, #00ffff, #6b7280, #ef4444)',
-                      }}
-                      title="Double-click to reset to 0"
-                    />
-                  </div>
-
-                  {/* Green */}
-                  <div className="space-y-1.5">
-                    <div className="flex items-center justify-between">
-                      <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Green</label>
-                      <div className="flex items-center gap-1.5">
-                        <DelayedInputControl
-                          value={localParams.colorBalance[1]}
-                          onChange={(value) => {
-                            const newBalance = [...localParams.colorBalance];
-                            newBalance[1] = value;
-                            handleParameterChange('colorBalance', newBalance);
-                          }}
-                          min={-1}
-                          max={1}
-                          step={0.01}
-                          precision={2}
-                        />
-                        <button
-                          onClick={() => {
-                            const newBalance = [...localParams.colorBalance];
-                            newBalance[1] = 0;
-                            handleParameterChange('colorBalance', newBalance);
-                          }}
-                          className="p-1 rounded"
-                          style={{
-                            backgroundColor: 'transparent',
-                            color: 'var(--gray-500)',
-                            transition: 'var(--transition-fast)'
-                          }}
-                          onMouseEnter={(e) => {
-                            e.currentTarget.style.backgroundColor = 'var(--gray-800)';
-                            e.currentTarget.style.color = 'var(--white)';
-                          }}
-                          onMouseLeave={(e) => {
-                            e.currentTarget.style.backgroundColor = 'transparent';
-                            e.currentTarget.style.color = 'var(--gray-500)';
-                          }}
-                          title="Reset"
-                        >
-                          <RotateCcw className="w-3 h-3" />
-                        </button>
-                      </div>
-                    </div>
-                    <input
-                      type="range"
-                      min={-1}
-                      max={1}
-                      step={0.01}
-                      value={localParams.colorBalance[1]}
-                      onInput={(e) => {
-                        const newBalance = [...localParams.colorBalance];
-                        newBalance[1] = parseFloat((e.target as HTMLInputElement).value);
-                        handleParameterChangeRealTime('colorBalance', newBalance);
-                      }}
-                      onChange={(e) => {
-                        const newBalance = [...localParams.colorBalance];
-                        newBalance[1] = parseFloat(e.target.value);
-                        handleParameterChange('colorBalance', newBalance);
-                      }}
-                      onDoubleClick={() => {
-                        const newBalance = [...localParams.colorBalance];
-                        newBalance[1] = 0;
-                        handleParameterChange('colorBalance', newBalance);
-                      }}
-                      className="slider w-full"
-                      style={{
-                        background: 'linear-gradient(to right, #f472b6, #6b7280, #10b981)',
-                      }}
-                      title="Double-click to reset to 0"
-                    />
-                  </div>
-
-                  {/* Blue */}
-                  <div className="space-y-1.5">
-                    <div className="flex items-center justify-between">
-                      <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Blue</label>
-                      <div className="flex items-center gap-1.5">
-                        <DelayedInputControl
-                          value={localParams.colorBalance[2]}
-                          onChange={(value) => {
-                            const newBalance = [...localParams.colorBalance];
-                            newBalance[2] = value;
-                            handleParameterChange('colorBalance', newBalance);
-                          }}
-                          min={-1}
-                          max={1}
-                          step={0.01}
-                          precision={2}
-                        />
-                        <button
-                          onClick={() => {
-                            const newBalance = [...localParams.colorBalance];
-                            newBalance[2] = 0;
-                            handleParameterChange('colorBalance', newBalance);
-                          }}
-                          className="p-1 rounded"
-                          style={{
-                            backgroundColor: 'transparent',
-                            color: 'var(--gray-500)',
-                            transition: 'var(--transition-fast)'
-                          }}
-                          onMouseEnter={(e) => {
-                            e.currentTarget.style.backgroundColor = 'var(--gray-800)';
-                            e.currentTarget.style.color = 'var(--white)';
-                          }}
-                          onMouseLeave={(e) => {
-                            e.currentTarget.style.backgroundColor = 'transparent';
-                            e.currentTarget.style.color = 'var(--gray-500)';
-                          }}
-                          title="Reset"
-                        >
-                          <RotateCcw className="w-3 h-3" />
-                        </button>
-                      </div>
-                    </div>
-                    <input
-                      type="range"
-                      min={-1}
-                      max={1}
-                      step={0.01}
-                      value={localParams.colorBalance[2]}
-                      onInput={(e) => {
-                        const newBalance = [...localParams.colorBalance];
-                        newBalance[2] = parseFloat((e.target as HTMLInputElement).value);
-                        handleParameterChangeRealTime('colorBalance', newBalance);
-                      }}
-                      onChange={(e) => {
-                        const newBalance = [...localParams.colorBalance];
-                        newBalance[2] = parseFloat(e.target.value);
-                        handleParameterChange('colorBalance', newBalance);
-                      }}
-                      onDoubleClick={() => {
-                        const newBalance = [...localParams.colorBalance];
-                        newBalance[2] = 0;
-                        handleParameterChange('colorBalance', newBalance);
-                      }}
-                      className="slider w-full"
-                      style={{
-                        background: 'linear-gradient(to right, #eab308, #6b7280, #3b82f6)',
-                      }}
-                      title="Double-click to reset to 0"
-                    />
-                  </div>
-                </div>
+                <SectionLabel>Color Balance</SectionLabel>
+                <SliderRow
+                  label="Red" value={localParams.colorBalance[0]} defaultValue={0} min={-1} max={1} step={0.01}
+                  formatValue={(v) => v.toFixed(2)}
+                  trackBackground="linear-gradient(to right, #00ffff, #6b7280, #ef4444)"
+                  onChange={(v) => {
+                    const newBalance = [...localParams.colorBalance];
+                    newBalance[0] = v;
+                    handleParameterChange('colorBalance', newBalance);
+                  }}
+                />
+                <SliderRow
+                  label="Green" value={localParams.colorBalance[1]} defaultValue={0} min={-1} max={1} step={0.01}
+                  formatValue={(v) => v.toFixed(2)}
+                  trackBackground="linear-gradient(to right, #f472b6, #6b7280, #10b981)"
+                  onChange={(v) => {
+                    const newBalance = [...localParams.colorBalance];
+                    newBalance[1] = v;
+                    handleParameterChange('colorBalance', newBalance);
+                  }}
+                />
+                <SliderRow
+                  label="Blue" value={localParams.colorBalance[2]} defaultValue={0} min={-1} max={1} step={0.01}
+                  formatValue={(v) => v.toFixed(2)}
+                  trackBackground="linear-gradient(to right, #eab308, #6b7280, #3b82f6)"
+                  onChange={(v) => {
+                    const newBalance = [...localParams.colorBalance];
+                    newBalance[2] = v;
+                    handleParameterChange('colorBalance', newBalance);
+                  }}
+                />
               </div>
             )}
           </div>
@@ -1469,17 +513,17 @@ export const LocalAdjustmentsModuleComponent: React.FC<LocalAdjustmentsModuleCom
   );
 
   const renderMaskingTab = () => (
-    <div className="space-y-3">
-      <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Parametric Masking</label>
+    <div className="flex flex-col" style={{ gap: 12 }}>
+      <SectionLabel>Parametric Masking</SectionLabel>
 
       {!activeLayer || activeLayer.type !== 'parametric' ? (
-        <div className="text-xs text-center py-4" style={{color: 'var(--gray-400)'}}>
+        <div className="text-xs text-center py-4" style={{ color: 'var(--glass-text-muted)' }}>
           Create or select a parametric layer to adjust masking parameters.
         </div>
       ) : (
-        <div className="space-y-1.5">
-          <label className="text-xs font-medium" style={{color: 'var(--gray-300)'}}>Luminance Range</label>
-          <div className="text-xs" style={{color: 'var(--gray-400)'}}>
+        <div className="flex flex-col" style={{ gap: 8 }}>
+          <span className="text-xs font-medium" style={{ color: 'var(--glass-text-label)' }}>Luminance Range</span>
+          <div className="text-xs" style={{ color: 'var(--glass-text-muted)' }}>
             Parametric masking controls will be available when a parametric layer is selected.
           </div>
         </div>
@@ -1488,34 +532,12 @@ export const LocalAdjustmentsModuleComponent: React.FC<LocalAdjustmentsModuleCom
   );
 
   return (
-    <div className={`space-y-3 ${className}`}>
+    <div className={`flex flex-col ${className}`} style={{ gap: 16 }}>
       {/* Tab Navigation */}
-      <div className="flex gap-1 rounded-lg p-1" style={{backgroundColor: 'var(--gray-700)'}}>
-        {[
-          { key: 'tools', label: 'Tools', icon: Brush },
-          { key: 'layers', label: 'Layers', icon: Layers },
-          { key: 'adjustments', label: 'Adjust', icon: Settings },
-          { key: 'masking', label: 'Mask', icon: Circle }
-        ].map(({ key, label, icon: Icon }) => (
-          <button
-            key={key}
-            onClick={() => setActiveTab(key as TabType)}
-            className={`flex-1 flex items-center justify-center gap-1 px-3 py-2 text-xs font-medium rounded-md transition-all ${
-              activeTab === key ? 'shadow-sm' : 'bg-transparent'
-            }`}
-            style={{
-              backgroundColor: activeTab === key ? 'var(--gray-600)' : 'transparent',
-              color: activeTab === key ? 'var(--white)' : 'var(--gray-300)'
-            }}
-          >
-            <Icon className="w-3 h-3" />
-            {label}
-          </button>
-        ))}
-      </div>
+      <Segmented options={TAB_OPTIONS} value={activeTab} onChange={setActiveTab} className="w-full" />
 
       {/* Tab Content */}
-      <div className="space-y-3">
+      <div>
         {activeTab === 'tools' && renderToolsTab()}
         {activeTab === 'layers' && renderLayersTab()}
         {activeTab === 'adjustments' && renderAdjustmentsTab()}
@@ -1523,13 +545,11 @@ export const LocalAdjustmentsModuleComponent: React.FC<LocalAdjustmentsModuleCom
       </div>
 
       {/* Active Tool Indicator */}
-      <div className="pt-3" style={{borderTop: '1px solid var(--border)'}}>
-        <div className="flex items-center gap-1.5 text-xs" style={{color: 'var(--gray-400)'}}>
-          <span>Active Tool:</span>
-          <span style={{color: 'var(--primary-400)'}} className="font-medium">
-            {activeTool.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}
-          </span>
-        </div>
+      <div className="flex items-center" style={{ gap: 6, fontSize: 11, paddingTop: 12, borderTop: '1px solid var(--glass-border)', color: 'var(--glass-text-muted)' }}>
+        <span>Active Tool:</span>
+        <span style={{ color: 'var(--accent)', fontWeight: 500 }}>
+          {activeTool.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}
+        </span>
       </div>
     </div>
   );

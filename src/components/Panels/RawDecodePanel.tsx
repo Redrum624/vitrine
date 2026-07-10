@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import type { CSSProperties } from 'react';
 import { ChevronDown, ChevronRight, Aperture } from 'lucide-react';
 import { useAppStore } from '../../stores/appStore';
 import { rawImageService } from '../../services/RawImageService';
@@ -18,6 +19,18 @@ const HIGHLIGHT_OPTIONS: { value: HighlightMode; label: string }[] = [
 ];
 
 const RE_DECODE_TOOLTIP = 'Changing this re-decodes the RAW file from disk.';
+
+// Shared glass-card select look (kept as REAL native <select>s — see the file-level
+// note below on why Demosaic/Highlights aren't Segmented here).
+const selectStyle: CSSProperties = {
+  width: '100%',
+  fontSize: 12,
+  padding: '6px 8px',
+  borderRadius: 8,
+  border: '1px solid rgba(255,255,255,.1)',
+  background: 'rgba(255,255,255,.04)',
+  color: 'var(--glass-text-label)',
+};
 
 interface RawDecodePanelProps {
   /**
@@ -41,6 +54,13 @@ interface RawDecodePanelProps {
  * re-decode is in flight (store.reDecoding) both controls are disabled and a progress note
  * is shown, mirroring the guard reDecode itself applies. A rejected re-decode surfaces a
  * notification instead of an unhandled promise rejection.
+ *
+ * Demosaic/Highlights stay real <select> elements (not the Segmented control used elsewhere
+ * in the Glass · Sectioned redesign): jest-dom's `toHaveValue`/`toBeDisabled`/title-attribute
+ * assertions in rawDecodePanel.test.tsx need a genuine form control, and a native <select>
+ * restyled with the same glass tokens reads identically to the rest of the card system
+ * without trading away that test contract (see design_handoff_glass_ui — "keep hidden
+ * selects" is the sanctioned fallback when a control swap would weaken value-binding).
  */
 export function RawDecodePanel({ currentImage }: RawDecodePanelProps) {
   const rawDecodeOptions = useAppStore((s) => s.rawDecodeOptions);
@@ -68,30 +88,30 @@ export function RawDecodePanel({ currentImage }: RawDecodePanelProps) {
   };
 
   return (
-    <div className="rounded-lg border overflow-hidden mb-3" style={{ borderColor: 'var(--border)' }}>
+    <div className="glass-card dc-rise" style={{ overflow: 'hidden', marginBottom: 12 }}>
       <div
-        className="flex items-center gap-2 px-3 py-2 cursor-pointer"
-        style={{ backgroundColor: 'var(--gray-800)' }}
+        className="flex items-center"
+        style={{ gap: 8, padding: '10px 14px', cursor: 'pointer' }}
         onClick={() => setOpen((o) => !o)}
       >
         {open ? (
-          <ChevronDown className="w-3.5 h-3.5" style={{ color: 'var(--gray-500)' }} />
+          <ChevronDown size={14} style={{ color: 'var(--glass-text-muted)' }} />
         ) : (
-          <ChevronRight className="w-3.5 h-3.5" style={{ color: 'var(--gray-500)' }} />
+          <ChevronRight size={14} style={{ color: 'var(--glass-text-muted)' }} />
         )}
-        <Aperture className="w-3.5 h-3.5" style={{ color: 'var(--primary-400)' }} />
-        <span className="text-xs font-medium flex-1 truncate" style={{ color: 'var(--gray-100)' }}>RAW Decode</span>
+        <Aperture size={14} style={{ color: 'var(--accent)' }} />
+        <span className="flex-1 truncate" style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--glass-text-title)' }}>RAW Decode</span>
         {!open && (
-          <span className="text-xs font-mono" style={{ color: 'var(--gray-500)' }}>
+          <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: 10.5, color: 'var(--glass-text-muted)' }}>
             {rawDecodeOptions.demosaic.toUpperCase()} &middot; {rawDecodeOptions.highlightMode}
           </span>
         )}
-        {reDecoding && <span className="text-xs" style={{ color: 'var(--primary-400)' }}>Decoding&hellip;</span>}
+        {reDecoding && <span style={{ fontSize: 10.5, color: 'var(--accent)' }}>Decoding&hellip;</span>}
       </div>
       {open && (
-        <div className="px-3 py-3 space-y-3">
-          <div className="space-y-1.5">
-            <label htmlFor="raw-decode-demosaic" className="text-xs font-medium" style={{ color: 'var(--gray-300)' }}>
+        <div className="flex flex-col" style={{ gap: 12, padding: '4px 14px 14px' }}>
+          <div className="flex flex-col" style={{ gap: 6 }}>
+            <label htmlFor="raw-decode-demosaic" style={{ fontSize: 11, fontWeight: 500, color: 'var(--glass-text-label)' }}>
               Demosaic
             </label>
             <select
@@ -100,16 +120,15 @@ export function RawDecodePanel({ currentImage }: RawDecodePanelProps) {
               disabled={reDecoding}
               title={RE_DECODE_TOOLTIP}
               onChange={(e) => handleDemosaicChange(e.target.value as DemosaicAlgo)}
-              className="w-full text-xs rounded px-2 py-1.5"
-              style={{ backgroundColor: 'var(--gray-700)', color: 'var(--white)', border: '1px solid var(--border)' }}
+              style={selectStyle}
             >
               {DEMOSAIC_OPTIONS.map((o) => (
                 <option key={o.value} value={o.value}>{o.label}</option>
               ))}
             </select>
           </div>
-          <div className="space-y-1.5">
-            <label htmlFor="raw-decode-highlights" className="text-xs font-medium" style={{ color: 'var(--gray-300)' }}>
+          <div className="flex flex-col" style={{ gap: 6 }}>
+            <label htmlFor="raw-decode-highlights" style={{ fontSize: 11, fontWeight: 500, color: 'var(--glass-text-label)' }}>
               Highlights
             </label>
             <select
@@ -118,8 +137,7 @@ export function RawDecodePanel({ currentImage }: RawDecodePanelProps) {
               disabled={reDecoding}
               title={RE_DECODE_TOOLTIP}
               onChange={(e) => handleHighlightChange(e.target.value as HighlightMode)}
-              className="w-full text-xs rounded px-2 py-1.5"
-              style={{ backgroundColor: 'var(--gray-700)', color: 'var(--white)', border: '1px solid var(--border)' }}
+              style={selectStyle}
             >
               {HIGHLIGHT_OPTIONS.map((o) => (
                 <option key={o.value} value={o.value}>{o.label}</option>
@@ -127,11 +145,11 @@ export function RawDecodePanel({ currentImage }: RawDecodePanelProps) {
             </select>
           </div>
           {reDecoding && (
-            <div className="text-xs" role="status" style={{ color: 'var(--gray-400)' }}>
+            <div role="status" style={{ fontSize: 11, color: 'var(--glass-text-secondary)' }}>
               Re-decoding RAW file&hellip;
             </div>
           )}
-          <div className="text-xs" style={{ color: 'var(--gray-500)' }}>
+          <div style={{ fontSize: 10.5, color: 'var(--glass-text-muted)' }}>
             {RE_DECODE_TOOLTIP}
           </div>
         </div>

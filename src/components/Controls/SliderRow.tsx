@@ -23,6 +23,17 @@ interface SliderRowProps {
   legend?: SliderRowLegend;
   disabled?: boolean;
   className?: string;
+  /**
+   * Fired on pointer-down/touch-start on the thumb, before any onChange. Lets a
+   * consumer track an "actively dragging" state (e.g. Crop's rotation guide
+   * overlay) — optional, most sliders don't need it.
+   */
+  onDragStart?: () => void;
+  /**
+   * Fired on pointer-up/leave/touch-end. Pairs with `onDragStart` for consumers
+   * that need a side-effect at the END of a drag (e.g. Crop's auto-crop-on-release).
+   */
+  onDragEnd?: () => void;
 }
 
 /**
@@ -46,6 +57,8 @@ export function SliderRow({
   legend,
   disabled = false,
   className = '',
+  onDragStart,
+  onDragEnd,
 }: SliderRowProps) {
   const sliderId = useId();
   const labelId = `${sliderId}-label`;
@@ -178,6 +191,11 @@ export function SliderRow({
           disabled={disabled}
           onChange={(e) => onChange(parseFloat(e.target.value))}
           onDoubleClick={() => onChange(defaultValue)}
+          onMouseDown={onDragStart}
+          onTouchStart={onDragStart}
+          onMouseUp={onDragEnd}
+          onMouseLeave={onDragEnd}
+          onTouchEnd={onDragEnd}
           aria-labelledby={labelId}
           aria-valuemin={min}
           aria-valuemax={max}
