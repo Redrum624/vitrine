@@ -459,9 +459,12 @@ export function ThumbnailPanel({
                       // paint this thumbnail — no extra IPC/decode (Task B2). Feeds the
                       // shared `imageDimensions` store map so the Gallery grid's tile
                       // meta can show real dimensions even before its own lazy loader
-                      // reaches this image.
+                      // reaches this image. RAW formats are excluded: `read-image-as-data-url`
+                      // (electron/main.cjs) returns a preview downscaled to <=300x200 for RAW
+                      // files, never the sensor's true dimensions — recording that would be
+                      // confidently wrong (fix round 1, Critical review finding).
                       const { naturalWidth, naturalHeight } = e.currentTarget;
-                      if (naturalWidth && naturalHeight) {
+                      if (naturalWidth && naturalHeight && !isRawImage(image)) {
                         setImageDimensions(image.id, { width: naturalWidth, height: naturalHeight });
                       }
                     }}

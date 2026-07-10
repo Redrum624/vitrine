@@ -127,6 +127,39 @@ describe('GalleryView tile meta — real dimensions from the thumbnail decode (T
       heightSpy.mockRestore();
     }
   });
+
+  // Critical review finding (fix round 1): `read-image-as-data-url` returns a
+  // RAW preview downscaled to <=300x200 (embedded JPEG / sharp resize, see
+  // electron/main.cjs), never the sensor's true dimensions. Recording that
+  // preview's naturalWidth/naturalHeight as "the" dimensions is confidently
+  // wrong (e.g. a 24MP ORF would show "300 × 200"). RAW tiles must stay
+  // format-only — exactly the pre-Task-B2 behavior — until something that
+  // actually decodes the full RAW (Develop's open/decode path) supplies real
+  // dimensions.
+  it('does NOT record dimensions from a RAW preview thumbnail (img2 is .cr3)', async () => {
+    const widthSpy = jest.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(1400);
+    const heightSpy = jest.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(900);
+    (window.electronAPI!.readImageAsDataURL as jest.Mock).mockResolvedValue('data:image/jpeg;base64,aaaa');
+    try {
+      render(<GalleryView images={images} onImageSelect={jest.fn()} visible={true} />);
+      await waitFor(() => expect(getTile('img2').querySelector('img')).toBeInTheDocument());
+
+      const img = getTile('img2').querySelector('img') as HTMLImageElement;
+      // Simulate the browser reporting the RAW preview's actual (downscaled) size.
+      Object.defineProperty(img, 'naturalWidth', { value: 300, configurable: true });
+      Object.defineProperty(img, 'naturalHeight', { value: 200, configurable: true });
+      fireEvent.load(img);
+
+      // Give any (incorrect) async store write a chance to land, then assert it didn't.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(useAppStore.getState().imageDimensions['img2']).toBeUndefined();
+      expect(getTile('img2')).not.toHaveTextContent('×');
+      expect(getTile('img2')).toHaveTextContent('CR3');
+    } finally {
+      widthSpy.mockRestore();
+      heightSpy.mockRestore();
+    }
+  });
 });
 
 describe('GalleryView selection semantics (shared with the filmstrip dock)', () => {

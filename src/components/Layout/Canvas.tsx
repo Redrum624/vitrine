@@ -708,6 +708,10 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
       // Restore previously-saved edits for this image, then reprocess so they show.
       const decoded = imageService.getCurrentImage();
       if (decoded) {
+        // Now that the full image (including RAW) is actually decoded, its true
+        // dimensions are known — upgrade the shared map so the gallery/dock tile
+        // stops showing format-only meta (fix round 1, Critical review finding).
+        useAppStore.getState().setImageDimensions(image.id, { width: decoded.width, height: decoded.height });
         const restored = await editPersistenceService.restoreForPath(image.path, decoded.width, decoded.height);
         if (restored) useAppStore.getState().triggerReprocessing();
         // Load this image's checkpoint history; seed an "Opened" baseline if empty.
