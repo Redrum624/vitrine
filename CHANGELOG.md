@@ -4,6 +4,11 @@ All notable changes to **Photo Editor Pro** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.14.1] - 2026-07-10
+
+### Changed
+- **Splash screen restyled to the Glass UI.** The launch splash now matches the redesigned workspace: the same radial canvas backdrop, a glass loading card, a solid-accent progress bar with glow on the standard track style, accent-styled subtitle, monospaced percentage/version, and the app's entrance animation (disabled under `prefers-reduced-motion`). Loading logic and progress IPC are unchanged. Affects: `electron/splash.html`.
+
 ## [1.14.0] - 2026-07-10
 
 ### Added
