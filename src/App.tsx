@@ -1026,6 +1026,12 @@ function App() {
       if (!m) return;
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      // Gallery mode: bail BEFORE stopPropagation/preventDefault so the keydown
+      // bubbles through to GalleryView's own bubble-phase listener (which rates
+      // the whole selection there). Swallowing it here first — as this used to
+      // do — made numpad rating silently dead in Gallery, since applyRating()
+      // itself already no-ops for viewMode === 'gallery'.
+      if (useAppStore.getState().viewMode === 'gallery') return;
       if (!currentImageRef.current) return;
       e.preventDefault();
       e.stopPropagation();

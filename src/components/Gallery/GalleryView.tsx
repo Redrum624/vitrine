@@ -151,13 +151,21 @@ export function GalleryView({ images, onImageSelect, visible }: GalleryViewProps
   }, []);
 
   // Lazy-load: the row-window ITSELF is the viewport-cull (any image whose row is
-  // currently mounted — visible + overscan, or everything if unmeasured — gets its
-  // thumbnail fetched). No separate getBoundingClientRect scan is needed here,
-  // unlike the dock's horizontal filmstrip which has no row concept to key off.
+  // currently mounted — visible + overscan — gets its thumbnail fetched). No
+  // separate getBoundingClientRect scan is needed here, unlike the dock's
+  // horizontal filmstrip which has no row concept to key off.
+  //
+  // Skips the fetch pass entirely while unmeasured (viewportSize still {0,0} on
+  // the very first commit) — otherwise `visibleImages` falls back to the WHOLE
+  // folder (see canVirtualize above) and every image gets a full-size
+  // readImageAsDataURL + readImageRating IPC in one commit, an unbounded burst
+  // at large folder sizes. The windowed pass fires one frame later once
+  // ResizeObserver reports real dimensions and this effect re-runs.
   useEffect(() => {
     if (!visible) return;
+    if (!canVirtualize && viewportSize.width === 0) return;
     visibleImages.forEach((img) => { void loadThumbnail(img); });
-  }, [visible, visibleImages, loadThumbnail]);
+  }, [visible, visibleImages, loadThumbnail, canVirtualize, viewportSize.width]);
 
   const handleScroll = () => setScrollTop(scrollRef.current?.scrollTop ?? 0);
 

@@ -94,10 +94,12 @@ interface AppStore extends AppState {
   ratingFilter: number;
   setRatingFilter: (n: number) => void;
   // View mode (Task 7, Glass · Sectioned 5a): 'develop' is the editing workspace
-  // (default); 'gallery' is the library grid. Toggled by the toolbar's Develop|Gallery
-  // segmented (shown in both views) and the filmstrip dock's Gallery chip. Selection/
-  // rating/filter state all live in this SAME store regardless of viewMode, so
-  // round-tripping between the two views never loses the current selection.
+  // (default); 'gallery' is the library grid. Toggled by the filmstrip dock's
+  // Gallery chip (Develop -> Gallery) and the toolbar's Develop|Gallery segmented,
+  // which lives ONLY in the Gallery toolbar variant (its "Develop" tab covers
+  // Gallery -> Develop). Selection/rating/filter state all live in this SAME
+  // store regardless of viewMode, so round-tripping between the two views never
+  // loses the current selection.
   viewMode: 'develop' | 'gallery';
   setViewMode: (mode: 'develop' | 'gallery') => void;
   // Gallery grid sort direction for the toolbar's "Sort: Capture time" chip.

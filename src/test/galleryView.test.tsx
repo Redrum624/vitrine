@@ -6,9 +6,12 @@
  * shared click selection semantics (shift range / ctrl toggle / plain select+load
  * — the same `handleImageClick` the filmstrip dock uses), double-click's
  * develop-view handoff, the shared rating filter hiding non-matching tiles, and
- * the Toolbar's Develop|Gallery segmented (shown in both toolbar variants).
+ * the Toolbar's Develop|Gallery segmented (Gallery toolbar variant only — see
+ * the dedicated describe block below).
  */
-import { render, screen, fireEvent } from '@testing-library/react';
+import fs from 'fs';
+import path from 'path';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { useAppStore } from '../stores/appStore';
 import { GalleryView } from '../components/Gallery/GalleryView';
 import { Toolbar } from '../components/Layout/Toolbar';
@@ -141,6 +144,101 @@ describe('GalleryView rating filter (shared store field)', () => {
     expect(document.querySelector('[data-image-id="img1"]')).toBeInTheDocument();
     expect(document.querySelector('[data-image-id="img2"]')).not.toBeInTheDocument();
     expect(document.querySelector('[data-image-id="img3"]')).not.toBeInTheDocument();
+  });
+});
+
+describe('GalleryView lazy-load thumbnail fetch (first-open over-fetch regression)', () => {
+  it('does not fetch any thumbnails on the first unmeasured render (viewportSize stays {0,0} in jsdom)', async () => {
+    render(<GalleryView images={images} onImageSelect={jest.fn()} visible={true} />);
+    // Let effects/microtasks settle without measuring the container — this is
+    // the exact "first paint, unmeasured" state that used to fire a
+    // readImageAsDataURL + readImageRating IPC for every image in the folder.
+    await Promise.resolve();
+    expect(window.electronAPI!.readImageAsDataURL).not.toHaveBeenCalled();
+    expect(window.electronAPI!.readImageRating).not.toHaveBeenCalled();
+  });
+
+  it('fetches thumbnails once the container reports a real measured size', async () => {
+    // jsdom's clientWidth/clientHeight are always 0 and ResizeObserver.observe()
+    // never invokes its callback (see src/setupTests.ts), so there is no way to
+    // trigger a REAL resize event here. Stubbing the getters on
+    // HTMLElement.prototype simulates "already measured" for the mount-time
+    // `update()` call inside GalleryView's measurement effect, which is enough
+    // to drive the windowed lazy-load pass without needing a live ResizeObserver.
+    const widthSpy = jest.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(1400);
+    const heightSpy = jest.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(900);
+    (window.electronAPI!.readImageAsDataURL as jest.Mock).mockResolvedValue('data:image/png;base64,aaaa');
+    try {
+      render(<GalleryView images={images} onImageSelect={jest.fn()} visible={true} />);
+      await waitFor(() => expect(window.electronAPI!.readImageAsDataURL).toHaveBeenCalled());
+      // Drain every image's resulting state update (storeThumbnail's
+      // setThumbnails + the loading-flag finally block) inside an act-wrapped
+      // waitFor so React doesn't warn about updates outside act.
+      await waitFor(() => expect(document.querySelectorAll('img')).toHaveLength(images.length));
+    } finally {
+      widthSpy.mockRestore();
+      heightSpy.mockRestore();
+    }
+  });
+});
+
+describe('GalleryView numpad/number rating keys (dead-key-in-gallery regression)', () => {
+  it("applies the rating to the whole selection on a bare '0'-'5' keydown (numpad digits emit the same e.key with NumLock on)", () => {
+    useAppStore.setState({ selectedImageIds: ['img1', 'img3'] });
+    render(<GalleryView images={images} onImageSelect={jest.fn()} visible={true} />);
+
+    fireEvent.keyDown(document, { key: '3' });
+
+    expect(useAppStore.getState().imageRatings.img1).toBe(3);
+    expect(useAppStore.getState().imageRatings.img3).toBe(3);
+    expect(window.electronAPI!.writeImageRating).toHaveBeenCalledWith('/p/1.jpg', 3);
+    expect(window.electronAPI!.writeImageRating).toHaveBeenCalledWith('/p/3.jpg', 3);
+  });
+});
+
+/**
+ * App.tsx's `onNumpadRating` closure is registered inside a `useEffect` and is
+ * not itself exported — rendering the full `<App />` tree just to exercise the
+ * capture-phase/bubble-phase interplay against GalleryView's own listener above
+ * is impractical (same ~30 service/module dependency problem documented in
+ * fileOpenSetsCurrentImage.test.ts). Per the fallback for this fix, this
+ * statically asserts the source order of the guard instead: the gallery
+ * early-return must appear BEFORE stopPropagation/preventDefault, which is
+ * exactly what lets the keydown reach the real listener exercised above.
+ */
+describe('App onNumpadRating gallery guard (source-order regression)', () => {
+  const appSource = fs.readFileSync(path.join(__dirname, '..', 'App.tsx'), 'utf8');
+
+  function extractConstArrowBody(source: string, constName: string): string {
+    const declMarker = `const ${constName} = `;
+    const declIndex = source.indexOf(declMarker);
+    if (declIndex === -1) {
+      throw new Error(`Could not find "${declMarker}" in App.tsx - has it been renamed?`);
+    }
+    const braceStart = source.indexOf('{', declIndex);
+    if (braceStart === -1) {
+      throw new Error(`Could not find the opening brace for ${constName} in App.tsx`);
+    }
+    let depth = 0;
+    for (let i = braceStart; i < source.length; i++) {
+      if (source[i] === '{') depth++;
+      else if (source[i] === '}') {
+        depth--;
+        if (depth === 0) return source.slice(braceStart, i + 1);
+      }
+    }
+    throw new Error(`Could not find the matching closing brace for ${constName} in App.tsx`);
+  }
+
+  it('early-returns on gallery viewMode before stopPropagation/preventDefault', () => {
+    const body = extractConstArrowBody(appSource, 'onNumpadRating');
+    const guardIndex = body.search(/viewMode\s*===\s*['"]gallery['"]\s*\)\s*return/);
+    const preventIndex = body.indexOf('e.preventDefault()');
+    const stopIndex = body.indexOf('e.stopPropagation()');
+
+    expect(guardIndex).toBeGreaterThan(-1);
+    expect(guardIndex).toBeLessThan(preventIndex);
+    expect(guardIndex).toBeLessThan(stopIndex);
   });
 });
 
