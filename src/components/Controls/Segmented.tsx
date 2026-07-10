@@ -1,4 +1,5 @@
-import type { ReactNode } from 'react';
+import { useRef } from 'react';
+import type { KeyboardEvent, ReactNode } from 'react';
 
 export interface SegmentedOption<T extends string> {
   value: T;
@@ -18,8 +19,49 @@ interface SegmentedProps<T extends string> {
  * text. Generic over any string-literal union (mode tiles, channel tabs,
  * Develop|Gallery toggle, ...). See design_handoff_glass_ui/README.md
  * ("Chips/tiles" → Segmented controls).
+ *
+ * Keyboard: implements the ARIA Authoring Practices "tabs" pattern with
+ * *automatic activation* — roving tabindex (only the active segment is a Tab
+ * stop; Tab enters/leaves the control on it) plus ArrowLeft/ArrowRight (wrap
+ * at the ends) and Home/End, all of which move focus AND fire onChange in the
+ * same step. This matches how a mouse click already selects on interaction
+ * (no separate "confirm" step), so keyboard users get the same one-action
+ * selection instead of the manual-activation variant (move focus, then
+ * Enter/Space to commit).
  */
 export function Segmented<T extends string>({ options, value, onChange, className = '' }: SegmentedProps<T>) {
+  const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
+
+  const focusAndActivate = (index: number) => {
+    const option = options[index];
+    if (!option) return;
+    onChange(option.value);
+    tabRefs.current[index]?.focus();
+  };
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
+    switch (event.key) {
+      case 'ArrowRight':
+        event.preventDefault();
+        focusAndActivate((index + 1) % options.length);
+        break;
+      case 'ArrowLeft':
+        event.preventDefault();
+        focusAndActivate((index - 1 + options.length) % options.length);
+        break;
+      case 'Home':
+        event.preventDefault();
+        focusAndActivate(0);
+        break;
+      case 'End':
+        event.preventDefault();
+        focusAndActivate(options.length - 1);
+        break;
+      default:
+        break;
+    }
+  };
+
   return (
     <div
       role="tablist"
@@ -31,15 +73,21 @@ export function Segmented<T extends string>({ options, value, onChange, classNam
         gap: 2,
       }}
     >
-      {options.map((option) => {
+      {options.map((option, index) => {
         const active = option.value === value;
         return (
           <button
             key={option.value}
+            ref={(el) => {
+              tabRefs.current[index] = el;
+            }}
             type="button"
             role="tab"
             aria-selected={active}
+            tabIndex={active ? 0 : -1}
+            className="segmented-tab"
             onClick={() => onChange(option.value)}
+            onKeyDown={(event) => handleKeyDown(event, index)}
             style={{
               padding: '6px 12px',
               borderRadius: 7,

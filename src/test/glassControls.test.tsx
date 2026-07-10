@@ -71,6 +71,90 @@ describe('Segmented', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'Luminance' }));
     expect(onChange).toHaveBeenCalledWith('luminance');
   });
+
+  it('gives only the active segment a tab stop (roving tabindex)', () => {
+    const onChange = jest.fn();
+    render(<Segmented value="luminance" onChange={onChange} options={options} />);
+
+    expect(screen.getByRole('tab', { name: 'Saturation' })).toHaveAttribute('tabIndex', '-1');
+    expect(screen.getByRole('tab', { name: 'Luminance' })).toHaveAttribute('tabIndex', '0');
+    expect(screen.getByRole('tab', { name: 'Hue' })).toHaveAttribute('tabIndex', '-1');
+  });
+
+  it('ArrowRight moves focus to and activates the next segment', () => {
+    const onChange = jest.fn();
+    render(<Segmented value="saturation" onChange={onChange} options={options} />);
+
+    screen.getByRole('tab', { name: 'Saturation' }).focus();
+    fireEvent.keyDown(screen.getByRole('tab', { name: 'Saturation' }), { key: 'ArrowRight' });
+
+    expect(onChange).toHaveBeenCalledWith('luminance');
+    expect(screen.getByRole('tab', { name: 'Luminance' })).toHaveFocus();
+  });
+
+  it('ArrowLeft moves focus to and activates the previous segment', () => {
+    const onChange = jest.fn();
+    render(<Segmented value="luminance" onChange={onChange} options={options} />);
+
+    screen.getByRole('tab', { name: 'Luminance' }).focus();
+    fireEvent.keyDown(screen.getByRole('tab', { name: 'Luminance' }), { key: 'ArrowLeft' });
+
+    expect(onChange).toHaveBeenCalledWith('saturation');
+    expect(screen.getByRole('tab', { name: 'Saturation' })).toHaveFocus();
+  });
+
+  it('ArrowRight wraps from the last segment to the first', () => {
+    const onChange = jest.fn();
+    render(<Segmented value="hue" onChange={onChange} options={options} />);
+
+    screen.getByRole('tab', { name: 'Hue' }).focus();
+    fireEvent.keyDown(screen.getByRole('tab', { name: 'Hue' }), { key: 'ArrowRight' });
+
+    expect(onChange).toHaveBeenCalledWith('saturation');
+    expect(screen.getByRole('tab', { name: 'Saturation' })).toHaveFocus();
+  });
+
+  it('ArrowLeft wraps from the first segment to the last', () => {
+    const onChange = jest.fn();
+    render(<Segmented value="saturation" onChange={onChange} options={options} />);
+
+    screen.getByRole('tab', { name: 'Saturation' }).focus();
+    fireEvent.keyDown(screen.getByRole('tab', { name: 'Saturation' }), { key: 'ArrowLeft' });
+
+    expect(onChange).toHaveBeenCalledWith('hue');
+    expect(screen.getByRole('tab', { name: 'Hue' })).toHaveFocus();
+  });
+
+  it('End jumps to and activates the last segment', () => {
+    const onChange = jest.fn();
+    render(<Segmented value="saturation" onChange={onChange} options={options} />);
+
+    screen.getByRole('tab', { name: 'Saturation' }).focus();
+    fireEvent.keyDown(screen.getByRole('tab', { name: 'Saturation' }), { key: 'End' });
+
+    expect(onChange).toHaveBeenCalledWith('hue');
+    expect(screen.getByRole('tab', { name: 'Hue' })).toHaveFocus();
+  });
+
+  it('Home jumps to and activates the first segment', () => {
+    const onChange = jest.fn();
+    render(<Segmented value="hue" onChange={onChange} options={options} />);
+
+    screen.getByRole('tab', { name: 'Hue' }).focus();
+    fireEvent.keyDown(screen.getByRole('tab', { name: 'Hue' }), { key: 'Home' });
+
+    expect(onChange).toHaveBeenCalledWith('saturation');
+    expect(screen.getByRole('tab', { name: 'Saturation' })).toHaveFocus();
+  });
+
+  it('leaves mouse click activation unchanged (no focus trap, no keydown needed)', () => {
+    const onChange = jest.fn();
+    render(<Segmented value="saturation" onChange={onChange} options={options} />);
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Hue' }));
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenCalledWith('hue');
+  });
 });
 
 describe('SliderRow', () => {

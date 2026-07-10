@@ -534,3 +534,12 @@ body {
   cursor: not-allowed;
   box-shadow: none;
 }
+
+/* Segmented control (src/components/Controls/Segmented.tsx): keyboard-only
+   focus ring on the roving-tabindex tab stop. :focus-visible keeps mouse
+   clicks ring-free (matches the existing "click just selects" feel) while
+   Tab/Arrow/Home/End navigation gets a clear accent ring. */
+.segmented-tab:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent-ring);
+}
