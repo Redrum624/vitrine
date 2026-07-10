@@ -312,7 +312,7 @@ export function ThumbnailPanel({
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [visible, images, selectedImage, onImageSelect, onClose, loadThumbnail]);
+  }, [visible, images, filteredImages, selectedImage, onImageSelect, onClose, loadThumbnail]);
 
   const handlePrevious = () => {
     if (!selectedImage || filteredImages.length === 0) return;

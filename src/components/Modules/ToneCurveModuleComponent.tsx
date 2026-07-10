@@ -332,7 +332,9 @@ export const ToneCurveModuleComponent: React.FC<ToneCurveModuleComponentProps> =
       >
         <div className="flex items-center justify-between" style={{ marginBottom: 8 }}>
           <span style={{ fontSize: 11, color: 'var(--glass-text-secondary)' }}>
-            {activeChannel === 'base' ? 'RGB · 1 point' : `${activeChannel.toUpperCase()} Channel`}
+            {activeChannel === 'base'
+              ? `RGB · ${params.baseCurveNodes} point${params.baseCurveNodes === 1 ? '' : 's'}`
+              : `${activeChannel.toUpperCase()} Channel`}
           </span>
           <button
             onClick={() => setShowAdvanced(!showAdvanced)}

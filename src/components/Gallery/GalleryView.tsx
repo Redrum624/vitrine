@@ -212,6 +212,7 @@ export function GalleryView({ images, onImageSelect, visible }: GalleryViewProps
     if (!visible) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (!/^[0-5]$/.test(e.key)) return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
       const target = e.target as HTMLElement | null;
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
       const ids = useAppStore.getState().selectedImageIds;

@@ -49,7 +49,7 @@ const RANGE_OPTIONS = [
 ];
 
 /** Full hue-rotation gradient for a mixer row's tinted track (ported verbatim
- * from the old ColoredSliderControl's hue-mode gradient math). */
+ * from the old colored-slider control's hue-mode gradient math). */
 function hueTrackGradient(color: string): string {
   const hexValue = parseInt(color.replace('#', ''), 16);
   const r = ((hexValue >> 16) & 0xff) / 255;

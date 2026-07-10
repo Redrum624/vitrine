@@ -104,8 +104,8 @@ interface OverflowItem {
  * Overflow "⋯" chip for the responsive-collapsed Develop pill (G5 review): a
  * simple glass popover holding the secondary actions (Print, Copy Style, Paste
  * Style, Reference). Every item keeps its original handler and disabled/active
- * state; click-outside closes. The items also have menu-bar homes, so no keyboard
- * flow depends on this popover.
+ * state; click-outside closes. These actions have no menu-bar equivalent — when
+ * the toolbar is collapsed, this popover is their only home.
  */
 function ToolbarOverflowMenu({ items }: { items: OverflowItem[] }) {
   const [open, setOpen] = useState(false);
@@ -117,7 +117,10 @@ function ToolbarOverflowMenu({ items }: { items: OverflowItem[] }) {
       if (ref.current && !ref.current.contains(e.target as HTMLElement)) setOpen(false);
     };
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false);
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        setOpen(false);
+      }
     };
     document.addEventListener('mousedown', onDown);
     document.addEventListener('keydown', onKeyDown);
@@ -399,7 +402,8 @@ export function Toolbar({ onExport, onPrint, onBatchProcess, onUndo: _onUndo, on
       <button onClick={onFitWindow} className="glass-pill-btn" style={pillBtn} title="Fit to Window">Fit</button>
 
       {/* Overflow "⋯" — only when collapsed; holds the secondary actions that were
-          pulled out of the pill. All keep working; all have menu-bar homes too. */}
+          pulled out of the pill. All keep working; none have a menu-bar home, so
+          this popover is the only place to reach them while collapsed. */}
       {collapsed && (
         <>
           <div style={divider} />

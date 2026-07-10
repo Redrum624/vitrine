@@ -194,6 +194,19 @@ describe('GalleryView numpad/number rating keys (dead-key-in-gallery regression)
     expect(window.electronAPI!.writeImageRating).toHaveBeenCalledWith('/p/1.jpg', 3);
     expect(window.electronAPI!.writeImageRating).toHaveBeenCalledWith('/p/3.jpg', 3);
   });
+
+  it('ignores the 0-5 rating keydown when a modifier key is held (Ctrl/Cmd/Alt shortcuts must not be hijacked)', () => {
+    useAppStore.setState({ selectedImageIds: ['img1', 'img3'] });
+    render(<GalleryView images={images} onImageSelect={jest.fn()} visible={true} />);
+
+    fireEvent.keyDown(document, { key: '3', ctrlKey: true });
+    fireEvent.keyDown(document, { key: '3', metaKey: true });
+    fireEvent.keyDown(document, { key: '3', altKey: true });
+
+    expect(useAppStore.getState().imageRatings.img1).toBeUndefined();
+    expect(useAppStore.getState().imageRatings.img3).toBeUndefined();
+    expect(window.electronAPI!.writeImageRating).not.toHaveBeenCalled();
+  });
 });
 
 /**
