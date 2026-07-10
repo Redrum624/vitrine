@@ -86,13 +86,19 @@ export class ImageService {
 
         logger.info(`Loading image from: ${filePath}`);
 
-        // Check cache first
-        const cacheEntry = imageCacheService.get(filePath, 0, 0); // Use 0,0 for original size
+        // Check the session base cache first. A hit means this path was decoded earlier this
+        // session (initial decode or RAW re-decode) — serve those pixels and skip the expensive
+        // decode entirely. This lookup is synchronous and happens before any await, so no newer
+        // load can have superseded us yet (the generation guard below covers the async decode path).
+        const cacheEntry = imageCacheService.getBase(filePath);
         if (cacheEntry) {
           const result: ImageData = {
             width: cacheEntry.width,
             height: cacheEntry.height,
-            data: cacheEntry.data,
+            // Copy so the working image never aliases the cache's buffer — matches the fresh-decode
+            // invariant (currentImage.data is independent of the cached copy) and keeps an in-place
+            // working-image mutation from ever corrupting the cached base pixels.
+            data: new Float32Array(cacheEntry.data),
             fileName: filePath.split(/[/\\]/).pop() || 'unknown',
             filePath,
             isRaw: cacheEntry.metadata?.isRaw as boolean,
@@ -102,9 +108,11 @@ export class ImageService {
           this.currentImage = result;
           // Snapshot the original for instant before/after comparison
           this.snapshotOriginal(result);
-          logger.info(`Image loaded from cache: ${result.width}x${result.height} - skipping reprocessing`);
-          // Don't notify listeners for cached images to avoid reprocessing
-          // this.notifyImageLoaded();
+          logger.info(`Image loaded from base cache: ${result.width}x${result.height} - skipping decode`);
+          // Behave like a fresh load minus the decode: notify listeners so the histogram/adjustment
+          // panels reprocess. (For an image with no saved edits, this notify is the ONLY reprocess
+          // trigger — the Canvas open flow only calls triggerReprocessing when saved edits restore.)
+          this.notifyImageLoaded();
           return result;
         }
 
@@ -166,13 +174,13 @@ export class ImageService {
             autoAdjustmentResult
           };
 
-          // Cache the result
-          imageCacheService.set(
+          // Cache the decoded base under the size-agnostic base key so a reopen serves it
+          // without re-running the (multi-second) LibRaw decode.
+          imageCacheService.setBase(
             filePath,
             rawData.data,
             rawData.width,
             rawData.height,
-            undefined,
             { isRaw: true, autoAdjustmentResult, ...rawData.metadata }
           );
 
@@ -184,13 +192,13 @@ export class ImageService {
           }
           result = await this.loadRegularImage(filePath);
 
-          // Cache the result
-          imageCacheService.set(
+          // Cache the decoded base under the size-agnostic base key so a reopen serves it
+          // without re-reading/re-decoding the file.
+          imageCacheService.setBase(
             filePath,
             result.data,
             result.width,
             result.height,
-            undefined,
             { isRaw: false, ...result.metadata }
           );
         }

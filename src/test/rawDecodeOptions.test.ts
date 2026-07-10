@@ -155,7 +155,7 @@ describe('RawImageService.reDecode', () => {
     const upd = jest.spyOn(imageService, 'updateCurrentImageData').mockImplementation(() => {});
     const setOrig = jest.spyOn(imageService, 'setOriginalImage').mockImplementation(() => {});
     const save = jest.spyOn(editPersistenceService, 'scheduleSave').mockImplementation(() => {});
-    const cacheSet = jest.spyOn(imageCacheService, 'set');
+    const cacheSet = jest.spyOn(imageCacheService, 'setBase');
     const clearCache = jest.spyOn(imageProcessingPipeline, 'clearCache');
 
     api().decodeRawFile.mockImplementation(async () => {
@@ -168,10 +168,10 @@ describe('RawImageService.reDecode', () => {
 
     await rawImageService.reDecode(AHD_RECON);
 
-    // Only the still-valid cache write for the file that was ACTUALLY decoded may proceed —
+    // Only the still-valid base-cache write for the file that was ACTUALLY decoded may proceed —
     // it's keyed by the original path and is correct data to have cached for a later reopen.
     expect(cacheSet).toHaveBeenCalledWith(
-      '/photo.orf', expect.any(Float32Array), 4, 2, undefined, expect.objectContaining({ isRaw: true }),
+      '/photo.orf', expect.any(Float32Array), 4, 2, expect.objectContaining({ isRaw: true }),
     );
 
     // Nothing about the newly-selected image (now the one on screen) is touched.

@@ -161,15 +161,17 @@ export class RawImageService {
       logger.info(`Re-decoding RAW base for ${current.filePath} with`, options);
       const rawData = await this.loadRawImage(current.filePath, undefined, options);
 
-      // Refresh the session cache entry so a later cache-hit reopen of THIS path returns these
-      // re-decoded pixels. This is always correct regardless of what's on screen now, since it's
-      // keyed by current.filePath (the file that was actually decoded), not the live image.
-      imageCacheService.set(
+      // Overwrite the session BASE cache entry for THIS path so a later reopen serves these
+      // re-decoded pixels instead of running a fresh decode. It shares the exact key that
+      // ImageService.loadImage reads (setBase/getBase), so the hit is guaranteed — and because
+      // it OVERWRITES the same key, the cache never serves pixels from stale decode options.
+      // Keyed by current.filePath (the file actually decoded), so it's correct regardless of
+      // what's on screen now (the identity re-check below guards the live-image mutations).
+      imageCacheService.setBase(
         current.filePath,
         rawData.data,
         rawData.width,
         rawData.height,
-        undefined,
         { isRaw: true, ...rawData.metadata },
       );
 

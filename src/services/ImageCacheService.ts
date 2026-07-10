@@ -66,6 +66,17 @@ export class ImageCacheService {
   }
 
   /**
+   * Canonical, size- AND options-agnostic key for an image's decoded BASE pixels
+   * (the result of the initial LibRaw/regular decode or a RAW re-decode). Distinct
+   * namespace from generateKey()'s sized keys, so a base entry can never collide with
+   * a sized/thumbnail entry. The REAL width/height live in the CacheEntry payload, not
+   * the key — that's what lets a reopen look the base up without knowing its dimensions.
+   */
+  private generateBaseKey(filePath: string): string {
+    return `${filePath}__BASE__`;
+  }
+
+  /**
    * Simple hash function for cache keys
    */
   private hashCode(str: string): number {
@@ -89,7 +100,37 @@ export class ImageCacheService {
     processingParams?: Record<string, unknown>,
     metadata?: Record<string, unknown>
   ): void {
-    const key = this.generateKey(filePath, width, height, processingParams);
+    this.setWithKey(this.generateKey(filePath, width, height, processingParams), imageData, width, height, metadata);
+  }
+
+  /**
+   * Store an image's decoded BASE pixels (initial decode or RAW re-decode) under the
+   * size- and options-agnostic base key, so a later reopen of the same path serves these
+   * pixels via getBase() instead of running a full (multi-second) decode again.
+   *
+   * Coherence: this cache is in-memory only (it does not survive the session), and every
+   * base write for a given path targets the SAME key — a RAW re-decode with new options
+   * OVERWRITES the prior entry rather than leaving a stale one behind. There is therefore at
+   * most one base entry per path and it always reflects the most recent decode. The REAL
+   * width/height are kept in the entry payload so getBase() reconstructs correct dimensions.
+   */
+  setBase(
+    filePath: string,
+    imageData: Float32Array,
+    width: number,
+    height: number,
+    metadata?: Record<string, unknown>
+  ): void {
+    this.setWithKey(this.generateBaseKey(filePath), imageData, width, height, metadata);
+  }
+
+  private setWithKey(
+    key: string,
+    imageData: Float32Array,
+    width: number,
+    height: number,
+    metadata?: Record<string, unknown>
+  ): void {
     const size = imageData.byteLength;
     const now = Date.now();
 
@@ -134,7 +175,18 @@ export class ImageCacheService {
     height: number,
     processingParams?: Record<string, unknown>
   ): CacheEntry | null {
-    const key = this.generateKey(filePath, width, height, processingParams);
+    return this.getWithKey(this.generateKey(filePath, width, height, processingParams));
+  }
+
+  /**
+   * Retrieve an image's decoded BASE pixels for a path (see setBase). Size-agnostic:
+   * the caller does not need to know the image's dimensions to hit this entry.
+   */
+  getBase(filePath: string): CacheEntry | null {
+    return this.getWithKey(this.generateBaseKey(filePath));
+  }
+
+  private getWithKey(key: string): CacheEntry | null {
     const entry = this.cache.get(key);
 
     if (entry) {
