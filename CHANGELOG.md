@@ -4,6 +4,11 @@ All notable changes to **Photo Editor Pro** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.14.6] - 2026-07-10
+
+### Fixed
+- **Zoomed photos can now be panned horizontally.** Cause: the drag clamp bounded panning against the photo-region container instead of the canvas box the zoomed image is actually drawn and clipped in — for any photo that is height-constrained in the letterbox (portrait or 4:3 in the wide workspace), the displayed width never exceeded the region width, so the horizontal bound computed 0 and left-right dragging was permanently locked (vertical worked only because the fitted height happens to match the region height). Fix: pan bounds derive from the canvas's own dimensions (`computePanBounds` helper with regression tests); verified live — horizontal drag pans and clamps at the exact computed bound. Affects: `src/components/Layout/Canvas.tsx`, `src/utils/panBounds.ts` (new).
+
 ## [1.14.5] - 2026-07-10
 
 ### Fixed
