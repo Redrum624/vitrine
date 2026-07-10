@@ -39,6 +39,11 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
   const glCanvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasWrapperRef = useRef<HTMLDivElement>(null);
+  // Path of the `loadImage` call currently in flight, set synchronously at the TOP
+  // of loadImage (before any await) so an EARLIER call resuming after its own await
+  // can detect that a LATER call has since started — see the setRawDecodeOptions
+  // race guard below.
+  const activeLoadPathRef = useRef<string | null>(null);
   const { viewport, setViewport, processedImageData, isAdjustingRotation, selectedTool, triggerReprocessing, showGrid, showRulers, showOriginal, isProcessing, renderMode, gpuResultVersion, setRenderMode } = useAppStore();
   // Whether attach() succeeded on this canvas (WebGL2 present available). When false the
   // app behaves exactly as before: GL canvas stays hidden and renderMode is forced 'cpu'.
@@ -680,6 +685,8 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
 
   const loadImage = useCallback(async (image: ImageFileInfo) => {
     try {
+      activeLoadPathRef.current = image.path;
+
       // Persist the OUTGOING image's edits + history before we reset the pipeline.
       editPersistenceService.flush();
       checkpointService.flush();
@@ -701,6 +708,17 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
       // Load this image's saved RAW decode options (or defaults) into the store BEFORE decoding,
       // so ImageService.loadImage decodes the base with the user's last-chosen demosaic/highlights.
       const savedDecodeOptions = await editPersistenceService.getSavedRawDecodeOptions(image.path);
+
+      // The user may have switched to a different image while the above await was in
+      // flight (rapid filmstrip/gallery clicks) — bail before writing decode options
+      // for a no-longer-current image. Without this, image A's (stale) options could
+      // land in the store AFTER image B's own loadImage call already set B's options,
+      // and then ImageService.loadImage(image.path) below would decode A with the
+      // WRONG (B's or neither's) options. Mirrors the post-decode identity guard below.
+      if (activeLoadPathRef.current !== image.path) {
+        logger.info(`Image load of ${image.path} discarded: superseded before decode options resolved`);
+        return;
+      }
       useAppStore.getState().setRawDecodeOptions(savedDecodeOptions ?? DEFAULT_RAW_DECODE_OPTIONS);
 
       // Load image using ImageService (will use cache if available)
