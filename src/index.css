@@ -463,3 +463,48 @@ body {
 .glass-gallery-tile:hover:not(.is-selected) {
   border-color: rgba(255, 255, 255, 0.25);
 }
+
+/* ---------------------------------------------------------------------- */
+/* Glass modals (Dialogs/GlassModal + ported dialogs). Plain :hover/         */
+/* [data-active] CSS so consumers never need bespoke inline JS hover         */
+/* handlers for these idioms.                                               */
+/* ---------------------------------------------------------------------- */
+
+/* Sidebar tab nav (Export/Batch dialogs): idle text button, accent-soft when
+   the active tab, plain hover brighten otherwise. */
+.glass-modal-tab {
+  transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
+}
+.glass-modal-tab:hover:not([data-active]) {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--glass-text-title);
+}
+.glass-modal-tab[data-active] {
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-ring);
+  color: var(--accent);
+}
+
+/* Larger selectable cards (format/preset/resize-mode/bit-depth choices):
+   idle .04 fill / .1 border, accent-soft + accent-ring when active, plain
+   hover brighten otherwise. */
+.glass-modal-card-btn {
+  transition: background-color 150ms ease, border-color 150ms ease;
+}
+.glass-modal-card-btn:hover:not([data-active]):not(:disabled) {
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(255, 255, 255, 0.16);
+}
+.glass-modal-card-btn[data-active] {
+  background: var(--accent-soft);
+  border-color: var(--accent-ring);
+}
+
+/* Secondary footer button (Cancel, ...): plain hover, no active state. */
+.glass-modal-btn-secondary {
+  transition: background-color 150ms ease, color 150ms ease, border-color 150ms ease;
+}
+.glass-modal-btn-secondary:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--glass-text-title);
+}

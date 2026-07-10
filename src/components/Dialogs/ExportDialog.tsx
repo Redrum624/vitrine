@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useEffect } from 'react';
+import type { CSSProperties } from 'react';
 import {
   Download,
   Image,
@@ -8,6 +9,9 @@ import {
   AlertTriangle,
   FolderOpen
 } from 'lucide-react';
+import { GlassModal } from './GlassModal';
+import { ChipButton } from '../Controls/ChipButton';
+import { SectionLabel } from '../Controls/SectionLabel';
 import SliderControl from '../Controls/SliderControl';
 import { ExportOptions, ExportPreset, exportService } from '../../services/ExportService';
 import { imageService } from '../../services/ImageService';
@@ -36,6 +40,35 @@ type TabType = 'format' | 'dimensions' | 'color';
  *  JPEG/WebP are 8-bit only. Used to default Bit Depth to the format maximum. */
 const maxBitDepthForFormat = (format: ExportOptions['format']): 8 | 16 =>
   format === 'png' || format === 'tiff' ? 16 : 8;
+
+// Shared glass-card select look (see RawDecodePanel.tsx for the precedent on
+// keeping real native <select>s restyled with the token palette).
+const selectStyle: CSSProperties = {
+  width: '100%',
+  fontSize: 12,
+  padding: '6px 8px',
+  borderRadius: 8,
+  border: '1px solid rgba(255,255,255,.1)',
+  background: 'rgba(255,255,255,.04)',
+  color: 'var(--glass-text-label)',
+};
+
+const inputStyle: CSSProperties = {
+  width: '100%',
+  fontSize: 12,
+  padding: '6px 8px',
+  borderRadius: 8,
+  border: '1px solid rgba(255,255,255,.1)',
+  background: 'rgba(255,255,255,.04)',
+  color: 'var(--glass-text-label)',
+};
+
+const infoBoxStyle: CSSProperties = {
+  padding: 12,
+  borderRadius: 10,
+  background: 'rgba(0,0,0,.3)',
+  border: '1px solid var(--glass-border)',
+};
 
 export const ExportDialog: React.FC<ExportDialogProps> = ({
   isOpen,
@@ -322,20 +355,19 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
     <div className="space-y-6">
       {/* Presets */}
       <div className="space-y-2">
-        <h3 className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--gray-500)' }}>Export Presets</h3>
+        <SectionLabel>Export Presets</SectionLabel>
         <div className="space-y-2 max-h-48 overflow-y-auto pr-2">
           {presets.map((preset) => (
             <button
               key={preset.id}
+              type="button"
               onClick={() => handlePresetChange(preset.id)}
-              className="w-full text-left p-3 rounded border transition-colors"
-              style={{
-                backgroundColor: selectedPreset === preset.id ? 'var(--gray-700)' : 'var(--gray-800)',
-                borderColor: selectedPreset === preset.id ? 'var(--gray-500)' : 'var(--border)'
-              }}
+              data-active={selectedPreset === preset.id || undefined}
+              className="glass-modal-card-btn w-full text-left"
+              style={{ padding: 12, borderRadius: 10, border: '1px solid rgba(255,255,255,.1)', background: 'rgba(255,255,255,.04)' }}
             >
-              <div className="text-sm font-semibold" style={{ color: 'var(--gray-200)' }}>{preset.name}</div>
-              <div className="text-xs mt-0.5" style={{ color: 'var(--gray-400)' }}>{preset.description}</div>
+              <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--glass-text-title)' }}>{preset.name}</div>
+              <div style={{ fontSize: 11, marginTop: 2, color: 'var(--glass-text-muted)' }}>{preset.description}</div>
             </button>
           ))}
         </div>
@@ -343,7 +375,7 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
 
       {/* Format Selection */}
       <div className="space-y-2">
-        <h3 className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--gray-500)' }}>Output Format</h3>
+        <SectionLabel>Output Format</SectionLabel>
         <div className="grid grid-cols-2 gap-2">
           {[
             { format: 'jpeg', label: 'JPEG', desc: 'Best for photos' },
@@ -353,15 +385,14 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
           ].map(({ format, label, desc }) => (
             <button
               key={format}
+              type="button"
               onClick={() => handleFormatChange(format as ExportOptions['format'])}
-              className="p-3 rounded border text-left transition-colors"
-              style={{
-                backgroundColor: exportOptions.format === format ? 'var(--gray-700)' : 'var(--gray-800)',
-                borderColor: exportOptions.format === format ? 'var(--gray-500)' : 'var(--border)'
-              }}
+              data-active={exportOptions.format === format || undefined}
+              className="glass-modal-card-btn text-left"
+              style={{ padding: 12, borderRadius: 10, border: '1px solid rgba(255,255,255,.1)', background: 'rgba(255,255,255,.04)' }}
             >
-              <div className="text-sm font-semibold" style={{ color: 'var(--gray-200)' }}>{label}</div>
-              <div className="text-xs mt-0.5" style={{ color: 'var(--gray-400)' }}>{desc}</div>
+              <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--glass-text-title)' }}>{label}</div>
+              <div style={{ fontSize: 11, marginTop: 2, color: 'var(--glass-text-muted)' }}>{desc}</div>
             </button>
           ))}
         </div>
@@ -386,12 +417,11 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
       {/* TIFF Compression */}
       {exportOptions.format === 'tiff' && (
         <div className="space-y-2">
-          <h3 className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--gray-500)' }}>TIFF Compression</h3>
+          <SectionLabel>TIFF Compression</SectionLabel>
           <select
             value={exportOptions.compression}
             onChange={(e) => handleOptionChange('compression', e.target.value)}
-            className="w-full px-2 py-1.5 text-sm rounded border focus:outline-none"
-            style={{ backgroundColor: 'var(--gray-800)', borderColor: 'var(--border)', color: 'var(--gray-200)' }}
+            style={selectStyle}
           >
             <option value="none">None (Uncompressed)</option>
             <option value="lzw">LZW (Lossless)</option>
@@ -410,13 +440,13 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
     return (
       <div className="space-y-6">
         {/* Current Dimensions */}
-        <div className="p-3 rounded border" style={{ backgroundColor: 'var(--gray-800)', borderColor: 'var(--border)' }}>
-          <div className="text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: 'var(--gray-500)' }}>Original Size</div>
-          <div className="text-sm" style={{ color: 'var(--gray-300)' }}>{imageWidth} × {imageHeight} pixels</div>
+        <div style={infoBoxStyle}>
+          <SectionLabel className="mb-1">Original Size</SectionLabel>
+          <div style={{ fontSize: 12.5, color: 'var(--glass-text-label)', marginTop: 6 }}>{imageWidth} × {imageHeight} pixels</div>
         </div>
 
         {/* Resize Toggle */}
-        <label className="flex items-center space-x-2 cursor-pointer">
+        <label className="flex items-center gap-2 cursor-pointer" style={{ fontSize: 12.5, color: 'var(--glass-text-label)' }}>
           <input
             type="checkbox"
             checked={!!(exportOptions.width || exportOptions.height)}
@@ -429,9 +459,9 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
                 handleOptionChange('height', undefined);
               }
             }}
-            className="rounded"
+            style={{ accentColor: 'var(--accent)' }}
           />
-          <span className="text-sm" style={{ color: 'var(--gray-300)' }}>Resize image</span>
+          Resize image
         </label>
 
         {(exportOptions.width || exportOptions.height) && (
@@ -439,24 +469,22 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
             {/* Dimensions */}
             <div className="grid grid-cols-2 gap-3">
               <div className="flex flex-col gap-1">
-                <label className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--gray-500)' }}>Width (px)</label>
+                <label style={{ fontSize: 11, fontWeight: 500, color: 'var(--glass-text-label)' }}>Width (px)</label>
                 <input
                   type="number"
                   value={exportOptions.width || ''}
                   onChange={(e) => handleOptionChange('width', parseInt(e.target.value) || undefined)}
-                  className="w-full px-2 py-1.5 text-sm rounded border focus:outline-none"
-                  style={{ backgroundColor: 'var(--gray-800)', borderColor: 'var(--border)', color: 'var(--gray-200)' }}
+                  style={inputStyle}
                   placeholder={imageWidth.toString()}
                 />
               </div>
               <div className="flex flex-col gap-1">
-                <label className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--gray-500)' }}>Height (px)</label>
+                <label style={{ fontSize: 11, fontWeight: 500, color: 'var(--glass-text-label)' }}>Height (px)</label>
                 <input
                   type="number"
                   value={exportOptions.height || ''}
                   onChange={(e) => handleOptionChange('height', parseInt(e.target.value) || undefined)}
-                  className="w-full px-2 py-1.5 text-sm rounded border focus:outline-none"
-                  style={{ backgroundColor: 'var(--gray-800)', borderColor: 'var(--border)', color: 'var(--gray-200)' }}
+                  style={inputStyle}
                   placeholder={imageHeight.toString()}
                 />
               </div>
@@ -464,7 +492,7 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
 
             {/* Resize Mode */}
             <div className="space-y-2">
-              <h3 className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--gray-500)' }}>Resize Mode</h3>
+              <SectionLabel>Resize Mode</SectionLabel>
               <div className="grid grid-cols-2 gap-2">
                 {[
                   { mode: 'fit', label: 'Fit', desc: 'Fit within bounds' },
@@ -474,35 +502,34 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
                 ].map(({ mode, label, desc }) => (
                   <button
                     key={mode}
+                    type="button"
                     onClick={() => handleOptionChange('resizeMode', mode)}
-                    className="p-2 rounded border text-left transition-colors"
-                    style={{
-                      backgroundColor: exportOptions.resizeMode === mode ? 'var(--gray-700)' : 'var(--gray-800)',
-                      borderColor: exportOptions.resizeMode === mode ? 'var(--gray-500)' : 'var(--border)'
-                    }}
+                    data-active={exportOptions.resizeMode === mode || undefined}
+                    className="glass-modal-card-btn text-left"
+                    style={{ padding: 8, borderRadius: 9, border: '1px solid rgba(255,255,255,.1)', background: 'rgba(255,255,255,.04)' }}
                   >
-                    <div className="text-sm font-semibold" style={{ color: 'var(--gray-200)' }}>{label}</div>
-                    <div className="text-xs mt-0.5" style={{ color: 'var(--gray-400)' }}>{desc}</div>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--glass-text-title)' }}>{label}</div>
+                    <div style={{ fontSize: 10.5, marginTop: 2, color: 'var(--glass-text-muted)' }}>{desc}</div>
                   </button>
                 ))}
               </div>
             </div>
 
             {/* Maintain Aspect Ratio */}
-            <label className="flex items-center space-x-2 cursor-pointer">
+            <label className="flex items-center gap-2 cursor-pointer" style={{ fontSize: 12.5, color: 'var(--glass-text-label)' }}>
               <input
                 type="checkbox"
                 checked={exportOptions.maintainAspectRatio}
                 onChange={(e) => handleOptionChange('maintainAspectRatio', e.target.checked)}
-                className="rounded"
+                style={{ accentColor: 'var(--accent)' }}
               />
-              <span className="text-sm" style={{ color: 'var(--gray-300)' }}>Maintain aspect ratio</span>
+              Maintain aspect ratio
             </label>
 
             {/* Output Size Preview */}
-            <div className="p-3 rounded border" style={{ backgroundColor: 'var(--gray-800)', borderColor: 'var(--border)' }}>
-              <div className="text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: 'var(--gray-500)' }}>Output Size</div>
-              <div className="text-sm" style={{ color: 'var(--gray-300)' }}>{outputWidth} × {outputHeight} pixels</div>
+            <div style={infoBoxStyle}>
+              <SectionLabel className="mb-1">Output Size</SectionLabel>
+              <div style={{ fontSize: 12.5, color: 'var(--glass-text-label)', marginTop: 6 }}>{outputWidth} × {outputHeight} pixels</div>
             </div>
           </div>
         )}
@@ -514,12 +541,11 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
     <div className="space-y-6">
       {/* Color Space */}
       <div className="space-y-2">
-        <h3 className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--gray-500)' }}>Color Space</h3>
+        <SectionLabel>Color Space</SectionLabel>
         <select
           value={exportOptions.colorSpace}
           onChange={(e) => handleOptionChange('colorSpace', e.target.value)}
-          className="w-full px-2 py-1.5 text-sm rounded border focus:outline-none"
-          style={{ backgroundColor: 'var(--gray-800)', borderColor: 'var(--border)', color: 'var(--gray-200)' }}
+          style={selectStyle}
         >
           <option value="srgb">sRGB (Standard)</option>
           <option value="adobergb">Adobe RGB (Photography)</option>
@@ -530,203 +556,211 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
 
       {/* Bit Depth */}
       <div className="space-y-2">
-        <h3 className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--gray-500)' }}>Bit Depth</h3>
+        <SectionLabel>Bit Depth</SectionLabel>
         <div className="grid grid-cols-2 gap-2">
           {[
             { bits: 8, label: '8-bit', desc: 'Standard (256 colors/channel)' },
             { bits: 16, label: '16-bit', desc: 'High precision (65536 colors/channel)' }
-          ].map(({ bits, label, desc }) => (
-            <button
-              key={bits}
-              onClick={() => handleOptionChange('bitDepth', bits)}
-              className="p-3 rounded border text-left transition-colors"
-              style={{
-                backgroundColor: exportOptions.bitDepth === bits ? 'var(--gray-700)' : 'var(--gray-800)',
-                borderColor: exportOptions.bitDepth === bits ? 'var(--gray-500)' : 'var(--border)',
-                opacity: exportOptions.format === 'jpeg' && bits === 16 ? 0.5 : 1
-              }}
-              disabled={exportOptions.format === 'jpeg' && bits === 16}
-            >
-              <div className="text-sm font-semibold" style={{ color: 'var(--gray-200)' }}>{label}</div>
-              <div className="text-xs mt-0.5" style={{ color: 'var(--gray-400)' }}>{desc}</div>
-            </button>
-          ))}
+          ].map(({ bits, label, desc }) => {
+            const disabled = exportOptions.format === 'jpeg' && bits === 16;
+            return (
+              <button
+                key={bits}
+                type="button"
+                onClick={() => handleOptionChange('bitDepth', bits)}
+                data-active={exportOptions.bitDepth === bits || undefined}
+                disabled={disabled}
+                className="glass-modal-card-btn text-left"
+                style={{
+                  padding: 12, borderRadius: 10, border: '1px solid rgba(255,255,255,.1)', background: 'rgba(255,255,255,.04)',
+                  opacity: disabled ? 0.5 : 1,
+                  cursor: disabled ? 'not-allowed' : 'pointer',
+                }}
+              >
+                <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--glass-text-title)' }}>{label}</div>
+                <div style={{ fontSize: 11, marginTop: 2, color: 'var(--glass-text-muted)' }}>{desc}</div>
+              </button>
+            );
+          })}
         </div>
       </div>
 
       {/* Metadata */}
       <div className="space-y-3">
-        <h3 className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--gray-500)' }}>Metadata</h3>
+        <SectionLabel>Metadata</SectionLabel>
 
-        <label className="flex items-center space-x-2 cursor-pointer">
+        <label className="flex items-center gap-2 cursor-pointer" style={{ fontSize: 12.5, color: 'var(--glass-text-label)' }}>
           <input
             type="checkbox"
             checked={exportOptions.preserveMetadata}
             onChange={(e) => handleOptionChange('preserveMetadata', e.target.checked)}
-            className="rounded"
+            style={{ accentColor: 'var(--accent)' }}
           />
-          <span className="text-sm" style={{ color: 'var(--gray-300)' }}>Preserve original metadata</span>
+          Preserve original metadata
         </label>
 
-        <label className="flex items-center space-x-2 cursor-pointer">
+        <label className="flex items-center gap-2 cursor-pointer" style={{ fontSize: 12.5, color: 'var(--glass-text-label)' }}>
           <input
             type="checkbox"
             checked={exportOptions.includeProcessingHistory}
             onChange={(e) => handleOptionChange('includeProcessingHistory', e.target.checked)}
-            className="rounded"
+            style={{ accentColor: 'var(--accent)' }}
           />
-          <span className="text-sm" style={{ color: 'var(--gray-300)' }}>Include processing history</span>
+          Include processing history
         </label>
       </div>
     </div>
   );
 
-  if (!isOpen) return null;
-
-  return (
-    <div className="fixed inset-0 flex items-center justify-center z-50" style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}>
-      <div className="rounded-lg w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col shadow-xl" style={{ backgroundColor: 'var(--gray-900)' }}>
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b" style={{ borderBottomColor: 'var(--border)' }}>
-          <div className="flex items-center gap-2">
-            <Download size={18} style={{ color: 'var(--gray-300)' }} />
-            <h2 className="text-sm font-semibold" style={{ color: 'var(--white)' }}>
-              {isMulti ? `Export ${multiPaths!.length} Images` : 'Export Image'}
-            </h2>
-          </div>
+  const footer = (
+    <div className="flex flex-col" style={{ gap: 12 }}>
+      {/* Output folder row */}
+      <div className="flex items-center gap-2">
+        <span style={{ fontSize: 11.5, color: 'var(--glass-text-muted)' }}>Output:</span>
+        <span
+          className="flex-1 truncate"
+          style={{ fontSize: 11, fontFamily: 'ui-monospace, monospace', color: 'var(--glass-text-label)' }}
+        >
+          {outputDirectory || 'Same folder as original'}
+        </span>
+        {outputDirectory && (
           <button
-            onClick={onClose}
-            className="p-1.5 rounded transition-colors"
-            style={{ color: 'var(--gray-400)' }}
+            type="button"
+            onClick={() => { setOutputDirectory(''); setExportOptions(prev => ({ ...prev, outputDirectory: undefined })); }}
+            className="glass-pill-btn inline-flex items-center justify-center"
+            style={{ padding: 4, borderRadius: 6, color: 'var(--glass-text-muted)' }}
+            title="Reset to original folder"
           >
-            <X size={18} />
+            <X size={12} />
           </button>
-        </div>
+        )}
+        <ChipButton onClick={handleChooseFolder} title="Choose output folder">
+          <FolderOpen size={12} style={{ marginRight: 6 }} />
+          Browse
+        </ChipButton>
+      </div>
 
-        <div className="flex flex-1 overflow-hidden">
-          {/* Tab Navigation */}
-          <div className="w-48 border-r" style={{ borderRightColor: 'var(--border)' }}>
-            <div className="p-4">
-              <h3 className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: 'var(--gray-500)' }}>Export Settings</h3>
-              <nav className="space-y-1">
-                {[
-                  { key: 'format', label: 'Format & Quality', icon: File },
-                  { key: 'dimensions', label: 'Dimensions', icon: Image },
-                  { key: 'color', label: 'Color & Metadata', icon: Palette }
-                ].map(({ key, label, icon: Icon }) => (
-                  <button
-                    key={key}
-                    onClick={() => setActiveTab(key as TabType)}
-                    className="w-full flex items-center gap-2 px-3 py-2 rounded text-left text-sm transition-colors"
-                    style={{
-                      backgroundColor: activeTab === key ? 'var(--gray-800)' : 'transparent',
-                      color: activeTab === key ? 'var(--white)' : 'var(--gray-400)'
-                    }}
-                  >
-                    <Icon size={16} />
-                    {label}
-                  </button>
-                ))}
-              </nav>
-            </div>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <div style={{ fontSize: 11.5, color: 'var(--glass-text-muted)' }}>
+            Estimated size: <span style={{ fontWeight: 600, color: 'var(--glass-text-label)' }}>{estimatedFileSize}</span>
           </div>
-
-          {/* Tab Content */}
-          <div className="flex-1 px-6 py-5 overflow-y-auto">
-            {activeTab === 'format' && renderFormatTab()}
-            {activeTab === 'dimensions' && renderDimensionsTab()}
-            {activeTab === 'color' && renderColorTab()}
-          </div>
-        </div>
-
-        {/* Footer */}
-        <div className="px-5 py-4 border-t" style={{ borderTopColor: 'var(--border)' }}>
-          {/* Output folder row */}
-          <div className="flex items-center gap-2 mb-3 text-sm">
-            <span style={{ color: 'var(--gray-500)' }}>Output:</span>
-            <span className="flex-1 truncate text-xs font-mono" style={{ color: 'var(--gray-300)' }}>
-              {outputDirectory || 'Same folder as original'}
-            </span>
-            {outputDirectory && (
-              <button
-                onClick={() => { setOutputDirectory(''); setExportOptions(prev => ({ ...prev, outputDirectory: undefined })); }}
-                className="p-1 rounded"
-                style={{ color: 'var(--gray-500)' }}
-                title="Reset to original folder"
-              >
-                <X size={12} />
-              </button>
-            )}
-            <button
-              onClick={handleChooseFolder}
-              className="flex items-center gap-1.5 px-2.5 py-1 text-xs rounded border transition-colors"
-              style={{ backgroundColor: 'var(--gray-800)', borderColor: 'var(--border)', color: 'var(--gray-300)' }}
-              title="Choose output folder"
-            >
-              <FolderOpen size={12} />
-              Browse
-            </button>
-          </div>
-
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4 text-sm">
-              <div style={{ color: 'var(--gray-400)' }}>
-                Estimated size: <span className="font-semibold" style={{ color: 'var(--gray-200)' }}>{estimatedFileSize}</span>
-              </div>
-              {validationErrors.length > 0 && (
-                <div className="flex items-center gap-1" style={{ color: 'var(--gray-300)' }}>
-                  <AlertTriangle size={14} />
-                  <span>{validationErrors.length} error(s)</span>
-                </div>
-              )}
-            </div>
-
-            <div className="flex gap-3">
-              <button
-                onClick={onClose}
-                className="px-4 py-2 text-sm transition-colors rounded"
-                style={{ color: 'var(--gray-400)' }}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleExport}
-                disabled={isExporting || validationErrors.length > 0}
-                className="flex items-center gap-2 px-4 py-2 text-sm rounded border transition-colors disabled:opacity-50"
-                style={{ backgroundColor: 'var(--gray-800)', borderColor: 'var(--border)', color: 'var(--gray-300)' }}
-              >
-                {isExporting ? (
-                  <>
-                    <div className="w-4 h-4 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: 'var(--gray-300)' }} />
-                    Exporting...
-                  </>
-                ) : (
-                  <>
-                    <Download size={16} />
-                    {isMulti ? `Export ${multiPaths!.length}` : 'Export'}
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-
-          {/* Validation Errors */}
           {validationErrors.length > 0 && (
-            <div className="mt-4 p-3 rounded border" style={{ backgroundColor: 'var(--gray-900)', borderColor: 'var(--border)' }}>
-              <div className="flex items-center gap-2 font-semibold mb-1 text-sm" style={{ color: 'var(--gray-300)' }}>
-                <AlertTriangle size={16} />
-                Validation Errors
-              </div>
-              <ul className="text-sm list-disc list-inside space-y-1" style={{ color: 'var(--gray-400)' }}>
-                {validationErrors.map((error, index) => (
-                  <li key={index}>{error}</li>
-                ))}
-              </ul>
+            <div className="flex items-center gap-1" style={{ fontSize: 11.5, color: '#f87171' }}>
+              <AlertTriangle size={13} />
+              <span>{validationErrors.length} error(s)</span>
             </div>
           )}
         </div>
+
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="glass-modal-btn-secondary"
+            style={{
+              padding: '9px 16px', borderRadius: 10, fontSize: 12, fontWeight: 500,
+              border: '1px solid rgba(255,255,255,.1)', background: 'transparent', color: 'var(--glass-text-secondary)',
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={handleExport}
+            disabled={isExporting || validationErrors.length > 0}
+            className="inline-flex items-center justify-center gap-2"
+            style={{
+              padding: '9px 18px', borderRadius: 11,
+              border: '1px solid var(--accent-ring)',
+              background: 'var(--accent)', color: '#0b0b0c', fontSize: 12.5, fontWeight: 700,
+              cursor: isExporting || validationErrors.length > 0 ? 'not-allowed' : 'pointer',
+              opacity: isExporting || validationErrors.length > 0 ? 0.6 : 1,
+              boxShadow: isExporting || validationErrors.length > 0 ? 'none' : '0 2px 18px var(--accent-ring)',
+            }}
+          >
+            {isExporting ? (
+              <>
+                <span
+                  className="animate-spin"
+                  style={{ width: 13, height: 13, borderRadius: '50%', border: '2px solid rgba(11,11,12,0.35)', borderTopColor: '#0b0b0c' }}
+                />
+                Exporting...
+              </>
+            ) : (
+              <>
+                <Download size={14} />
+                {isMulti ? `Export ${multiPaths!.length}` : 'Export'}
+              </>
+            )}
+          </button>
+        </div>
       </div>
+
+      {/* Validation Errors */}
+      {validationErrors.length > 0 && (
+        <div style={{ padding: 12, borderRadius: 10, background: 'rgba(0,0,0,.3)', border: '1px solid var(--glass-border)' }}>
+          <div className="flex items-center gap-2" style={{ fontSize: 11.5, fontWeight: 600, color: '#f87171', marginBottom: 4 }}>
+            <AlertTriangle size={14} />
+            Validation Errors
+          </div>
+          <ul style={{ fontSize: 11.5, color: 'var(--glass-text-muted)', paddingLeft: 16, listStyle: 'disc' }}>
+            {validationErrors.map((error, index) => (
+              <li key={index}>{error}</li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
+  );
+
+  return (
+    <GlassModal
+      isOpen={isOpen}
+      onClose={onClose}
+      icon={<Download size={15} />}
+      title={isMulti ? `Export ${multiPaths!.length} Images` : 'Export Image'}
+      cardClassName="w-full max-w-4xl"
+      cardStyle={{ maxHeight: '90vh' }}
+      scrollBody={false}
+      footer={footer}
+    >
+      <div className="flex flex-1 overflow-hidden">
+        {/* Tab Navigation */}
+        <div className="flex-shrink-0" style={{ width: 192, borderRight: '1px solid var(--glass-border)', padding: 14 }}>
+          <SectionLabel className="mb-3">Export Settings</SectionLabel>
+          <nav className="flex flex-col" style={{ gap: 4, marginTop: 10 }}>
+            {[
+              { key: 'format', label: 'Format & Quality', icon: File },
+              { key: 'dimensions', label: 'Dimensions', icon: Image },
+              { key: 'color', label: 'Color & Metadata', icon: Palette }
+            ].map(({ key, label, icon: Icon }) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setActiveTab(key as TabType)}
+                data-active={activeTab === key || undefined}
+                className="glass-modal-tab w-full flex items-center gap-2"
+                style={{
+                  padding: '8px 10px', borderRadius: 9, fontSize: 12, textAlign: 'left',
+                  border: '1px solid transparent', color: 'var(--glass-text-secondary)',
+                }}
+              >
+                <Icon size={14} />
+                {label}
+              </button>
+            ))}
+          </nav>
+        </div>
+
+        {/* Tab Content */}
+        <div className="flex-1 overflow-y-auto" style={{ padding: '20px 24px' }}>
+          {activeTab === 'format' && renderFormatTab()}
+          {activeTab === 'dimensions' && renderDimensionsTab()}
+          {activeTab === 'color' && renderColorTab()}
+        </div>
+      </div>
+    </GlassModal>
   );
 };
 

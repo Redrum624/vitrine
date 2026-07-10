@@ -10,9 +10,11 @@ import {
   CheckCircle,
   XCircle,
   Loader,
-  X,
   FolderOpen
 } from 'lucide-react';
+import { GlassModal } from './GlassModal';
+import { ChipButton } from '../Controls/ChipButton';
+import { SectionLabel } from '../Controls/SectionLabel';
 import SliderControl from '../Controls/SliderControl';
 import { BatchJob, BatchPreset, batchProcessingService } from '../../services/BatchProcessingService';
 import { ImageFileInfo } from '../../services/FileSystemService';
@@ -39,6 +41,23 @@ const mergeUnique = (existing: ImageFileInfo[], incoming: ImageFileInfo[]): Imag
     }
   }
   return merged;
+};
+
+const statBoxStyle: React.CSSProperties = {
+  padding: 12,
+  borderRadius: 10,
+  background: 'rgba(0,0,0,.3)',
+  border: '1px solid var(--glass-border)',
+};
+
+const inputStyle: React.CSSProperties = {
+  width: '100%',
+  fontSize: 12,
+  padding: '6px 8px',
+  borderRadius: 8,
+  border: '1px solid rgba(255,255,255,.1)',
+  background: 'rgba(255,255,255,.04)',
+  color: 'var(--glass-text-label)',
 };
 
 export const BatchProcessingDialog: React.FC<BatchProcessingDialogProps> = ({
@@ -149,15 +168,15 @@ export const BatchProcessingDialog: React.FC<BatchProcessingDialogProps> = ({
   const getStatusIcon = (status: BatchJob['status']) => {
     switch (status) {
       case 'pending':
-        return <Clock size={16} style={{ color: 'var(--gray-400)' }} />;
+        return <Clock size={16} style={{ color: 'var(--glass-text-muted)' }} />;
       case 'running':
-        return <Loader size={16} className="animate-spin" style={{ color: 'var(--gray-300)' }} />;
+        return <Loader size={16} className="animate-spin" style={{ color: 'var(--accent)' }} />;
       case 'completed':
-        return <CheckCircle size={16} style={{ color: 'var(--gray-300)' }} />;
+        return <CheckCircle size={16} style={{ color: 'var(--glass-text-label)' }} />;
       case 'failed':
-        return <XCircle size={16} style={{ color: 'var(--gray-400)' }} />;
+        return <XCircle size={16} style={{ color: 'var(--glass-text-muted)' }} />;
       case 'cancelled':
-        return <Square size={16} style={{ color: 'var(--gray-500)' }} />;
+        return <Square size={16} style={{ color: 'var(--glass-text-muted)' }} />;
       default:
         return null;
     }
@@ -169,64 +188,55 @@ export const BatchProcessingDialog: React.FC<BatchProcessingDialogProps> = ({
     return (
       <div className="space-y-6">
         {/* Statistics */}
-        <div className="grid grid-cols-3 gap-4">
-          <div className="rounded p-3 border" style={{ backgroundColor: 'var(--gray-800)', borderColor: 'var(--border)' }}>
-            <div className="text-lg font-semibold" style={{ color: 'var(--gray-200)' }}>{statistics.totalJobs}</div>
-            <div className="text-xs uppercase tracking-wider" style={{ color: 'var(--gray-500)' }}>Total Jobs</div>
+        <div className="grid grid-cols-3 gap-3">
+          <div style={statBoxStyle}>
+            <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--glass-text-title)' }}>{statistics.totalJobs}</div>
+            <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '.6px', color: 'var(--glass-text-muted)' }}>Total Jobs</div>
           </div>
-          <div className="rounded p-3 border" style={{ backgroundColor: 'var(--gray-800)', borderColor: 'var(--border)' }}>
-            <div className="text-lg font-semibold" style={{ color: 'var(--gray-200)' }}>{statistics.activeJobs}</div>
-            <div className="text-xs uppercase tracking-wider" style={{ color: 'var(--gray-500)' }}>Active Jobs</div>
+          <div style={statBoxStyle}>
+            <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--glass-text-title)' }}>{statistics.activeJobs}</div>
+            <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '.6px', color: 'var(--glass-text-muted)' }}>Active Jobs</div>
           </div>
-          <div className="rounded p-3 border" style={{ backgroundColor: 'var(--gray-800)', borderColor: 'var(--border)' }}>
-            <div className="text-lg font-semibold" style={{ color: 'var(--gray-200)' }}>{statistics.totalImagesProcessed}</div>
-            <div className="text-xs uppercase tracking-wider" style={{ color: 'var(--gray-500)' }}>Images Processed</div>
+          <div style={statBoxStyle}>
+            <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--glass-text-title)' }}>{statistics.totalImagesProcessed}</div>
+            <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '.6px', color: 'var(--glass-text-muted)' }}>Images Processed</div>
           </div>
         </div>
 
         {/* Jobs List */}
         <div className="space-y-3">
-          <div className="flex justify-between items-center mb-2">
-            <h3 className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--gray-500)' }}>Batch Jobs</h3>
-            <div className="flex gap-2">
-              <button
-                onClick={() => batchProcessingService.clearCompletedJobs()}
-                className="px-3 py-1.5 text-xs rounded border"
-                style={{ backgroundColor: 'transparent', borderColor: 'var(--border)', color: 'var(--gray-300)' }}
-              >
-                Clear Completed
-              </button>
-              <button
-                onClick={refreshJobs}
-                className="px-3 py-1.5 text-xs rounded border"
-                style={{ backgroundColor: 'var(--gray-800)', borderColor: 'var(--border)', color: 'var(--gray-300)' }}
-              >
-                Refresh
-              </button>
+          <div className="flex items-center mb-2" style={{ gap: 8 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <SectionLabel>Batch Jobs</SectionLabel>
+            </div>
+            <div className="flex gap-2 flex-shrink-0">
+              <ChipButton onClick={() => batchProcessingService.clearCompletedJobs()}>Clear Completed</ChipButton>
+              <ChipButton onClick={refreshJobs}>Refresh</ChipButton>
             </div>
           </div>
 
           <div className="max-h-96 overflow-y-auto space-y-2 pr-2">
             {jobs.length === 0 ? (
-              <div className="text-center py-8" style={{ color: 'var(--gray-500)' }}>
+              <div className="text-center py-8" style={{ color: 'var(--glass-text-muted)' }}>
                 <Image size={24} className="mx-auto mb-2 opacity-50" />
-                <div className="text-sm">No batch jobs yet</div>
-                <div className="text-xs mt-1">Create a job to get started</div>
+                <div style={{ fontSize: 12.5 }}>No batch jobs yet</div>
+                <div style={{ fontSize: 11, marginTop: 4 }}>Create a job to get started</div>
               </div>
             ) : (
               jobs.map((job) => (
-                <div key={job.id} className="rounded p-3 border" style={{ backgroundColor: 'var(--gray-800)', borderColor: 'var(--border)' }}>
+                <div key={job.id} style={statBoxStyle}>
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center gap-2">
                       {getStatusIcon(job.status)}
-                      <span className="text-sm font-semibold" style={{ color: 'var(--gray-200)' }}>{job.name}</span>
+                      <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--glass-text-title)' }}>{job.name}</span>
                     </div>
                     <div className="flex gap-1">
                       {job.status === 'pending' && (
                         <button
+                          type="button"
                           onClick={() => handleStartJob(job.id)}
-                          className="p-1 rounded border"
-                          style={{ backgroundColor: 'var(--gray-900)', borderColor: 'var(--border)', color: 'var(--gray-300)' }}
+                          className="glass-pill-btn inline-flex items-center justify-center"
+                          style={{ padding: 6, borderRadius: 7, border: '1px solid rgba(255,255,255,.1)', color: 'var(--glass-text-label)' }}
                           title="Start Job"
                         >
                           <Play size={12} />
@@ -234,9 +244,10 @@ export const BatchProcessingDialog: React.FC<BatchProcessingDialogProps> = ({
                       )}
                       {job.status === 'running' && (
                         <button
+                          type="button"
                           onClick={() => handleCancelJob(job.id)}
-                          className="p-1 rounded border"
-                          style={{ backgroundColor: 'var(--gray-900)', borderColor: 'var(--border)', color: 'var(--gray-300)' }}
+                          className="glass-pill-btn inline-flex items-center justify-center"
+                          style={{ padding: 6, borderRadius: 7, border: '1px solid rgba(255,255,255,.1)', color: 'var(--glass-text-label)' }}
                           title="Cancel Job"
                         >
                           <Square size={12} />
@@ -244,9 +255,10 @@ export const BatchProcessingDialog: React.FC<BatchProcessingDialogProps> = ({
                       )}
                       {(job.status === 'completed' || job.status === 'failed' || job.status === 'cancelled') && (
                         <button
+                          type="button"
                           onClick={() => handleRemoveJob(job.id)}
-                          className="p-1 rounded border"
-                          style={{ backgroundColor: 'transparent', borderColor: 'transparent', color: 'var(--gray-400)' }}
+                          className="glass-pill-btn inline-flex items-center justify-center"
+                          style={{ padding: 6, borderRadius: 7, color: 'var(--glass-text-muted)' }}
                           title="Remove Job"
                         >
                           <Trash2 size={12} />
@@ -257,18 +269,23 @@ export const BatchProcessingDialog: React.FC<BatchProcessingDialogProps> = ({
 
                   {/* Progress Bar */}
                   <div className="mb-2">
-                    <div className="flex justify-between text-xs mb-1" style={{ color: 'var(--gray-400)' }}>
+                    <div className="flex justify-between mb-1" style={{ fontSize: 11, color: 'var(--glass-text-muted)' }}>
                       <span>{job.progress.current} / {job.progress.total} images</span>
                       {job.status === 'running' && job.progress.estimatedTimeRemaining && (
                         <span>~{formatTime(job.progress.estimatedTimeRemaining)} remaining</span>
                       )}
                     </div>
-                    <div className="w-full rounded-full h-1.5" style={{ backgroundColor: 'var(--gray-900)' }}>
+                    <div style={{ position: 'relative', height: 5 }}>
                       <div
-                        className="h-1.5 rounded-full transition-all duration-300"
+                        aria-hidden="true"
+                        style={{ position: 'absolute', inset: 0, borderRadius: 3, background: 'rgba(255,255,255,.09)', boxShadow: 'inset 0 1px 2px rgba(0,0,0,.6)' }}
+                      />
+                      <div
+                        aria-hidden="true"
                         style={{
-                          backgroundColor: 'var(--gray-400)',
-                          width: `${(job.progress.current / job.progress.total) * 100}%`
+                          position: 'absolute', inset: 0, borderRadius: 3,
+                          width: `${(job.progress.current / job.progress.total) * 100}%`,
+                          background: 'var(--accent)', transition: 'width 300ms ease',
                         }}
                       />
                     </div>
@@ -276,25 +293,25 @@ export const BatchProcessingDialog: React.FC<BatchProcessingDialogProps> = ({
 
                   {/* Current Image */}
                   {job.status === 'running' && job.progress.currentImageName && (
-                    <div className="text-xs mb-2" style={{ color: 'var(--gray-400)' }}>
+                    <div className="mb-2" style={{ fontSize: 11, color: 'var(--glass-text-muted)' }}>
                       Processing: {job.progress.currentImageName}
                     </div>
                   )}
 
                   {/* Results Summary */}
                   {job.results.length > 0 && (
-                     <div className="grid grid-cols-3 gap-2 text-xs" style={{ color: 'var(--gray-300)' }}>
+                     <div className="grid grid-cols-3 gap-2" style={{ fontSize: 11, color: 'var(--glass-text-label)' }}>
                       <div>✓ {job.results.filter(r => r.success).length} successful</div>
                       <div>✗ {job.results.filter(r => !r.success).length} failed</div>
-                      <div style={{ color: 'var(--gray-400)' }}>⏱ {formatTime(job.results.reduce((sum, r) => sum + r.processingTime, 0))}</div>
+                      <div style={{ color: 'var(--glass-text-muted)' }}>⏱ {formatTime(job.results.reduce((sum, r) => sum + r.processingTime, 0))}</div>
                     </div>
                   )}
 
                   {/* Errors */}
                   {job.errors.length > 0 && (
-                    <div className="mt-2 p-2 rounded border" style={{ backgroundColor: 'var(--gray-900)', borderColor: 'var(--border)' }}>
-                      <div className="text-xs font-semibold" style={{ color: 'var(--gray-300)' }}>Errors:</div>
-                      <div className="text-xs mt-1 space-y-1" style={{ color: 'var(--gray-400)' }}>
+                    <div className="mt-2" style={{ padding: 8, borderRadius: 8, background: 'rgba(0,0,0,.3)', border: '1px solid var(--glass-border)' }}>
+                      <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--glass-text-label)' }}>Errors:</div>
+                      <div className="space-y-1 mt-1" style={{ fontSize: 11, color: 'var(--glass-text-muted)' }}>
                         {job.errors.slice(0, 3).map((error, i) => (
                           <div key={i}>• {error}</div>
                         ))}
@@ -316,62 +333,55 @@ export const BatchProcessingDialog: React.FC<BatchProcessingDialogProps> = ({
   const renderCreateTab = () => (
     <div className="space-y-6">
       <div className="space-y-2">
-        <label className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--gray-500)' }}>Job Name</label>
+        <SectionLabel>Job Name</SectionLabel>
         <input
           type="text"
           value={jobName}
           onChange={(e) => setJobName(e.target.value)}
           placeholder="Leave empty for auto-generated name"
-          className="w-full px-2 py-1.5 text-sm rounded border focus:outline-none"
-          style={{ backgroundColor: 'var(--gray-800)', borderColor: 'var(--border)', color: 'var(--gray-200)' }}
+          style={inputStyle}
         />
       </div>
 
       <div className="space-y-2">
-        <div className="flex justify-between items-center">
-          <label className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--gray-500)' }}>Images to Process</label>
-          <div className="flex gap-2">
+        <div className="flex items-center" style={{ gap: 8 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <SectionLabel>Images to Process</SectionLabel>
+          </div>
+          <div className="flex gap-2 flex-shrink-0">
             {availableImages.length > 0 && (
-              <button
-                onClick={() => onSelectedImagesChange(mergeUnique(selectedImages, availableImages))}
-                className="flex items-center gap-1 px-3 py-1.5 rounded border text-xs"
-                style={{ backgroundColor: 'var(--gray-800)', borderColor: 'var(--border)', color: 'var(--gray-300)' }}
-              >
-                <Plus size={12} />
+              <ChipButton onClick={() => onSelectedImagesChange(mergeUnique(selectedImages, availableImages))}>
+                <Plus size={12} style={{ marginRight: 6 }} />
                 Add Open Images
-              </button>
+              </ChipButton>
             )}
-            <button
-              onClick={onSelectImages}
-              className="flex items-center gap-1 px-3 py-1.5 rounded border text-xs"
-              style={{ backgroundColor: 'var(--gray-800)', borderColor: 'var(--border)', color: 'var(--gray-300)' }}
-            >
-              <FolderOpen size={12} />
+            <ChipButton onClick={onSelectImages}>
+              <FolderOpen size={12} style={{ marginRight: 6 }} />
               Select Images
-            </button>
+            </ChipButton>
           </div>
         </div>
 
-        <div className="p-3 rounded border min-h-[100px]" style={{ backgroundColor: 'var(--gray-800)', borderColor: 'var(--border)' }}>
+        <div style={{ ...statBoxStyle, minHeight: 100 }}>
           {selectedImages.length === 0 ? (
-            <div className="text-center py-4" style={{ color: 'var(--gray-500)' }}>
+            <div className="text-center py-4" style={{ color: 'var(--glass-text-muted)' }}>
               <Image size={24} className="mx-auto mb-2 opacity-50" />
-              <div className="text-sm">No images selected</div>
+              <div style={{ fontSize: 12.5 }}>No images selected</div>
             </div>
           ) : (
             <div className="space-y-2">
-              <div className="text-sm" style={{ color: 'var(--gray-300)' }}>
+              <div style={{ fontSize: 12.5, color: 'var(--glass-text-label)' }}>
                 {selectedImages.length} images selected
               </div>
               <div className="max-h-32 overflow-y-auto space-y-1 pr-2">
                 {selectedImages.slice(0, 10).map((image, i) => (
-                  <div key={i} className="flex justify-between items-center text-xs">
-                    <span className="truncate" style={{ color: 'var(--gray-300)' }}>{image.name}</span>
-                    <span style={{ color: 'var(--gray-400)' }}>{formatFileSize(image.size || 0)}</span>
+                  <div key={i} className="flex justify-between items-center" style={{ fontSize: 11 }}>
+                    <span className="truncate" style={{ color: 'var(--glass-text-label)' }}>{image.name}</span>
+                    <span style={{ color: 'var(--glass-text-muted)' }}>{formatFileSize(image.size || 0)}</span>
                   </div>
                 ))}
                 {selectedImages.length > 10 && (
-                  <div className="text-xs" style={{ color: 'var(--gray-400)' }}>
+                  <div style={{ fontSize: 11, color: 'var(--glass-text-muted)' }}>
                     ... and {selectedImages.length - 10} more
                   </div>
                 )}
@@ -382,21 +392,20 @@ export const BatchProcessingDialog: React.FC<BatchProcessingDialogProps> = ({
       </div>
 
       <div className="space-y-2">
-        <label className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--gray-500)' }}>Processing Preset</label>
+        <SectionLabel>Processing Preset</SectionLabel>
         <div className="space-y-2 max-h-48 overflow-y-auto pr-2">
           {presets.map((preset) => (
             <button
               key={preset.id}
+              type="button"
               onClick={() => setSelectedPreset(preset.id)}
-              className="w-full text-left p-3 rounded border transition-colors"
-              style={{
-                backgroundColor: selectedPreset === preset.id ? 'var(--gray-700)' : 'var(--gray-800)',
-                borderColor: selectedPreset === preset.id ? 'var(--gray-500)' : 'var(--border)'
-              }}
+              data-active={selectedPreset === preset.id || undefined}
+              className="glass-modal-card-btn w-full text-left"
+              style={{ padding: 12, borderRadius: 10, border: '1px solid rgba(255,255,255,.1)', background: 'rgba(255,255,255,.04)' }}
             >
-              <div className="text-sm font-semibold" style={{ color: 'var(--gray-200)' }}>{preset.name}</div>
-              <div className="text-xs mt-0.5" style={{ color: 'var(--gray-400)' }}>{preset.description}</div>
-              <div className="text-xs mt-1.5" style={{ color: 'var(--gray-500)' }}>
+              <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--glass-text-title)' }}>{preset.name}</div>
+              <div style={{ fontSize: 11, marginTop: 2, color: 'var(--glass-text-muted)' }}>{preset.description}</div>
+              <div style={{ fontSize: 10.5, marginTop: 6, color: 'var(--glass-text-muted)' }}>
                 Format: {preset.exportOptions.format?.toUpperCase()} •
                 {preset.exportOptions.width && preset.exportOptions.height ?
                   ` ${preset.exportOptions.width}×${preset.exportOptions.height}` :
@@ -410,12 +419,20 @@ export const BatchProcessingDialog: React.FC<BatchProcessingDialogProps> = ({
 
       <div className="pt-2">
         <button
+          type="button"
           onClick={handleCreateJob}
           disabled={!selectedPreset || selectedImages.length === 0}
-          className="w-full flex items-center justify-center gap-2 px-3 py-2 text-sm rounded border transition-colors disabled:opacity-50"
-          style={{ backgroundColor: 'var(--gray-800)', borderColor: 'var(--border)', color: 'var(--gray-300)' }}
+          className="w-full inline-flex items-center justify-center gap-2"
+          style={{
+            padding: 11, borderRadius: 11,
+            border: '1px solid var(--accent-ring)',
+            background: 'var(--accent)', color: '#0b0b0c', fontSize: 12.5, fontWeight: 700,
+            cursor: (!selectedPreset || selectedImages.length === 0) ? 'not-allowed' : 'pointer',
+            opacity: (!selectedPreset || selectedImages.length === 0) ? 0.5 : 1,
+            boxShadow: (!selectedPreset || selectedImages.length === 0) ? 'none' : '0 2px 18px var(--accent-ring)',
+          }}
         >
-          <Plus size={16} />
+          <Plus size={15} />
           Create and Start Batch Job
         </button>
       </div>
@@ -428,7 +445,7 @@ export const BatchProcessingDialog: React.FC<BatchProcessingDialogProps> = ({
     return (
       <div className="space-y-6">
         <div className="space-y-3">
-          <h3 className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--gray-500)' }}>Performance Settings</h3>
+          <SectionLabel>Performance Settings</SectionLabel>
           <SliderControl
             label="Max Concurrent Jobs"
             value={2}
@@ -442,101 +459,86 @@ export const BatchProcessingDialog: React.FC<BatchProcessingDialogProps> = ({
         </div>
 
         <div className="space-y-3">
-          <h3 className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--gray-500)' }}>Statistics</h3>
+          <SectionLabel>Statistics</SectionLabel>
           <div className="grid grid-cols-2 gap-3">
-            <div className="rounded p-3 border" style={{ backgroundColor: 'var(--gray-800)', borderColor: 'var(--border)' }}>
-              <div className="text-xs mb-1" style={{ color: 'var(--gray-400)' }}>Total Images Processed</div>
-              <div className="text-sm font-semibold" style={{ color: 'var(--gray-200)' }}>{statistics.totalImagesProcessed}</div>
+            <div style={statBoxStyle}>
+              <div style={{ fontSize: 11, marginBottom: 4, color: 'var(--glass-text-muted)' }}>Total Images Processed</div>
+              <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--glass-text-title)' }}>{statistics.totalImagesProcessed}</div>
             </div>
-            <div className="rounded p-3 border" style={{ backgroundColor: 'var(--gray-800)', borderColor: 'var(--border)' }}>
-              <div className="text-xs mb-1" style={{ color: 'var(--gray-400)' }}>Avg Processing Time</div>
-              <div className="text-sm font-semibold" style={{ color: 'var(--gray-200)' }}>
+            <div style={statBoxStyle}>
+              <div style={{ fontSize: 11, marginBottom: 4, color: 'var(--glass-text-muted)' }}>Avg Processing Time</div>
+              <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--glass-text-title)' }}>
                 {statistics.averageProcessingTime > 0 ? formatTime(statistics.averageProcessingTime) : 'N/A'}
               </div>
             </div>
-            <div className="rounded p-3 border" style={{ backgroundColor: 'var(--gray-800)', borderColor: 'var(--border)' }}>
-              <div className="text-xs mb-1" style={{ color: 'var(--gray-400)' }}>Completed Jobs</div>
-              <div className="text-sm font-semibold" style={{ color: 'var(--gray-200)' }}>{statistics.completedJobs}</div>
+            <div style={statBoxStyle}>
+              <div style={{ fontSize: 11, marginBottom: 4, color: 'var(--glass-text-muted)' }}>Completed Jobs</div>
+              <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--glass-text-title)' }}>{statistics.completedJobs}</div>
             </div>
-            <div className="rounded p-3 border" style={{ backgroundColor: 'var(--gray-800)', borderColor: 'var(--border)' }}>
-              <div className="text-xs mb-1" style={{ color: 'var(--gray-400)' }}>Failed Jobs</div>
-              <div className="text-sm font-semibold" style={{ color: 'var(--gray-200)' }}>{statistics.failedJobs}</div>
+            <div style={statBoxStyle}>
+              <div style={{ fontSize: 11, marginBottom: 4, color: 'var(--glass-text-muted)' }}>Failed Jobs</div>
+              <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--glass-text-title)' }}>{statistics.failedJobs}</div>
             </div>
           </div>
         </div>
 
         <div className="space-y-3">
-          <h3 className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--gray-500)' }}>Actions</h3>
+          <SectionLabel>Actions</SectionLabel>
           <div className="space-y-2">
-            <button
-              onClick={() => batchProcessingService.clearCompletedJobs()}
-              className="w-full px-3 py-2 text-sm rounded border transition-colors"
-              style={{ backgroundColor: 'var(--gray-800)', borderColor: 'var(--border)', color: 'var(--gray-300)' }}
-            >
+            <ChipButton onClick={() => batchProcessingService.clearCompletedJobs()} className="w-full">
               Clear All Completed Jobs
-            </button>
+            </ChipButton>
           </div>
         </div>
       </div>
     );
   };
 
-  if (!isOpen) return null;
-
   return (
-    <div className="fixed inset-0 flex items-center justify-center z-50" style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}>
-      <div className="rounded-lg shadow-xl w-full max-w-4xl h-4/5 max-h-[80vh] flex flex-col" style={{ backgroundColor: 'var(--gray-900)' }}>
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b" style={{ borderBottomColor: 'var(--border)' }}>
-          <div className="flex items-center gap-2">
-            <Settings size={18} style={{ color: 'var(--gray-300)' }} />
-            <h2 className="text-sm font-semibold" style={{ color: 'var(--white)' }}>Batch Processing</h2>
-          </div>
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded transition-colors"
-            style={{ color: 'var(--gray-400)' }}
-          >
-            <X size={18} />
-          </button>
+    <GlassModal
+      isOpen={isOpen}
+      onClose={onClose}
+      icon={<Settings size={15} />}
+      title="Batch Processing"
+      cardClassName="w-full max-w-4xl h-4/5"
+      cardStyle={{ maxHeight: '80vh' }}
+      scrollBody={false}
+    >
+      <div className="flex flex-1 overflow-hidden">
+        {/* Tab Navigation */}
+        <div className="flex-shrink-0" style={{ width: 192, borderRight: '1px solid var(--glass-border)', padding: 14 }}>
+          <nav className="flex flex-col" style={{ gap: 4 }}>
+            {[
+              { key: 'jobs', label: 'Active Jobs', icon: Play },
+              { key: 'create', label: 'Create Job', icon: Plus },
+              { key: 'settings', label: 'Settings', icon: Settings }
+            ].map(({ key, label, icon: Icon }) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setActiveTab(key as TabType)}
+                data-active={activeTab === key || undefined}
+                className="glass-modal-tab w-full flex items-center gap-2"
+                style={{
+                  padding: '8px 10px', borderRadius: 9, fontSize: 12, textAlign: 'left',
+                  border: '1px solid transparent', color: 'var(--glass-text-secondary)',
+                }}
+              >
+                <Icon size={14} />
+                {label}
+              </button>
+            ))}
+          </nav>
         </div>
 
-        <div className="flex flex-1 overflow-hidden">
-          {/* Tab Navigation */}
-          <div className="w-48 border-r" style={{ borderRightColor: 'var(--border)' }}>
-            <div className="p-4">
-              <nav className="space-y-1">
-                {[
-                  { key: 'jobs', label: 'Active Jobs', icon: Play },
-                  { key: 'create', label: 'Create Job', icon: Plus },
-                  { key: 'settings', label: 'Settings', icon: Settings }
-                ].map(({ key, label, icon: Icon }) => (
-                  <button
-                    key={key}
-                    onClick={() => setActiveTab(key as TabType)}
-                    className="w-full flex items-center gap-2 px-3 py-2 rounded text-left text-sm transition-colors"
-                    style={{
-                      backgroundColor: activeTab === key ? 'var(--gray-800)' : 'transparent',
-                      color: activeTab === key ? 'var(--white)' : 'var(--gray-400)'
-                    }}
-                  >
-                    <Icon size={16} />
-                    {label}
-                  </button>
-                ))}
-              </nav>
-            </div>
-          </div>
-
-          {/* Tab Content */}
-          <div className="flex-1 px-6 py-5 overflow-y-auto">
-            {activeTab === 'jobs' && renderJobsTab()}
-            {activeTab === 'create' && renderCreateTab()}
-            {activeTab === 'settings' && renderSettingsTab()}
-          </div>
+        {/* Tab Content */}
+        <div className="flex-1 overflow-y-auto" style={{ padding: '20px 24px' }}>
+          {activeTab === 'jobs' && renderJobsTab()}
+          {activeTab === 'create' && renderCreateTab()}
+          {activeTab === 'settings' && renderSettingsTab()}
         </div>
       </div>
-    </div>
+    </GlassModal>
   );
 };
 
