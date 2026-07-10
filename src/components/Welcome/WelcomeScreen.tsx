@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Camera, Image, Folder, BookOpen, Zap, ArrowRight, X } from 'lucide-react';
+import { AccentButton } from '../Controls/AccentButton';
+import { infoBoxStyle } from '../Dialogs/glassFormStyles';
 
 interface WelcomeScreenProps {
   isVisible: boolean;
@@ -76,74 +78,109 @@ export function WelcomeScreen({
   if (!isVisible) return null;
 
   return (
-    <div className="fixed inset-0 flex items-center justify-center z-50" style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}>
-      <div className="rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col" style={{ backgroundColor: 'var(--gray-900)' }}>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center"
+      style={{ background: 'rgba(5,5,8,.6)', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)' }}
+    >
+      <div
+        role="dialog"
+        aria-label="Welcome to Photo Editor Pro"
+        className="glass-card dc-rise flex flex-col max-w-2xl w-full"
+        style={{ background: 'rgba(15,15,19,.92)', maxHeight: '90vh', overflow: 'hidden' }}
+      >
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b" style={{ borderBottomColor: 'var(--border)' }}>
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-lg border" style={{ backgroundColor: 'var(--gray-800)', borderColor: 'var(--border)' }}>
-              <Camera className="w-5 h-5" style={{ color: 'var(--gray-300)' }} />
-            </div>
-            <div>
-              <h2 className="text-sm font-semibold" style={{ color: 'var(--white)' }}>Welcome to Photo Editor Pro</h2>
-              <p className="text-xs" style={{ color: 'var(--gray-400)' }}>Professional photo editing made simple</p>
-            </div>
+        <div
+          className="flex items-center flex-shrink-0"
+          style={{ padding: '13px 16px', gap: 11, background: 'rgba(0,0,0,.3)', borderBottom: '1px solid var(--glass-border)' }}
+        >
+          <div
+            className="inline-flex items-center justify-center flex-shrink-0"
+            style={{ width: 28, height: 28, borderRadius: 8, background: 'var(--accent-soft)', border: '1px solid var(--accent-ring)', color: 'var(--accent)' }}
+          >
+            <Camera size={15} />
           </div>
-          <button onClick={handleClose} className="p-1.5 rounded transition-colors" style={{ color: 'var(--gray-400)' }}>
-            <X className="w-4 h-4" />
+          <div className="flex-1 min-w-0">
+            <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--glass-text-title)' }}>Welcome to Photo Editor Pro</div>
+            <div style={{ fontSize: 10.5, color: 'var(--glass-text-muted)' }}>Professional photo editing made simple</div>
+          </div>
+          <button
+            type="button"
+            aria-label="Close"
+            title="Close"
+            onClick={handleClose}
+            className="glass-pill-btn inline-flex items-center justify-center flex-shrink-0"
+            style={{ width: 26, height: 26, borderRadius: 8, border: '1px solid rgba(255,255,255,.1)', background: 'rgba(255,255,255,.04)', color: 'var(--glass-text-secondary)' }}
+          >
+            <X size={14} />
           </button>
         </div>
 
-        <div className="px-6 py-5 overflow-y-auto flex-1 space-y-6">
+        <div className="flex-1 overflow-y-auto space-y-6" style={{ padding: '20px 24px' }}>
           {/* Quick Start */}
           <div>
-            <h3 className="flex items-center gap-2 mb-3 uppercase tracking-wider text-xs font-semibold" style={{ color: 'var(--gray-500)' }}>
-              <Zap className="w-4 h-4" style={{ color: 'var(--gray-400)' }} />
+            <h3 className="flex items-center gap-2 mb-3" style={{ fontSize: 10, fontWeight: 700, letterSpacing: '1.4px', textTransform: 'uppercase', color: 'var(--accent)' }}>
+              <Zap size={14} />
               Quick Start
             </h3>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               {quickActions.map((action) => (
                 <button
                   key={action.id}
+                  type="button"
                   onClick={() => handleQuickAction(action.id)}
-                  className="p-4 rounded-xl transition-all duration-200 border text-left group"
-                  style={{ backgroundColor: 'var(--gray-800)', borderColor: 'var(--border)' }}
+                  className="glass-modal-card-btn text-left"
+                  style={{ padding: 14, borderRadius: 12, border: '1px solid rgba(255,255,255,.1)', background: 'rgba(255,255,255,.04)' }}
                 >
-                  <action.icon className="w-7 h-7 mb-2" style={{ color: 'var(--gray-300)' }} />
-                  <h4 className="text-sm font-semibold mb-1 flex items-center justify-between" style={{ color: 'var(--gray-200)' }}>
+                  <action.icon size={22} style={{ marginBottom: 8, color: 'var(--glass-text-label)' }} />
+                  <h4 className="flex items-center justify-between" style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 4, color: 'var(--glass-text-title)' }}>
                     {action.title}
-                    <ArrowRight className="w-4 h-4 opacity-50" style={{ color: 'var(--gray-400)' }} />
+                    <ArrowRight size={14} style={{ opacity: 0.5, color: 'var(--glass-text-muted)' }} />
                   </h4>
-                  <p className="text-xs mb-2" style={{ color: 'var(--gray-400)' }}>{action.description}</p>
-                  <span className="text-xs px-2 py-0.5 rounded border" style={{ backgroundColor: 'var(--gray-900)', borderColor: 'var(--border)', color: 'var(--gray-300)' }}>{action.shortcut}</span>
+                  <p style={{ fontSize: 11, marginBottom: 8, color: 'var(--glass-text-muted)' }}>{action.description}</p>
+                  <span
+                    style={{
+                      fontSize: 10.5, padding: '2px 8px', borderRadius: 6,
+                      background: 'rgba(0,0,0,.3)', border: '1px solid var(--glass-border)', color: 'var(--glass-text-label)',
+                    }}
+                  >
+                    {action.shortcut}
+                  </span>
                 </button>
               ))}
             </div>
           </div>
 
           {/* Tips */}
-          <div className="p-4 rounded-xl border" style={{ backgroundColor: 'var(--gray-800)', borderColor: 'var(--border)' }}>
-            <h3 className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--gray-300)' }}>💡 Pro Tip</h3>
-            <p className="text-sm leading-relaxed min-h-[3rem]" style={{ color: 'var(--gray-400)' }}>{tips[currentTip]}</p>
+          <div style={infoBoxStyle}>
+            <h3 style={{ fontSize: 10, fontWeight: 700, letterSpacing: '1.4px', textTransform: 'uppercase', marginBottom: 8, color: 'var(--glass-text-secondary)' }}>💡 Pro Tip</h3>
+            <p style={{ fontSize: 12.5, lineHeight: 1.5, minHeight: '3rem', color: 'var(--glass-text-muted)' }}>{tips[currentTip]}</p>
             <div className="flex gap-1.5 mt-3">
               {tips.map((_, index) => (
-                <div key={index} className="h-1 rounded-full transition-all duration-300"
-                  style={{ backgroundColor: index === currentTip ? 'var(--gray-400)' : 'var(--gray-600)', width: index === currentTip ? '24px' : '8px' }} />
+                <div
+                  key={index}
+                  className="h-1 rounded-full transition-all duration-300"
+                  style={{ background: index === currentTip ? 'var(--accent)' : 'rgba(255,255,255,.14)', width: index === currentTip ? 24 : 8 }}
+                />
               ))}
             </div>
           </div>
         </div>
 
         {/* Footer */}
-        <div className="px-5 py-4 border-t flex items-center justify-between" style={{ borderTopColor: 'var(--border)' }}>
-          <label className="flex items-center gap-2 text-xs cursor-pointer" style={{ color: 'var(--gray-400)' }}>
-            <input type="checkbox" checked={dontShowAgain} onChange={(e) => setDontShowAgain(e.target.checked)} className="rounded" />
+        <div
+          className="flex items-center justify-between flex-shrink-0"
+          style={{ padding: '14px 16px', borderTop: '1px solid var(--glass-border)' }}
+        >
+          <label className="flex items-center gap-2 cursor-pointer" style={{ fontSize: 11.5, color: 'var(--glass-text-muted)' }}>
+            <input
+              type="checkbox"
+              checked={dontShowAgain}
+              onChange={(e) => setDontShowAgain(e.target.checked)}
+              style={{ accentColor: 'var(--accent)' }}
+            />
             <span>Don't show again</span>
           </label>
-          <button onClick={handleClose} className="px-3 py-1.5 text-xs rounded border transition-colors"
-            style={{ backgroundColor: 'var(--gray-800)', borderColor: 'var(--border)', color: 'var(--gray-300)' }}>
-            Get Started
-          </button>
+          <AccentButton onClick={handleClose}>Get Started</AccentButton>
         </div>
       </div>
     </div>

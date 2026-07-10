@@ -1,5 +1,10 @@
 import { useState, useEffect } from 'react';
-import { X, Save, FolderOpen, Download, Upload, Star, Search, Filter } from 'lucide-react';
+import { Save, FolderOpen, Download, Upload, Star, Search, Filter } from 'lucide-react';
+import { GlassModal } from './GlassModal';
+import { ChipButton } from '../Controls/ChipButton';
+import { AccentButton } from '../Controls/AccentButton';
+import { SectionLabel } from '../Controls/SectionLabel';
+import { inputStyle } from './glassFormStyles';
 import { presetService, AdjustmentPreset } from '../../services/PresetService';
 import { logger } from '../../utils/Logger';
 
@@ -146,219 +151,198 @@ export function PresetDialog({ isOpen, onClose, onApplyPreset }: PresetDialogPro
     }
   };
 
-  if (!isOpen) return null;
+  const headerActions = (
+    <div className="flex items-center flex-shrink-0" style={{ gap: 6 }}>
+      <ChipButton onClick={() => setShowCreateDialog(true)}>
+        <Save size={12} style={{ marginRight: 6 }} />
+        Create Preset
+      </ChipButton>
+      <button
+        type="button"
+        onClick={handleExportPresets}
+        title="Export Presets"
+        className="glass-pill-btn inline-flex items-center justify-center"
+        style={{ padding: 6, borderRadius: 7, color: 'var(--glass-text-muted)' }}
+      >
+        <Download size={14} />
+      </button>
+      <label
+        className="glass-pill-btn inline-flex items-center justify-center cursor-pointer"
+        title="Import Presets"
+        style={{ padding: 6, borderRadius: 7, color: 'var(--glass-text-muted)' }}
+      >
+        <Upload size={14} />
+        <input type="file" accept=".json" onChange={handleImportPresets} className="hidden" />
+      </label>
+    </div>
+  );
 
   return (
-    <div className="fixed inset-0 flex items-center justify-center z-50" style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}>
-      <div className="rounded-lg shadow-xl w-5/6 max-w-6xl h-4/5 max-h-screen flex flex-col" style={{ backgroundColor: 'var(--gray-900)' }}>
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b" style={{ borderBottomColor: 'var(--border)' }}>
-          <div className="flex items-center space-x-3">
-            <FolderOpen className="w-5 h-5" style={{ color: 'var(--gray-300)' }} />
-            <h2 className="text-sm font-semibold" style={{ color: 'var(--white)' }}>Preset Manager</h2>
-          </div>
-          <div className="flex items-center space-x-2">
-            <button
-              onClick={() => setShowCreateDialog(true)}
-              className="px-3 py-1.5 text-sm rounded border transition-colors flex items-center"
-              style={{ backgroundColor: 'var(--gray-800)', borderColor: 'var(--border)', color: 'var(--gray-300)' }}
-            >
-              <Save className="w-4 h-4 mr-1" />
-              Create Preset
-            </button>
-            <button
-              onClick={handleExportPresets}
-              className="p-1.5 rounded border transition-colors"
-              title="Export Presets"
-              style={{ backgroundColor: 'transparent', borderColor: 'transparent', color: 'var(--gray-400)' }}
-            >
-              <Download className="w-4 h-4" />
-            </button>
-            <label className="p-1.5 rounded transition-colors cursor-pointer" title="Import Presets" style={{ color: 'var(--gray-400)' }}>
-              <Upload className="w-4 h-4" />
-              <input
-                type="file"
-                accept=".json"
-                onChange={handleImportPresets}
-                className="hidden"
-              />
-            </label>
-            <button
-              onClick={onClose}
-              className="p-1.5 rounded transition-colors"
-              style={{ color: 'var(--gray-400)' }}
-            >
-              <X className="w-5 h-5" />
-            </button>
-          </div>
-        </div>
-
+    <>
+      <GlassModal
+        isOpen={isOpen}
+        onClose={onClose}
+        icon={<FolderOpen size={15} />}
+        title="Preset Manager"
+        headerActions={headerActions}
+        cardClassName="w-5/6 max-w-6xl h-4/5"
+        cardStyle={{ maxHeight: '90vh' }}
+        scrollBody={false}
+      >
         <div className="flex flex-1 overflow-hidden">
-          {/* Left Sidebar - Categories */}
-          <div className="w-64 border-r p-4" style={{ borderRightColor: 'var(--border)' }}>
-            <div className="mb-4">
-              <div className="relative flex items-center">
-                <Search className="absolute left-2 w-4 h-4" style={{ color: 'var(--gray-500)' }} />
-                <input
-                  type="text"
-                  placeholder="Search presets..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full pl-8 pr-2 py-1.5 text-sm rounded border focus:outline-none"
-                  style={{
-                    backgroundColor: 'var(--gray-800)',
-                    borderColor: 'var(--border)',
-                    color: 'var(--gray-200)'
-                  }}
-                />
-              </div>
+          {/* Categories */}
+          <div className="flex-shrink-0 flex flex-col" style={{ width: 216, borderRight: '1px solid var(--glass-border)', padding: 14, gap: 12 }}>
+            <div className="relative flex items-center">
+              <Search size={13} style={{ position: 'absolute', left: 8, color: 'var(--glass-text-muted)' }} />
+              <input
+                type="text"
+                placeholder="Search presets..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                style={{ ...inputStyle, paddingLeft: 26 }}
+              />
             </div>
 
-            <div className="space-y-1">
+            <nav className="flex flex-col" style={{ gap: 4 }}>
               {categoriesWithCounts.map((category) => (
                 <button
                   key={category.id}
+                  type="button"
                   onClick={() => setSelectedCategory(category.id)}
-                  className="w-full flex items-center justify-between px-3 py-2 rounded text-sm transition-colors"
+                  data-active={selectedCategory === category.id || undefined}
+                  className="glass-modal-tab w-full flex items-center justify-between"
                   style={{
-                    backgroundColor: selectedCategory === category.id ? 'var(--gray-800)' : 'transparent',
-                    color: selectedCategory === category.id ? 'var(--white)' : 'var(--gray-400)'
+                    padding: '8px 10px', borderRadius: 9, fontSize: 12, textAlign: 'left',
+                    border: '1px solid transparent', color: 'var(--glass-text-secondary)',
                   }}
                 >
                   <span>{category.name}</span>
-                  <span className="text-xs opacity-75">{category.count}</span>
+                  <span style={{ fontSize: 10.5, opacity: 0.75 }}>{category.count}</span>
                 </button>
               ))}
-            </div>
+            </nav>
           </div>
 
-          {/* Main Content - Preset Grid */}
-          <div className="flex-1 px-5 py-4 overflow-y-auto">
+          {/* Preset grid */}
+          <div className="flex-1 overflow-y-auto" style={{ padding: '20px 24px' }}>
             <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
               {filteredPresets.map((preset) => (
                 <div
                   key={preset.id}
-                  className="rounded-lg p-4 cursor-pointer transition-all border"
                   onClick={() => handleApplyPreset(preset)}
-                  style={{
-                    backgroundColor: 'var(--gray-800)',
-                    borderColor: selectedPreset?.id === preset.id ? 'var(--gray-500)' : 'var(--border)'
-                  }}
+                  data-active={selectedPreset?.id === preset.id || undefined}
+                  className="glass-modal-card-btn cursor-pointer"
+                  style={{ padding: 14, borderRadius: 12, border: '1px solid rgba(255,255,255,.1)', background: 'rgba(255,255,255,.04)' }}
                 >
-                  {/* Preset Preview */}
-                  <div className="aspect-video rounded mb-3 flex items-center justify-center" style={{ backgroundColor: 'var(--gray-900)' }}>
-                    <Filter className="w-8 h-8" style={{ color: 'var(--gray-500)' }} />
+                  {/* Preview */}
+                  <div className="aspect-video rounded flex items-center justify-center mb-3" style={{ background: 'rgba(0,0,0,.3)' }}>
+                    <Filter size={22} style={{ color: 'var(--glass-text-muted)' }} />
                   </div>
 
-                  {/* Preset Info */}
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <h3 className="text-sm font-semibold truncate" style={{ color: 'var(--gray-200)' }}>{preset.name}</h3>
-                      <div className="flex items-center space-x-1">
-                        <Star className="w-3 h-3" style={{ color: 'var(--gray-400)' }} />
-                        <span className="text-xs" style={{ color: 'var(--gray-400)' }}>{preset.metadata.imageCount || 0}</span>
-                      </div>
+                  <div className="flex items-center justify-between">
+                    <h3 className="truncate" style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--glass-text-title)' }}>{preset.name}</h3>
+                    <div className="flex items-center" style={{ gap: 4 }}>
+                      <Star size={11} style={{ color: 'var(--glass-text-muted)' }} />
+                      <span style={{ fontSize: 10.5, color: 'var(--glass-text-muted)' }}>{preset.metadata.imageCount || 0}</span>
                     </div>
-                    <p className="text-xs line-clamp-2" style={{ color: 'var(--gray-400)' }}>{preset.description}</p>
-                    <div className="flex items-center justify-between pt-1">
-                      <span className="px-2 py-1 rounded text-xs" style={{ backgroundColor: 'var(--gray-900)', color: 'var(--gray-300)' }}>
-                        {preset.category === 'bw' ? 'B&W' : preset.category.charAt(0).toUpperCase() + preset.category.slice(1)}
-                      </span>
-                      {preset.category === 'custom' && (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDeletePreset(preset.id);
-                          }}
-                          className="text-xs transition-colors"
-                          style={{ color: 'var(--gray-500)' }}
-                        >
-                          Delete
-                        </button>
-                      )}
-                    </div>
+                  </div>
+                  <p className="line-clamp-2" style={{ fontSize: 11, marginTop: 4, color: 'var(--glass-text-muted)' }}>{preset.description}</p>
+                  <div className="flex items-center justify-between" style={{ marginTop: 8 }}>
+                    <span style={{ padding: '2px 8px', borderRadius: 6, fontSize: 10, background: 'rgba(0,0,0,.3)', color: 'var(--glass-text-label)' }}>
+                      {preset.category === 'bw' ? 'B&W' : preset.category.charAt(0).toUpperCase() + preset.category.slice(1)}
+                    </span>
+                    {preset.category === 'custom' && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeletePreset(preset.id);
+                        }}
+                        style={{ fontSize: 10.5, color: 'var(--glass-text-muted)', background: 'transparent', border: 0, cursor: 'pointer' }}
+                      >
+                        Delete
+                      </button>
+                    )}
                   </div>
                 </div>
               ))}
             </div>
 
             {filteredPresets.length === 0 && (
-              <div className="text-center mt-12" style={{ color: 'var(--gray-500)' }}>
-                <Filter className="w-10 h-10 mx-auto mb-3 opacity-50" />
-                <p className="text-sm">No presets found</p>
-                <p className="text-xs mt-1">Try adjusting your search or category filter</p>
+              <div className="text-center" style={{ marginTop: 48, color: 'var(--glass-text-muted)' }}>
+                <Filter size={36} className="mx-auto mb-3 opacity-50" />
+                <p style={{ fontSize: 12.5 }}>No presets found</p>
+                <p style={{ fontSize: 11, marginTop: 4 }}>Try adjusting your search or category filter</p>
               </div>
             )}
           </div>
         </div>
+      </GlassModal>
 
-        {/* Create Preset Dialog */}
-        {showCreateDialog && (
-          <div className="absolute inset-0 flex items-center justify-center" style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}>
-            <div className="rounded-lg p-5 w-96 border" style={{ backgroundColor: 'var(--gray-900)', borderColor: 'var(--border)' }}>
-              <h3 className="text-sm font-semibold mb-4" style={{ color: 'var(--white)' }}>Create New Preset</h3>
-              <div className="space-y-4">
-                <div className="flex flex-col gap-1">
-                  <label className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--gray-500)' }}>Name</label>
-                  <input
-                    type="text"
-                    value={newPresetName}
-                    onChange={(e) => setNewPresetName(e.target.value)}
-                    className="px-2 py-1.5 text-sm rounded border focus:outline-none"
-                    style={{ backgroundColor: 'var(--gray-800)', borderColor: 'var(--border)', color: 'var(--gray-200)' }}
-                    placeholder="My Custom Preset"
-                  />
-                </div>
-                <div className="flex flex-col gap-1">
-                  <label className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--gray-500)' }}>Description</label>
-                  <textarea
-                    value={newPresetDescription}
-                    onChange={(e) => setNewPresetDescription(e.target.value)}
-                    className="px-2 py-1.5 text-sm rounded border focus:outline-none"
-                    style={{ backgroundColor: 'var(--gray-800)', borderColor: 'var(--border)', color: 'var(--gray-200)' }}
-                    rows={3}
-                    placeholder="Description of the preset..."
-                  />
-                </div>
-                <div className="flex flex-col gap-1">
-                  <label className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--gray-500)' }}>Category</label>
-                  <select
-                    value={newPresetCategory}
-                    onChange={(e) => setNewPresetCategory(e.target.value as Exclude<PresetCategory, 'all'>)}
-                    className="px-2 py-1.5 text-sm rounded border focus:outline-none"
-                    style={{ backgroundColor: 'var(--gray-800)', borderColor: 'var(--border)', color: 'var(--gray-200)' }}
-                  >
-                    <option value="custom">Custom</option>
-                    <option value="portrait">Portrait</option>
-                    <option value="landscape">Landscape</option>
-                    <option value="street">Street</option>
-                    <option value="bw">Black & White</option>
-                    <option value="vintage">Vintage</option>
-                    <option value="cinematic">Cinematic</option>
-                  </select>
-                </div>
-              </div>
-              <div className="flex justify-end space-x-2 mt-6">
-                <button
-                  onClick={() => setShowCreateDialog(false)}
-                  className="px-3 py-1.5 text-sm rounded border transition-colors"
-                  style={{ backgroundColor: 'transparent', borderColor: 'transparent', color: 'var(--gray-400)' }}
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleCreatePreset}
-                  disabled={!newPresetName.trim()}
-                  className="px-3 py-1.5 text-sm rounded border transition-colors disabled:opacity-50"
-                  style={{ backgroundColor: 'var(--gray-800)', borderColor: 'var(--border)', color: 'var(--gray-300)' }}
-                >
-                  Create Preset
-                </button>
-              </div>
-            </div>
+      {/* Create Preset sub-dialog */}
+      <GlassModal
+        isOpen={showCreateDialog}
+        onClose={() => setShowCreateDialog(false)}
+        title="Create New Preset"
+        cardStyle={{ width: 400 }}
+        footer={
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setShowCreateDialog(false)}
+              className="glass-modal-btn-secondary"
+              style={{
+                padding: '9px 16px', borderRadius: 10, fontSize: 12, fontWeight: 500,
+                border: '1px solid rgba(255,255,255,.1)', background: 'transparent', color: 'var(--glass-text-secondary)',
+              }}
+            >
+              Cancel
+            </button>
+            <AccentButton onClick={handleCreatePreset} disabled={!newPresetName.trim()}>
+              Create Preset
+            </AccentButton>
           </div>
-        )}
-      </div>
-    </div>
+        }
+      >
+        <div className="flex flex-col" style={{ gap: 14, padding: 16 }}>
+          <div className="flex flex-col gap-1">
+            <SectionLabel>Name</SectionLabel>
+            <input
+              type="text"
+              value={newPresetName}
+              onChange={(e) => setNewPresetName(e.target.value)}
+              style={inputStyle}
+              placeholder="My Custom Preset"
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            <SectionLabel>Description</SectionLabel>
+            <textarea
+              value={newPresetDescription}
+              onChange={(e) => setNewPresetDescription(e.target.value)}
+              style={{ ...inputStyle, resize: 'vertical' }}
+              rows={3}
+              placeholder="Description of the preset..."
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            <SectionLabel>Category</SectionLabel>
+            <select
+              value={newPresetCategory}
+              onChange={(e) => setNewPresetCategory(e.target.value as Exclude<PresetCategory, 'all'>)}
+              style={inputStyle}
+            >
+              <option value="custom">Custom</option>
+              <option value="portrait">Portrait</option>
+              <option value="landscape">Landscape</option>
+              <option value="street">Street</option>
+              <option value="bw">Black & White</option>
+              <option value="vintage">Vintage</option>
+              <option value="cinematic">Cinematic</option>
+            </select>
+          </div>
+        </div>
+      </GlassModal>
+    </>
   );
 }
