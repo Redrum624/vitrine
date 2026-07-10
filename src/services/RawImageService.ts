@@ -91,6 +91,36 @@ export class RawImageService {
   }
 
   /**
+   * Fast progressive-open preview: decode the camera's embedded JPEG (options-independent,
+   * a few hundred ms) into RGBA Float32, so the editor can paint a meaningful image
+   * near-instantly while the full 16-bit LibRaw demosaic runs in the background. The main
+   * process orients + downscales the embedded JPEG to `maxDim`, so the IPC transfer is tiny
+   * (~9MB @ 2048px vs. 122MB for the full 16-bit buffer). Rejects when no embedded preview
+   * exists or the electron API is unavailable — the caller falls back to a full-decode-first open.
+   */
+  async loadRawPreview(filePath: string, maxDim = 2048): Promise<RawImageData> {
+    if (typeof window === 'undefined' || !window.electronAPI?.decodeRawPreview) {
+      throw new Error('decodeRawPreview IPC unavailable');
+    }
+    const extension = filePath.toLowerCase().substring(filePath.lastIndexOf('.'));
+    const result = await window.electronAPI.decodeRawPreview(filePath, maxDim);
+    // 8-bit RGB (removeAlpha in main) → RGBA Float32 (convertUint8… auto-detects the 3ch layout).
+    const floatData = this.convertUint8ToFloat32Array(new Uint8Array(result.data), result.width, result.height);
+    return {
+      width: result.width,
+      height: result.height,
+      data: floatData,
+      // NOT LibRaw-processed — but flagged true so ImageService skips the fallback
+      // auto-adjustments path (the embedded JPEG is already camera-graded).
+      isLibRawProcessed: true,
+      fileName: filePath.split(/[\\/]/).pop() || 'unknown',
+      filePath,
+      format: extension.toUpperCase(),
+      metadata: this.extractBasicMetadata(extension),
+    };
+  }
+
+  /**
    * Re-decode the CURRENT RAW image's base pixels with new decode options and reprocess
    * existing module edits on top of the fresh base. This is the ONLY path by which decode
    * options take effect (per the M0 spec) — the Task 5 panel calls it when the user changes

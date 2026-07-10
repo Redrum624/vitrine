@@ -134,4 +134,27 @@ function readOrientation(buf) {
   return 1;
 }
 
-module.exports = { jpegEnd, findEmbeddedJpegs, rawDataStart, readOrientation };
+/**
+ * Apply an EXIF/TIFF orientation (1-8) to a sharp pipeline. Used for RAW previews whose
+ * orientation lives in the container's IFD0 (Olympus ORF) rather than the embedded JPEG's own
+ * EXIF, so sharp's `.rotate()` auto-orient can't help. `.rotate(deg)` is clockwise; `.flip()` is
+ * vertical, `.flop()` is horizontal. 5/7 (transpose/transverse) are best-effort — real cameras
+ * only emit 1/3/6/8 (and rarely 2).
+ * @param {import('sharp').Sharp} pipe
+ * @param {number} ori  EXIF orientation 1-8
+ * @returns {import('sharp').Sharp}
+ */
+function applyExifOrientation(pipe, ori) {
+  switch (ori) {
+    case 2: return pipe.flop();
+    case 3: return pipe.rotate(180);
+    case 4: return pipe.flip();
+    case 5: return pipe.rotate(90).flop();
+    case 6: return pipe.rotate(90);
+    case 7: return pipe.rotate(270).flop();
+    case 8: return pipe.rotate(270);
+    default: return pipe; // 1 (none) or unknown
+  }
+}
+
+module.exports = { jpegEnd, findEmbeddedJpegs, rawDataStart, readOrientation, applyExifOrientation };

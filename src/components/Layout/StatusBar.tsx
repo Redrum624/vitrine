@@ -131,7 +131,7 @@ const getMemoryInfo = (): string => {
 };
 
 export function StatusBar({ currentImage, processingStats, images }: StatusBarProps) {
-  const { imageRatings, setImageRating, ratingFilter, setRatingFilter, viewMode, alignmentAxisX, selectedImageIds } = useAppStore();
+  const { imageRatings, setImageRating, ratingFilter, setRatingFilter, viewMode, alignmentAxisX, selectedImageIds, developing } = useAppStore();
   const memoryInfo = getMemoryInfo();
   const currentRating = currentImage ? (imageRatings[currentImage.id] ?? 0) : 0;
   const isGallery = viewMode === 'gallery';
@@ -213,12 +213,21 @@ export function StatusBar({ currentImage, processingStats, images }: StatusBarPr
         {isGallery ? (
           <span className="truncate" style={{ color: 'var(--accent)', minWidth: 0 }}>{selectedImageIds?.length ?? 0} selected</span>
         ) : (
-          processingStats && (
-            <span className="truncate" style={{ color: 'var(--accent)', minWidth: 0 }}>
-              {processingStats.modulesActive}/{processingStats.totalModules} modules
-              {processingStats.processingTime > 0 ? ` · ${processingStats.processingTime.toFixed(1)} ms` : ''}
-            </span>
-          )
+          <>
+            {/* Progressive open: while the fast embedded-JPEG preview is shown and the full
+                16-bit decode runs in the background, surface a subtle "developing" chip. */}
+            {developing && (
+              <span className="truncate" style={{ color: 'var(--accent)', minWidth: 0, whiteSpace: 'nowrap' }}>
+                Developing full quality…
+              </span>
+            )}
+            {processingStats && (
+              <span className="truncate" style={{ color: 'var(--accent)', minWidth: 0 }}>
+                {processingStats.modulesActive}/{processingStats.totalModules} modules
+                {processingStats.processingTime > 0 ? ` · ${processingStats.processingTime.toFixed(1)} ms` : ''}
+              </span>
+            )}
+          </>
         )}
         {memoryInfo && <span style={{ flexShrink: 0, whiteSpace: 'nowrap' }}>{memoryInfo}</span>}
       </div>

@@ -50,6 +50,11 @@ interface AppStore extends AppState {
   // progress affordance and disables the decode controls).
   reDecoding: boolean;
   setReDecoding: (v: boolean) => void;
+  // True while a progressive open is showing the fast embedded-JPEG preview and the full
+  // 16-bit LibRaw decode is still running in the background (drives the footer "Developing
+  // full quality…" affordance). Cleared when the full decode swaps in, or the open is superseded.
+  developing: boolean;
+  setDeveloping: (v: boolean) => void;
   // Which display path the Canvas should use:
   //  'gpu' → present the resident-texture GPU result on the WebGL2 canvas (zero readback)
   //  'cpu' → blit `processedImageData` to the 2D canvas (the proven path)
@@ -161,6 +166,7 @@ export const useAppStore = create<AppStore>((set) => ({
   upscaleMode: null,
   rawDecodeOptions: DEFAULT_RAW_DECODE_OPTIONS,
   reDecoding: false,
+  developing: false,
   renderMode: 'cpu',
   gpuResultVersion: 0,
   baseImageVersion: 0,
@@ -196,6 +202,7 @@ export const useAppStore = create<AppStore>((set) => ({
   setUpscaleMode: (v) => set({ upscaleMode: v }),
   setRawDecodeOptions: (opts) => set({ rawDecodeOptions: opts }),
   setReDecoding: (v) => set({ reDecoding: v }),
+  setDeveloping: (v) => set({ developing: v }),
 
   setAlignmentAxisX: (x) => set({ alignmentAxisX: x }),
 

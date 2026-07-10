@@ -258,6 +258,80 @@ async function decodeEmbeddedJpeg(filePath, log) {
   return { data, width: info.width, height: info.height, channels: info.channels, bitDepth: 8 };
 }
 
+/**
+ * Fast progressive-open preview: extract the LARGEST embedded JPEG, orient it upright, and
+ * DOWNSCALE it to fit `maxDim` — returning packed 8-bit RGB pixels. This is the camera's
+ * already-graded preview (options-independent), decoded in a few hundred ms vs. the ~4.3s
+ * native LibRaw demosaic — so the editor can paint a meaningful image near-instantly while
+ * the full 16-bit decode runs in the background (see ImageService progressive open).
+ *
+ * Unlike `decodeEmbeddedJpeg` (the LAST-RESORT rung, which UPSCALES to full sensor dims), this
+ * never enlarges: `withoutEnlargement: true` keeps the transfer tiny (~9MB at 2048px vs 122MB
+ * for the full 16-bit buffer) and the sharp resize cheap. Throws when no usable embedded JPEG
+ * exists, so the caller falls back to a full-decode-first open.
+ *
+ * @param {string} filePath
+ * @param {number} [maxDim=2048]  longest-edge cap for the preview
+ * @param {object} [log]
+ * @returns {Promise<{data: ArrayBuffer, width, height, channels: 3, bitDepth: 8}>}
+ */
+async function decodeEmbeddedPreview(filePath, maxDim = 2048, log = console) {
+  const sharp = require('sharp');
+  const { findEmbeddedJpegs, rawDataStart, readOrientation, applyExifOrientation } = require('./embeddedPreview.cjs');
+
+  const fd = await fs.promises.open(filePath, 'r');
+  let jpeg = null;
+  let containerOrientation = 1;
+  try {
+    const stat = await fd.stat();
+    const headSize = Math.min(stat.size, 256 * 1024);
+    const head = Buffer.allocUnsafe(headSize);
+    await fd.read(head, 0, headSize, 0);
+
+    // Embedded preview JPEGs sit BEFORE the raw sensor strip; cap the scan there so we never
+    // read the (large) sensor data. Fall back to a bounded 8MB / 12MB window if the cap is unknown.
+    const cap = rawDataStart(head) || 8 * 1024 * 1024;
+    const scanSize = Math.min(stat.size, cap, 12 * 1024 * 1024);
+    const buf = Buffer.allocUnsafe(scanSize);
+    await fd.read(buf, 0, scanSize, 0);
+
+    // ORF's embedded preview carries no orientation of its own — take it from the RAW container's IFD0.
+    containerOrientation = readOrientation(head);
+
+    const jpegs = findEmbeddedJpegs(buf);
+    // Take the largest embedded JPEG that is clearly a real preview (not a tiny 160px thumbnail).
+    const best = jpegs.find((j) => j.length > 50000);
+    if (best) jpeg = Buffer.from(buf.subarray(best.offset, best.offset + best.length));
+  } finally {
+    await fd.close();
+  }
+
+  if (!jpeg) {
+    throw new Error(`No embedded preview JPEG found for ${path.basename(filePath)}`);
+  }
+
+  // Orient upright (prefer the JPEG's OWN EXIF orientation; else the container's), then DOWNSCALE
+  // to fit maxDim. `removeAlpha` guarantees packed 3-channel RGB (matches the renderer's 3ch path).
+  const previewOri = await sharp(jpeg, { failOn: 'none' })
+    .metadata().then((m) => m.orientation || 0).catch(() => 0);
+  let pipe = sharp(jpeg, { failOn: 'none' });
+  if (previewOri > 1) {
+    pipe = pipe.rotate(); // auto-orient from the preview's own EXIF
+  } else if (containerOrientation > 1) {
+    pipe = applyExifOrientation(pipe, containerOrientation);
+  }
+
+  const { data, info } = await pipe
+    .resize(maxDim, maxDim, { fit: 'inside', withoutEnlargement: true, kernel: sharp.kernel.lanczos3 })
+    .removeAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+
+  log.log(`RAW preview (embedded JPEG): ${info.width}x${info.height} (${info.channels}ch) from ${filePath}`);
+  const out = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
+  return { data: out, width: info.width, height: info.height, channels: 3, bitDepth: 8 };
+}
+
 const RAW_TMP_DIR_RE = /^photoapp-raw-[0-9a-f]+$/;
 
 /**
@@ -317,6 +391,7 @@ module.exports = {
   decodeNative,
   decodeWasm,
   decodeEmbeddedJpeg,
+  decodeEmbeddedPreview,
   parsePpm16,
   resolveLibrawBin,
   sweepStaleRawTmpDirs,

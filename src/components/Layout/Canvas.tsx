@@ -801,10 +801,22 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
       // The identity guard mirrors ImageService's own generation guard (belt-and-suspenders: a
       // superseded decode never reaches its notify, so this hook won't run for a stale image),
       // and local-adjustment geometry restores against the REAL decoded dimensions.
-      await imageService.loadImage(image.path, (decoded) => {
-        if (activeLoadPathRef.current !== image.path) return;
-        editPersistenceService.restoreState(savedState, decoded.width, decoded.height, image.path);
-      });
+      // Passing onFullDecode opts into PROGRESSIVE open (interactive editor): loadImage paints the
+      // fast embedded-JPEG preview first (beforeNotify below seeds edits at the preview dims — the
+      // restored geometry is normalized so it re-bakes when the full decode swaps in), returns, and
+      // runs the full 16-bit decode in the background. onFullDecode fires with the TRUE dims once
+      // that swap lands, so the tile dims below (recorded at preview dims) upgrade to full res.
+      await imageService.loadImage(
+        image.path,
+        (decoded) => {
+          if (activeLoadPathRef.current !== image.path) return;
+          editPersistenceService.restoreState(savedState, decoded.width, decoded.height, image.path);
+        },
+        (fullWidth, fullHeight) => {
+          if (activeLoadPathRef.current !== image.path) return;
+          useAppStore.getState().setImageDimensions(image.id, { width: fullWidth, height: fullHeight });
+        },
+      );
 
       // The decode above is async — the user may have switched to a different image
       // while it was in flight (rapid filmstrip/gallery clicks). Re-check identity

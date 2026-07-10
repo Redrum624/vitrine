@@ -1,5 +1,5 @@
 import { logger } from '../utils/Logger';
-import { rawImageService } from './RawImageService';
+import { rawImageService, RawImageData } from './RawImageService';
 import { ValidationService } from './ValidationService';
 import { errorHandlingService } from './ErrorHandlingService';
 import { imageCacheService } from './ImageCacheService';
@@ -8,7 +8,7 @@ import { autoRawAdjustmentService, RAWDetectionResult } from './AutoRawAdjustmen
 import { ImageProcessingPipeline } from './ImageProcessingPipeline';
 import { useAppStore } from '../stores/appStore';
 import { editPersistenceService } from './EditPersistenceService';
-import { DEFAULT_RAW_DECODE_OPTIONS } from '../types/electron';
+import { DEFAULT_RAW_DECODE_OPTIONS, RawDecodeOptions } from '../types/electron';
 
 export interface ImageData {
   width: number;
@@ -79,8 +79,19 @@ export class ImageService {
    *   the first pass renders the edited image directly (no unedited-defaults flash, no double
    *   pass). Only fires when this decode is still current (the generation guard skips it for a
    *   superseded load, so it never seeds a stale image).
+   *   In a progressive RAW open it fires on the fast PREVIEW render (real preview dims) — the
+   *   restored edit geometry is normalized (0-1), so it re-bakes correctly when the full decode
+   *   swaps in at full dims (see LocalAdjustmentsModule.processImage's resolution rebuild).
+   * @param onFullDecode Optional — passing it OPTS INTO progressive RAW open (interactive editor
+   *   only; batch/export omit it so they always get the full-resolution decode). Called with the
+   *   TRUE (full-decode) dimensions once the background full decode has swapped the base in place,
+   *   so the caller can upgrade any preview-dimension bookkeeping (e.g. the gallery tile's dims).
    */
-  async loadImage(filePath: string, beforeNotify?: (result: ImageData) => void): Promise<ImageData> {
+  async loadImage(
+    filePath: string,
+    beforeNotify?: (result: ImageData) => void,
+    onFullDecode?: (width: number, height: number) => void,
+  ): Promise<ImageData> {
     const thisGeneration = ++this.loadGeneration;
     this.bakedUpscale = null; // Clear baked marker on any fresh image load
 
@@ -136,7 +147,54 @@ export class ImageService {
           // these from per-image persistence (or DEFAULT_RAW_DECODE_OPTIONS) BEFORE calling
           // loadImage, so the initial decode matches the user's last-chosen demosaic/highlights.
           const decodeOptions = useAppStore.getState().rawDecodeOptions;
-          const rawData = await rawImageService.loadRawImage(filePath, decodeOptions);
+
+          // PROGRESSIVE OPEN (interactive editor only — gated on onFullDecode + the preview IPC):
+          // paint the camera's embedded-JPEG preview near-instantly, run the full 16-bit LibRaw
+          // decode in the BACKGROUND, and swap the base in place when it lands. Time-to-first-image
+          // drops from ~5s (full decode) to <1s (embedded preview). Batch/export omit onFullDecode,
+          // so they always take the full-resolution path below.
+          let rawData: RawImageData;
+          if (onFullDecode && typeof window !== 'undefined' && window.electronAPI?.decodeRawPreview) {
+            // Start the full decode NOW so the dcraw_emu subprocess overlaps the sharp preview
+            // extraction (the subprocess doesn't block the main event loop).
+            const fullPromise = rawImageService.loadRawImage(filePath, decodeOptions);
+            fullPromise.catch(() => { /* handled in developFullDecode / below */ });
+
+            let preview: RawImageData | null = null;
+            try {
+              preview = await rawImageService.loadRawPreview(filePath);
+            } catch (previewError) {
+              logger.warn('Embedded preview unavailable; opening via full decode', previewError);
+            }
+
+            if (preview && thisGeneration === this.loadGeneration) {
+              const previewResult: ImageData = {
+                width: preview.width,
+                height: preview.height,
+                data: preview.data,
+                fileName: preview.fileName,
+                filePath: preview.filePath,
+                isRaw: true,
+                metadata: preview.metadata,
+              };
+              // The preview is NOT written to the base cache — the cache must only ever hold the
+              // full 16-bit decode (a reopen must never serve the low-res preview as the base).
+              this.currentImage = previewResult;
+              this.snapshotOriginal(previewResult);
+              // Seed restored edits at PREVIEW dims (normalized geometry → re-bakes on the swap).
+              beforeNotify?.(previewResult);
+              this.notifyImageLoaded(); // FIRST PASS — edited preview on screen, fast
+              useAppStore.getState().setDeveloping(true);
+              // Background: await the full decode, then swap the base in place (guarded).
+              void this.developFullDecode(filePath, thisGeneration, fullPromise, decodeOptions, onFullDecode);
+              return previewResult;
+            }
+
+            // Preview failed or superseded: fall through with the SAME full promise (no double decode).
+            rawData = await fullPromise;
+          } else {
+            rawData = await rawImageService.loadRawImage(filePath, decodeOptions);
+          }
 
           // Validate dimensions
           const dimensionValidation = ValidationService.validateDimensions(rawData.width, rawData.height);
@@ -238,6 +296,77 @@ export class ImageService {
     }
 
     return result;
+  }
+
+  /**
+   * Background half of a progressive RAW open: await the full 16-bit LibRaw decode, then SWAP
+   * it in for the fast embedded preview currently on screen — updating the base cache, the
+   * before/after snapshot, and the working base (updateCurrentImageData bumps baseImageVersion
+   * so the GPU re-uploads and reprocesses at full resolution; the restored edits, already in the
+   * pipeline modules, re-apply — normalized mask geometry re-bakes at the full dims). Mirrors
+   * RawImageService.reDecode's swap sequence and identity guard.
+   *
+   * All guards run BEFORE any mutation, so a superseded open never corrupts state or writes a
+   * stale base to the cache:
+   *  - generation: a newer loadImage() started → discard (that open owns the screen + affordance).
+   *  - identity: the current image is no longer this path → discard.
+   *  - decode-options: the user changed demosaic/highlight via the RAW Decode panel (reDecode)
+   *    while we were decoding → discard, so this stale-options full decode never overwrites the
+   *    reDecode's fresh base.
+   */
+  private async developFullDecode(
+    filePath: string,
+    generation: number,
+    fullPromise: Promise<RawImageData>,
+    decodeOptions: RawDecodeOptions,
+    onFullDecode?: (width: number, height: number) => void,
+  ): Promise<void> {
+    try {
+      const rawData = await fullPromise;
+
+      if (generation !== this.loadGeneration) {
+        logger.info(`Progressive full decode of ${filePath} discarded: superseded by a newer open`);
+        return;
+      }
+      const stillCurrent = this.currentImage;
+      if (!stillCurrent || stillCurrent.filePath !== filePath) {
+        logger.info(`Progressive full decode of ${filePath} discarded: current image changed`);
+        return;
+      }
+      const opts = useAppStore.getState().rawDecodeOptions;
+      if (opts.demosaic !== decodeOptions.demosaic || opts.highlightMode !== decodeOptions.highlightMode) {
+        logger.info(`Progressive full decode of ${filePath} discarded: decode options changed (re-decode superseded it)`);
+        return;
+      }
+
+      const dimensionValidation = ValidationService.validateDimensions(rawData.width, rawData.height);
+      if (!dimensionValidation.valid) {
+        logger.warn(`Progressive full decode produced invalid dimensions: ${dimensionValidation.error}`);
+        return;
+      }
+
+      // Swap the base to the full 16-bit decode. Base cache gets the FULL decode only.
+      imageCacheService.setBase(
+        filePath,
+        rawData.data,
+        rawData.width,
+        rawData.height,
+        { isRaw: true, autoAdjustmentResult: undefined, ...rawData.metadata },
+      );
+      this.processingPipeline?.clearCache(); // module results cached against preview dims are stale
+      this.setOriginalImage(new Float32Array(rawData.data), rawData.width, rawData.height);
+      // Replace the working base + bump baseImageVersion + notify → single reprocess at full dims.
+      this.updateCurrentImageData(rawData.data, rawData.width, rawData.height);
+      onFullDecode?.(rawData.width, rawData.height);
+      logger.info(`Progressive open: full decode swapped in for ${filePath} (${rawData.width}x${rawData.height})`);
+    } catch (error) {
+      logger.error(`Progressive full decode failed for ${filePath}; keeping the preview`, error);
+    } finally {
+      // Only clear the affordance if THIS open still owns it (a newer open sets it true again).
+      if (generation === this.loadGeneration) {
+        useAppStore.getState().setDeveloping(false);
+      }
+    }
   }
 
   private async loadRegularImage(filePath: string): Promise<ImageData> {

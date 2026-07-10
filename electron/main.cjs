@@ -641,7 +641,7 @@ ipcMain.handle('read-image-as-data-url', async (event, filePath) => {
           const head = Buffer.allocUnsafe(headSize);
           await fd.read(head, 0, headSize, 0);
 
-          const { findEmbeddedJpegs, rawDataStart, readOrientation } = require('./embeddedPreview.cjs');
+          const { findEmbeddedJpegs, rawDataStart, readOrientation, applyExifOrientation } = require('./embeddedPreview.cjs');
           const cap = rawDataStart(head) || 8 * 1024 * 1024;
           const scanSize = Math.min(stat.size, cap, 12 * 1024 * 1024);
           const buf = Buffer.allocUnsafe(scanSize);
@@ -739,23 +739,8 @@ function getMimeType(filePath) {
   return mimeTypes[ext] || 'application/octet-stream';
 }
 
-// Apply an EXIF orientation (1-8) to a sharp pipeline explicitly. Used for RAW previews
-// whose embedded JPEG carries NO orientation tag (e.g. Olympus ORF, where orientation
-// lives in the RAW container's IFD0), so sharp's .rotate() auto-orient can't help. sharp
-// .rotate(deg) is clockwise; .flip() is vertical, .flop() is horizontal. 5/7 (transpose/
-// transverse) are best-effort — real cameras only emit 1/3/6/8 (and rarely 2).
-function applyExifOrientation(pipe, ori) {
-  switch (ori) {
-    case 2: return pipe.flop();
-    case 3: return pipe.rotate(180);
-    case 4: return pipe.flip();
-    case 5: return pipe.rotate(90).flop();
-    case 6: return pipe.rotate(90);
-    case 7: return pipe.rotate(270).flop();
-    case 8: return pipe.rotate(270);
-    default: return pipe; // 1 (none) or unknown
-  }
-}
+// applyExifOrientation now lives in ./embeddedPreview.cjs (shared with rawDecoder.cjs's
+// progressive-preview path); the read-image-as-data-url handler requires it locally.
 
 // Path validation helper for write IPC handlers. Resolves to an absolute path
 // (which collapses any `..` traversal) and then denies writes into protected
@@ -1034,6 +1019,21 @@ ipcMain.handle('decode-raw-file', async (event, filePath, options) => {
   } catch (error) {
     console.error('RAW decode failed:', error);
     throw new Error(`RAW decode failed: ${error.message}`);
+  }
+});
+
+// Fast progressive-open preview: the camera's embedded JPEG, oriented + downscaled to fit
+// maxDim (8-bit RGB). Decoded in a few hundred ms so the editor paints a meaningful image
+// near-instantly while the full 16-bit LibRaw decode runs in the background (the transfer is
+// ~9MB @ 2048px vs. 122MB for the full buffer). Rejects when no embedded preview exists —
+// the renderer then falls back to a full-decode-first open.
+ipcMain.handle('decode-raw-preview', async (event, filePath, maxDim) => {
+  const { decodeEmbeddedPreview } = require('./rawDecoder.cjs');
+  try {
+    return await decodeEmbeddedPreview(filePath, maxDim || 2048, console);
+  } catch (error) {
+    console.warn('RAW preview decode failed:', error.message);
+    throw new Error(`RAW preview decode failed: ${error.message}`);
   }
 });
 

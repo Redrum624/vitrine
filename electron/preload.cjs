@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   readFile: (filePath) => ipcRenderer.invoke('read-file', filePath),
   readFileBuffer: (filePath) => ipcRenderer.invoke('read-file-buffer', filePath),
   decodeRawFile: (filePath, options) => ipcRenderer.invoke('decode-raw-file', filePath, options),
+  decodeRawPreview: (filePath, maxDim) => ipcRenderer.invoke('decode-raw-preview', filePath, maxDim),
   readImageAsDataURL: (filePath) => ipcRenderer.invoke('read-image-as-data-url', filePath),
   writeFile: (filePath, data) => ipcRenderer.invoke('write-file', filePath, data),
   writeLog: (logEntry) => ipcRenderer.invoke('write-log', logEntry),
