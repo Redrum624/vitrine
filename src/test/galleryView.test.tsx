@@ -355,4 +355,42 @@ describe('Toolbar — Develop|Gallery segmented (Gallery toolbar variant only)',
     expect(screen.getByRole('button', { name: /sort: capture time/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /batch process/i })).toBeInTheDocument();
   });
+
+  describe('Gallery Export… routing (Task B3)', () => {
+    it('routes to onExportSelected when exactly one image is ctrl-selected, not onExport', () => {
+      useAppStore.setState({ viewMode: 'gallery', selectedImageIds: ['img1'] });
+      const onExport = jest.fn();
+      const onExportSelected = jest.fn();
+      render(
+        <Toolbar hasImage zoom={1} onBatchProcess={jest.fn()} onExport={onExport} onExportSelected={onExportSelected} />
+      );
+      fireEvent.click(screen.getByRole('button', { name: /export/i }));
+      expect(onExportSelected).toHaveBeenCalledTimes(1);
+      expect(onExport).not.toHaveBeenCalled();
+    });
+
+    it('still routes to onExportSelected when ≥2 images are selected', () => {
+      useAppStore.setState({ viewMode: 'gallery', selectedImageIds: ['img1', 'img2'] });
+      const onExport = jest.fn();
+      const onExportSelected = jest.fn();
+      render(
+        <Toolbar hasImage zoom={1} onBatchProcess={jest.fn()} onExport={onExport} onExportSelected={onExportSelected} />
+      );
+      fireEvent.click(screen.getByRole('button', { name: /export/i }));
+      expect(onExportSelected).toHaveBeenCalledTimes(1);
+      expect(onExport).not.toHaveBeenCalled();
+    });
+
+    it('falls back to onExport (current photo) when nothing is selected', () => {
+      useAppStore.setState({ viewMode: 'gallery', selectedImageIds: [] });
+      const onExport = jest.fn();
+      const onExportSelected = jest.fn();
+      render(
+        <Toolbar hasImage zoom={1} onBatchProcess={jest.fn()} onExport={onExport} onExportSelected={onExportSelected} />
+      );
+      fireEvent.click(screen.getByRole('button', { name: /export/i }));
+      expect(onExport).toHaveBeenCalledTimes(1);
+      expect(onExportSelected).not.toHaveBeenCalled();
+    });
+  });
 });

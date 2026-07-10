@@ -33,8 +33,9 @@ interface ToolbarProps {
   referenceMode?: boolean;
   /** Gallery variant (Task 7): opens the native folder picker. */
   onOpenFolder?: () => void;
-  /** Gallery variant: exports the current multi-selection (≥2 images) — the same
-   * flow the filmstrip dock's "Export N" button triggers. */
+  /** Gallery variant: exports the current selection (≥1 image) — the same flow
+   * the filmstrip dock's "Export N" button triggers (that button itself only
+   * appears at ≥2 selected; the Gallery toolbar's Export… routes here at ≥1). */
   onExportSelected?: () => void;
 }
 
@@ -261,7 +262,7 @@ export function Toolbar({ onExport, onPrint, onBatchProcess, onUndo: _onUndo, on
           Open Folder
         </button>
         <button
-          onClick={() => (selectedCount >= 2 ? onExportSelected?.() : onExport?.())}
+          onClick={() => (selectedCount >= 1 ? onExportSelected?.() : onExport?.())}
           className="glass-pill-btn"
           style={pillBtn}
           title="Export"

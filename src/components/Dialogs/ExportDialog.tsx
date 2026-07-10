@@ -681,7 +681,7 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
       isOpen={isOpen}
       onClose={onClose}
       icon={<Download size={15} />}
-      title={isMulti ? `Export ${multiPaths!.length} Images` : 'Export Image'}
+      title={isMulti ? `Export ${multiPaths!.length} Image${multiPaths!.length !== 1 ? 's' : ''}` : 'Export Image'}
       cardClassName="w-full max-w-4xl"
       cardStyle={{ maxHeight: '90vh' }}
       scrollBody={false}

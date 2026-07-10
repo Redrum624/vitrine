@@ -351,7 +351,7 @@ function App() {
   const currentImageRef = useRef<ImageFileInfo | null>(null);
   useEffect(() => { currentImageRef.current = currentImage; }, [currentImage]);
   const [isExportDialogOpen, setIsExportDialogOpen] = useState(false);
-  // Paths for a multi-export run (≥2 selected images); empty = single-image export.
+  // Paths for a multi-export run (≥1 selected image); empty = single-image export.
   const [multiExportPaths, setMultiExportPaths] = useState<string[]>([]);
   const [isBatchDialogOpen, setIsBatchDialogOpen] = useState(false);
   const [isPresetDialogOpen, setIsPresetDialogOpen] = useState(false);
@@ -722,14 +722,15 @@ function App() {
     }
   }, [currentImage]);
 
-  // Opens the multi-export flow for the current selection (≥2 images) — shared by
-  // the filmstrip dock's "Export N" button and the Gallery toolbar's Export… button.
+  // Opens the multi-export flow for the current selection (≥1 image) — shared by
+  // the filmstrip dock's "Export N" button (which only appears at ≥2 selected)
+  // and the Gallery toolbar's Export… button (which routes here at ≥1 selected).
   const handleExportSelected = useCallback(() => {
     const ids = useAppStore.getState().selectedImageIds;
     const paths = ids
       .map((id) => availableImages.find((img) => img.id === id)?.path)
       .filter((p): p is string => !!p);
-    if (paths.length >= 2) {
+    if (paths.length >= 1) {
       setMultiExportPaths(paths);
       setIsExportDialogOpen(true);
     }

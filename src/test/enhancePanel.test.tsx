@@ -103,7 +103,7 @@ describe('EnhanceModuleComponent', () => {
     await act(async () => { resolveApply(); }); // let it finish
   });
 
-  it('Detail & quality section is collapsed by default and shows sliders when expanded', () => {
+  it('Detail & quality section is always open and shows its sliders', () => {
     render(<EnhanceModuleComponent module={enhanceModule} noiseReductionModule={makeNrModule()} />);
     // Section header should exist
     expect(screen.getByText('Detail & quality')).toBeInTheDocument();

@@ -375,5 +375,3 @@ export const PrintDialog: React.FC<PrintDialogProps> = ({
     </GlassModal>
   );
 };
-
-export default PrintDialog;
