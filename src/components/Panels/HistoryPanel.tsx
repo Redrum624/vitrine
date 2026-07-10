@@ -15,6 +15,12 @@ function timeAgo(at: number, now: number): string {
   return `${Math.floor(h / 24)}d ago`;
 }
 
+/** Absolute HH:MM (24h, local time) for the row's inline clock-time column. */
+function clockTime(at: number): string {
+  const d = new Date(at);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
 interface HistoryPanelProps {
   /** Surfaces "Clear" as the unified card header's Reset ↺ (Task 4 — History had
    * no chrome of its own pre-Task-2, so it wasn't wired in that pass). */
@@ -72,11 +78,20 @@ export function HistoryPanel({ onRegisterActions }: HistoryPanelProps = {}) {
                   borderStyle: 'solid',
                   borderColor: isActive ? 'var(--accent-ring)' : 'rgba(255,255,255,.1)',
                 }}
-                title={isActive ? 'Current state' : 'Restore this checkpoint'}
+                title={`${isActive ? 'Current state' : 'Restore this checkpoint'} — ${timeAgo(cp.at, now)}`}
               >
-                <div className="flex flex-col" style={{ gap: 2 }}>
+                <div className="flex items-center" style={{ gap: 8, minWidth: 0 }}>
+                  <span
+                    style={{
+                      fontFamily: 'ui-monospace, monospace',
+                      fontSize: 10,
+                      color: isActive ? 'var(--accent)' : 'var(--glass-text-muted)',
+                      flexShrink: 0,
+                    }}
+                  >
+                    {clockTime(cp.at)}
+                  </span>
                   <span style={{ fontSize: 11.5, color: isActive ? 'var(--accent)' : 'var(--glass-text-label)' }}>{cp.label}</span>
-                  <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: 10, color: 'var(--glass-text-muted)' }}>{timeAgo(cp.at, now)}</span>
                 </div>
                 {isActive
                   ? <span style={{ fontSize: 10.5, color: 'var(--accent)' }}>current</span>
