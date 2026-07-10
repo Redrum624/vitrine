@@ -4,6 +4,17 @@ All notable changes to **Photo Editor Pro** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.14.4] - 2026-07-10
+
+### Fixed
+- **Reopening a RAW photo is now instant.** Cause: the session image cache was write-only — lookups used a different key shape than writes, so every reopen ran the full multi-second LibRaw decode. Fix: a dedicated base-image cache key; reopens serve the cached decode (options-coherent: the cache is only written together with the image's persisted decode options, and entries larger than the cache budget are rejected instead of evicting everything). Affects: `src/services/ImageCacheService.ts`, `src/services/ImageService.ts`, `src/services/RawImageService.ts`.
+- **Nikon `.nrw` and Samsung `.srw` files now decode.** Cause: the decode-routing extension list missed them, sending them to the standard image loader, which cannot read them. Fix: one canonical RAW extension list shared by decode routing and the UI's RAW detection. Affects: `src/utils/rawExtensions.ts` (new), `src/services/RawImageService.ts`, `src/utils/gallerySelection.ts`.
+- **Switching photos during a slow load can no longer misfile the result.** Cause: the canvas load path never re-checked which image was current after its async decode. Fix: an identity guard mirrors the existing re-decode guard. Affects: `src/components/Layout/Canvas.tsx`.
+
+### Changed
+- **Segmented controls are keyboard-accessible**: Tab lands on the active segment; Arrow keys (with wrap), Home and End move and activate; a visible focus ring appears for keyboard users. Affects: `src/components/Controls/Segmented.tsx`, `src/index.css`.
+- Removed three orphaned RAW-service functions left behind by earlier cleanups.
+
 ## [1.14.3] - 2026-07-10
 
 ### Fixed
