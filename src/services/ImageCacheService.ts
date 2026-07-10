@@ -114,10 +114,11 @@ export class ImageCacheService {
    * most one base entry per path and it always reflects the most recent decode. The REAL
    * width/height are kept in the entry payload so getBase() reconstructs correct dimensions.
    *
-   * Practical bound: the total budget is DEFAULT_MAX_SIZE (500MB), and a single entry larger
-   * than that is refused outright rather than evicting the whole cache to make room (see
-   * setWithKey). In practice this comfortably holds ONE large RAW base (e.g. a 40MP+ Float32
-   * RGBA decode); switching between several such large RAWs in the same session may still
+   * Practical bound: the guard in setWithKey refuses a single entry larger than `this.maxSize`
+   * outright rather than evicting the whole cache to make room. `this.maxSize` defaults to
+   * DEFAULT_MAX_SIZE (500MB) unless the instance was constructed with a custom size. In
+   * practice the default comfortably holds ONE large RAW base (e.g. a 40MP+ Float32 RGBA
+   * decode); switching between several such large RAWs in the same session may still
    * re-decode more than once. Accepted design limit, not a bug.
    */
   setBase(

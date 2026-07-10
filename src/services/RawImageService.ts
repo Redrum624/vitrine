@@ -2,7 +2,6 @@ import { logger } from '../utils/Logger';
 import { advancedRawProcessor, AdvancedRawProcessingOptions } from './AdvancedRawProcessor';
 import { libRawService, LibRawOptions, ProcessedRawData } from './LibRawService';
 import { cameraProfileService } from './CameraProfileService';
-import { advancedDemosaicingService } from './AdvancedDemosaicingService';
 import { rawHistogramService, HistogramData } from './RawHistogramService';
 import { noiseReductionService, NoiseReductionOptions } from './NoiseReductionService';
 import { lensProfileService, LensProfile, LensCorrections } from './LensProfileService';
@@ -600,11 +599,6 @@ export class RawImageService {
     return rgbaData;
   }
 
-  // Get supported formats
-  getSupportedFormats(): string[] {
-    return [...RAW_EXTENSIONS];
-  }
-
   // Check if format needs special processing
   needsAdvancedProcessing(extension: string): boolean {
     return ['.orf', '.cr2', '.cr3', '.nef', '.arw'].includes(extension.toLowerCase());
@@ -669,36 +663,6 @@ export class RawImageService {
   // Get LibRaw service statistics
   getLibRawStats() {
     return libRawService.getStats();
-  }
-
-  /**
-   * Apply advanced demosaicing to RAW data
-   * This method provides access to professional demosaicing algorithms
-   */
-  async applyAdvancedDemosaicing(
-    rawData: Float32Array,
-    width: number,
-    height: number,
-    algorithm: 'VNG' | 'AHD' | 'LMMSE' = 'VNG',
-    bayerPattern: 'RGGB' | 'BGGR' | 'GRBG' | 'GBRG' = 'RGGB'
-  ): Promise<Float32Array> {
-    logger.info(`Applying ${algorithm} demosaicing to ${width}x${height} image`);
-
-    try {
-      switch (algorithm) {
-        case 'VNG':
-          return await advancedDemosaicingService.demosaicVNG(rawData, width, height, bayerPattern);
-        case 'AHD':
-          return await advancedDemosaicingService.demosaicAHD(rawData, width, height, bayerPattern);
-        case 'LMMSE':
-          return await advancedDemosaicingService.demosaicLMMSE(rawData, width, height, bayerPattern, 0.01);
-        default:
-          throw new Error(`Unsupported demosaicing algorithm: ${algorithm}`);
-      }
-    } catch (error) {
-      logger.error(`Advanced demosaicing failed:`, error);
-      throw error;
-    }
   }
 
   /**

@@ -123,6 +123,10 @@ interface AppStore extends AppState {
   // without either loader needing to touch that list.
   imageDimensions: Record<string, { width: number; height: number }>;
   setImageDimensions: (id: string, dims: { width: number; height: number }) => void;
+  /** Drop every learned dimension — called when the folder-load path swaps in a
+   * genuinely different image LIST (see App.tsx's handleFolderSelected), so a
+   * new folder never shows a stale dimension carried over under a REUSED id. */
+  clearImageDimensions: () => void;
   // Export progress
   exportProgress: { current: number; total: number; currentName: string; cancelRequested: boolean } | null;
   startExportProgress: (total: number) => void;
@@ -277,6 +281,8 @@ export const useAppStore = create<AppStore>((set) => ({
     if (existing && existing.width === dims.width && existing.height === dims.height) return state;
     return { imageDimensions: { ...state.imageDimensions, [id]: dims } };
   }),
+
+  clearImageDimensions: () => set(() => ({ imageDimensions: {} })),
 
   startExportProgress: (total) => set(() => ({
     exportProgress: { current: 0, total, currentName: '', cancelRequested: false },

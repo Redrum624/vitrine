@@ -35,7 +35,11 @@ export function Segmented<T extends string>({ options, value, onChange, classNam
   const focusAndActivate = (index: number) => {
     const option = options[index];
     if (!option) return;
-    onChange(option.value);
+    // With a single option, Home/End/ArrowLeft/ArrowRight all wrap back to the SAME
+    // (already-active) index — skip the redundant onChange so a single-item control
+    // doesn't fire a spurious no-op change on every arrow keypress.
+    const activeIndex = options.findIndex((o) => o.value === value);
+    if (index !== activeIndex) onChange(option.value);
     tabRefs.current[index]?.focus();
   };
 

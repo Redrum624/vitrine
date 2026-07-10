@@ -620,7 +620,7 @@ function cacheRawThumb(key, url) {
 ipcMain.handle('read-image-as-data-url', async (event, filePath) => {
   try {
     const ext = path.extname(filePath).toLowerCase();
-    const rawFormats = ['.cr2', '.cr3', '.nef', '.arw', '.orf', '.dng', '.raf', '.rw2', '.pef', '.srw'];
+    const rawFormats = ['.cr2', '.cr3', '.nef', '.nrw', '.arw', '.orf', '.dng', '.raf', '.rw2', '.pef', '.srw'];
 
     // For RAW files, extract an embedded JPEG preview.
     if (rawFormats.includes(ext)) {

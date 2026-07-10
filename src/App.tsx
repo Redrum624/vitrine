@@ -358,6 +358,12 @@ function App() {
   const [isShortcutsDialogOpen, setIsShortcutsDialogOpen] = useState(false);
   const [isWelcomeVisible, setIsWelcomeVisible] = useState(false);
   const [availableImages, setAvailableImages] = useState<ImageFileInfo[]>([]);
+  // Mirrors availableImages OUTSIDE React state so handleFolderSelected can detect a
+  // genuine list change synchronously (see its use below) without adding
+  // `availableImages` to its own dependency array (which would recreate the callback
+  // — and, per setAvailableImages's own functional-update comment, defeat the point
+  // of comparing against the true previous list — on every folder reload).
+  const prevAvailableImagesRef = useRef<ImageFileInfo[]>([]);
   const [batchSelectedImages, setBatchSelectedImages] = useState<ImageFileInfo[]>([]);
   const [showThumbnailPanel, setShowThumbnailPanel] = useState(false);
   const [canUndo, setCanUndo] = useState(false);
@@ -711,6 +717,16 @@ function App() {
 
   const handleFolderSelected = useCallback((images: ImageFileInfo[]) => {
     logger.info(`Folder selected with ${images.length} images`);
+    // A genuinely different image LIST (folder switch) — as opposed to a
+    // watcher-triggered reload of the SAME folder — invalidates every previously
+    // learned `imageDimensions` entry: those are keyed by image id, and ids get
+    // reused across folders (both FileSystemService's id scheme and the
+    // fixture/test data can produce id collisions across folders), so a stale
+    // dimension could otherwise resurface under the new folder's same-id image.
+    if (!sameImageList(prevAvailableImagesRef.current, images)) {
+      useAppStore.getState().clearImageDimensions();
+    }
+    prevAvailableImagesRef.current = images;
     // Keep the existing array reference when the file list is unchanged (e.g.
     // a watcher-triggered reload after our own rating write, cloud sync or
     // antivirus touching a file) so effects keyed on `images` don't re-run
