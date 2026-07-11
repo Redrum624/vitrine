@@ -222,6 +222,18 @@ describe('SliderRow', () => {
     expect(container.querySelector('[data-detent="true"]')).not.toBeInTheDocument();
   });
 
+  it('positions the detent line at the default\'s fractional offset (not centred for an asymmetric default)', () => {
+    // Temperature default 6500 in [2000, 10000] → (6500-2000)/(10000-2000) = 56.25%.
+    const { container } = render(
+      <SliderRow label="Temperature" value={5900} defaultValue={6500} min={2000} max={10000} onChange={() => {}} />
+    );
+    const detent = container.querySelector('[data-detent="true"]');
+    expect(detent).toBeInTheDocument();
+    expect(detent).toHaveStyle({ left: '56.25%' });
+    // Sanity: an asymmetric default is NOT at the 50% centre.
+    expect(detent).not.toHaveStyle({ left: '50%' });
+  });
+
   it('renders an optional legend row', () => {
     render(
       <SliderRow
@@ -237,6 +249,18 @@ describe('SliderRow', () => {
     expect(screen.getByText('Cool')).toBeInTheDocument();
     expect(screen.getByText('Neutral')).toBeInTheDocument();
     expect(screen.getByText('Warm')).toBeInTheDocument();
+  });
+
+  it('omits the legend row entirely when no legend prop is supplied', () => {
+    const { container } = render(
+      <SliderRow label="Exposure" value={0} defaultValue={0} min={-2} max={2} step={0.05} onChange={() => {}} />
+    );
+    // The row has exactly two children (label/chip row + track); the optional legend
+    // row is absent, so no third row is rendered.
+    expect((container.firstChild as HTMLElement).childElementCount).toBe(2);
+    // And none of the legend labels leak in from another slider.
+    expect(screen.queryByText('Cool')).toBeNull();
+    expect(screen.queryByText('Warm')).toBeNull();
   });
 
   describe('drag lifecycle hooks (onDragStart / onDragEnd)', () => {
