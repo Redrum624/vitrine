@@ -189,6 +189,10 @@ export interface ElectronAPI {
   /** Move files to the OS trash / Windows Recycle Bin (NEVER a permanent delete);
    *  returns a per-path { path, ok, error } result. Used by the Gallery Del flow. */
   trashItems: (filePaths: string[]) => Promise<TrashItemResult[]>;
+  /** Reveals a file in the OS file manager (Explorer), selecting it — read-only,
+   *  never writes/deletes. Used by the Gallery tile context menu's "Show in
+   *  Explorer" (Task Q5). */
+  showItemInFolder: (filePath: string) => Promise<{ ok: boolean; error?: string }>;
   storeGet: <T = unknown>(key: string) => Promise<T | null>;
   storeSet: (key: string, value: unknown) => Promise<boolean>;
   storeDelete: (key: string) => Promise<boolean>;

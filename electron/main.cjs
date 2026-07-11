@@ -945,6 +945,25 @@ ipcMain.handle('trash-items', async (event, filePaths) => {
   return results;
 });
 
+// Reveals a file in the OS file manager (Explorer on Windows), selecting it —
+// Gallery tile context menu's "Show in Explorer" (Task Q5, P11 follow-up).
+// Read-only / non-destructive (never writes, moves, or deletes anything), so unlike
+// the write handlers it doesn't go through validateWritePath's system-location
+// deny-list — it only validates the incoming value is a non-empty string, same
+// input-validation shape as the other IPC handlers.
+ipcMain.handle('show-item-in-folder', async (event, filePath) => {
+  if (typeof filePath !== 'string' || !filePath.trim()) {
+    return { ok: false, error: 'Invalid path' };
+  }
+  try {
+    shell.showItemInFolder(path.resolve(filePath));
+    return { ok: true };
+  } catch (error) {
+    console.warn('Failed to show item in folder:', filePath, error && error.message);
+    return { ok: false, error: (error && error.message) || 'show in folder failed' };
+  }
+});
+
 // Generic JSON key-value store under userData (survives app updates — userData is
 // outside the install dir). Keys are hashed to a safe filename. Used for per-image
 // edit persistence and any other durable renderer state.

@@ -15,6 +15,7 @@ import {
 import { evictOldestThumbnails, MAX_THUMBNAIL_CACHE } from '../Panels/ThumbnailPanel';
 import { getDisplayFormat } from '../../utils/imageFormat';
 import { keyboardEventBlocked } from '../../utils/keyboardScope';
+import { GalleryTileContextMenu } from './GalleryTileContextMenu';
 
 interface GalleryViewProps {
   images: ImageFileInfo[];
@@ -23,6 +24,12 @@ interface GalleryViewProps {
   /** Stays mounted (like ThumbnailPanel) so its thumbnail cache survives Develop
    * ↔ Gallery toggles; renders null while hidden. */
   visible: boolean;
+  /** Tile context menu's "Remove…" (Task Q5): forwards the target ids to the caller
+   *  instead of removing anything itself — App wires this to the SAME
+   *  `removeTargetIds` state the gallery Del key sets, so the confirm dialog stays
+   *  the single destructive-path gate. No-ops (menu item still closes the menu) if
+   *  the caller doesn't supply it. */
+  onRequestRemove?: (ids: string[]) => void;
 }
 
 const GRID_GAP = 16;
@@ -37,7 +44,7 @@ const OVERSCAN_ROWS = 2;
  * switching views never loses selection, and the shared `handleImageClick` from
  * gallerySelection.ts for identical shift/ctrl/plain click semantics.
  */
-export function GalleryView({ images, onImageSelect, visible }: GalleryViewProps) {
+export function GalleryView({ images, onImageSelect, visible, onRequestRemove }: GalleryViewProps) {
   const [thumbnails, setThumbnails] = useState<Map<string, string>>(new Map());
   const [loadingThumbnails, setLoadingThumbnails] = useState<Set<string>>(new Set());
   const thumbnailsRef = useRef<Map<string, string>>(new Map());
@@ -212,6 +219,24 @@ export function GalleryView({ images, onImageSelect, visible }: GalleryViewProps
   // needs to add the view switch.
   const handleTileDoubleClick = () => setViewMode('develop');
 
+  // Right-click context menu (Task Q5, P11 follow-up). Selection semantics: an
+  // UNSELECTED tile is single-selected first (the menu then acts on just it); a
+  // tile already part of the current multi-selection keeps that selection (the
+  // menu acts on all of it) — computed synchronously here (not read back from the
+  // store after setSelection) so "Remove…" gets the right id list even though
+  // React hasn't re-rendered yet. A second contextmenu (same tile or a different
+  // one) simply overwrites this state, repositioning/retargeting the menu.
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; image: ImageFileInfo; ids: string[] } | null>(null);
+
+  const handleTileContextMenu = (image: ImageFileInfo, e: React.MouseEvent) => {
+    e.preventDefault();
+    const currentSelection = selectedImageIds ?? [];
+    const alreadySelected = currentSelection.includes(image.id);
+    const ids = alreadySelected ? currentSelection : [image.id];
+    if (!alreadySelected) setSelection([image.id], image.id);
+    setContextMenu({ x: e.clientX, y: e.clientY, image, ids });
+  };
+
   // 1-5/0 rate the WHOLE selection while the gallery is open. Develop's own rating
   // shortcut (App.tsx's `applyRating`) is guarded to no-op when viewMode is
   // 'gallery', so the two never double-fire on the same keypress.
@@ -242,6 +267,7 @@ export function GalleryView({ images, onImageSelect, visible }: GalleryViewProps
   if (!visible) return null;
 
   return (
+    <>
     <div
       ref={scrollRef}
       className="absolute overflow-y-auto no-select"
@@ -284,6 +310,7 @@ export function GalleryView({ images, onImageSelect, visible }: GalleryViewProps
                   }}
                   onClick={(e) => handleTileClick(image, e)}
                   onDoubleClick={handleTileDoubleClick}
+                  onContextMenu={(e) => handleTileContextMenu(image, e)}
                   title={`${image.name} (${getDisplayFormat(image.format)})`}
                 >
                   {isLoading ? (
@@ -381,6 +408,20 @@ export function GalleryView({ images, onImageSelect, visible }: GalleryViewProps
         </>
       )}
     </div>
+    {contextMenu && (
+      <GalleryTileContextMenu
+        x={contextMenu.x}
+        y={contextMenu.y}
+        onClose={() => setContextMenu(null)}
+        onOpen={() => {
+          onImageSelect(contextMenu.image);
+          setViewMode('develop');
+        }}
+        onRemove={() => onRequestRemove?.(contextMenu.ids)}
+        onShowInExplorer={() => window.electronAPI?.showItemInFolder?.(contextMenu.image.path)}
+      />
+    )}
+    </>
   );
 }
 

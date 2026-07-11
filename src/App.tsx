@@ -1550,6 +1550,7 @@ function App() {
             images={availableImages}
             onImageSelect={setCurrentImage}
             visible={viewMode === 'gallery'}
+            onRequestRemove={setRemoveTargetIds}
           />
 
           {/* Floating filename chip (Develop) — top-left: `name · i of N · zoom%`.
