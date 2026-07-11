@@ -10,7 +10,10 @@
 import { CameraMetadataService } from '../services/CameraMetadataService';
 import type { ImageFile } from '../types';
 
-type AnyApi = { readImageMetadata?: (p: string) => Promise<unknown> };
+type AnyApi = {
+  readImageMetadata?: (p: string) => Promise<unknown>;
+  readRawMetadata?: (p: string) => Promise<unknown>;
+};
 
 function setApi(api: AnyApi | undefined): void {
   (window as unknown as { electronAPI?: AnyApi }).electronAPI = api;
@@ -53,7 +56,11 @@ describe('CameraMetadataService.getCameraInfo', () => {
         Make: { description: 'OLYMPUS CORPORATION    ' },
         Model: { description: 'PEN-F           ' },
         ISOSpeedRatings: { value: 1600, description: '1600' },
-        LensModel: { description: 'M.Zuiko Digital 17mm F1.8' }
+        LensModel: { description: 'M.Zuiko Digital 17mm F1.8' },
+        ExposureTime: { value: [1, 500], description: '1/500' },
+        FNumber: { value: [18, 10], description: 'f/1.8' },
+        FocalLength: { value: [17, 1], description: '17 mm' },
+        DateTimeOriginal: { description: '2025:02:06 20:27:48' }
       },
       iptc: {},
       xmp: {},
@@ -68,6 +75,10 @@ describe('CameraMetadataService.getCameraInfo', () => {
     expect(info!.model).toBe('PEN-F');
     expect(info!.iso).toBe(1600);
     expect(info!.lensModel).toBe('M.Zuiko Digital 17mm F1.8');
+    expect(info!.shutter).toBe('1/500 s');
+    expect(info!.aperture).toBeCloseTo(1.8, 5);
+    expect(info!.focalLength).toBe(17);
+    expect(info!.dateTime).toBe('2025:02:06 20:27:48');
   });
 
   test('reads ISO from a single-element array value', async () => {
@@ -88,11 +99,11 @@ describe('CameraMetadataService.getCameraInfo', () => {
     expect(info).toEqual({ make: 'SONY', model: 'ILCE-7M3', iso: 3200 });
   });
 
-  test('returns null when EXIF is empty (the RAW/ORF case)', async () => {
+  test('returns null when EXIF is empty (a stripped JPG)', async () => {
     const payload = { exif: {}, iptc: {}, xmp: {}, icc: {}, thumbnail: null };
     setApi({ readImageMetadata: jest.fn().mockResolvedValue(payload) });
 
-    const info = await service.getCameraInfo(makeImage('C:/pics/raw.orf'));
+    const info = await service.getCameraInfo(makeImage('C:/pics/stripped.jpg'));
     expect(info).toBeNull();
   });
 
@@ -119,7 +130,7 @@ describe('CameraMetadataService.getCameraInfo', () => {
     const reader = jest.fn().mockResolvedValue({ exif: {}, iptc: {}, xmp: {}, icc: {}, thumbnail: null });
     setApi({ readImageMetadata: reader });
 
-    const img = makeImage('C:/pics/x.orf');
+    const img = makeImage('C:/pics/x.jpg');
     expect(await service.getCameraInfo(img)).toBeNull();
     expect(await service.getCameraInfo(img)).toBeNull();
     expect(reader).toHaveBeenCalledTimes(1);
@@ -140,5 +151,64 @@ describe('CameraMetadataService.getCameraInfo', () => {
     setApi({});
     const info = await service.getCameraInfo(makeImage('C:/pics/x.jpg'));
     expect(info).toBeNull();
+  });
+});
+
+describe('CameraMetadataService.getCameraInfo — RAW routing', () => {
+  test('RAW files route to read-raw-metadata and map every field', async () => {
+    const rawReader = jest.fn().mockResolvedValue({
+      make: 'OLYMPUS CORPORATION',
+      model: 'PEN-F',
+      iso: 1600,
+      exposureTime: 0.002,
+      aperture: 1.8,
+      focalLength: 17,
+      dateTime: '2025:02:06 20:27:48',
+      lens: 'OLYMPUS M.17mm F1.8'
+    });
+    const imgReader = jest.fn();
+    setApi({ readRawMetadata: rawReader, readImageMetadata: imgReader });
+
+    const info = await service.getCameraInfo(makeImage('C:/pics/P2060833.ORF'));
+    expect(info).toEqual({
+      make: 'OLYMPUS CORPORATION',
+      model: 'PEN-F',
+      iso: 1600,
+      lensModel: 'OLYMPUS M.17mm F1.8',
+      aperture: 1.8,
+      focalLength: 17,
+      dateTime: '2025:02:06 20:27:48',
+      shutter: '1/500 s'
+    });
+    // RAW must NOT go through the exifreader (read-image-metadata) path.
+    expect(rawReader).toHaveBeenCalledWith('C:/pics/P2060833.ORF');
+    expect(imgReader).not.toHaveBeenCalled();
+  });
+
+  test('formats slow shutter speeds (>= 1s) as "N s"', async () => {
+    setApi({ readRawMetadata: jest.fn().mockResolvedValue({ make: 'FUJIFILM', exposureTime: 2 }) });
+    const info = await service.getCameraInfo(makeImage('C:/pics/night.raf'));
+    expect(info!.shutter).toBe('2 s');
+  });
+
+  test('returns null when the readRawMetadata bridge is unavailable', async () => {
+    setApi({ readImageMetadata: jest.fn() });
+    const info = await service.getCameraInfo(makeImage('C:/pics/x.nef'));
+    expect(info).toBeNull();
+  });
+
+  test('returns null when read-raw-metadata resolves null (no EXIF found)', async () => {
+    setApi({ readRawMetadata: jest.fn().mockResolvedValue(null) });
+    const info = await service.getCameraInfo(makeImage('C:/pics/x.cr2'));
+    expect(info).toBeNull();
+  });
+
+  test('caches the RAW result (read-raw-metadata called once for two lookups)', async () => {
+    const rawReader = jest.fn().mockResolvedValue({ make: 'SONY', model: 'ILCE-7M3', iso: 3200 });
+    setApi({ readRawMetadata: rawReader });
+    const img = makeImage('C:/pics/a7.arw');
+    await service.getCameraInfo(img);
+    await service.getCameraInfo(img);
+    expect(rawReader).toHaveBeenCalledTimes(1);
   });
 });

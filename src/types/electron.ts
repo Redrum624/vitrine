@@ -53,6 +53,23 @@ export interface EmbeddableMetadata {
   };
 }
 
+/**
+ * Camera EXIF read from a proprietary RAW container's TIFF/EXIF IFDs (the
+ * read-raw-metadata IPC). Flat, display-oriented shape — every field optional,
+ * present only when the file carried it. `exposureTime` is in seconds (the
+ * renderer formats it to a shutter string).
+ */
+export interface RawExifMetadata {
+  make?: string;
+  model?: string;
+  iso?: number;
+  exposureTime?: number;
+  aperture?: number;
+  focalLength?: number;
+  dateTime?: string;
+  lens?: string;
+}
+
 interface MessageBoxOptions {
   type?: 'none' | 'info' | 'error' | 'question' | 'warning';
   title?: string;
@@ -183,6 +200,11 @@ export interface ElectronAPI {
     icc: import('./index').IccProfile;
     thumbnail: import('./index').ThumbnailData;
   }>;
+  /** Camera EXIF parsed from a proprietary RAW container's TIFF/EXIF IFDs in the
+   *  main process (exifreader cannot parse ORF/CR2/NEF/ARW/DNG/...). Flat shape;
+   *  every field optional; null when nothing usable is found. See
+   *  electron/rawMetadata.cjs + CameraMetadataService. */
+  readRawMetadata: (filePath: string) => Promise<RawExifMetadata | null>;
   writeImageMetadata: (filePath: string, metadata: EmbeddableMetadata) => Promise<boolean>;
   writeImageRating: (filePath: string, rating: number) => Promise<{ ok: boolean; method?: string; path?: string; error?: string }>;
   readImageRating: (filePath: string) => Promise<number | null>;

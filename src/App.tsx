@@ -54,6 +54,7 @@ import { styleAnalysisService } from './services/StyleAnalysisService';
 import { autoAdjustService } from './services/AutoAdjustService';
 import { imageProcessingPipeline } from './services/ImageProcessingPipeline';
 import { PrintDialog } from './components/Dialogs/PrintDialog';
+import { InfoPopover } from './components/InfoPopover';
 import { guardDeveloping } from './utils/developingGuard';
 
 // Import pipeline tests for development
@@ -422,6 +423,11 @@ function App() {
   // Histogram state - independent from tool selection
   const [histogramVisible, setHistogramVisible] = useState(false);
   const lastActiveModuleRef = useRef<string | null>('basicadj');
+
+  // Filename-chip Info popover (Task Q6): camera EXIF + file facts, opened by
+  // clicking the top-left filename chip. Anchored to the chip via this ref.
+  const [infoOpen, setInfoOpen] = useState(false);
+  const filenameChipRef = useRef<HTMLDivElement>(null);
 
   // Full-bleed workspace + live photo region (Glass · Sectioned, Task 5). The
   // alignment axis = horizontal center of the live photo-region rect; the
@@ -1580,8 +1586,20 @@ function App() {
             const { current, total } = fileSystemService.getCurrentImageInfo();
             return (
               <div
+                ref={filenameChipRef}
                 data-testid="filename-chip"
+                role="button"
+                tabIndex={0}
+                aria-label="Image info"
+                aria-expanded={infoOpen}
                 className="glass-chrome no-select"
+                onClick={() => setInfoOpen((v) => !v)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    setInfoOpen((v) => !v);
+                  }
+                }}
                 style={{
                   position: 'absolute',
                   left: CHIP_LEFT,
@@ -1592,7 +1610,7 @@ function App() {
                   fontWeight: 500,
                   color: 'var(--glass-text-chrome-primary)',
                   zIndex: 30,
-                  pointerEvents: 'none',
+                  cursor: 'pointer',
                   whiteSpace: 'nowrap',
                 }}
               >
@@ -1605,6 +1623,12 @@ function App() {
               </div>
             );
           })()}
+
+          {/* Info popover (Task Q6) — camera EXIF + file facts, anchored under the
+              filename chip. Develop view only (Gallery shows the folder chip). */}
+          {infoOpen && currentImage && viewMode !== 'gallery' && (
+            <InfoPopover image={currentImage} anchorRef={filenameChipRef} onClose={() => setInfoOpen(false)} />
+          )}
 
           {/* Floating toolbar pill — top, centered on the alignment axis in Develop;
               window-centered in Gallery (no photo region / axis in that view). */}

@@ -37,6 +37,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Metadata operations
   readImageMetadata: (filePath) => ipcRenderer.invoke('read-image-metadata', filePath),
+  // Camera EXIF from a proprietary RAW container (parsed from the file's TIFF/EXIF
+  // IFDs in the main process, since exifreader cannot parse these containers).
+  readRawMetadata: (filePath) => ipcRenderer.invoke('read-raw-metadata', filePath),
   writeImageMetadata: (filePath, metadata) => ipcRenderer.invoke('write-image-metadata', filePath, metadata),
   writeImageRating: (filePath, rating) => ipcRenderer.invoke('write-image-rating', filePath, rating),
   readImageRating: (filePath) => ipcRenderer.invoke('read-image-rating', filePath),

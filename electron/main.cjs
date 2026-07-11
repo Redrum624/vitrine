@@ -854,6 +854,25 @@ ipcMain.handle('read-image-metadata', async (event, filePath) => {
   }
 });
 
+// Read camera EXIF from a proprietary RAW container (ORF/CR2/NEF/ARW/DNG/...).
+// exifreader THROWS "Invalid image format" on these containers and the embedded
+// preview JPEG often carries no EXIF, so we parse the file's own TIFF/EXIF IFDs
+// directly (electron/rawMetadata.cjs — unit-tested). Cheap, decode-independent,
+// and cache-tier-agnostic: it reads the same fields whether the pixels come from
+// a fresh decode, an L1 hit, or an L2 disk hit. Returns a flat metadata object,
+// or null when nothing usable is found (never throws).
+ipcMain.handle('read-raw-metadata', async (event, filePath) => {
+  try {
+    const { parseRawExif } = require('./rawMetadata.cjs');
+    const data = await fs.promises.readFile(filePath);
+    const md = parseRawExif(data);
+    return Object.keys(md).length ? md : null;
+  } catch (error) {
+    console.warn('Failed to read RAW metadata:', error.message);
+    return null;
+  }
+});
+
 // Write image metadata (EXIF copyright/artist + IPTC-as-XMP) into an existing
 // raster file. Delegates to electron/imageWriter.cjs (unit-tested). Throws on
 // failure so the renderer promise rejects (no silent success).
