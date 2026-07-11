@@ -1,4 +1,5 @@
 import { logger } from '../utils/Logger';
+import { keyboardEventBlocked } from '../utils/keyboardScope';
 
 export interface KeyboardShortcut {
   id: string;
@@ -89,11 +90,11 @@ export class KeyboardShortcutsService {
   private handleKeyDown(event: KeyboardEvent): void {
     if (!this.isEnabled) return;
 
-    // Don't trigger shortcuts when typing in input fields
-    const target = event.target as HTMLElement;
-    if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.contentEditable === 'true') {
-      return;
-    }
+    // Shared guard: don't trigger shortcuts while typing in a field OR while any
+    // modal dialog is open. Returning HERE (before the match below) is what keeps
+    // the capture-phase preventDefault/stopPropagation from firing, so the blocked
+    // event still reaches the input/dialog's own handlers. See keyboardScope.ts.
+    if (keyboardEventBlocked(event)) return;
 
     const key = this.getEventKey(event);
     const shortcut = this.shortcuts.get(key);

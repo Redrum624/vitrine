@@ -12,6 +12,7 @@ import { imageProcessingPipeline } from '../../services/ImageProcessingPipeline'
 import { useAppStore } from '../../stores/appStore';
 import { notificationService } from '../../services/NotificationService';
 import { guardDeveloping } from '../../utils/developingGuard';
+import { keyboardEventBlocked } from '../../utils/keyboardScope';
 import type { LocalAdjustmentsPipelineModule } from '../../modules/LocalAdjustmentsPipelineModule';
 import type { LocalAdjustmentLayer } from '../../modules/LocalAdjustmentsModule';
 
@@ -220,8 +221,9 @@ export function BasicAdjustmentsModuleComponent({
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Delete' && e.key !== 'Backspace') return;
       if (!selectedMaskId) return;
-      const el = document.activeElement as HTMLElement | null;
-      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
+      // Shared guard (keyboardScope.ts): don't delete the mask while typing in a
+      // field OR while a modal dialog is open (its own Del/Backspace wins).
+      if (keyboardEventBlocked(e)) return;
       e.preventDefault();
       deleteMask(selectedMaskId);
     };

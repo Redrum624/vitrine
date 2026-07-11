@@ -14,6 +14,7 @@ import {
 } from '../../utils/gallerySelection';
 import { evictOldestThumbnails, MAX_THUMBNAIL_CACHE } from '../Panels/ThumbnailPanel';
 import { getDisplayFormat } from '../../utils/imageFormat';
+import { keyboardEventBlocked } from '../../utils/keyboardScope';
 
 interface GalleryViewProps {
   images: ImageFileInfo[];
@@ -219,12 +220,11 @@ export function GalleryView({ images, onImageSelect, visible }: GalleryViewProps
     const onKeyDown = (e: KeyboardEvent) => {
       if (!/^[0-5]$/.test(e.key)) return;
       if (e.ctrlKey || e.metaKey || e.altKey) return;
-      const target = e.target as HTMLElement | null;
-      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
-      // Never rate beneath an open modal (e.g. the Del-remove confirm dialog,
-      // where the selection is non-empty by construction) — a rating here writes
-      // XMP to every selected file on disk. Mirrors App.tsx's gallery-Del guard.
-      if (document.querySelector('[aria-modal="true"]') !== null) return;
+      // Shared guard (keyboardScope.ts): don't rate while typing in a field OR
+      // beneath an open modal (e.g. the Del-remove confirm dialog, where the
+      // selection is non-empty by construction) — a rating here writes XMP to
+      // every selected file on disk.
+      if (keyboardEventBlocked(e)) return;
       const ids = useAppStore.getState().selectedImageIds;
       if (!ids || ids.length === 0) return;
       const rating = Number(e.key);

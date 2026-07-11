@@ -17,6 +17,7 @@ import { PresetDialog } from './components/Dialogs/PresetDialog';
 import { ImageSizeDialog } from './components/Dialogs/ImageSizeDialog';
 import { GalleryRemoveDialog } from './components/Dialogs/GalleryRemoveDialog';
 import { computeRemoval, trashImages, shouldHandleGalleryDelete } from './utils/galleryRemove';
+import { keyboardEventBlocked } from './utils/keyboardScope';
 import { NotificationSystem } from './components/UI/NotificationSystem';
 import { useNotifications } from './hooks/useNotifications';
 import { ShortcutsHelpDialog } from './components/Dialogs/ShortcutsHelpDialog';
@@ -904,18 +905,17 @@ function App() {
   // flips so the "already open" guard reads a fresh value.
   useEffect(() => {
     const onGalleryDelete = (e: KeyboardEvent) => {
-      const t = e.target as HTMLElement | null;
+      // Shared DOM guard (keyboardScope.ts) covers the input/contentEditable target
+      // AND any open aria-modal dialog (our own confirm, or Export/etc. reachable
+      // from the gallery toolbar). The removeTargetIds !== null check below
+      // additionally covers our own confirm dialog in the frame before its
+      // aria-modal node commits to the DOM.
+      if (keyboardEventBlocked(e)) return;
       const ids = useAppStore.getState().selectedImageIds;
-      // Any GlassModal open (our own confirm, or Export/etc. reachable from the
-      // gallery toolbar) marks itself aria-modal — never open the remove dialog
-      // behind or on top of one.
-      const anyModalOpen = removeTargetIds !== null || document.querySelector('[aria-modal="true"]') !== null;
       if (!shouldHandleGalleryDelete({
         key: e.key,
         viewMode: useAppStore.getState().viewMode,
-        targetTagName: t?.tagName,
-        isContentEditable: t?.isContentEditable,
-        dialogOpen: anyModalOpen,
+        dialogOpen: removeTargetIds !== null,
         selectionCount: ids?.length ?? 0,
       })) return;
       e.preventDefault();
@@ -1215,8 +1215,10 @@ function App() {
     const onNumpadRating = (e: KeyboardEvent) => {
       const m = /^Numpad([0-5])$/.exec(e.code);
       if (!m) return;
-      const t = e.target as HTMLElement | null;
-      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      // Shared guard (keyboardScope.ts): don't rate while typing in a field OR
+      // while a modal dialog is open. Returns BEFORE stopPropagation/preventDefault
+      // so a blocked keypress still reaches the input/dialog's own handlers.
+      if (keyboardEventBlocked(e)) return;
       // Gallery mode: bail BEFORE stopPropagation/preventDefault so the keydown
       // bubbles through to GalleryView's own bubble-phase listener (which rates
       // the whole selection there). Swallowing it here first — as this used to

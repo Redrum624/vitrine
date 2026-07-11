@@ -8,6 +8,7 @@ import { ChipButton } from '../Controls/ChipButton';
 import { DOCK_BOTTOM } from '../../layout/photoRegion';
 import { filterImagesByRating, handleImageClick, isRawImage } from '../../utils/gallerySelection';
 import { getDisplayFormat } from '../../utils/imageFormat';
+import { keyboardEventBlocked } from '../../utils/keyboardScope';
 
 interface ThumbnailPanelProps {
   images: ImageFileInfo[];
@@ -294,6 +295,12 @@ export function ThumbnailPanel({
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (!visible || filteredImages.length === 0) return;
+      // Shared guard (keyboardScope.ts): never switch the loaded photo or close the
+      // filmstrip while the user is typing in a field OR a modal dialog is open —
+      // the dialog owns its own arrows/Esc. This listener historically had NO input
+      // check at all, so arrow keys inside a dialog's text field switched the photo
+      // and Esc closed the filmstrip out from under the dialog.
+      if (keyboardEventBlocked(e)) return;
 
       const currentIndex = selectedImage ? filteredImages.findIndex(img => img.id === selectedImage.id) : -1;
 
