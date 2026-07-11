@@ -4,6 +4,19 @@ All notable changes to **Photo Editor Pro** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.17.0] - 2026-07-10
+
+### Added
+- **RAW full quality is now instant across sessions (disk-persisted base cache).** The decoded 16-bit base of every RAW you open is persisted to disk (up to 2 GB, least-recently-used entries evicted), so reopening a photo in a *later session* loads full quality from disk in about a second instead of re-running the multi-second LibRaw decode — measured in the packaged app on a 20 MP ORF: full quality at **1.2 s** from disk vs **7.5 s** cold (~6×), with the instant preview unchanged. Entries are keyed by file, decode options, and the file's modification time/size — editing the source file or changing demosaic/highlight options invalidates them automatically, and a degraded 8-bit fallback decode is never persisted. All v1.16.0 progressive-open guarantees are unchanged. Affects: `electron/baseCache.cjs` (new), `electron/main.cjs`, `electron/preload.cjs`, `src/services/RawImageService.ts`.
+
+### Fixed
+- **Enhance Revert can no longer restore another photo's pixels.** Cause: the upscale revert stack survived image switches, so Revert after switching photos would have restored the previous image's pre-upscale pixels as the current image; Revert was also not gated during the progressive-open developing window. Fix: the stack is cleared on every image switch, and Revert waits for full quality like every other base-mutating action. Affects: `src/services/EnhanceService.ts`, `src/services/ImageService.ts`.
+- **A superseded background decode now pays forward instead of being discarded.** Cause: switching photos while a ~4 s RAW decode was still running threw the finished decode away. Fix: the result is cached under its own (file, options) key before the supersede guards run, so the next reopen of that photo is instant; a stale-options result for the currently-open photo is still skipped so it can never clobber a fresher re-decode. Affects: `src/services/ImageService.ts`.
+
+### Changed
+- A repository tripwire test now fails the suite if any future action that reads or writes base pixels is added without the developing-window guard (this bypass class was caught three separate times by review during v1.16.0 — now it's caught by CI at introduction time). Affects: `src/test/developingGuardTripwire.test.ts` (new).
+- The Image Size and Canvas Size menu entries are disabled while "Developing full quality…" is shown (they would display the preview's dimensions); the status bar subscribes to exactly the fields it renders; the toolbar's Print button no longer claims a Ctrl+P shortcut (Ctrl+P opens the Preset Manager).
+
 ## [1.16.0] - 2026-07-10
 
 ### Added
