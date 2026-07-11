@@ -38,6 +38,10 @@ export class ImageService {
   private processingPipeline: ImageProcessingPipeline | null = null;
   private loadGeneration = 0;
   private bakedUpscale: BakedUpscaleInfo | null = null;
+  // Single hook fired when the WORKING IMAGE IS SWITCHED (fresh loadImage / clearImage) — see
+  // setImageSwitchHook. Used to drop per-image transient state that lives outside ImageService
+  // (currently EnhanceService's revert stack), scoped alongside the `bakedUpscale` marker.
+  private imageSwitchHook: (() => void) | null = null;
 
   static getInstance(): ImageService {
     if (!ImageService.instance) {
@@ -97,6 +101,7 @@ export class ImageService {
   ): Promise<ImageData> {
     const thisGeneration = ++this.loadGeneration;
     this.bakedUpscale = null; // Clear baked marker on any fresh image load
+    this.notifyImageSwitched(); // drop per-image transient state scoped to the previous image (EnhanceService's revert stack)
     // Reset the "Developing full quality…" affordance for EVERY new load — synchronously, before
     // any cache lookup or decode. Without this, switching away from a still-developing RAW (e.g.
     // to a warm/cached or non-RAW image) left the affordance stuck on forever: it was only ever
@@ -750,11 +755,38 @@ export class ImageService {
   clearImage(): void {
     this.currentImage = null;
     this.bakedUpscale = null;
+    this.notifyImageSwitched(); // same per-image reset as a fresh load (drop EnhanceService's revert stack)
     // Release the original-snapshot references too (deferred or materialized) —
     // otherwise the previous image's ~310MB base stays reachable after a clear.
     this.originalImageData = null;
     this.pendingOriginalSource = null;
     logger.info('Image cleared');
+  }
+
+  /**
+   * Register the single hook fired whenever the WORKING IMAGE IS SWITCHED — a fresh loadImage()
+   * (any path: cache hit, progressive preview, full decode) or clearImage(). It is NOT fired on
+   * in-place base replacements (updateCurrentImageData: rotate/flip/resize, the progressive
+   * full-decode swap, the upscale bake), which keep the same logical image. EnhanceService
+   * registers here to drop its per-image revert stack (see EnhanceService.onImageSwitched): those
+   * restore points hold the PREVIOUS image's pre-upscale pixels + edit state, so surviving a switch
+   * would let revert() restore another image's base as the current working image.
+   *
+   * Mirrors the setBakeBridge wiring — EnhanceService already imports imageService, so a single
+   * setter (rather than a reverse import) avoids an import cycle and a new event bus. Single-consumer
+   * by design, exactly like the `bakedUpscale` marker it is scoped alongside (both cleared at the
+   * same loadImage/clearImage choke points).
+   */
+  setImageSwitchHook(hook: () => void): void {
+    this.imageSwitchHook = hook;
+  }
+
+  private notifyImageSwitched(): void {
+    try {
+      this.imageSwitchHook?.();
+    } catch (error) {
+      logger.error('Error in image-switch hook:', error);
+    }
   }
 
   /**

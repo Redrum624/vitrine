@@ -238,11 +238,29 @@ class EnhanceService {
   }
 
   revert(): void {
+    // Base-MUTATING via _popAndRestore → imageService.updateCurrentImageData. Gated during the
+    // progressive-open developing window exactly like applyUpscale (single choke point, toast via
+    // notificationService.info): reverting while the background full decode is still pending would
+    // restore the pre-upscale base into a working image the swap is about to clobber. The stack is
+    // left intact so the revert is retryable the moment the full decode settles.
+    if (guardDeveloping(notificationService.info.bind(notificationService), 'Enhance Revert')) return;
     if (!this._popAndRestore()) return;
 
     const store = useAppStore.getState();
     store.notifyExternalParamsChange();
     store.triggerReprocessing();
+  }
+
+  /**
+   * Drop the per-image revert stack when the working image is SWITCHED (a fresh open or a clear).
+   * Registered on ImageService's image-switch hook at module load — the restore points hold the
+   * PREVIOUS image's pre-upscale pixels + edit state, so keeping them across a switch would let a
+   * subsequent revert() restore another image's base as the current working image (round-4
+   * re-review finding). Scoped exactly like ImageService's `bakedUpscale` marker, which is cleared
+   * at the same two choke points.
+   */
+  onImageSwitched(): void {
+    this.restoreStack = [];
   }
 
   /**
@@ -274,3 +292,9 @@ checkpointService.setBakeBridge({
   getDepth: () => enhanceService.getRestoreDepth(),
   unwindToDepth: (d) => enhanceService.unwindToDepth(d),
 });
+
+// Scope the revert stack per image: drop it whenever the working image is switched (a fresh
+// loadImage or clearImage), mirroring how ImageService clears its bakedUpscale marker at the same
+// choke points. Optional-chained so unit tests that mock ImageService without this method degrade
+// gracefully (the same pattern as imageProcessingPipeline.getModule?. above).
+imageService.setImageSwitchHook?.(() => enhanceService.onImageSwitched());
