@@ -156,9 +156,11 @@ describe('Canvas.loadImage — mid-flight image-switch race', () => {
  * otherwise overwrite the newer image's already-applied decode options AND go on to
  * decode the stale image with the wrong (newer image's) options in the store.
  *
- * Fixed by `activeLoadPathRef`, set synchronously at the very top of `loadImage`
- * (before any await) and re-checked right after `getSavedEditState` resolves —
- * mirrors the post-decode identity guard's pattern one step earlier in the flow.
+ * Fixed by the monotonic load token (`loadTokenRef`, which replaced the original
+ * path-equality `activeLoadPathRef` — see the A→B→A describe below), bumped
+ * synchronously at the very top of `loadImage` (before any await) and re-checked
+ * right after `getSavedEditState` resolves — mirrors the post-decode identity
+ * guard's pattern one step earlier in the flow.
  */
 describe('Canvas.loadImage — mid-flight setRawDecodeOptions race (pre-decode)', () => {
   const A_OPTIONS: RawDecodeOptions = { demosaic: 'dcb', highlightMode: 'blend' };
@@ -218,6 +220,74 @@ describe('Canvas.loadImage — mid-flight setRawDecodeOptions race (pre-decode)'
     // And A's decode must never even have been requested — the guard returns before
     // reaching imageService.loadImage at all.
     expect((imageService.loadImage as jest.Mock).mock.calls.map((c) => c[0])).not.toContain(IMG_A.path);
+  });
+});
+
+/**
+ * Final whole-branch review of the latency round, important #2: the pre-decode guard above
+ * originally discriminated by PATH (`activeLoadPathRef`), not call instance. A→B→A rapid
+ * clicks: call 1 (A) suspends on the saved-state read; call 2 (B) and call 3 (A again)
+ * complete; call 1 then resumes, sees "A is (again) the active path", passes the guard and
+ * re-dispatches `imageService.loadImage(A)` — bumping ImageService's generation and
+ * superseding call 3's already-completed load. Final state is coherent (same
+ * path/options/savedState), but on a cold RAW this runs a SECOND full decode + preview
+ * extraction + notify/reprocess of the same file. Fixed by a monotonic load token
+ * (`loadTokenRef`): each call captures its own token and, after every await, only the
+ * LATEST call instance proceeds — a newer call for ANY path (same or different)
+ * invalidates older in-flight instances.
+ */
+describe('Canvas.loadImage — A→B→A rapid-switch race (stale call must not re-dispatch)', () => {
+  beforeEach(() => {
+    useAppStore.setState({ imageDimensions: {} });
+    jest.clearAllMocks();
+    (imageService.getCurrentImage as jest.Mock).mockReturnValue(null);
+    (editPersistenceService.restoreState as jest.Mock).mockReturnValue(false);
+    (checkpointService.getCheckpoints as jest.Mock).mockReturnValue([{ id: 1 }]);
+  });
+
+  it('a superseded call resumed AFTER its path became current again bails instead of loading twice', async () => {
+    // Call 1 (A) is held open on the saved-state read; calls 2 (B) and 3 (A) resolve immediately.
+    let resolveFirstA: (state: unknown) => void = () => {};
+    let aStateReads = 0;
+    (editPersistenceService.getSavedEditState as jest.Mock).mockImplementation((path: string) => {
+      if (path === IMG_A.path && ++aStateReads === 1) {
+        return new Promise((resolve) => { resolveFirstA = resolve; });
+      }
+      return Promise.resolve(null);
+    });
+    (imageService.loadImage as jest.Mock).mockImplementation(async (path: string, beforeNotify?: (r: unknown) => void) => {
+      const decoded = { filePath: path, width: 20, height: 10 };
+      (imageService.getCurrentImage as jest.Mock).mockReturnValue(decoded);
+      beforeNotify?.(decoded);
+    });
+
+    const props = { onFitWindow: () => {}, onActualSize: () => {}, onZoomIn: () => {}, onZoomOut: () => {}, zoom: 1 };
+    const { rerender } = render(<Canvas {...props} currentImage={IMG_A} />);
+
+    // Call 1 starts (synchronous prefix) and suspends awaiting A's saved edit state.
+    await Promise.resolve();
+
+    // Click B: call 2 runs to completion.
+    rerender(<Canvas {...props} currentImage={IMG_B} />);
+    await new Promise((r) => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 0));
+
+    // Click A again: call 3 runs to completion — A's decode has been dispatched ONCE.
+    rerender(<Canvas {...props} currentImage={IMG_A} />);
+    await new Promise((r) => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 0));
+    expect((imageService.loadImage as jest.Mock).mock.calls.length).toBe(2); // B (call 2) + A (call 3)
+
+    // Call 1 resumes. A path-equality guard would see "A is current again", proceed, and
+    // dispatch a SECOND decode of A (superseding call 3's completed load); the monotonic
+    // token guard makes the stale instance bail instead.
+    resolveFirstA(null);
+    await new Promise((r) => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 0));
+
+    const paths = (imageService.loadImage as jest.Mock).mock.calls.map((c) => c[0]);
+    expect(paths.filter((p) => p === IMG_A.path)).toHaveLength(1); // call 3 only — call 1 never re-dispatches
+    expect((imageService.loadImage as jest.Mock).mock.calls.length).toBe(2);
   });
 });
 

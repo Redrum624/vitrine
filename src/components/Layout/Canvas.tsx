@@ -59,11 +59,16 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
   const glCanvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasWrapperRef = useRef<HTMLDivElement>(null);
-  // Path of the `loadImage` call currently in flight, set synchronously at the TOP
-  // of loadImage (before any await) so an EARLIER call resuming after its own await
-  // can detect that a LATER call has since started — see the setRawDecodeOptions
-  // race guard below.
-  const activeLoadPathRef = useRef<string | null>(null);
+  // Monotonic token identifying the LATEST `loadImage` call instance, bumped
+  // synchronously at the TOP of loadImage (before any await). Each call captures its
+  // own token and, after every await, bails unless it is still the latest — so an
+  // EARLIER call resuming after its own await detects that a LATER call has since
+  // started. Discriminates by CALL INSTANCE, not path (which this replaced): a newer
+  // call for ANY path — including the SAME path, as in A→B→A rapid clicks — must
+  // invalidate older in-flight instances, otherwise a resumed stale call re-dispatches
+  // a duplicate decode of the image the newest call already loaded (final whole-branch
+  // review, important #2). See the setRawDecodeOptions race guard below.
+  const loadTokenRef = useRef(0);
   // Per-field selectors (not a whole-store `useAppStore()` subscription) — Canvas only
   // re-renders when one of ITS OWN fields actually changes, not on every store update
   // elsewhere (e.g. Gallery-only fields like ratingFilter/selectedImageIds). Same pattern as
@@ -766,8 +771,10 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
   }, [viewport, drawLoadedImage]);
 
   const loadImage = useCallback(async (image: ImageFileInfo) => {
+    // This call instance's token: any later loadImage call bumps the ref, marking
+    // this instance stale at its next post-await check.
+    const loadToken = ++loadTokenRef.current;
     try {
-      activeLoadPathRef.current = image.path;
 
       // Persist the OUTGOING image's edits + history before we reset the pipeline.
       editPersistenceService.flush();
@@ -798,13 +805,15 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
       // edited photo.
       const savedState = await editPersistenceService.getSavedEditState(image.path);
 
-      // The user may have switched to a different image while the above await was in
-      // flight (rapid filmstrip/gallery clicks) — bail before writing decode options
-      // for a no-longer-current image. Without this, image A's (stale) options could
-      // land in the store AFTER image B's own loadImage call already set B's options,
-      // and then ImageService.loadImage(image.path) below would decode A with the
-      // WRONG (B's or neither's) options. Mirrors the post-decode identity guard below.
-      if (activeLoadPathRef.current !== image.path) {
+      // The user may have switched images while the above await was in flight (rapid
+      // filmstrip/gallery clicks) — bail before writing decode options for a superseded
+      // call. Without this, image A's (stale) options could land in the store AFTER
+      // image B's own loadImage call already set B's options, and then
+      // ImageService.loadImage(image.path) below would decode A with the WRONG (B's or
+      // neither's) options. The token also covers the A→B→A case the old path-equality
+      // check missed: even if OUR path is current again via a newer call, this stale
+      // instance must not proceed to dispatch a duplicate decode of it.
+      if (loadTokenRef.current !== loadToken) {
         logger.info(`Image load of ${image.path} discarded: superseded before decode options resolved`);
         return;
       }
@@ -825,11 +834,11 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
       await imageService.loadImage(
         image.path,
         (decoded) => {
-          if (activeLoadPathRef.current !== image.path) return;
+          if (loadTokenRef.current !== loadToken) return;
           editPersistenceService.restoreState(savedState, decoded.width, decoded.height, image.path);
         },
         (fullWidth, fullHeight) => {
-          if (activeLoadPathRef.current !== image.path) return;
+          if (loadTokenRef.current !== loadToken) return;
           useAppStore.getState().setImageDimensions(image.id, { width: fullWidth, height: fullHeight });
         },
       );
