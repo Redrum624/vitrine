@@ -74,7 +74,12 @@ describe('PresetService — Local Adjustments round-trip', () => {
     const restored = la.getParameters().layers;
     expect(restored).toHaveLength(2);
 
-    const r = restored.find((l) => l.name === 'Radial')!;
+    // Apply must preserve layer ORDER (not just membership) — index into the
+    // restored array directly rather than looking layers up by name.
+    expect(restored[0].name).toBe('Radial');
+    expect(restored[1].name).toBe('Grad');
+
+    const r = restored[0];
     expect(r.type).toBe('radial_gradient');
     expect(r.geometry).toEqual(radialGeom);
     expect(r.parameters.exposure).toBe(0.5);
@@ -82,7 +87,7 @@ describe('PresetService — Local Adjustments round-trip', () => {
     expect(r.opacity).toBeCloseTo(0.8);
     expect(r.enabled).toBe(true);
 
-    const g = restored.find((l) => l.name === 'Grad')!;
+    const g = restored[1];
     expect(g.type).toBe('linear_gradient');
     expect(g.geometry).toEqual(gradGeom);
     expect(g.parameters.contrast).toBe(-20);
@@ -144,5 +149,65 @@ describe('PresetService — Local Adjustments round-trip', () => {
     expect(la.getParameters().layers.length).toBe(before);
 
     presetService.deletePreset('legacy_la_preset');
+  });
+
+  test('applying a preset with no `localAdjustments` key at all leaves current LA untouched', () => {
+    const la = getLA();
+    la.createLayer('radial_gradient', 'Keep', W, H);
+    la.enable();
+    const before = [...la.getParameters().layers];
+
+    // Preset shape with the `localAdjustments` key entirely absent from settings
+    // (not just an empty/legacy sub-shape) — e.g. a preset that never touched LA.
+    const noLaKey = {
+      version: '1.0.0',
+      presets: [{
+        id: 'no_la_key_preset',
+        name: 'No LA Key',
+        description: '',
+        category: 'custom',
+        tags: [],
+        createdAt: '', modifiedAt: '',
+        settings: {},
+        metadata: { version: '1.0.0', compatibility: ['1.0.0'] },
+      }],
+    };
+    presetService.importPresets(JSON.stringify(noLaKey));
+
+    expect(presetService.applyPreset('no_la_key_preset')).toBe(true);
+    expect(la.getParameters().layers.length).toBe(before.length);
+    expect(la.getParameters().layers.map((l) => l.id)).toEqual(before.map((l) => l.id));
+
+    presetService.deletePreset('no_la_key_preset');
+  });
+
+  test('applying a preset with an explicit empty `layers: []` leaves current LA untouched', () => {
+    const la = getLA();
+    la.createLayer('radial_gradient', 'Keep', W, H);
+    la.enable();
+    const before = [...la.getParameters().layers];
+
+    // localAdjustments IS present but explicitly carries zero layers — must be a
+    // no-op on the target's current layers, not a wipe.
+    const emptyLayers = {
+      version: '1.0.0',
+      presets: [{
+        id: 'empty_layers_preset',
+        name: 'Empty Layers',
+        description: '',
+        category: 'custom',
+        tags: [],
+        createdAt: '', modifiedAt: '',
+        settings: { localAdjustments: { enabled: true, layers: [] } },
+        metadata: { version: '1.0.0', compatibility: ['1.0.0'] },
+      }],
+    };
+    presetService.importPresets(JSON.stringify(emptyLayers));
+
+    expect(presetService.applyPreset('empty_layers_preset')).toBe(true);
+    expect(la.getParameters().layers.length).toBe(before.length);
+    expect(la.getParameters().layers.map((l) => l.id)).toEqual(before.map((l) => l.id));
+
+    presetService.deletePreset('empty_layers_preset');
   });
 });

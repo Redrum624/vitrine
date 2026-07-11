@@ -6,6 +6,7 @@ import { AccentButton } from '../Controls/AccentButton';
 import { SectionLabel } from '../Controls/SectionLabel';
 import { inputStyle } from './glassFormStyles';
 import { presetService, AdjustmentPreset } from '../../services/PresetService';
+import { useAppStore } from '../../stores/appStore';
 import { logger } from '../../utils/Logger';
 
 interface PresetDialogProps {
@@ -67,9 +68,19 @@ export function PresetDialog({ isOpen, onClose, onApplyPreset }: PresetDialogPro
   const handleApplyPreset = (preset: AdjustmentPreset) => {
     try {
       setSelectedPreset(preset);
-      onApplyPreset(preset);
-      presetService.applyPreset(preset.id);
-      logger.info(`Applied preset: ${preset.name}`);
+      const applied = presetService.applyPreset(preset.id);
+      if (applied) {
+        // Same follow-up doUndo/doRedo use after CheckpointService.restore() — the
+        // preset applied its settings directly to the pipeline modules, so the
+        // canvas + panels need an explicit nudge to actually repaint.
+        const store = useAppStore.getState();
+        store.notifyExternalParamsChange();
+        store.triggerReprocessing();
+        onApplyPreset(preset);
+        logger.info(`Applied preset: ${preset.name}`);
+      } else {
+        logger.error(`Failed to apply preset: ${preset.name}`);
+      }
     } catch (error) {
       logger.error('Failed to apply preset:', error);
     }
