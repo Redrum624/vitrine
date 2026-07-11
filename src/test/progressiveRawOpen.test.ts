@@ -160,15 +160,17 @@ describe('ImageService.loadImage — progressive RAW open', () => {
     expect(imageCacheService.getBase('/photo.orf')).toBeNull();  // stale-options full never cached
   });
 
-  it('skips the wasteful OLD-options swap when a re-decode is in flight (store options not yet updated)', async () => {
+  it('skips the wasteful OLD-options swap when a re-decode is in flight, but STILL writes L1 (Case-A failure recovery)', async () => {
     // Case A of the OLD→NEW double swap: the ORIGINAL background full decode (started first, so it
     // lands first) resolves while a re-decode is in flight but has NOT yet updated the store
-    // options — so `optionsChanged` still reads false. Without the reDecode-in-flight guard, this
-    // decode would swap the OLD-options result in + pay a full-res reprocess, only for reDecode to
-    // immediately replace it with the NEW-options result. It must neither swap nor write L1.
+    // options — so `optionsChanged` still reads false. The wasteful OLD-options VISUAL swap is
+    // suppressed (reDecode owns the screen). The L1 cache write, however, now HAPPENS under the
+    // captured options: reDecode's own setBase overwrites it on success, and on reDecode FAILURE it
+    // survives as an instant L1 hit on reopen — upgrading failure recovery from an L2 read to L1.
+    const captured = { demosaic: 'dcb' as const, highlightMode: 'blend' as const };
     const full = deferred<ReturnType<typeof makeFullPayload>>();
     decodeApi().mockImplementation(async () => full.promise);
-    useAppStore.getState().setRawDecodeOptions({ demosaic: 'dcb', highlightMode: 'blend' });
+    useAppStore.getState().setRawDecodeOptions(captured);
 
     await imageService.loadImage('/photo.orf', undefined, () => {});
     expect(imageService.getCurrentImage()?.width).toBe(4); // preview on screen
@@ -183,9 +185,22 @@ describe('ImageService.loadImage — progressive RAW open', () => {
 
     expect(swap).not.toHaveBeenCalled();                         // no wasteful OLD-options swap
     expect(imageService.getCurrentImage()?.width).toBe(4);       // still the preview — reDecode will swap
-    expect(imageCacheService.getBase('/photo.orf')).toBeNull();  // stale-options base not written either
+    // …but the fully-paid decode IS now cached under its captured options (Case-A L1 write).
+    const entry = imageCacheService.getBase('/photo.orf');
+    expect(entry?.width).toBe(8);
+    expect(entry?.metadata?.decodeOptions).toEqual(captured);
     swap.mockRestore();
+
+    // Simulate reDecode FAILURE: reDecoding lowered, store options UNCHANGED (still `captured`), so
+    // reDecode never overwrote the L1 entry. Reopening now serves full quality straight from L1 —
+    // NO LibRaw decode IPC, NO progressive preview.
     useAppStore.getState().setReDecoding(false);
+    decodeApi().mockClear();
+    previewApi().mockClear();
+    const reopened = await imageService.loadImage('/photo.orf', undefined, () => {});
+    expect(reopened.width).toBe(8);              // recovered from L1 (Case-A entry)
+    expect(decodeApi()).not.toHaveBeenCalled();  // instant L1 hit — no re-decode
+    expect(previewApi()).not.toHaveBeenCalled(); // no progressive preview on a cache hit
   });
 
   it('caches a superseded decode WITHOUT swapping the working image (write-before-guard invariant)', async () => {

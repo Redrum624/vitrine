@@ -56,3 +56,30 @@ describe('getSavedRawDecodeOptions — persisted-shape validation', () => {
     expect(await editPersistenceService.getSavedRawDecodeOptions('/p.orf')).toBeNull();
   });
 });
+
+/**
+ * Q3 item 3: the Canvas open path already holds the edit state (single up-front getSavedEditState
+ * read) and must run the SAME shape guard on savedState.rawDecodeOptions WITHOUT a second IPC read.
+ * validateSavedRawDecodeOptions is that synchronous core — Canvas routes through it instead of
+ * reading savedState.rawDecodeOptions raw (the P6-validator bypass this closes).
+ */
+describe('validateSavedRawDecodeOptions — synchronous Canvas-path guard', () => {
+  it('returns valid options unchanged', () => {
+    const valid: RawDecodeOptions = { demosaic: 'ahd', highlightMode: 'reconstruct' };
+    expect(editPersistenceService.validateSavedRawDecodeOptions(valid)).toEqual(valid);
+  });
+
+  it('falls back to DEFAULT for an out-of-enum value', () => {
+    expect(editPersistenceService.validateSavedRawDecodeOptions({ demosaic: 'garbage', highlightMode: 'blend' }))
+      .toEqual(DEFAULT_RAW_DECODE_OPTIONS);
+  });
+
+  it('falls back to DEFAULT for a structurally-corrupt (non-object) value', () => {
+    expect(editPersistenceService.validateSavedRawDecodeOptions('not-an-object')).toEqual(DEFAULT_RAW_DECODE_OPTIONS);
+  });
+
+  it('returns null for an absent (undefined/null) value so the caller supplies its own DEFAULT', () => {
+    expect(editPersistenceService.validateSavedRawDecodeOptions(undefined)).toBeNull();
+    expect(editPersistenceService.validateSavedRawDecodeOptions(null)).toBeNull();
+  });
+});

@@ -243,7 +243,8 @@ export class ImageService {
             try {
               autoAdjustmentResult = await autoRawAdjustmentService.detectAndApplyRAWAdjustments(
                 filePath,
-                this.processingPipeline
+                this.processingPipeline,
+                interactive, // batch opens (interactive=false) must not write-through the histogram decode
               );
 
               if (autoAdjustmentResult.isRAW && autoAdjustmentResult.confidence > 0.5) {
@@ -354,15 +355,20 @@ export class ImageService {
    *    while we were decoding → don't swap, so this stale-options full decode never replaces the
    *    reDecode's fresh working image.
    *
-   * The ONE case that also skips the WRITE is a stale-options decode of THIS SAME path (store
-   * options differ from this decode's captured options while this path is still the current
+   * The ONE case that also skips the WRITE is a STALE-OPTIONS decode of THIS SAME path (the store
+   * options already differ from this decode's captured options while this path is still the current
    * image — regardless of generation, so an out-of-order landing after a same-path reopen can't
    * clobber either): the path may already hold fresher-options pixels (from reDecode or a reopen
-   * that cache-hit them), and getBase is options-blind on read. Same-path same-options rewrites
-   * are content-identical and different-path writes can never collide, so the skip loses no
-   * legitimate pay-forward. The options recorded on the cache write are the CAPTURED ones (the
-   * decodeOptions param), never the current store state — they are the buffer's true decode
-   * provenance.
+   * that cache-hit them), and getBase is options-blind on the KEY, so overwriting them with our
+   * stale entry would downgrade the cache. The options recorded on the cache write are the CAPTURED
+   * ones (the decodeOptions param), never the current store state — they are the buffer's true
+   * decode provenance.
+   *
+   * A reDecode merely IN FLIGHT (options not yet changed) does NOT skip the write: the captured
+   * options still equal the store options, so the entry is coherent for the read side. reDecode's
+   * own setBase overwrites it on success; on reDecode FAILURE it survives as an INSTANT L1 hit on
+   * reopen (upgrading failure recovery from an L2 disk read to L1). Only the visual swap is
+   * suppressed for that case (see reDecodeWillOwnPath below) — the cache write is orthogonal.
    */
   private async developFullDecode(
     filePath: string,
@@ -406,14 +412,26 @@ export class ImageService {
       // WRITE-BEFORE-GUARD (deliberate — see doc comment): cache this fully-paid decode under its
       // own (path, captured-options) key so a superseded open still pays forward to the next
       // reopen. The base cache holds the FULL 16-bit decode only (the preview is never cached).
-      // Skip the write ONLY when this decode's options are stale for this SAME still-current path
-      // (getBase is options-blind on read; the path may already hold fresher-options pixels from
-      // reDecode or a reopen that cache-hit them) — either because the store options already
-      // changed (optionsChanged) OR because a re-decode is in flight that will write the
-      // authoritative base (reDecodeInFlight). Deliberately NOT conditioned on generation: a stale
-      // decode landing out-of-order after a same-path reopen must not clobber either. Options
-      // recorded are the CAPTURED decodeOptions param (this buffer's true provenance).
-      const wouldClobberFresherReDecode = !identityChanged && (optionsChanged || reDecodeInFlight);
+      // Skip the write ONLY when this decode's options are STALE for this SAME still-current path
+      // (optionsChanged): the store already moved to different options, getBase is options-blind on
+      // read, and the path may already hold fresher-options pixels (from reDecode or a reopen that
+      // cache-hit them) — overwriting them with our stale-options entry would downgrade the cache.
+      //
+      // CASE A (reDecode in flight, options NOT yet changed — reDecodeInFlight && !optionsChanged):
+      // we DO write now. The captured options still equal the current store options, so the read
+      // side (baseCacheOptionsMismatch) will serve this entry coherently. If reDecode SUCCEEDS its
+      // own setBase overwrites this entry (a harmless extra write). If reDecode FAILS the store
+      // stays on these options, so this entry becomes a valid INSTANT L1 hit on reopen — upgrading
+      // failure recovery from an L2 disk read (~1s) to L1 (instant). Only the VISUAL swap is still
+      // suppressed for Case A (reDecodeWillOwnPath, below) — reDecode owns the screen; the cache
+      // write is orthogonal and safe. (P6 made the L1 READ options-aware, which is what makes
+      // writing the captured-options entry here safe — a mismatch is treated as a miss, never
+      // served as wrong-options pixels.)
+      //
+      // Deliberately NOT conditioned on generation: a stale decode landing out-of-order after a
+      // same-path reopen must not clobber either. Options recorded are the CAPTURED decodeOptions
+      // param (this buffer's true provenance), never the current store state.
+      const wouldClobberFresherReDecode = !identityChanged && optionsChanged;
       if (!wouldClobberFresherReDecode) {
         imageCacheService.setBase(
           filePath,

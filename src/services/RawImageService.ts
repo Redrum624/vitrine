@@ -700,9 +700,14 @@ export class RawImageService {
       bitDepth?: 8 | 16;
       shadowThreshold?: number;
       highlightThreshold?: number;
-    }
+    },
+    // `interactive` gates the underlying loadRawImage's L2 disk write-through. Defaults true (the
+    // interactive editor), but batch-originated callers (ImageService.loadImage's non-LibRaw
+    // fallback → AutoRawAdjustmentService.detectAndApplyRAWAdjustments) thread false through so a
+    // one-shot batch decode never churns the disk base-cache LRU.
+    interactive: boolean = true,
   ): Promise<RawImageData> {
-    const rawData = await this.loadRawImage(filePath);
+    const rawData = await this.loadRawImage(filePath, undefined, interactive);
 
     // Generate histogram if requested
     if (histogramOptions?.generateHistogram !== false) {

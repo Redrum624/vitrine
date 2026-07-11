@@ -66,7 +66,10 @@ export class AutoRawAdjustmentService {
    */
   async detectAndApplyRAWAdjustments(
     filePath: string,
-    pipeline: ImageProcessingPipeline
+    pipeline: ImageProcessingPipeline,
+    // Threaded from ImageService.loadImage's `interactive` flag: batch-originated opens pass false so
+    // the analysis decode below does not write-through to (and churn) the disk base-cache LRU.
+    interactive: boolean = true,
   ): Promise<RAWDetectionResult> {
     try {
       logger.info(`Auto-detecting RAW parameters: ${filePath}`);
@@ -88,7 +91,7 @@ export class AutoRawAdjustmentService {
         generateHistogram: true,
         bins: 256,
         bitDepth: 16
-      });
+      }, interactive);
 
       // Analyze image content and metadata
       const analysis = this.analyzeRAWImage(rawData);

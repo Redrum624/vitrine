@@ -771,7 +771,12 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
         logger.info(`Image load of ${image.path} discarded: superseded before decode options resolved`);
         return;
       }
-      useAppStore.getState().setRawDecodeOptions(savedState?.rawDecodeOptions ?? DEFAULT_RAW_DECODE_OPTIONS);
+      // Shape-validate the persisted options through EditPersistenceService's validator (the same
+      // guard getSavedRawDecodeOptions applies) BEFORE they reach the store/decoder — a corrupt
+      // out-of-enum value from an old/buggy build must not seed the decode. Uses the validator's
+      // sync variant so this reuses the single getSavedEditState read above (no second IPC).
+      const validatedOptions = editPersistenceService.validateSavedRawDecodeOptions(savedState?.rawDecodeOptions);
+      useAppStore.getState().setRawDecodeOptions(validatedOptions ?? DEFAULT_RAW_DECODE_OPTIONS);
 
       // Load the image. The beforeNotify hook fires synchronously once the base is decoded
       // (real dimensions known) but BEFORE ImageService notifies its load listeners — the

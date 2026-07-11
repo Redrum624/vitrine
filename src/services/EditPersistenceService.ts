@@ -186,9 +186,20 @@ class EditPersistenceService {
    */
   async getSavedRawDecodeOptions(path: string): Promise<RawDecodeOptions | null> {
     const saved = (await this.getSavedEditState(path))?.rawDecodeOptions;
+    return this.validateSavedRawDecodeOptions(saved);
+  }
+
+  /**
+   * Shape-validate an ALREADY-FETCHED persisted rawDecodeOptions value — the synchronous core of
+   * getSavedRawDecodeOptions, split out so a caller that already holds the edit state (Canvas's
+   * single up-front getSavedEditState read) can run the SAME validation WITHOUT paying a second IPC
+   * round-trip. Returns null when nothing was persisted (caller uses DEFAULT), the value itself when
+   * it is a valid shape, or DEFAULT_RAW_DECODE_OPTIONS when it is persisted-but-corrupt (out-of-enum
+   * demosaic/highlightMode from an old/buggy build or a tampered store) rather than propagating an
+   * invalid decode option to the store/decoder.
+   */
+  validateSavedRawDecodeOptions(saved: unknown): RawDecodeOptions | null {
     if (saved === undefined || saved === null) return null; // nothing persisted → caller uses DEFAULT
-    // Persisted BUT corrupt (out-of-enum demosaic/highlightMode from an old/buggy build or a
-    // tampered store) → fall back to DEFAULT rather than propagating an invalid decode option.
     return isValidRawDecodeOptions(saved) ? saved : DEFAULT_RAW_DECODE_OPTIONS;
   }
 

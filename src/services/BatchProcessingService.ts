@@ -326,10 +326,18 @@ export class BatchProcessingService {
     try {
       logger.debug(`Processing batch image: ${image.name}`);
 
-      // Load the image. interactive=false: a batch run decodes each image once and never reopens
-      // it interactively, so it must not write-through to (and churn) the disk base-cache LRU —
-      // disk READS still apply (a coherent, free win if a prior interactive open persisted it).
-      const imageData = await imageService.loadImage(image.path, undefined, undefined, false);
+      // Decode the image via the side-effect-free export decode (NOT loadImage). This gives the
+      // batch three things loadImage did NOT:
+      //   1. PER-IMAGE decode options — decodeForExport resolves each file's own persisted RAW
+      //      options (EditPersistenceService.getSavedRawDecodeOptions, shape-validated) instead of
+      //      the STORE's current options (which belong to whatever image the user has open). A
+      //      batch of RAWs with different demosaic/highlight settings now each decode with THEIR own.
+      //   2. No editor side effects — it never sets currentImage / fires notifyImageLoaded, so a
+      //      batch run no longer swaps the user's open image out from under them per file.
+      //   3. interactive=false disk behaviour — decodeForExport decodes with interactive=false, so a
+      //      one-shot batch decode never write-through-churns the disk base-cache LRU (disk READS
+      //      still apply — a coherent, free win if a prior interactive open persisted it).
+      const imageData = await imageService.decodeForExport(image.path);
 
       // Apply pipeline settings if specified
       let processedData = imageData.data;
