@@ -87,7 +87,9 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
   // EnhanceService.applyUpscale). Unknown dims (no image) ⇒ leave every scale enabled; the
   // service guard still protects the actual apply.
   const feasibility: Partial<Record<2 | 4, UpscaleFeasibility>> = (() => {
-    const original = imageService.getOriginalImage();
+    // Dims-only accessor: getOriginalImage() would materialize the deferred 310MB
+    // snapshot synchronously inside this render (L4 review finding).
+    const original = imageService.getOriginalImageDimensions();
     if (!original) return {};
     const cropMod = imageProcessingPipeline.getModule?.('crop') as
       | { getOutputDimensions(w: number, h: number): { width: number; height: number } }

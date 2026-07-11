@@ -45,6 +45,7 @@ describe('CropModuleComponent — glass port', () => {
 // ── Enhance ──────────────────────────────────────────────────────────────────
 jest.mock('../services/ImageService', () => ({ imageService: {
   getOriginalImage: jest.fn(() => null),
+  getOriginalImageDimensions: jest.fn(() => null),
   getCurrentImage: jest.fn(() => null),
 } }));
 jest.mock('../services/EnhanceService', () => ({

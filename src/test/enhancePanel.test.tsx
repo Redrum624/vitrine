@@ -5,6 +5,7 @@ let mockOriginalDims: { width: number; height: number } | null = null;
 import { render, screen, fireEvent, act } from '@testing-library/react';
 jest.mock('../services/ImageService', () => ({ imageService: {
   getOriginalImage: jest.fn(() => (mockOriginalDims ? { data: new Float32Array(4), ...mockOriginalDims } : null)),
+  getOriginalImageDimensions: jest.fn(() => mockOriginalDims),
   getCurrentImage: jest.fn(() => null),
 } }));
 jest.mock('../services/EnhanceService', () => ({

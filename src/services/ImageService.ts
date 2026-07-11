@@ -515,6 +515,18 @@ export class ImageService {
   }
 
   /**
+   * Dimensions of the original (pre-edit) image WITHOUT materializing the deferred
+   * 310MB snapshot copy. Consumers that only need width/height (e.g. the Enhance
+   * panel's upscale feasibility, which renders per frame) must use this instead of
+   * getOriginalImage() — calling the full getter from a render triggers the deep
+   * copy synchronously and defeats the lazy-snapshot optimization.
+   */
+  getOriginalImageDimensions(): { width: number; height: number } | null {
+    const src = this.originalImageData ?? this.pendingOriginalSource;
+    return src ? { width: src.width, height: src.height } : null;
+  }
+
+  /**
    * Record a REFERENCE to the as-decoded pixels for later before/after comparison — no copy.
    * The actual deep copy is deferred until getOriginalImage() (or a mutating
    * updateCurrentImageData call) actually needs it. Called at load time for every open (and by
@@ -738,6 +750,10 @@ export class ImageService {
   clearImage(): void {
     this.currentImage = null;
     this.bakedUpscale = null;
+    // Release the original-snapshot references too (deferred or materialized) —
+    // otherwise the previous image's ~310MB base stays reachable after a clear.
+    this.originalImageData = null;
+    this.pendingOriginalSource = null;
     logger.info('Image cleared');
   }
 
