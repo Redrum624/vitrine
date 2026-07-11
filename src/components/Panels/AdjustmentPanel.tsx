@@ -29,6 +29,7 @@ import { imageProcessingPipeline } from '../../services/ImageProcessingPipeline'
 import { imageService } from '../../services/ImageService';
 import { notificationService } from '../../services/NotificationService';
 import { guardDeveloping } from '../../utils/developingGuard';
+import { boxDownsampleRGBA } from '../../utils/imageDownsample';
 import { progressivePreviewService } from '../../services/ProgressivePreviewService';
 import { adaptiveDebounceService } from '../../services/AdaptiveDebounceService';
 import { useAppStore } from '../../stores/appStore';
@@ -177,9 +178,11 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
       // Cancel any previous progressive preview requests
       progressivePreviewService.cancelActiveRequests();
 
-      // Temporarily use smaller downsampling to avoid issues
-      // TODO: Fix downsampling algorithm properly later
-      const MAX_PREVIEW_SIZE = 1024; // Smaller size for now to test fix
+      // Preview is capped at MAX_PREVIEW_SIZE and shrunk with an area-averaged box
+      // downsample (boxDownsampleRGBA) — the previous nearest-neighbour "every Nth pixel"
+      // sampler aliased high-frequency content into moiré and made the preview diverge from
+      // the full-resolution render.
+      const MAX_PREVIEW_SIZE = 1024;
       const aspectRatio = currentImage.width / currentImage.height;
 
       let previewWidth, previewHeight;
@@ -226,28 +229,17 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
 
         console.log(`AdjustmentPanel: Downsampling ${currentImage.width}x${currentImage.height} to EXACT aspect ratio ${previewWidth}x${previewHeight}`);
 
-        // Simple downsampling - use every Nth pixel
-        const scaleX = currentImage.width / previewWidth;
-        const scaleY = currentImage.height / previewHeight;
-
-        console.log(`AdjustmentPanel: Scale factors: ${scaleX.toFixed(2)}x horizontally, ${scaleY.toFixed(2)}x vertically`);
-
-        previewData = new Float32Array(previewWidth * previewHeight * 4);
-
-        for (let y = 0; y < previewHeight; y++) {
-          for (let x = 0; x < previewWidth; x++) {
-            // Use exact mapping to avoid aspect ratio distortion
-            const srcX = Math.min(Math.floor(x * scaleX), currentImage.width - 1);
-            const srcY = Math.min(Math.floor(y * scaleY), currentImage.height - 1);
-            const srcIdx = (srcY * currentImage.width + srcX) * sourceChannels;
-            const dstIdx = (y * previewWidth + x) * 4;
-
-            previewData[dstIdx] = currentImage.data[srcIdx] || 0;
-            previewData[dstIdx + 1] = currentImage.data[srcIdx + 1] || 0;
-            previewData[dstIdx + 2] = currentImage.data[srcIdx + 2] || 0;
-            previewData[dstIdx + 3] = sourceChannels === 4 ? (currentImage.data[srcIdx + 3] || 1.0) : 1.0;
-          }
-        }
+        // Area-averaged box downsample: each preview pixel is the mean of every source
+        // pixel in its footprint (anti-aliased), instead of dropping to a single source
+        // pixel per cell. Averages in the source's own value space and outputs RGBA.
+        previewData = boxDownsampleRGBA(
+          currentImage.data,
+          currentImage.width,
+          currentImage.height,
+          previewWidth,
+          previewHeight,
+          sourceChannels,
+        );
       }
 
       // Debug the preview data

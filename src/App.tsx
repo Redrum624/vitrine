@@ -128,14 +128,12 @@ export function OriginalPane() {
     offscreenRef.current = offscreen;
   }, [baseImageVersion]);
 
-  // Redraw whenever the viewport (zoom/pan) or mainCanvasFit changes. mainCanvasFit
-  // is enough of a trigger by itself: Canvas.redrawCanvas() republishes it as a FRESH
-  // object (new reference) on every run, including runs caused by processedImageData
-  // changing (see Canvas.tsx's `[processedImageData, ...]` redraw effect) — so this
-  // effect already re-fires whenever the main canvas reprocesses, without needing
-  // processedImageData in its own deps (it was previously listed here but unused in
-  // the body — a stale carry-over from an earlier draft).
-  useEffect(() => {
+  // Re-fit + redraw the Before pane from its cached offscreen snapshot. Extracted into a
+  // stable callback so BOTH the viewport/fit effect and a dedicated ResizeObserver (below)
+  // can trigger it — the pane's own size is not part of the shared viewport/mainCanvasFit
+  // state, so a pure pane resize (dragging the before/after divider without changing zoom
+  // or pan) has to re-fit off its element's ResizeObserver.
+  const redrawOriginal = useCallback(() => {
     const offscreen = offscreenRef.current;
     const canvas = canvasRef.current;
     const container = containerRef.current;
@@ -199,6 +197,30 @@ export function OriginalPane() {
       geom.offsetX * sOrig, geom.offsetY * sOrig, geom.contentW * sOrig, geom.contentH * sOrig,
     );
   }, [viewport, mainCanvasFit]);
+
+  // Redraw whenever the viewport (zoom/pan) or mainCanvasFit changes. mainCanvasFit is
+  // enough of a trigger by itself: Canvas.redrawCanvas() republishes it as a FRESH object
+  // (new reference) on every run, including runs caused by processedImageData changing (see
+  // Canvas.tsx's `[processedImageData, ...]` redraw effect) — so this already re-fires
+  // whenever the main canvas reprocesses.
+  useEffect(() => {
+    redrawOriginal();
+  }, [redrawOriginal]);
+
+  // Re-fit on a PURE pane resize. The before/after split divider can resize just this pane
+  // without any viewport/mainCanvasFit change; without its own ResizeObserver the Before
+  // pane kept the stale fit until the next zoom/pan. A ref holds the latest draw so this
+  // effect subscribes exactly once (no churn as viewport changes). Falls back to a no-op
+  // where ResizeObserver isn't available.
+  const redrawRef = useRef(redrawOriginal);
+  redrawRef.current = redrawOriginal;
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => redrawRef.current());
+    ro.observe(container);
+    return () => ro.disconnect();
+  }, []);
 
   return (
     <div ref={containerRef} data-pane-container="before" className="w-full h-full flex items-center justify-center relative">

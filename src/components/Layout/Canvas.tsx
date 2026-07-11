@@ -3,7 +3,8 @@ import { useAppStore } from '../../stores/appStore';
 import { ImageFileInfo } from '../../services/FileSystemService';
 import { imageService } from '../../services/ImageService';
 import { logger } from '../../utils/Logger';
-import { computeViewportGeometry } from '../../utils/viewportGeometry';
+import { computeViewportGeometry, overlayContentRect } from '../../utils/viewportGeometry';
+import { computeRenderCacheHash } from '../../utils/renderCacheHash';
 import { clampPan } from '../../utils/panBounds';
 import { CropTransformOverlay } from '../Canvas/CropTransformOverlay';
 import { InteractiveCropHandles } from '../Canvas/InteractiveCropHandles';
@@ -536,57 +537,10 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
       // Generate hash for cache comparison — include the current image path
       // to ensure different images with the same dimensions never match cache
       const currentImagePath = imageService.getCurrentImage()?.filePath || '';
-      let dataHash = `${currentImagePath}_${imageInfo.width}x${imageInfo.height}_${data.length}`;
-
-      // Add sampling of actual pixel values for better cache invalidation
-      if (data.length > 0) {
-        // Sample pixels more densely to ensure we catch non-zero values
-        const sampleIndices = [];
-        const totalPixels = data.length / 4;
-        const sampleCount = Math.min(100, Math.max(50, Math.floor(totalPixels / 100))); // Sample 50-100 pixels
-
-        // CRITICAL FIX: Use multiple sampling strategies to ensure we find non-zero values
-        // Strategy 1: Systematic sampling across the entire image
-        for (let i = 0; i < sampleCount; i++) {
-          const pixelIndex = Math.floor((i * totalPixels) / sampleCount);
-          const pixelStart = pixelIndex * 4;
-          if (pixelStart + 2 < data.length) {
-            sampleIndices.push(pixelStart);     // R
-            sampleIndices.push(pixelStart + 1); // G
-            sampleIndices.push(pixelStart + 2); // B
-          }
-        }
-
-        // Strategy 2: Sample from center area where image content is most likely
-        const centerY = Math.floor(imageInfo.height / 2);
-        const centerX = Math.floor(imageInfo.width / 2);
-        const centerRange = Math.min(imageInfo.width, imageInfo.height) / 4;
-        for (let dy = -centerRange; dy <= centerRange; dy += Math.floor(centerRange / 10)) {
-          for (let dx = -centerRange; dx <= centerRange; dx += Math.floor(centerRange / 10)) {
-            const y = centerY + dy;
-            const x = centerX + dx;
-            if (y >= 0 && y < imageInfo.height && x >= 0 && x < imageInfo.width) {
-              const pixelStart = (y * imageInfo.width + x) * 4;
-              if (pixelStart + 2 < data.length) {
-                sampleIndices.push(pixelStart);     // R
-                sampleIndices.push(pixelStart + 1); // G
-                sampleIndices.push(pixelStart + 2); // B
-              }
-            }
-          }
-        }
-
-        // Create hash from sampled values
-        const samples = sampleIndices.map(i => data[i] ? data[i].toFixed(4) : '0').join(',');
-        dataHash += `_${samples}`;
-
-        // Debug the sampling with better statistics
-        const pixelsSampled = sampleIndices.length / 3;
-        const nonZeroSamples = sampleIndices.filter(i => data[i] > 0.0001).length; // Lower threshold
-        const minSample = Math.min(...sampleIndices.map(i => data[i]));
-        const maxSample = Math.max(...sampleIndices.map(i => data[i]));
-        if (DEBUG_CANVAS) console.log(`Canvas: Data sampling - ${pixelsSampled} pixels, ${nonZeroSamples} non-zero, range: ${minSample.toFixed(6)}-${maxSample.toFixed(6)}`);
-      }
+      // Hash embeds path + dims + a sparse pixel sampling for cache invalidation. Extracted
+      // to a pure helper (renderCacheHash) that clamps the center-area sampling step >= 1 —
+      // sub-40px images previously produced a 0 step and looped forever (see helper docs).
+      const dataHash = computeRenderCacheHash(currentImagePath, imageInfo.width, imageInfo.height, data);
 
       // Check if we can reuse cached ImageData
       const cache = canvasCache.current;
@@ -1237,66 +1191,89 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
               }}
             />
 
-            {/* Grid Overlay */}
-            {showGrid && displayImage && canvasDimensions.width > 0 && (
-              <svg
-                className="absolute inset-0 pointer-events-none"
-                width={canvasDimensions.width}
-                height={canvasDimensions.height}
-                style={{ opacity: 0.3 }}
-              >
-                {/* Thirds grid */}
-                {[1, 2].map(i => (
-                  <g key={`grid-${i}`}>
-                    <line x1={canvasDimensions.width * i / 3} y1={0} x2={canvasDimensions.width * i / 3} y2={canvasDimensions.height} stroke="#fff" strokeWidth="0.5" />
-                    <line x1={0} y1={canvasDimensions.height * i / 3} x2={canvasDimensions.width} y2={canvasDimensions.height * i / 3} stroke="#fff" strokeWidth="0.5" />
-                  </g>
-                ))}
-                {/* Center crosshair */}
-                <line x1={canvasDimensions.width / 2 - 10} y1={canvasDimensions.height / 2} x2={canvasDimensions.width / 2 + 10} y2={canvasDimensions.height / 2} stroke="#fff" strokeWidth="0.5" />
-                <line x1={canvasDimensions.width / 2} y1={canvasDimensions.height / 2 - 10} x2={canvasDimensions.width / 2} y2={canvasDimensions.height / 2 + 10} stroke="#fff" strokeWidth="0.5" />
-              </svg>
-            )}
+            {/* Grid Overlay — tracks the IMAGE, not the viewport box. The rule-of-thirds
+                lines and crosshair ride the content rect from the shared viewport-canvas
+                model (overlayContentRect), so at zoom > 1 (content larger than the box, panned)
+                they stay locked to the image instead of the screen (Task P4). The SVG box
+                clips whatever content falls outside the viewport. */}
+            {showGrid && displayImage && canvasDimensions.width > 0 && (() => {
+              const rect = overlayContentRect(
+                contentDimensions.width, contentDimensions.height,
+                canvasDimensions.width, canvasDimensions.height,
+                viewport.zoom, viewport.panX, viewport.panY,
+              );
+              const cx = rect.x + rect.w / 2;
+              const cy = rect.y + rect.h / 2;
+              return (
+                <svg
+                  className="absolute inset-0 pointer-events-none"
+                  width={canvasDimensions.width}
+                  height={canvasDimensions.height}
+                  style={{ opacity: 0.3 }}
+                >
+                  {/* Thirds grid over the image content rect */}
+                  {[1, 2].map(i => (
+                    <g key={`grid-${i}`}>
+                      <line x1={rect.x + rect.w * i / 3} y1={rect.y} x2={rect.x + rect.w * i / 3} y2={rect.y + rect.h} stroke="#fff" strokeWidth="0.5" />
+                      <line x1={rect.x} y1={rect.y + rect.h * i / 3} x2={rect.x + rect.w} y2={rect.y + rect.h * i / 3} stroke="#fff" strokeWidth="0.5" />
+                    </g>
+                  ))}
+                  {/* Center crosshair at the image center */}
+                  <line x1={cx - 10} y1={cy} x2={cx + 10} y2={cy} stroke="#fff" strokeWidth="0.5" />
+                  <line x1={cx} y1={cy - 10} x2={cx} y2={cy + 10} stroke="#fff" strokeWidth="0.5" />
+                </svg>
+              );
+            })()}
 
-            {/* Rulers Overlay */}
-            {showRulers && displayImage && canvasDimensions.width > 0 && (
-              <>
-                {/* Top ruler */}
-                <div
-                  className="absolute top-0 left-0 pointer-events-none"
-                  style={{ width: canvasDimensions.width, height: 20, backgroundColor: 'rgba(30,30,30,0.85)' }}
-                >
-                  <svg width={canvasDimensions.width} height={20}>
-                    {Array.from({ length: Math.ceil(canvasDimensions.width / 50) + 1 }, (_, i) => {
-                      const x = i * 50;
-                      return (
-                        <g key={`rtick-${i}`}>
+            {/* Rulers Overlay — ticks are anchored to the image's top-left corner via the
+                shared content rect, so tick 0 sits on the image edge and every tick tracks
+                the image under pan/zoom (label = CSS px from the image origin). Ticks that
+                fall outside the viewport strip are dropped (Task P4). */}
+            {showRulers && displayImage && canvasDimensions.width > 0 && (() => {
+              const rect = overlayContentRect(
+                contentDimensions.width, contentDimensions.height,
+                canvasDimensions.width, canvasDimensions.height,
+                viewport.zoom, viewport.panX, viewport.panY,
+              );
+              const topTicks = Array.from({ length: Math.ceil(rect.w / 50) + 1 }, (_, k) => k * 50)
+                .map(off => ({ off, x: rect.x + off }))
+                .filter(t => t.x >= 0 && t.x <= canvasDimensions.width);
+              const leftTicks = Array.from({ length: Math.ceil(rect.h / 50) + 1 }, (_, k) => k * 50)
+                .map(off => ({ off, y: rect.y + off }))
+                .filter(t => t.y >= 0 && t.y <= canvasDimensions.height);
+              return (
+                <>
+                  {/* Top ruler */}
+                  <div
+                    className="absolute top-0 left-0 pointer-events-none"
+                    style={{ width: canvasDimensions.width, height: 20, backgroundColor: 'rgba(30,30,30,0.85)' }}
+                  >
+                    <svg width={canvasDimensions.width} height={20}>
+                      {topTicks.map(({ off, x }) => (
+                        <g key={`rtick-${off}`}>
                           <line x1={x} y1={14} x2={x} y2={20} stroke="#888" strokeWidth="0.5" />
-                          <text x={x + 2} y={12} fill="#888" fontSize="8" fontFamily="monospace">{Math.round(x)}</text>
+                          <text x={x + 2} y={12} fill="#888" fontSize="8" fontFamily="monospace">{off}</text>
                         </g>
-                      );
-                    })}
-                  </svg>
-                </div>
-                {/* Left ruler */}
-                <div
-                  className="absolute top-0 left-0 pointer-events-none"
-                  style={{ width: 20, height: canvasDimensions.height, backgroundColor: 'rgba(30,30,30,0.85)' }}
-                >
-                  <svg width={20} height={canvasDimensions.height}>
-                    {Array.from({ length: Math.ceil(canvasDimensions.height / 50) + 1 }, (_, i) => {
-                      const y = i * 50;
-                      return (
-                        <g key={`ltick-${i}`}>
+                      ))}
+                    </svg>
+                  </div>
+                  {/* Left ruler */}
+                  <div
+                    className="absolute top-0 left-0 pointer-events-none"
+                    style={{ width: 20, height: canvasDimensions.height, backgroundColor: 'rgba(30,30,30,0.85)' }}
+                  >
+                    <svg width={20} height={canvasDimensions.height}>
+                      {leftTicks.map(({ off, y }) => (
+                        <g key={`ltick-${off}`}>
                           <line x1={14} y1={y} x2={20} y2={y} stroke="#888" strokeWidth="0.5" />
-                          <text x={2} y={y + 10} fill="#888" fontSize="8" fontFamily="monospace">{Math.round(y)}</text>
+                          <text x={2} y={y + 10} fill="#888" fontSize="8" fontFamily="monospace">{off}</text>
                         </g>
-                      );
-                    })}
-                  </svg>
-                </div>
-              </>
-            )}
+                      ))}
+                    </svg>
+                  </div>
+                </>
+              );
+            })()}
 
             {/* Crop/Transform Overlay - 3x3 grid and darkened areas */}
             {cropModule && displayImage && canvasDimensions.width > 0 && (() => {

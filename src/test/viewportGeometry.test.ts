@@ -1,4 +1,8 @@
-import { computeViewportGeometry } from '../utils/viewportGeometry';
+import {
+  computeViewportGeometry,
+  overlayContentRect,
+  imageAnchorToOverlay,
+} from '../utils/viewportGeometry';
 
 // Reference region 1408×790 (a wide photo pane); a 3:2 photo fits height-constrained
 // to fit = 1185×790 inside it.
@@ -62,5 +66,62 @@ describe('computeViewportGeometry', () => {
     expect(g.panX).toBe(0);
     expect(g.offsetX).toBeCloseTo(0, 6); // (1184 − 1184)/2 + 0
     expect(g.maxPanY).toBe((1580 - 790) / 2);
+  });
+});
+
+// The grid/rulers overlays used to render in screen space (pinned to the viewport box), so
+// at zoom > 1 they detached from the image. They now map image-space anchors through the
+// SAME viewport-canvas model via overlayContentRect/imageAnchorToOverlay. These tests prove
+// the overlay mapping matches what computeViewportGeometry predicts and that an image anchor
+// tracks the image across two zoom/pan states.
+describe('overlayContentRect / imageAnchorToOverlay (image-space grid & rulers)', () => {
+  it('reproduces the geometry offset/content when given the geometry viewport box', () => {
+    const g = computeViewportGeometry(FIT_W, FIT_H, CONT_W, CONT_H, 2, 200, -100);
+    // Feed the box the geometry produced + the (already in-bounds) clamped pan.
+    const rect = overlayContentRect(FIT_W, FIT_H, g.viewportW, g.viewportH, 2, g.panX, g.panY);
+    expect(rect.x).toBeCloseTo(g.offsetX, 6);
+    expect(rect.y).toBeCloseTo(g.offsetY, 6);
+    expect(rect.w).toBeCloseTo(g.contentW, 6);
+    expect(rect.h).toBeCloseTo(g.contentH, 6);
+  });
+
+  it('maps the image top-left anchor (0,0) to the content top-left (offset)', () => {
+    const g = computeViewportGeometry(FIT_W, FIT_H, CONT_W, CONT_H, 1.5, 0, 0);
+    const rect = overlayContentRect(FIT_W, FIT_H, g.viewportW, g.viewportH, 1.5, g.panX, g.panY);
+    const topLeft = imageAnchorToOverlay(rect, 0, 0);
+    expect(topLeft.x).toBeCloseTo(g.offsetX, 6);
+    expect(topLeft.y).toBeCloseTo(g.offsetY, 6);
+  });
+
+  it('maps the image center anchor (0.5,0.5) to the viewport center shifted by the pan', () => {
+    const zoom = 2;
+    const panX = 150;
+    const panY = -80;
+    const g = computeViewportGeometry(FIT_W, FIT_H, CONT_W, CONT_H, zoom, panX, panY);
+    const rect = overlayContentRect(FIT_W, FIT_H, g.viewportW, g.viewportH, zoom, g.panX, g.panY);
+    const center = imageAnchorToOverlay(rect, 0.5, 0.5);
+    // Image center sits at the box center plus the (clamped) pan.
+    expect(center.x).toBeCloseTo(g.viewportW / 2 + g.panX, 6);
+    expect(center.y).toBeCloseTo(g.viewportH / 2 + g.panY, 6);
+  });
+
+  it('tracks the same image anchor across two different zoom/pan states', () => {
+    // State A: zoom 1 (content centered in the fit box, no pan).
+    const gA = computeViewportGeometry(FIT_W, FIT_H, CONT_W, CONT_H, 1, 0, 0);
+    const rectA = overlayContentRect(FIT_W, FIT_H, gA.viewportW, gA.viewportH, 1, gA.panX, gA.panY);
+    // State B: zoom 2 panned right — the SAME image point must move with the content, not
+    // stay pinned to the box (the screen-space bug), so its overlay X differs between states.
+    const gB = computeViewportGeometry(FIT_W, FIT_H, CONT_W, CONT_H, 2, 300, 0);
+    const rectB = overlayContentRect(FIT_W, FIT_H, gB.viewportW, gB.viewportH, 2, gB.panX, gB.panY);
+
+    const anchor = { nx: 0.25, ny: 0.75 };
+    const a = imageAnchorToOverlay(rectA, anchor.nx, anchor.ny);
+    const b = imageAnchorToOverlay(rectB, anchor.nx, anchor.ny);
+
+    // Each state's mapping equals its own geometry prediction (content origin + fraction·size).
+    expect(a.x).toBeCloseTo(gA.offsetX + anchor.nx * gA.contentW, 6);
+    expect(b.x).toBeCloseTo(gB.offsetX + anchor.nx * gB.contentW, 6);
+    // And the anchor genuinely moved (would be identical if the overlay were screen-fixed).
+    expect(Math.abs(b.x - a.x)).toBeGreaterThan(1);
   });
 });
