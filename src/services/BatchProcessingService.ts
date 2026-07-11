@@ -326,8 +326,10 @@ export class BatchProcessingService {
     try {
       logger.debug(`Processing batch image: ${image.name}`);
 
-      // Load the image
-      const imageData = await imageService.loadImage(image.path);
+      // Load the image. interactive=false: a batch run decodes each image once and never reopens
+      // it interactively, so it must not write-through to (and churn) the disk base-cache LRU —
+      // disk READS still apply (a coherent, free win if a prior interactive open persisted it).
+      const imageData = await imageService.loadImage(image.path, undefined, undefined, false);
 
       // Apply pipeline settings if specified
       let processedData = imageData.data;

@@ -450,12 +450,25 @@ export class ImageCacheService {
   }
 
   /**
-   * Get cache utilization percentage (combined across both the sized and base budgets)
+   * Get cache utilization as PERCENTAGES. `size`/`entries` remain the COMBINED figures (across the
+   * sized and base budgets) for backwards-compatibility with any existing caller. `sized`/`base`
+   * break the size utilization out PER CATEGORY: the combined ratio can hide one exhausted
+   * category behind the other (e.g. the 700MB base budget sitting at 98% is invisible when the
+   * larger combined denominator still reads ~55%), so a monitor that only watched the combined
+   * figure would miss a base-cache thrash. The two budgets are evicted independently (see
+   * setWithKey/cleanup), so they deserve independent utilization readouts.
    */
-  getUtilization(): { size: number; entries: number } {
+  getUtilization(): {
+    size: number;
+    entries: number;
+    sized: { size: number };
+    base: { size: number };
+  } {
     return {
       size: Math.round(((this.currentSize + this.baseCurrentSize) / (this.maxSize + this.baseMaxSize)) * 100),
-      entries: Math.round((this.cache.size / this.maxEntries) * 100)
+      entries: Math.round((this.cache.size / this.maxEntries) * 100),
+      sized: { size: Math.round((this.currentSize / this.maxSize) * 100) },
+      base: { size: Math.round((this.baseCurrentSize / this.baseMaxSize) * 100) },
     };
   }
 

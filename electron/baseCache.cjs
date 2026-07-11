@@ -94,6 +94,23 @@ function selectEvictions(entries, incomingSize, budget) {
   return evict;
 }
 
+/**
+ * Return the underlying ArrayBuffer of a Node Buffer WITHOUT copying when the Buffer spans its
+ * entire backing store — the common case for a large `fs.readFile` (Node gives reads at/above the
+ * pool threshold a DEDICATED, non-pooled allocation with byteOffset 0 and byteLength ===
+ * buffer.byteLength). A disk-cache hit is ~122MB, so skipping the `.slice()` there avoids a
+ * pointless second ~122MB copy on every hit. Only slice (copy) when the Buffer is a partial view
+ * over a shared/pooled ArrayBuffer, where handing back the whole backing store would expose
+ * unrelated bytes (and the wrong byteLength).
+ * @param {Buffer} buf
+ * @returns {ArrayBuffer}
+ */
+function bufferToArrayBuffer(buf) {
+  return buf.byteOffset === 0 && buf.byteLength === buf.buffer.byteLength
+    ? buf.buffer
+    : buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+}
+
 // ---------------------------------------------------------------------------
 // Stateful fs layer (in-memory index over the on-disk entries)
 // ---------------------------------------------------------------------------
@@ -224,7 +241,7 @@ async function read(filePath, options) {
   meta.lastAccess = now;
   fs.promises.writeFile(jsonPathFor(key), JSON.stringify(meta)).catch(() => {});
 
-  const data = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+  const data = bufferToArrayBuffer(buf);
   return { data, width: meta.width, height: meta.height, channels: meta.channels, bitDepth: meta.bitDepth };
 }
 
@@ -297,6 +314,7 @@ module.exports = {
   entryName,
   sidecarIsValid,
   selectEvictions,
+  bufferToArrayBuffer,
   // fs layer
   init,
   read,

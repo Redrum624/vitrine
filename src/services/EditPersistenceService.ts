@@ -4,9 +4,25 @@ import { LocalAdjustmentsPipelineModule } from '../modules/LocalAdjustmentsPipel
 import type { MaskGeometry, LocalAdjustmentParams } from '../modules/LocalAdjustmentsModule';
 import { logger } from '../utils/Logger';
 import { useAppStore } from '../stores/appStore';
-import type { RawDecodeOptions } from '../types/electron';
+import { DEFAULT_RAW_DECODE_OPTIONS, type RawDecodeOptions } from '../types/electron';
 
 const STORE_VERSION = 1;
+
+/**
+ * Shape-validate persisted RAW decode options. The store JSON is durable and survives app updates,
+ * so a value written by an older/buggy build (or hand-edited / partially-corrupt file) can carry a
+ * demosaic/highlightMode outside the current enums. Passing such a value downstream would feed an
+ * invalid `-q`/highlight to the decoder and desync the RawDecodePanel's selects. Accept only the
+ * exact known enum members. Kept in sync with types/electron.ts (DemosaicAlgo / HighlightMode).
+ */
+function isValidRawDecodeOptions(o: unknown): o is RawDecodeOptions {
+  if (!o || typeof o !== 'object') return false;
+  const opts = o as Record<string, unknown>;
+  const demosaicOk = opts.demosaic === 'ahd' || opts.demosaic === 'dcb';
+  const highlightOk =
+    opts.highlightMode === 'off' || opts.highlightMode === 'blend' || opts.highlightMode === 'reconstruct';
+  return demosaicOk && highlightOk;
+}
 
 type LayerType = 'brush' | 'linear_gradient' | 'radial_gradient' | 'parametric';
 
@@ -169,7 +185,11 @@ class EditPersistenceService {
    * serialize() embedding useAppStore's rawDecodeOptions into the durable edit state.
    */
   async getSavedRawDecodeOptions(path: string): Promise<RawDecodeOptions | null> {
-    return (await this.getSavedEditState(path))?.rawDecodeOptions ?? null;
+    const saved = (await this.getSavedEditState(path))?.rawDecodeOptions;
+    if (saved === undefined || saved === null) return null; // nothing persisted → caller uses DEFAULT
+    // Persisted BUT corrupt (out-of-enum demosaic/highlightMode from an old/buggy build or a
+    // tampered store) → fall back to DEFAULT rather than propagating an invalid decode option.
+    return isValidRawDecodeOptions(saved) ? saved : DEFAULT_RAW_DECODE_OPTIONS;
   }
 
   /** Debounced save of the current image's edits — call after any edit. */

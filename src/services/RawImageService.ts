@@ -5,7 +5,13 @@ import { rawHistogramService, HistogramData } from './RawHistogramService';
 import { noiseReductionService, NoiseReductionOptions } from './NoiseReductionService';
 import { lensProfileService, LensProfile, LensCorrections } from './LensProfileService';
 import { colorManagementService, SoftProofOptions, ColorConversionOptions } from './ColorManagementService';
-import { imageService } from './ImageService';
+// NOTE: ImageService is intentionally NOT imported statically here. RawImageService and
+// ImageService formed a static circular import (ImageService imports rawImageService for its open
+// path; this module imported imageService for reDecode). reDecode now resolves the ImageService
+// singleton LAZILY via a dynamic `import('./ImageService')` at call time (see reDecode), so no
+// static edge RawImageService → ImageService remains and each module initialises independently in
+// any order (proven by rawImageServiceImportCycle.test.ts). The reverse edge (ImageService →
+// RawImageService) is one-directional and harmless.
 import { imageProcessingPipeline } from './ImageProcessingPipeline';
 import { imageCacheService } from './ImageCacheService';
 import { editPersistenceService } from './EditPersistenceService';
@@ -65,6 +71,7 @@ export class RawImageService {
   async loadRawImage(
     filePath: string,
     decodeOptions?: RawDecodeOptions,
+    interactive: boolean = true,
   ): Promise<RawImageData> {
     try {
       logger.info(`Loading RAW image: ${filePath}`);
@@ -76,7 +83,9 @@ export class RawImageService {
       // (native dcraw_emu → libraw-wasm/Node → embedded-JPEG last resort — see
       // electron/rawDecoder.cjs), or, in a no-IPC/browser context, the renderer LibRawService.
       // decodeOptions (demosaic + highlight mode) are threaded through to the native/wasm rungs.
-      const rawData = await this.decodeRawFile(filePath, extension, decodeOptions);
+      // `interactive` gates the L2 disk write-through (see decodeRawFile): the Canvas open path
+      // persists the decode; batch export / decodeForExport do not (they must not churn the LRU).
+      const rawData = await this.decodeRawFile(filePath, extension, decodeOptions, interactive);
 
       const loadTime = performance.now() - startTime;
       logger.info(`RAW image loaded in ${loadTime.toFixed(2)}ms: ${rawData.width}x${rawData.height}`);
@@ -149,6 +158,12 @@ export class RawImageService {
    *   #5) — a no-op when the caller doesn't have an id (e.g. tests).
    */
   async reDecode(options: RawDecodeOptions, imageId?: string): Promise<void> {
+    // Resolve the ImageService singleton LAZILY (dynamic import) rather than via a static top-level
+    // import — that is what breaks the RawImageService ↔ ImageService static import cycle. By the
+    // time a re-decode fires (user changed a decode option on an open image) every module is long
+    // since loaded, so this resolves the already-initialised module instantly. Kept at the top so
+    // the identity/re-entrancy guards below read a consistent snapshot.
+    const { imageService } = await import('./ImageService');
     const store = useAppStore.getState();
     const current = imageService.getCurrentImage();
 
@@ -179,13 +194,15 @@ export class RawImageService {
       // it OVERWRITES the same key, the cache never serves pixels from stale decode options.
       // Written together with store.setRawDecodeOptions/scheduleSave below, both gated by the
       // identity check above, so the cached pixels and the persisted options can never diverge:
-      // either both update together, or neither does.
+      // either both update together, or neither does. `decodeOptions` records this base's true
+      // provenance (same shape developFullDecode / loadImage write) so the L1 read-side guard in
+      // ImageService.loadImage can reject a hit whose options no longer match on reopen.
       imageCacheService.setBase(
         current.filePath,
         rawData.data,
         rawData.width,
         rawData.height,
-        { isRaw: true, autoAdjustmentResult: undefined, ...rawData.metadata },
+        { isRaw: true, autoAdjustmentResult: undefined, decodeOptions: options, ...rawData.metadata },
       );
 
       // Replace the working base image + the before/after original snapshot. setOriginalImage
@@ -220,7 +237,7 @@ export class RawImageService {
    * the embedded JPEG from the RAW file. This is 100% reliable for every file
    * and avoids the browser SharedArrayBuffer/Emscripten issues entirely.
    */
-  private async decodeRawFile(filePath: string, extension: string, decodeOptions?: RawDecodeOptions): Promise<RawImageData> {
+  private async decodeRawFile(filePath: string, extension: string, decodeOptions?: RawDecodeOptions, interactive: boolean = true): Promise<RawImageData> {
     // Try Electron main-process decoder first (native LibRaw demosaic → wasm → embedded JPEG).
     // decodeOptions (demosaic + highlight mode) are threaded to the main process, which mirrors
     // them onto the native and wasm rungs; the embedded-JPEG last resort ignores them by design.
@@ -269,7 +286,10 @@ export class RawImageService {
         // 16-bit only: the 8-bit embedded-JPEG fallback is a TRANSIENT degradation (native decode
         // may succeed next session), and the cache key doesn't include bitDepth — persisting the
         // fallback would lock 8-bit pixels in across sessions under the 16-bit entry's key.
-        if (!fromDiskCache && result.bitDepth === 16 && window.electronAPI.baseCacheWrite) {
+        // INTERACTIVE only: a batch export of 50 RAWs (or an export decode) must not churn the
+        // ~2GB disk LRU with one-shot decodes it will never reopen. Disk READS stay enabled for
+        // everyone (above) — a coherent, free win — but only the Canvas open path WRITES through.
+        if (interactive && !fromDiskCache && result.bitDepth === 16 && window.electronAPI.baseCacheWrite) {
           try {
             void window.electronAPI.baseCacheWrite(filePath, decodeOptions, {
               data: result.data,

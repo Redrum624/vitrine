@@ -2,7 +2,7 @@ import { logger } from '../utils/Logger';
 import { rawImageService, RawImageData } from './RawImageService';
 import { ValidationService } from './ValidationService';
 import { errorHandlingService } from './ErrorHandlingService';
-import { imageCacheService } from './ImageCacheService';
+import { imageCacheService, CacheEntry } from './ImageCacheService';
 import { canvasPoolService } from './CanvasPoolService';
 import { autoRawAdjustmentService, RAWDetectionResult } from './AutoRawAdjustmentService';
 import { ImageProcessingPipeline } from './ImageProcessingPipeline';
@@ -98,6 +98,7 @@ export class ImageService {
     filePath: string,
     beforeNotify?: (result: ImageData) => void,
     onFullDecode?: (width: number, height: number) => void,
+    interactive: boolean = true,
   ): Promise<ImageData> {
     const thisGeneration = ++this.loadGeneration;
     this.bakedUpscale = null; // Clear baked marker on any fresh image load
@@ -126,7 +127,7 @@ export class ImageService {
         // decode entirely. This lookup is synchronous and happens before any await, so no newer
         // load can have superseded us yet (the generation guard below covers the async decode path).
         const cacheEntry = imageCacheService.getBase(filePath);
-        if (cacheEntry) {
+        if (cacheEntry && !this.baseCacheOptionsMismatch(cacheEntry)) {
           const result: ImageData = {
             width: cacheEntry.width,
             height: cacheEntry.height,
@@ -179,7 +180,7 @@ export class ImageService {
           if (onFullDecode && typeof window !== 'undefined' && window.electronAPI?.decodeRawPreview) {
             // Start the full decode NOW so the dcraw_emu subprocess overlaps the sharp preview
             // extraction (the subprocess doesn't block the main event loop).
-            const fullPromise = rawImageService.loadRawImage(filePath, decodeOptions);
+            const fullPromise = rawImageService.loadRawImage(filePath, decodeOptions, interactive);
             fullPromise.catch(() => { /* handled in developFullDecode / below */ });
 
             let preview: RawImageData | null = null;
@@ -219,7 +220,7 @@ export class ImageService {
             // Preview failed or superseded: fall through with the SAME full promise (no double decode).
             rawData = await fullPromise;
           } else {
-            rawData = await rawImageService.loadRawImage(filePath, decodeOptions);
+            rawData = await rawImageService.loadRawImage(filePath, decodeOptions, interactive);
           }
 
           // Validate dimensions
@@ -389,16 +390,30 @@ export class ImageService {
       const optionsChanged =
         storeOpts.demosaic !== decodeOptions.demosaic || storeOpts.highlightMode !== decodeOptions.highlightMode;
 
+      // A re-decode (RawDecodePanel → RawImageService.reDecode) for THIS path may be in flight.
+      // reDecode updates the store's rawDecodeOptions only AFTER its own decode resolves, so when
+      // the ORIGINAL background decode lands FIRST (the common order — it started earlier),
+      // `optionsChanged` still reads false here even though a fresher re-decode is about to own
+      // this path's base + screen. Without folding this in, we'd swap the OLD-options result in and
+      // pay a full-res reprocess, only for reDecode to immediately swap the NEW-options result over
+      // it — the wasteful OLD→NEW double swap. Treat an in-flight re-decode of the current path as
+      // "reDecode wins": neither write L1 (reDecode writes the authoritative base) nor swap
+      // (reDecode swaps). `!identityChanged` scopes it to a re-decode of THIS path — reDecode only
+      // ever operates on the current image, and if identity changed we already bail below.
+      const reDecodeInFlight = useAppStore.getState().reDecoding;
+      const reDecodeWillOwnPath = reDecodeInFlight && !identityChanged;
+
       // WRITE-BEFORE-GUARD (deliberate — see doc comment): cache this fully-paid decode under its
       // own (path, captured-options) key so a superseded open still pays forward to the next
       // reopen. The base cache holds the FULL 16-bit decode only (the preview is never cached).
       // Skip the write ONLY when this decode's options are stale for this SAME still-current path
       // (getBase is options-blind on read; the path may already hold fresher-options pixels from
-      // reDecode or a reopen that cache-hit them). Deliberately NOT conditioned on generation: a
-      // stale decode landing out-of-order after a same-path reopen must not clobber either.
-      // Options recorded are the CAPTURED decodeOptions param (this buffer's true provenance),
-      // never the current store state.
-      const wouldClobberFresherReDecode = !identityChanged && optionsChanged;
+      // reDecode or a reopen that cache-hit them) — either because the store options already
+      // changed (optionsChanged) OR because a re-decode is in flight that will write the
+      // authoritative base (reDecodeInFlight). Deliberately NOT conditioned on generation: a stale
+      // decode landing out-of-order after a same-path reopen must not clobber either. Options
+      // recorded are the CAPTURED decodeOptions param (this buffer's true provenance).
+      const wouldClobberFresherReDecode = !identityChanged && (optionsChanged || reDecodeInFlight);
       if (!wouldClobberFresherReDecode) {
         imageCacheService.setBase(
           filePath,
@@ -419,8 +434,8 @@ export class ImageService {
         logger.info(`Progressive full decode of ${filePath} discarded: current image changed — base cached, not swapped`);
         return;
       }
-      if (optionsChanged) {
-        logger.info(`Progressive full decode of ${filePath} discarded: decode options changed (re-decode superseded it)`);
+      if (optionsChanged || reDecodeWillOwnPath) {
+        logger.info(`Progressive full decode of ${filePath} discarded: a re-decode owns this path (options changed=${optionsChanged}, reDecode in flight=${reDecodeWillOwnPath}) — base not swapped`);
         return;
       }
 
@@ -519,6 +534,23 @@ export class ImageService {
         reject(error);
       }
     });
+  }
+
+  /**
+   * L1 base-cache read-side coherence guard: a cached base is served ONLY when its recorded decode
+   * options still match the options the caller is about to decode with. Canvas restores the
+   * per-image saved decodeOptions into the store BEFORE loadImage, so a mismatch is normally
+   * impossible — this guards the race/corruption case (e.g. a stale entry whose options no longer
+   * match the store) so loadImage never serves wrong-options pixels: on a mismatch we treat the hit
+   * as a MISS and fall through to a fresh decode (which overwrites the entry with correctly-
+   * provenanced pixels). Only RAW bases carry decode options; regular images (and any pre-
+   * provenance entry with no recorded decodeOptions) have nothing to compare and are served as-is.
+   */
+  private baseCacheOptionsMismatch(entry: CacheEntry): boolean {
+    const recorded = entry.metadata?.decodeOptions as RawDecodeOptions | undefined;
+    if (!recorded) return false;
+    const current = useAppStore.getState().rawDecodeOptions;
+    return recorded.demosaic !== current.demosaic || recorded.highlightMode !== current.highlightMode;
   }
 
   getCurrentImage(): ImageData | null {
@@ -773,7 +805,9 @@ export class ImageService {
         ? useAppStore.getState().rawDecodeOptions
         : (await editPersistenceService.getSavedRawDecodeOptions(filePath)) ?? DEFAULT_RAW_DECODE_OPTIONS;
 
-      const rawData = await rawImageService.loadRawImage(filePath, decodeOptions);
+      // interactive=false: an export decode is a one-shot the user never reopens interactively —
+      // it must not write-through to (and churn) the disk base-cache LRU. Disk READS still apply.
+      const rawData = await rawImageService.loadRawImage(filePath, decodeOptions, false);
 
       const dimensionValidation = ValidationService.validateDimensions(rawData.width, rawData.height);
       if (!dimensionValidation.valid) {

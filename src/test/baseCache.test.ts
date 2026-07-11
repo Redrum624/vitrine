@@ -19,6 +19,7 @@ const baseCache = require('../../electron/baseCache.cjs') as {
   entryName: (filePath: string, o?: { demosaic?: string; highlightMode?: string }) => string;
   sidecarIsValid: (meta: { sourceMtimeMs?: number; sourceSize?: number } | null, stat: { mtimeMs: number; size: number } | null) => boolean;
   selectEvictions: (entries: { key: string; size: number; lastAccess: number }[], incomingSize: number, budget: number) => string[];
+  bufferToArrayBuffer: (buf: Buffer) => ArrayBuffer;
   init: (dir: string, opts?: { budget?: number }) => number;
   read: (filePath: string, o?: { demosaic?: string; highlightMode?: string }) => Promise<{ data: ArrayBuffer; width: number; height: number; channels: number; bitDepth: number } | null>;
   write: (filePath: string, o: { demosaic?: string; highlightMode?: string } | undefined, payload: { data: ArrayBuffer; width: number; height: number; channels: number; bitDepth: number }) => Promise<void>;
@@ -81,6 +82,29 @@ describe('baseCache pure helpers', () => {
     it('rejects a missing meta or stat', () => {
       expect(baseCache.sidecarIsValid(null, { mtimeMs: 1000, size: 5000 })).toBe(false);
       expect(baseCache.sidecarIsValid(meta, null)).toBe(false);
+    });
+  });
+
+  describe('bufferToArrayBuffer (zero-copy on a full-span Buffer, slice otherwise)', () => {
+    it('returns the SAME underlying ArrayBuffer (no copy) when the Buffer spans its whole backing store', () => {
+      // Buffer.from(ArrayBuffer) views the ArrayBuffer with byteOffset 0 and full length — the
+      // shape a large dedicated fs.readFile produces. bufferToArrayBuffer must hand it back as-is.
+      const ab = new ArrayBuffer(48);
+      new Uint8Array(ab).fill(9);
+      const buf = Buffer.from(ab);
+      const out = baseCache.bufferToArrayBuffer(buf);
+      expect(out).toBe(ab);                 // same reference — zero copy
+      expect(out.byteLength).toBe(48);
+    });
+
+    it('SLICES (copies) a partial view over a shared/pooled ArrayBuffer so no unrelated bytes leak', () => {
+      const ab = new ArrayBuffer(48);
+      new Uint8Array(ab).forEach((_, i, arr) => (arr[i] = i));
+      const partial = Buffer.from(ab, 8, 16); // byteOffset 8, byteLength 16 over a 48-byte store
+      const out = baseCache.bufferToArrayBuffer(partial);
+      expect(out).not.toBe(ab);              // a fresh, copied ArrayBuffer
+      expect(out.byteLength).toBe(16);       // exactly the view's length, not the whole 48
+      expect(Array.from(new Uint8Array(out))).toEqual(Array.from({ length: 16 }, (_, i) => i + 8));
     });
   });
 

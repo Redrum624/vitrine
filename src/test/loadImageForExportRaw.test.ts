@@ -36,8 +36,9 @@ it('decodes RAW at full resolution for export and never uses the thumbnail IPC',
   const result = await imageService.loadImageForExport('C:/x/p.orf');
 
   // No image is currently open and nothing is persisted for this path (electronAPI.storeGet is
-  // not stubbed here), so decodeForExport falls back to DEFAULT_RAW_DECODE_OPTIONS.
-  expect(loadRawImage).toHaveBeenCalledWith('C:/x/p.orf', DEFAULT_RAW_DECODE_OPTIONS);
+  // not stubbed here), so decodeForExport falls back to DEFAULT_RAW_DECODE_OPTIONS. The third arg
+  // is interactive=false: an export decode must not write-through to the disk base-cache LRU.
+  expect(loadRawImage).toHaveBeenCalledWith('C:/x/p.orf', DEFAULT_RAW_DECODE_OPTIONS, false);
   expect(result.width).toBe(200);
   expect(result.height).toBe(100);
   expect(result.data).toBe(data);

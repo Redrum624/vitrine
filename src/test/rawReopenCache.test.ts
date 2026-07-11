@@ -95,6 +95,25 @@ describe('RAW reopen serves from the session base cache', () => {
     expect(decodeApi()).toHaveBeenLastCalledWith('/b.orf', DEFAULT_RAW_DECODE_OPTIONS);
   });
 
+  it('(e) a base whose recorded options no longer match the store is a MISS (never serves stale-options pixels)', async () => {
+    // First open with DEFAULT options → base cached with provenance decodeOptions = DEFAULT.
+    await imageService.loadImage('/photo.orf');
+    expect(decodeApi()).toHaveBeenCalledTimes(1);
+    expect(imageCacheService.getBase('/photo.orf')).not.toBeNull();
+
+    // Race/corruption case: the store now holds DIFFERENT decode options than the cached base was
+    // decoded with (Canvas normally keeps these in lock-step). The read-side coherence guard must
+    // treat the hit as a MISS and decode fresh rather than serve wrong-options pixels.
+    useAppStore.getState().setRawDecodeOptions(AHD_RECON);
+    await imageService.loadImage('/photo.orf');
+    expect(decodeApi()).toHaveBeenCalledTimes(2); // MISS → fresh decode with the new options
+
+    // The re-decode rewrote the base with matching provenance (AHD_RECON) — the next reopen is a
+    // HIT again (no third decode).
+    await imageService.loadImage('/photo.orf');
+    expect(decodeApi()).toHaveBeenCalledTimes(2);
+  });
+
   it('(d) non-RAW reopen also serves from the base cache (same loadImage path, bonus)', async () => {
     // Design decision: non-RAW images share the base-cache path, so a reopen skips the
     // file read/decode too. Drive the private regular-image loader as the decode seam.

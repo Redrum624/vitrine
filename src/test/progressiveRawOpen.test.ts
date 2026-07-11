@@ -160,6 +160,34 @@ describe('ImageService.loadImage — progressive RAW open', () => {
     expect(imageCacheService.getBase('/photo.orf')).toBeNull();  // stale-options full never cached
   });
 
+  it('skips the wasteful OLD-options swap when a re-decode is in flight (store options not yet updated)', async () => {
+    // Case A of the OLD→NEW double swap: the ORIGINAL background full decode (started first, so it
+    // lands first) resolves while a re-decode is in flight but has NOT yet updated the store
+    // options — so `optionsChanged` still reads false. Without the reDecode-in-flight guard, this
+    // decode would swap the OLD-options result in + pay a full-res reprocess, only for reDecode to
+    // immediately replace it with the NEW-options result. It must neither swap nor write L1.
+    const full = deferred<ReturnType<typeof makeFullPayload>>();
+    decodeApi().mockImplementation(async () => full.promise);
+    useAppStore.getState().setRawDecodeOptions({ demosaic: 'dcb', highlightMode: 'blend' });
+
+    await imageService.loadImage('/photo.orf', undefined, () => {});
+    expect(imageService.getCurrentImage()?.width).toBe(4); // preview on screen
+
+    // A re-decode (RawDecodePanel → reDecode) flips `reDecoding` true synchronously but does NOT
+    // update the store options until its OWN decode resolves.
+    useAppStore.getState().setReDecoding(true);
+
+    const swap = jest.spyOn(imageService, 'updateCurrentImageData');
+    full.resolve(makeFullPayload(8, 4, 200));
+    await flush();
+
+    expect(swap).not.toHaveBeenCalled();                         // no wasteful OLD-options swap
+    expect(imageService.getCurrentImage()?.width).toBe(4);       // still the preview — reDecode will swap
+    expect(imageCacheService.getBase('/photo.orf')).toBeNull();  // stale-options base not written either
+    swap.mockRestore();
+    useAppStore.getState().setReDecoding(false);
+  });
+
   it('caches a superseded decode WITHOUT swapping the working image (write-before-guard invariant)', async () => {
     const fullA = deferred<ReturnType<typeof makeFullPayload>>();
     decodeApi().mockImplementation(async (path: string) =>
@@ -311,6 +339,33 @@ describe('ImageService.loadImage — disk-persisted base cache (L2, Task R4)', (
     expect(imageCacheService.getBase('/a.orf')?.width).toBe(10);     // A paid forward into L1
     expect(decodeApi()).not.toHaveBeenCalled();                     // both served from disk, never LibRaw
     expect(baseWriteApi()).not.toHaveBeenCalled();                  // disk HITs don't rewrite the disk
+  });
+});
+
+describe('disk write-through interactive gating (P6 item 2)', () => {
+  it('an INTERACTIVE open writes the fresh decode through to disk', async () => {
+    baseReadApi().mockResolvedValue(null); // miss → the real decode runs
+    await imageService.loadImage('/photo.orf'); // default interactive=true (non-progressive: no onFullDecode)
+    await flush();
+    expect(decodeApi()).toHaveBeenCalledTimes(1);
+    expect(baseWriteApi()).toHaveBeenCalledTimes(1); // …and interactive → write-through persists it
+  });
+
+  it('a NON-INTERACTIVE loadImage (batch) does NOT write through, but still READS the disk', async () => {
+    baseReadApi().mockResolvedValue(null); // miss
+    await imageService.loadImage('/photo.orf', undefined, undefined, false);
+    await flush();
+    expect(decodeApi()).toHaveBeenCalledTimes(1);       // decode still ran
+    expect(baseReadApi()).toHaveBeenCalled();           // disk READ stays enabled for batch
+    expect(baseWriteApi()).not.toHaveBeenCalled();      // …but the one-shot batch decode is NOT persisted
+  });
+
+  it('decodeForExport does NOT write through to disk (export is a one-shot)', async () => {
+    baseReadApi().mockResolvedValue(null); // miss
+    await imageService.decodeForExport('/photo.orf');
+    await flush();
+    expect(decodeApi()).toHaveBeenCalledTimes(1);
+    expect(baseWriteApi()).not.toHaveBeenCalled();
   });
 });
 

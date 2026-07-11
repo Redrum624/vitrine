@@ -36,6 +36,11 @@ const WASM_DEMOSAIC_QUAL = { ahd: 3, dcb: 4 };
 // (clip, same as 'off') — callers are warned below when options are non-default.
 const WASM_HIGHLIGHT = { off: 0, blend: 2, reconstruct: 5 };
 
+// Warn-once latch: an unknown highlightMode is a static config/programming error, not a per-file
+// condition — buildWasmOptions runs once PER DECODED FILE, so warning every call spams the log
+// (potentially thousands of identical lines across a batch). Surface it once per process.
+let warnedUnknownHighlight = false;
+
 /**
  * Build the libraw-wasm options object from structured decode options.
  * Pure mapping — no I/O.
@@ -68,7 +73,8 @@ function buildWasmOptions(options, log) {
         `honoured only if bundled wasm exposes libraw_output_params_t.highlight)`
       );
     }
-  } else {
+  } else if (!warnedUnknownHighlight) {
+    warnedUnknownHighlight = true;
     (log || console).warn(`[libraw-wasm] Unknown highlightMode "${highlightMode}", using LibRaw default (clip).`);
   }
 
