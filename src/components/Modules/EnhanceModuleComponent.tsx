@@ -30,6 +30,11 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
   const [busy, setBusy] = useState(false);
   const upscaleProgress = useAppStore((s) => s.upscaleProgress);
   const upscaleMode = useAppStore((s) => s.upscaleMode);
+  // Re-render on bulk upstream param changes (Auto All / Paste Style / presets bump this) so the
+  // staleness hint re-evaluates while the panel stays mounted. Normal per-module slider edits
+  // happen while THIS panel is unmounted (single module panel visible at a time), so navigating
+  // back re-mounts and re-reads isEnhanceStale() — no live signal needed for that path.
+  const externalParamsVersion = useAppStore((s) => s.externalParamsVersion);
   const [error, setError] = useState<string | null>(null);
   const [revertVersion, setRevertVersion] = useState(0);
 
@@ -57,16 +62,20 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
   const handleApply = useCallback(async () => {
     setBusy(true); setError(null);
     try {
-      if (nrEnabled) {
-        const nrParams = { enabled: true, strength: nrStrength, method: 'auto' as const };
-        noiseReductionModule.setParams(nrParams);
-        onNoiseReductionChange?.(nrParams);
-      } else {
-        const nrParams = { enabled: false };
-        noiseReductionModule.setParams(nrParams);
-        onNoiseReductionChange?.(nrParams);
-      }
-      if (paramsRef.current.upscale) {
+      const isUpscale = paramsRef.current.upscale;
+      const nrParams = nrEnabled
+        ? { enabled: true, strength: nrStrength, method: 'auto' as const }
+        : { enabled: false };
+      // Always commit NR params to the module so the pipeline (and applyUpscale's own bake pass)
+      // picks them up. The parent's onNoiseReductionChange ALSO fires a debounced full pipeline
+      // pass — but on the UPSCALE path that pass is redundant: applyUpscale bakes NR into the new
+      // base itself and triggers exactly one post-bake reprocess, and the parent's pass would run
+      // a wasted full pass on the pre-upscale preview that the bake immediately discards (round-6
+      // P7 item 4 — the NR + Upscale double-reprocess). So skip the parent trigger when upscaling.
+      noiseReductionModule.setParams(nrParams);
+      if (!isUpscale) onNoiseReductionChange?.(nrParams);
+
+      if (isUpscale) {
         await enhanceService.applyUpscale({ ...paramsRef.current, upscale: true });
         setRevertVersion((v) => v + 1);
       } else if (paramsRef.current.sharpen) {
@@ -74,6 +83,10 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
         module.setParams(patch); setParams((p) => ({ ...p, ...patch }));
         onParamsChange?.(patch);
       }
+      // Snapshot the upstream param state this Apply result reflects, so a later upstream edit
+      // surfaces the "Re-apply to update" staleness hint. Only after a real apply (upscale or
+      // sharpen) — a no-op click (neither toggle on) leaves the baseline untouched.
+      if (isUpscale || paramsRef.current.sharpen) enhanceService.markEnhanceApplied();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -82,6 +95,12 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
   }, [nrEnabled, nrStrength, module, onParamsChange, onNoiseReductionChange]);
 
   const currentParams = paramsRef.current;
+
+  // Staleness affordance: an Apply Enhance result goes stale once an upstream (non-enhance)
+  // pipeline param changes. `externalParamsVersion` is read only to re-subscribe on bulk changes
+  // (its value is always ≥ 0, so it never gates the flag); the truth comes from the service
+  // snapshot vs the live pipeline params. Hidden while busy (a re-apply is already in flight).
+  const enhanceStale = externalParamsVersion >= 0 && !busy && enhanceService.isEnhanceStale();
 
   // Per-scale output-size feasibility for the CURRENT image (crop-adjusted dims, mirroring
   // EnhanceService.applyUpscale). Unknown dims (no image) ⇒ leave every scale enabled; the
@@ -297,6 +316,20 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
           ? (upscaleProgress != null ? `Enhancing… ${Math.round(upscaleProgress * 100)}%` : 'Enhancing…')
           : currentParams.upscale ? `Apply Enhance (×${currentParams.scale})` : 'Apply Enhance'}
       </button>
+
+      {/* Staleness hint: upstream edits changed after Apply Enhance ran → the result is out of date. */}
+      {enhanceStale && (
+        <div
+          data-testid="enhance-stale-hint"
+          style={{
+            display: 'flex', alignItems: 'center', gap: 6, marginTop: -6,
+            fontSize: 10.5, color: 'var(--accent)',
+          }}
+        >
+          <span aria-hidden style={{ flexShrink: 0 }}>↻</span>
+          <span>Upstream edits changed — Re-apply to update.</span>
+        </div>
+      )}
 
       {/* Revert button */}
       {revertVersion >= 0 && enhanceService.canRevert() && (

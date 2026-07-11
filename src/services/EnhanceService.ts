@@ -77,9 +77,46 @@ interface RestorePoint {
 class EnhanceService {
   private restoreStack: RestorePoint[] = [];
   private inFlight = false;
+  // Staleness snapshot: the hash of all UPSTREAM (non-enhance) pipeline params captured at the
+  // moment Apply Enhance last ran for the CURRENT image. null = no apply yet (or image switched).
+  // Lives on the service (not the panel's React state) so it survives the Enhance panel
+  // unmounting when the user navigates to another module and back — scoped per image exactly like
+  // `restoreStack`, and reset at the same choke point (onImageSwitched).
+  private appliedUpstreamHash: string | null = null;
 
   canRevert(): boolean {
     return this.restoreStack.length > 0;
+  }
+
+  /**
+   * Fingerprint of every pipeline module's params EXCEPT enhance's own — the upstream state that
+   * feeds the enhance input (crop → noise-reduction run before enhance; see the pipeline order).
+   * Deliberately excludes `enhance` so tweaking Enhance's OWN sliders never flags itself stale.
+   * getModules() iterates in registration (processing) order, so the string is stable.
+   */
+  private upstreamParamsHash(): string {
+    const modules = imageProcessingPipeline.getModules?.() ?? new Map();
+    const parts: string[] = [];
+    for (const [id, mod] of modules) {
+      if (id === 'enhance') continue;
+      const getParams = (mod as { getParams?: () => unknown }).getParams;
+      parts.push(`${id}:${JSON.stringify(typeof getParams === 'function' ? getParams.call(mod) : null)}`);
+    }
+    return parts.join('|');
+  }
+
+  /** Snapshot the current upstream param state as the baseline an Apply Enhance result reflects. */
+  markEnhanceApplied(): void {
+    this.appliedUpstreamHash = this.upstreamParamsHash();
+  }
+
+  /**
+   * True when an Apply Enhance has run for this image AND an upstream (non-enhance) param has
+   * since changed — i.e. the applied result no longer reflects the current pipeline input, so the
+   * panel should surface a "Re-apply to update" hint. False before any apply and right after one.
+   */
+  isEnhanceStale(): boolean {
+    return this.appliedUpstreamHash !== null && this.appliedUpstreamHash !== this.upstreamParamsHash();
   }
 
   getRestoreDepth(): number {
@@ -261,6 +298,9 @@ class EnhanceService {
    */
   onImageSwitched(): void {
     this.restoreStack = [];
+    // The staleness snapshot is per-image too: a fresh image has no applied-enhance baseline, so
+    // the "Re-apply to update" hint must not carry over from the previous image.
+    this.appliedUpstreamHash = null;
   }
 
   /**

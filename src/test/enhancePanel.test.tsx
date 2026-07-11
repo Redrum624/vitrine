@@ -12,7 +12,10 @@ jest.mock('../services/EnhanceService', () => ({
   // getUpscaleFeasibility is a PURE helper — use the real implementation so the
   // disabled states / tooltip numbers under test are the production ones.
   getUpscaleFeasibility: jest.requireActual('../services/EnhanceService').getUpscaleFeasibility,
-  enhanceService: { applyUpscale: jest.fn(async () => {}), revert: jest.fn(), canRevert: () => false }
+  enhanceService: {
+    applyUpscale: jest.fn(async () => {}), revert: jest.fn(), canRevert: () => false,
+    markEnhanceApplied: jest.fn(), isEnhanceStale: jest.fn(() => false),
+  },
 }));
 import EnhanceModuleComponent from '../components/Modules/EnhanceModuleComponent';
 import { enhanceModule } from '../modules/EnhanceModule';
@@ -169,5 +172,79 @@ describe('EnhanceModuleComponent — upscale feasibility (160 MP output cap)', (
     fireEvent.click(screen.getByRole('button', { name: /upscale/i }));
     await act(async () => { fireEvent.click(screen.getByText(/Apply Enhance \(×/)); });
     expect(screen.getByRole('alert')).toHaveTextContent('boom from service');
+  });
+});
+
+describe('EnhanceModuleComponent — staleness affordance (P7 item 3)', () => {
+  beforeEach(() => {
+    enhanceModule.resetParams();
+    useAppStore.setState({ upscaleProgress: null, upscaleMode: null, externalParamsVersion: 0 });
+    mockOriginalDims = null;
+    (enhanceService.isEnhanceStale as jest.Mock).mockReturnValue(false);
+    (enhanceService.markEnhanceApplied as jest.Mock).mockClear();
+  });
+
+  it('snapshots the upstream baseline on Apply (markEnhanceApplied) and shows NO hint yet', () => {
+    render(<EnhanceModuleComponent module={enhanceModule} noiseReductionModule={makeNrModule()} />);
+    fireEvent.click(screen.getByText('Apply Enhance'));
+    expect(enhanceService.markEnhanceApplied).toHaveBeenCalled();
+    expect(screen.queryByTestId('enhance-stale-hint')).toBeNull();
+  });
+
+  it('shows the "Re-apply to update" hint when the service reports the enhance is stale', () => {
+    (enhanceService.isEnhanceStale as jest.Mock).mockReturnValue(true);
+    render(<EnhanceModuleComponent module={enhanceModule} noiseReductionModule={makeNrModule()} />);
+    expect(screen.getByTestId('enhance-stale-hint')).toHaveTextContent(/re-apply/i);
+  });
+
+  it('re-evaluates on an externalParamsVersion bump (bulk upstream change → hint appears)', () => {
+    render(<EnhanceModuleComponent module={enhanceModule} noiseReductionModule={makeNrModule()} />);
+    expect(screen.queryByTestId('enhance-stale-hint')).toBeNull();
+    (enhanceService.isEnhanceStale as jest.Mock).mockReturnValue(true);
+    act(() => { useAppStore.setState({ externalParamsVersion: 1 }); });
+    expect(screen.getByTestId('enhance-stale-hint')).toBeInTheDocument();
+  });
+
+  it('clears the hint after a re-apply (markEnhanceApplied re-snapshots; service reports fresh)', () => {
+    (enhanceService.isEnhanceStale as jest.Mock).mockReturnValue(true);
+    render(<EnhanceModuleComponent module={enhanceModule} noiseReductionModule={makeNrModule()} />);
+    expect(screen.getByTestId('enhance-stale-hint')).toBeInTheDocument();
+    (enhanceService.isEnhanceStale as jest.Mock).mockReturnValue(false);
+    fireEvent.click(screen.getByText('Apply Enhance'));
+    expect(enhanceService.markEnhanceApplied).toHaveBeenCalled();
+    expect(screen.queryByTestId('enhance-stale-hint')).toBeNull();
+  });
+});
+
+describe('EnhanceModuleComponent — NR + Upscale single reprocess (P7 item 4)', () => {
+  beforeEach(() => {
+    enhanceModule.resetParams();
+    useAppStore.setState({ upscaleProgress: null, upscaleMode: null });
+    mockOriginalDims = { width: 2000, height: 1500 };
+    (enhanceService.applyUpscale as jest.Mock).mockClear();
+    (enhanceService.isEnhanceStale as jest.Mock).mockReturnValue(false);
+  });
+
+  it('upscale path with NR on commits NR params for the bake but SKIPS the redundant onNoiseReductionChange reprocess', async () => {
+    const onNR = jest.fn();
+    const nrMod = makeNrModule();
+    render(<EnhanceModuleComponent module={enhanceModule} noiseReductionModule={nrMod} onNoiseReductionChange={onNR} />);
+    fireEvent.click(screen.getByRole('button', { name: /noise.?reduction/i })); // enable NR
+    fireEvent.click(screen.getByRole('button', { name: /upscale/i }));          // enable Upscale
+    await act(async () => { fireEvent.click(screen.getByText(/Apply Enhance \(×/)); });
+    // NR params ARE committed to the module (applyUpscale bakes them into the new base)...
+    expect(nrMod.setParams).toHaveBeenCalledWith({ enabled: true, strength: expect.any(Number), method: 'auto' });
+    // ...but the parent's reprocess trigger is NOT fired — applyUpscale owns the single post-bake pass.
+    expect(onNR).not.toHaveBeenCalled();
+    expect(enhanceService.applyUpscale).toHaveBeenCalledWith(expect.objectContaining({ upscale: true }));
+  });
+
+  it('sharpen path (no upscale) STILL fires onNoiseReductionChange — that reprocess is what applies enhance', () => {
+    const onNR = jest.fn();
+    const nrMod = makeNrModule();
+    render(<EnhanceModuleComponent module={enhanceModule} noiseReductionModule={nrMod} onNoiseReductionChange={onNR} />);
+    fireEvent.click(screen.getByRole('button', { name: /noise.?reduction/i }));
+    fireEvent.click(screen.getByText('Apply Enhance'));
+    expect(onNR).toHaveBeenCalledWith({ enabled: true, strength: expect.any(Number), method: 'auto' });
   });
 });

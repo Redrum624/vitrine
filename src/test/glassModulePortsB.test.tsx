@@ -50,7 +50,10 @@ jest.mock('../services/ImageService', () => ({ imageService: {
 } }));
 jest.mock('../services/EnhanceService', () => ({
   getUpscaleFeasibility: jest.requireActual('../services/EnhanceService').getUpscaleFeasibility,
-  enhanceService: { applyUpscale: jest.fn(async () => {}), revert: jest.fn(), canRevert: () => false },
+  enhanceService: {
+    applyUpscale: jest.fn(async () => {}), revert: jest.fn(), canRevert: () => false,
+    markEnhanceApplied: jest.fn(), isEnhanceStale: jest.fn(() => false),
+  },
 }));
 import EnhanceModuleComponent from '../components/Modules/EnhanceModuleComponent';
 import { enhanceModule } from '../modules/EnhanceModule';

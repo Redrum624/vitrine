@@ -20,7 +20,7 @@ export function enhanceImage(rgba: Float32Array, w: number, h: number, p: Enhanc
   // 0+1 native res: denoise chroma, RL-deconv deblur + luma graft
   const ycc = rgbaToYCrCb(rgba);
   let { y, cr, cb } = ycc; const a = ycc.a;
-  if (p.denoiseStrength > 0) { const d = denoiseChroma(cr, cb, w, h, p.denoiseStrength); cr = d.cr; cb = d.cb; }
+  if (p.denoiseStrength > 0) { const d = denoiseChroma(cr, cb, y, w, h, p.denoiseStrength); cr = d.cr; cb = d.cb; }
   if (p.rlIters > 0 && p.psfSigma > 0) {
     const restored = rlDeconvLuma(y, w, h, p.psfSigma, p.rlIters);
     y = lumaGraft(y, restored, w, h, p.alpha, p.hpSigma);
