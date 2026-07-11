@@ -67,8 +67,8 @@ export function GalleryTileContextMenu({ x, y, onOpen, onRemove, onShowInExplore
 
   // Re-clamp against the menu's REAL measured size once mounted. Also re-runs
   // whenever x/y change (a second contextmenu while the menu is already open
-  // repositions it — GalleryView remounts this with fresh coordinates rather
-  // than moving the existing instance, but the effect covers both cases).
+  // updates the SAME mounted instance's props — no key prop, so React updates
+  // rather than remounts; the [x, y] deps re-clamp on mount and reposition alike).
   useLayoutEffect(() => {
     const el = menuRef.current;
     const width = el?.offsetWidth || MENU_WIDTH_ESTIMATE;
