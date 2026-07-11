@@ -7,6 +7,8 @@
  * readback correctness gate is selfTest(), which runs in the Electron app at startup
  * (it needs a live GL context) — NOT here.
  */
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { GpuPreviewPipeline, gpuPreviewPipeline, memoizeUniformLocation } from '../shaders/GpuPreviewPipeline';
 
 describe('GpuPreviewPipeline (no WebGL2 in jsdom)', () => {
@@ -41,6 +43,33 @@ describe('GpuPreviewPipeline (no WebGL2 in jsdom)', () => {
     expect(() => pipeline.setSource(data, 4, 4)).toThrow(/attach/);
     expect(() => pipeline.render([])).toThrow(/attach/);
     expect(() => pipeline.readback()).toThrow(/attach/);
+  });
+});
+
+describe('runSubPasses texture-unit ordering (local-adjustments red-render regression)', () => {
+  // WebGL2 can't run in jsdom, so the real proof is the in-app selfTest() (local-adj went
+  // from maxDiff=1.0 FAIL to 1.19e-7 PASS once this ordering was fixed). This source-level
+  // net guards the exact structural invariant that broke it: the local-adjustments blend
+  // sub-pass binds u_adjusted=scratch on unit 1, then a MaskUpload on unit 2. resolveTexture()
+  // UPLOADS the mask on a cache miss (uploadMask → bindTexture + texImage2D on the ACTIVE
+  // unit). If resolveTexture() runs while unit 1 is still active, the upload clobbers unit 1,
+  // so the shader samples the R32F mask as the "adjusted" image and renders (mask,0,0)=red.
+  // The fix: select gl.activeTexture(gl.TEXTURE0 + u) BEFORE resolveTexture(texture).
+  const src = readFileSync(join(__dirname, '..', 'shaders', 'GpuPreviewPipeline.ts'), 'utf8');
+
+  it('selects the texture unit before resolving (avoids upload clobbering the previous unit)', () => {
+    // Isolate the runSubPasses binding loop body.
+    const loopStart = src.indexOf('for (let u = 0; u < bindings.length; u++)');
+    expect(loopStart).toBeGreaterThan(-1);
+    const loopBody = src.slice(loopStart, loopStart + 1600);
+
+    const activeIdx = loopBody.indexOf('gl.activeTexture(gl.TEXTURE0 + u)');
+    const resolveIdx = loopBody.indexOf('resolveTexture(texture)');
+    expect(activeIdx).toBeGreaterThan(-1);
+    expect(resolveIdx).toBeGreaterThan(-1);
+    // The active-unit selection MUST come first, or a cache-miss mask upload lands on the
+    // previous binding's unit and re-introduces the red-render bug.
+    expect(activeIdx).toBeLessThan(resolveIdx);
   });
 });
 

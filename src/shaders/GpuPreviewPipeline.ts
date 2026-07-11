@@ -644,6 +644,16 @@ export class GpuPreviewPipeline {
       const bindings = sp.bindings ?? [{ texture: 'prev', sampler: 'u_image' }];
       for (let u = 0; u < bindings.length; u++) {
         const { texture, sampler } = bindings[u];
+        // Select this binding's texture unit BEFORE resolveTexture(). resolveTexture may
+        // UPLOAD a texture on a cache miss (a MaskUpload → uploadMask() → bindTexture() +
+        // texImage2D() on the ACTIVE unit; likewise ensureScratch()'s makeTexture()). Doing
+        // that while unit u-1 is still active would clobber the PREVIOUS binding — e.g. the
+        // local-adjustments blend binds u_adjusted=scratch on unit 1, then the mask upload on
+        // unit 1 (still active) would overwrite it, so the shader samples the R32F mask as the
+        // "adjusted" image and renders (mask,0,0) = red (local-adj self-test FAIL maxDiff=1.0).
+        // Selecting unit u first makes any such upload land on unit u — exactly where we bind
+        // `tex` next. Same class of bug, and same fix, as the tonecurve LUT upload in render().
+        gl.activeTexture(gl.TEXTURE0 + u);
         const tex = resolveTexture(texture);
         if (!tex) {
           // A required texture (e.g. a mask upload that failed/size-mismatched) is
@@ -652,7 +662,6 @@ export class GpuPreviewPipeline {
           gl.activeTexture(gl.TEXTURE0);
           return null;
         }
-        gl.activeTexture(gl.TEXTURE0 + u);
         gl.bindTexture(gl.TEXTURE_2D, tex);
         gl.uniform1i(gl.getUniformLocation(prog, sampler), u);
       }
@@ -1105,6 +1114,7 @@ export class GpuPreviewPipeline {
       const laPass = buildLocalAdjustmentsPass(laParams, w, h);
       let laMaxDiff = Infinity;
       let laOk = false;
+      let laWorstIdx = -1;
       if (laPass) {
         this.setSource(data, w, h);
         this.render([laPass]);
@@ -1112,9 +1122,26 @@ export class GpuPreviewPipeline {
         const refLA = laModule.processImage(new Float32Array(data), w, h);
         laMaxDiff = 0;
         for (let i = 0; i < refLA.length; i++) {
-          laMaxDiff = Math.max(laMaxDiff, Math.abs(gpuLA[i] - refLA[i]));
+          const d = Math.abs(gpuLA[i] - refLA[i]);
+          if (d > laMaxDiff) { laMaxDiff = d; laWorstIdx = i; }
         }
         laOk = laMaxDiff < 1e-3;
+        // On FAIL, dump the worst pixel with GPU vs CPU values + the mask/base context so a
+        // driver-specific failure is diagnosable from a user's log (WARN survives in prod).
+        if (!laOk && laWorstIdx >= 0) {
+          const px = laWorstIdx >> 2;
+          const ch = laWorstIdx & 3;
+          const base4 = px << 2;
+          const masks = laModule.getLayers().map(l => (l.mask?.[px] ?? NaN).toFixed(3)).join(',');
+          logger.warn(
+            `[GPU-PIPELINE] local-adj FAIL worst @idx=${laWorstIdx} px=${px} (x=${px % w},y=${(px / w) | 0}) ch=${'rgba'[ch]} ` +
+            `gpu=${gpuLA[laWorstIdx].toFixed(4)} cpu=${refLA[laWorstIdx].toFixed(4)} ` +
+            `srcRGBA=[${data[base4].toFixed(3)},${data[base4 + 1].toFixed(3)},${data[base4 + 2].toFixed(3)},${data[base4 + 3].toFixed(3)}] ` +
+            `gpuRGBA=[${gpuLA[base4].toFixed(3)},${gpuLA[base4 + 1].toFixed(3)},${gpuLA[base4 + 2].toFixed(3)},${gpuLA[base4 + 3].toFixed(3)}] ` +
+            `cpuRGBA=[${refLA[base4].toFixed(3)},${refLA[base4 + 1].toFixed(3)},${refLA[base4 + 2].toFixed(3)},${refLA[base4 + 3].toFixed(3)}] ` +
+            `layerMasks@px=[${masks}]`,
+          );
+        }
       } else {
         logger.warn('[GPU-PIPELINE] local-adj self-test: pass builder returned null (unexpected for GPU-representable layers)');
       }
