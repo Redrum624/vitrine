@@ -1,9 +1,8 @@
 import { create } from 'zustand';
-import type { AppState, ImageFile, Layer, ViewportState, ProcessedImageData, RenderMode } from '../types';
+import type { AppState, Layer, ViewportState, ProcessedImageData, RenderMode } from '../types';
 import { DEFAULT_RAW_DECODE_OPTIONS, type RawDecodeOptions } from '../types/electron';
 
 interface AppStore extends AppState {
-  setCurrentImage: (image: ImageFile | null) => void;
   setSelectedTool: (toolId: string | null) => void;
   addLayer: (layer: Layer) => void;
   removeLayer: (layerId: string) => void;
@@ -17,7 +16,6 @@ interface AppStore extends AppState {
   setProcessedImageData: (data: Float32Array | ProcessedImageData | null) => void;
   toggleSidebar: () => void;
   resetZoom: () => void;
-  getCurrentPipelineSettings: () => Record<string, unknown>;
   // Rotation grid overlay state
   isAdjustingRotation: boolean;
   setIsAdjustingRotation: (adjusting: boolean) => void;
@@ -146,7 +144,6 @@ interface AppStore extends AppState {
 }
 
 export const useAppStore = create<AppStore>((set) => ({
-  currentImage: null,
   selectedTool: null,
   layers: [],
   processedImageData: null,
@@ -211,8 +208,6 @@ export const useAppStore = create<AppStore>((set) => ({
   bumpGpuResult: () => set((state) => ({ gpuResultVersion: state.gpuResultVersion + 1 })),
 
   bumpBaseImageVersion: () => set((state) => ({ baseImageVersion: state.baseImageVersion + 1 })),
-
-  setCurrentImage: (image) => set({ currentImage: image }),
 
   setIsAdjustingRotation: (adjusting) => set({ isAdjustingRotation: adjusting }),
 
@@ -318,19 +313,4 @@ export const useAppStore = create<AppStore>((set) => ({
   }),
 
   endExportProgress: () => set(() => ({ exportProgress: null })),
-
-  getCurrentPipelineSettings: () => {
-    // This would need to be implemented to collect current settings from all modules
-    // For now, return a placeholder structure
-    return {
-      lensCorrections: {},
-      basicAdjustments: {},
-      shadowsHighlights: {},
-      localAdjustments: {},
-      noiseReduction: {},
-      enhance: {},
-      colorGrading: {},
-      export: {}
-    };
-  },
 }));

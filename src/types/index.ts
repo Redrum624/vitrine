@@ -298,7 +298,6 @@ export interface ProcessedImageData {
 export type RenderMode = 'gpu' | 'cpu';
 
 export interface AppState {
-  currentImage: ImageFile | null;
   selectedTool: string | null;
   layers: Layer[];
   viewport: ViewportState;

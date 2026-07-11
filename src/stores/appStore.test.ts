@@ -1,11 +1,10 @@
 import { useAppStore } from './appStore';
-import type { Layer, ImageFile } from '../types';
+import type { Layer } from '../types';
 
 describe('appStore', () => {
   beforeEach(() => {
     // Reset store state before each test
     useAppStore.setState({
-      currentImage: null,
       selectedTool: null,
       layers: [],
       processedImageData: null,
@@ -16,34 +15,6 @@ describe('appStore', () => {
         rotation: 0,
       },
       sidebarCollapsed: false,
-    });
-  });
-
-  describe('currentImage', () => {
-    it('should set current image', () => {
-      const mockImage: ImageFile = {
-        id: 'test-1',
-        name: 'test.jpg',
-        path: '/path/to/test.jpg',
-        thumbnail: 'data:image/jpeg;base64,test',
-        metadata: {
-          width: 800,
-          height: 600,
-          size: 1024,
-          format: 'jpeg',
-          dateCreated: new Date(),
-        },
-      };
-
-      useAppStore.getState().setCurrentImage(mockImage);
-
-      expect(useAppStore.getState().currentImage).toEqual(mockImage);
-    });
-
-    it('should set current image to null', () => {
-      useAppStore.getState().setCurrentImage(null);
-
-      expect(useAppStore.getState().currentImage).toBeNull();
     });
   });
 
@@ -198,13 +169,4 @@ describe('appStore', () => {
     });
   });
 
-  describe('getCurrentPipelineSettings', () => {
-    it('should return pipeline settings structure', () => {
-      const settings = useAppStore.getState().getCurrentPipelineSettings();
-
-      expect(settings).toHaveProperty('lensCorrections');
-      expect(settings).toHaveProperty('basicAdjustments');
-      expect(settings).toHaveProperty('shadowsHighlights');
-    });
-  });
 });

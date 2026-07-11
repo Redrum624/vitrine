@@ -5,8 +5,6 @@ import { rawHistogramService, HistogramData } from './RawHistogramService';
 import { noiseReductionService, NoiseReductionOptions } from './NoiseReductionService';
 import { lensProfileService, LensProfile, LensCorrections } from './LensProfileService';
 import { colorManagementService, SoftProofOptions, ColorConversionOptions } from './ColorManagementService';
-import { printService, PrintSettings } from './PrintService';
-import { webGalleryService, GalleryImage, GalleryOutput, GallerySettings } from './WebGalleryService';
 import { imageService } from './ImageService';
 import { imageProcessingPipeline } from './ImageProcessingPipeline';
 import { imageCacheService } from './ImageCacheService';
@@ -998,70 +996,6 @@ export class RawImageService {
       return await colorManagementService.convertColorProfile(imageData, width, height, options as unknown as ColorConversionOptions);
     } catch (error) {
       logger.error('Failed to convert color profile:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Get available paper sizes
-   */
-  getPaperSizes() {
-    return printService.getPaperSizes();
-  }
-
-  /**
-   * Get available print layouts
-   */
-  getPrintLayouts() {
-    return printService.getPrintLayouts();
-  }
-
-  /**
-   * Create print job
-   */
-  async createPrintJob(imageData: Float32Array, width: number, height: number, settings: Record<string, unknown>) {
-    try {
-      return await printService.createPrintJob(imageData, width, height, settings as unknown as PrintSettings);
-    } catch (error) {
-      logger.error('Failed to create print job:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Get print jobs
-   */
-  getPrintJobs() {
-    return printService.getAllPrintJobs();
-  }
-
-  /**
-   * Get available gallery themes
-   */
-  getGalleryThemes() {
-    return webGalleryService.getThemes();
-  }
-
-  /**
-   * Generate web gallery
-   */
-  async generateWebGallery(images: unknown[], settings: Record<string, unknown>) {
-    try {
-      return await webGalleryService.generateGallery(images as GalleryImage[], settings as unknown as GallerySettings);
-    } catch (error) {
-      logger.error('Failed to generate web gallery:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Export gallery as downloadable file
-   */
-  async exportGallery(galleryOutput: unknown, filename: string) {
-    try {
-      return await webGalleryService.exportGallery(galleryOutput as GalleryOutput, filename);
-    } catch (error) {
-      logger.error('Failed to export gallery:', error);
       throw error;
     }
   }

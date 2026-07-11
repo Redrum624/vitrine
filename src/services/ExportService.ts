@@ -1,6 +1,5 @@
 import { logger } from '../utils/Logger';
 import { isElectron, EmbeddableMetadata } from '../types/electron';
-import { watermarkService, WatermarkSettings } from './WatermarkService';
 import { COLOR_SPACE_CONVERSIONS } from './colorSpaceMatrices';
 
 export interface ExportOptions {
@@ -51,9 +50,6 @@ export interface ExportOptions {
   filename?: string;
   suffix?: string;         // Added to original filename
   outputDirectory?: string;
-
-  // Watermark
-  watermark?: WatermarkSettings;
 }
 
 export interface ExportResult {
@@ -229,39 +225,19 @@ export class ExportService {
       const needsResize =
         outputDimensions.width !== originalWidth || outputDimensions.height !== originalHeight;
 
-      // RESIZE STRATEGY (moved off the renderer main thread):
-      //  - No watermark (the common path): defer the resize to the main process.
-      //    sharp downscales the raw buffer with lanczos3 BEFORE encode, off the UI
-      //    thread and at higher quality than the old JS bicubic. The renderer-side
-      //    sharpening/colour-space/bit-depth steps below run at FULL resolution —
-      //    they are all PER-PIXEL transforms, so the result is identical whether
-      //    applied before or after a resize (only the pixel count differs).
-      //  - Watermark enabled: a watermark MUST be composited at the OUTPUT size, or
-      //    its placement/scale would differ once downscaled. We therefore keep the
-      //    legacy renderer resize for that path so output is byte-for-byte preserved.
-      const watermarkEnabled = !!exportOptions.watermark?.enabled;
-      const resizeInMainProcess = needsResize && !watermarkEnabled;
+      // RESIZE STRATEGY (moved off the renderer main thread): defer the resize to
+      // the main process. sharp downscales the raw buffer with lanczos3 BEFORE
+      // encode, off the UI thread and at higher quality than the old JS bicubic.
+      // The renderer-side sharpening/colour-space/bit-depth steps below run at FULL
+      // resolution — they are all PER-PIXEL transforms, so the result is identical
+      // whether applied before or after a resize (only the pixel count differs).
 
       // Dimensions the renderer-side per-pixel steps (sharpen/colour/bit-depth)
       // operate on, and that the buffer handed to createImageFile is sized for.
-      // When the resize is deferred to sharp this stays at the full/original size.
+      // The resize is deferred to sharp, so this stays at the full/original size.
       let processedData = imageData;
-      let workingWidth = originalWidth;
-      let workingHeight = originalHeight;
-
-      if (needsResize && !resizeInMainProcess) {
-        // Watermark path: resize on the renderer (legacy behaviour, preserved exactly).
-        processedData = await this.resizeImage(
-          imageData,
-          originalWidth,
-          originalHeight,
-          outputDimensions.width,
-          outputDimensions.height,
-          exportOptions.resizeMode
-        );
-        workingWidth = outputDimensions.width;
-        workingHeight = outputDimensions.height;
-      }
+      const workingWidth = originalWidth;
+      const workingHeight = originalHeight;
 
       // Apply output sharpening (disabled by default; sharpening lives in the
       // develop pipeline now). Kept inert here for back-compat.
@@ -271,16 +247,6 @@ export class ExportService {
           workingWidth,
           workingHeight,
           exportOptions.outputSharpening
-        );
-      }
-
-      // Apply watermark if enabled (only reached on the renderer-resize path).
-      if (watermarkEnabled) {
-        processedData = await this.applyWatermark(
-          processedData,
-          workingWidth,
-          workingHeight,
-          exportOptions.watermark!
         );
       }
 
@@ -319,7 +285,7 @@ export class ExportService {
         workingHeight,
         exportOptions,
         outputPath,
-        resizeInMainProcess ? outputDimensions : undefined
+        needsResize ? outputDimensions : undefined
       );
 
       // Get file size
@@ -452,113 +418,6 @@ export class ExportService {
     }
 
     return { width, height };
-  }
-
-  // Resize image using high-quality resampling
-  private async resizeImage(
-    imageData: Float32Array,
-    originalWidth: number,
-    originalHeight: number,
-    newWidth: number,
-    newHeight: number,
-    mode: ExportOptions['resizeMode']
-  ): Promise<Float32Array> {
-    logger.debug(`Resizing image: ${originalWidth}x${originalHeight} → ${newWidth}x${newHeight} (${mode})`);
-
-    const resized = new Float32Array(newWidth * newHeight * 4);
-
-    // Use bicubic interpolation for high-quality resizing
-    for (let y = 0; y < newHeight; y++) {
-      for (let x = 0; x < newWidth; x++) {
-        const destIndex = (y * newWidth + x) * 4;
-
-        // Calculate source coordinates
-        let srcX: number, srcY: number;
-
-        switch (mode) {
-          case 'crop': {
-            // Center crop
-            const scale = Math.max(originalWidth / newWidth, originalHeight / newHeight);
-            const offsetX = (originalWidth - newWidth * scale) / 2;
-            const offsetY = (originalHeight - newHeight * scale) / 2;
-            srcX = x * scale + offsetX;
-            srcY = y * scale + offsetY;
-            break;
-          }
-
-          default:
-            // Standard scaling
-            srcX = (x * originalWidth) / newWidth;
-            srcY = (y * originalHeight) / newHeight;
-            break;
-        }
-
-        // Bicubic interpolation
-        const sample = this.bicubicSample(imageData, originalWidth, originalHeight, srcX, srcY);
-
-        resized[destIndex] = sample[0];     // R
-        resized[destIndex + 1] = sample[1]; // G
-        resized[destIndex + 2] = sample[2]; // B
-        resized[destIndex + 3] = sample[3]; // A
-      }
-    }
-
-    return resized;
-  }
-
-  // Bicubic interpolation sampling
-  private bicubicSample(
-    imageData: Float32Array,
-    width: number,
-    height: number,
-    x: number,
-    y: number
-  ): [number, number, number, number] {
-    const x1 = Math.floor(x);
-    const y1 = Math.floor(y);
-    const dx = x - x1;
-    const dy = y - y1;
-
-    const result: [number, number, number, number] = [0, 0, 0, 0];
-
-    for (let channel = 0; channel < 4; channel++) {
-      let value = 0;
-
-      // 4x4 bicubic kernel
-      for (let ky = -1; ky <= 2; ky++) {
-        for (let kx = -1; kx <= 2; kx++) {
-          const sx = Math.max(0, Math.min(width - 1, x1 + kx));
-          const sy = Math.max(0, Math.min(height - 1, y1 + ky));
-          const pixelValue = imageData[(sy * width + sx) * 4 + channel];
-
-          const weightX = this.cubicWeight(dx - kx);
-          const weightY = this.cubicWeight(dy - ky);
-
-          value += pixelValue * weightX * weightY;
-        }
-      }
-
-      result[channel] = Math.max(0, Math.min(1, value));
-    }
-
-    return result;
-  }
-
-  // Cubic interpolation weight function.
-  // NOTE: this resampler (resizeImage / bicubicSample / cubicWeight) is the
-  // RENDERER-SIDE path used ONLY when a watermark is present. The primary export
-  // resize (no watermark) runs sharp lanczos3 in imageWriter.cjs (main process).
-  private cubicWeight(t: number): number {
-    const a = -0.5; // Catmull-Rom / Keys cubic kernel parameter
-    const absT = Math.abs(t);
-
-    if (absT <= 1) {
-      return (a + 2) * absT * absT * absT - (a + 3) * absT * absT + 1;
-    } else if (absT < 2) {
-      return a * absT * absT * absT - 5 * a * absT * absT + 8 * a * absT - 4 * a;
-    }
-
-    return 0;
   }
 
   // Apply output sharpening
@@ -709,58 +568,6 @@ export class ExportService {
     return converted;
   }
 
-  // Apply watermark to image
-  private async applyWatermark(
-    imageData: Float32Array,
-    width: number,
-    height: number,
-    watermarkSettings: WatermarkSettings
-  ): Promise<Float32Array> {
-    try {
-      logger.debug('Applying watermark to export...');
-
-      // Convert Float32Array to ImageData
-      const canvas = document.createElement('canvas');
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext('2d')!;
-
-      const canvasImageData = ctx.createImageData(width, height);
-
-      // Convert Float32Array to Uint8ClampedArray
-      for (let i = 0; i < imageData.length; i += 4) {
-        canvasImageData.data[i] = Math.round(Math.max(0, Math.min(1, imageData[i])) * 255);     // R
-        canvasImageData.data[i + 1] = Math.round(Math.max(0, Math.min(1, imageData[i + 1])) * 255); // G
-        canvasImageData.data[i + 2] = Math.round(Math.max(0, Math.min(1, imageData[i + 2])) * 255); // B
-        canvasImageData.data[i + 3] = 255; // A
-      }
-
-      // Apply watermark
-      const watermarkedImageData = await watermarkService.applyWatermark(
-        canvasImageData,
-        watermarkSettings,
-        canvas
-      );
-
-      // Convert back to Float32Array
-      const result = new Float32Array(imageData.length);
-      for (let i = 0; i < watermarkedImageData.data.length; i += 4) {
-        result[i] = watermarkedImageData.data[i] / 255;         // R
-        result[i + 1] = watermarkedImageData.data[i + 1] / 255; // G
-        result[i + 2] = watermarkedImageData.data[i + 2] / 255; // B
-        result[i + 3] = watermarkedImageData.data[i + 3] / 255; // A
-      }
-
-      logger.debug('Watermark applied to export successfully');
-      return result;
-
-    } catch (error) {
-      logger.error('Failed to apply watermark during export:', error);
-      // Return original data on error
-      return imageData;
-    }
-  }
-
   // Convert bit depth
   private convertBitDepth(
     imageData: Float32Array,
@@ -818,8 +625,7 @@ export class ExportService {
     outputPath: string,
     // When set, the buffer is at full/original resolution and the main-process
     // writer must resize it (with sharp, off the renderer thread) to these dims
-    // BEFORE encoding. Omitted when the resize already happened on the renderer
-    // (watermark path) or no resize is needed.
+    // BEFORE encoding. Omitted when no resize is needed.
     targetDimensions?: { width: number; height: number }
   ): Promise<void> {
     logger.debug(`Creating ${options.format.toUpperCase()} file: ${width}x${height}, ${options.bitDepth}-bit`);

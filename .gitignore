@@ -173,6 +173,9 @@ installer/
 libraw.wasm
 libraw.js
 
+# Emscripten SDK (local wasm toolchain; was a stray bare gitlink with no .gitmodules)
+wasm-build/emsdk/
+
 # Image processing cache
 cache/
 processed/
