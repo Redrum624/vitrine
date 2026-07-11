@@ -309,6 +309,9 @@ class EnhanceService {
     // The staleness snapshot is per-image too: a fresh image has no applied-enhance baseline, so
     // the "Re-apply to update" hint must not carry over from the previous image.
     this.appliedUpstreamHash = null;
+    // upscaleMode is per-bake state (drives the AI/Standard badge and the AI-route disclosure
+    // hint) — a never-upscaled image must not inherit the previous image's route label (Q2 review).
+    useAppStore.getState().setUpscaleMode(null);
   }
 
   /**
