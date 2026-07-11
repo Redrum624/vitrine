@@ -190,9 +190,12 @@ export class RawImageService {
         { isRaw: true, autoAdjustmentResult: undefined, ...rawData.metadata },
       );
 
-      // Replace the working base image + the before/after original snapshot.
-      imageService.updateCurrentImageData(rawData.data, rawData.width, rawData.height);
+      // Replace the working base image + the before/after original snapshot. setOriginalImage
+      // runs FIRST so updateCurrentImageData's copy-on-write check (originalImageData already
+      // set) is a no-op — no wasted defensive copy of the pre-redecode pixels that would just be
+      // discarded a line later (see ImageService.updateCurrentImageData's comment).
       imageService.setOriginalImage(new Float32Array(rawData.data), rawData.width, rawData.height);
+      imageService.updateCurrentImageData(rawData.data, rawData.width, rawData.height);
 
       // Gallery/dock tile dims (see @param imageId doc above): write the true dims this
       // re-decode just produced, so a superseded progressive-open swap never leaves the tile

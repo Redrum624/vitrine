@@ -184,8 +184,12 @@ class EnhanceService {
       this.restoreStack.push({ data: restoreData, width, height, scale: params.scale, editState });
 
       imageProcessingPipeline.resetAllModules();
-      imageService.updateCurrentImageData(enhanced, outWidth, outHeight);
+      // setOriginalImage BEFORE updateCurrentImageData: the base cache is a fully-materialized
+      // snapshot already, so setting it first means updateCurrentImageData's copy-on-write check
+      // (originalImageData already set) is a no-op — no wasted defensive copy of the pre-upscale
+      // pixels that would just be discarded a line later.
       imageService.setOriginalImage(base, outWidth, outHeight);
+      imageService.updateCurrentImageData(enhanced, outWidth, outHeight);
       imageService.setBakedUpscale({ scale: params.scale, nativeWidth: procW, nativeHeight: procH });
       checkpointService.recordLabeled(`Enhanced ×${params.scale} (${mode === 'ai' ? 'AI' : 'Standard'})`, this.getRestoreDepth());
       store.notifyExternalParamsChange();
@@ -203,8 +207,9 @@ class EnhanceService {
     if (!rp) return false;
 
     imageProcessingPipeline.resetAllModules();
-    imageService.updateCurrentImageData(new Float32Array(rp.data), rp.width, rp.height);
+    // setOriginalImage BEFORE updateCurrentImageData — see applyUpscale's comment above.
     imageService.setOriginalImage(new Float32Array(rp.data), rp.width, rp.height);
+    imageService.updateCurrentImageData(new Float32Array(rp.data), rp.width, rp.height);
     editPersistenceService.restore(rp.editState, rp.width, rp.height);
 
     if (this.restoreStack.length === 0) {

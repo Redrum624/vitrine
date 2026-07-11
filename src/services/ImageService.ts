@@ -31,6 +31,9 @@ export class ImageService {
   private static instance: ImageService;
   private currentImage: ImageData | null = null;
   private originalImageData: { data: Float32Array; width: number; height: number } | null = null;
+  // Deferred (not-yet-copied) reference to the pre-edit base pixels — see deferOriginalSnapshot's
+  // doc comment for the full lazy/copy-on-write design.
+  private pendingOriginalSource: { data: Float32Array; width: number; height: number } | null = null;
   private imageLoadListeners: (() => void)[] = [];
   private processingPipeline: ImageProcessingPipeline | null = null;
   private loadGeneration = 0;
@@ -134,8 +137,8 @@ export class ImageService {
           };
 
           this.currentImage = result;
-          // Snapshot the original for instant before/after comparison
-          this.snapshotOriginal(result);
+          // Defer the original snapshot for instant before/after comparison — no copy yet.
+          this.deferOriginalSnapshot(result);
           logger.info(`Image loaded from base cache: ${result.width}x${result.height} - skipping decode`);
           // Seed restored per-image edits BEFORE notifying (so the first pass renders edited).
           // Guarded like notifyImageLoaded's listener loop: a throwing caller must not abort this
@@ -194,7 +197,7 @@ export class ImageService {
               // The preview is NOT written to the base cache — the cache must only ever hold the
               // full 16-bit decode (a reopen must never serve the low-res preview as the base).
               this.currentImage = previewResult;
-              this.snapshotOriginal(previewResult);
+              this.deferOriginalSnapshot(previewResult);
               // Seed restored edits at PREVIEW dims (normalized geometry → re-bakes on the swap).
               try {
                 beforeNotify?.(previewResult);
@@ -297,8 +300,8 @@ export class ImageService {
         }
 
         this.currentImage = result;
-        // Snapshot the original for instant before/after comparison
-        this.snapshotOriginal(result);
+        // Defer the original snapshot for instant before/after comparison — no copy yet.
+        this.deferOriginalSnapshot(result);
         // Seed restored per-image edits BEFORE notifying, so the first pipeline pass triggered
         // by the load listeners renders the edited image directly (no unedited-defaults flash).
         try {
@@ -376,7 +379,15 @@ export class ImageService {
         { isRaw: true, autoAdjustmentResult: undefined, ...rawData.metadata },
       );
       this.processingPipeline?.clearCache(); // module results cached against preview dims are stale
-      this.setOriginalImage(new Float32Array(rawData.data), rawData.width, rawData.height);
+      // Defer (don't copy) the original snapshot for the full-res base — this swap is the
+      // progressive open's "real" load moment (graded preview -> neutral full decode), so it
+      // gets the SAME laziness as a fresh loadImage(): most opens never use Before/After, so
+      // don't pay the ~90-230ms/~310MB copy here either. Called BEFORE updateCurrentImageData,
+      // with the SAME rawData.data reference that call passes, so updateCurrentImageData's
+      // copy-on-write check (data !== pendingOriginalSource.data) is a no-op — zero copies at
+      // swap time. (This used to be an eager `setOriginalImage(new Float32Array(rawData.data))`
+      // unconditionally on every progressive RAW open — see this method's doc comment.)
+      this.deferOriginalSnapshot(rawData);
       // Replace the working base + bump baseImageVersion + notify → single reprocess at full dims.
       this.updateCurrentImageData(rawData.data, rawData.width, rawData.height);
       onFullDecode?.(rawData.width, rawData.height);
@@ -468,36 +479,84 @@ export class ImageService {
   }
 
   /**
-   * Returns the pristine original image data as it was at load time.
-   * Used for instant before/after comparison without re-reading from disk.
+   * Returns the pristine original image data as it was at load time (or as explicitly
+   * overwritten by setOriginalImage — see that method's doc comment). Used for instant
+   * before/after comparison without re-reading from disk.
+   *
+   * LAZY / COPY-ON-WRITE DESIGN (Task L4): every image open used to eagerly deep-copy the
+   * full-res buffer here (~90-230ms + ~310MB for a 20MP image), even though most opens never
+   * open Before/After — the copy paid for itself on a tiny fraction of opens. Now the open
+   * flow only records a REFERENCE to the as-decoded buffer (deferOriginalSnapshot, no
+   * allocation). The actual deep copy happens HERE, lazily, the first time a caller actually
+   * asks for the original — materializeOriginalSnapshot does the one-time allocation and the
+   * result is cached in `originalImageData` so repeat calls (e.g. OriginalPane's effect
+   * re-running on unrelated viewport changes) are free.
+   *
+   * Correctness across in-place-looking mutations (rotate/flip/resize, upscale, RAW re-decode):
+   * "original" must mean the pre-edit base as decoded, not whatever the CURRENT working buffer
+   * holds — so a naive "copy from getCurrentImage() on demand" would be wrong once the working
+   * image has been replaced by one of those operations. Audit of every updateCurrentImageData
+   * call site (App.tsx rotate/flip/resize, EnhanceService upscale + revert, RawImageService
+   * re-decode, this file's progressive full-decode swap) shows each one passes a FRESHLY
+   * allocated output array — none of them mutate the previous buffer in place — so the
+   * reference held in `pendingOriginalSource` stays valid (untouched) across any number of such
+   * calls until it's materialized. updateCurrentImageData ALSO defensively materializes the
+   * snapshot from the pre-mutation pixels before swapping (see its comment) as a copy-on-write
+   * safety net, so correctness does not silently depend on every future mutator upholding that
+   * invariant.
    */
   getOriginalImage(): { data: Float32Array; width: number; height: number } | null {
+    if (this.originalImageData) return this.originalImageData;
+    if (this.pendingOriginalSource) {
+      this.originalImageData = this.materializeOriginalSnapshot(this.pendingOriginalSource);
+      this.pendingOriginalSource = null;
+    }
     return this.originalImageData;
   }
 
   /**
-   * Take a deep copy of the image data at load time so comparisons are instant.
-   * Runs asynchronously in a microtask to avoid blocking the initial render.
+   * Record a REFERENCE to the as-decoded pixels for later before/after comparison — no copy.
+   * The actual deep copy is deferred until getOriginalImage() (or a mutating
+   * updateCurrentImageData call) actually needs it. Called at load time for every open (and by
+   * the progressive-open full-decode swap below), so the common open→browse-without-Before/After
+   * path pays zero extra allocation/copy cost. Takes the bare {data,width,height} shape (not the
+   * full ImageData) so callers that only have the raw decode result — not a whole ImageData —
+   * can defer it too.
    */
-  private snapshotOriginal(image: ImageData): void {
-    // Use queueMicrotask so the copy doesn't block the first paint
-    queueMicrotask(() => {
-      this.originalImageData = {
-        data: new Float32Array(image.data),
-        width: image.width,
-        height: image.height,
-      };
-      logger.info(`Original image snapshot cached: ${image.width}x${image.height} (${(image.data.byteLength / 1024 / 1024).toFixed(1)} MB)`);
-    });
+  private deferOriginalSnapshot(source: { data: Float32Array; width: number; height: number }): void {
+    this.originalImageData = null; // a fresh image invalidates any previously materialized snapshot
+    this.pendingOriginalSource = { data: source.data, width: source.width, height: source.height };
+  }
+
+  /**
+   * Deep-copy `source` into a fresh, independent snapshot (so later in-place-looking
+   * replacements of the working buffer can never alias it). Factored out so both
+   * getOriginalImage() and updateCurrentImageData() share the one allocation path — tests spy
+   * on this method directly to assert a plain open triggers zero materializations.
+   */
+  private materializeOriginalSnapshot(
+    source: { data: Float32Array; width: number; height: number }
+  ): { data: Float32Array; width: number; height: number } {
+    const snapshot = {
+      data: new Float32Array(source.data),
+      width: source.width,
+      height: source.height,
+    };
+    logger.info(`Original image snapshot materialized: ${source.width}x${source.height} (${(source.data.byteLength / 1024 / 1024).toFixed(1)} MB)`);
+    return snapshot;
   }
 
   /**
    * Overwrite the original snapshot used by getOriginalImage() for Before/After comparison.
-   * Called by EnhanceService after an upscale so the "Before" side reflects the
-   * clean-resize base at the new larger dimensions rather than the original load.
+   * Called by EnhanceService after an upscale, and by RawImageService/this file after a RAW
+   * re-decode, so the "Before" side reflects the clean new base rather than the pre-operation
+   * pixels. This is an explicit, already-materialized snapshot — it supersedes (and clears) any
+   * still-deferred `pendingOriginalSource`, so a later getOriginalImage() call never overwrites
+   * it with the stale pre-operation pixels.
    */
   setOriginalImage(data: Float32Array, width: number, height: number): void {
     this.originalImageData = { data, width, height };
+    this.pendingOriginalSource = null;
   }
 
   /**
@@ -506,6 +565,26 @@ export class ImageService {
    */
   updateCurrentImageData(data: Float32Array, width: number, height: number): void {
     if (this.currentImage) {
+      // Copy-on-write safety net: if nothing has materialized the before/after snapshot yet,
+      // lock it in NOW from the pre-mutation pixels, before they're replaced below. Every known
+      // mutator already passes a freshly-allocated output array rather than reusing the base
+      // buffer (see getOriginalImage()'s doc comment for the audit), so in practice this rarely
+      // has to actually copy here (rotate/flip/resize DO hit this the first time they run before
+      // Before/After has ever been used) — but it guards the invariant explicitly rather than
+      // trusting every future caller to uphold it. Callers that immediately follow this with
+      // their own setOriginalImage() (upscale, re-decode) simply overwrite the result a moment
+      // later; that redundant copy is bounded to those already-expensive operations, never the
+      // plain-open hot path.
+      //
+      // The `pendingOriginalSource.data !== data` check skips the copy when the incoming buffer
+      // IS the pending original itself — the progressive-open full-decode swap below calls
+      // deferOriginalSnapshot(rawData) then updateCurrentImageData(rawData.data, ...) with the
+      // SAME array; there is nothing to "preserve" from a swap onto itself, so this stays a
+      // zero-copy reference update exactly like a plain open (see developFullDecode's comment).
+      if (!this.originalImageData && this.pendingOriginalSource && this.pendingOriginalSource.data !== data) {
+        this.originalImageData = this.materializeOriginalSnapshot(this.pendingOriginalSource);
+        this.pendingOriginalSource = null;
+      }
       this.currentImage = {
         ...this.currentImage,
         data,
