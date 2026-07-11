@@ -6,7 +6,7 @@ import { checkpointService } from './CheckpointService';
 import { editPersistenceService } from './EditPersistenceService';
 import { notificationService } from './NotificationService';
 import { useAppStore } from '../stores/appStore';
-import { EnhanceParams } from '../utils/enhanceChain';
+import { EnhanceParams, enhanceAiUpscaled } from '../utils/enhanceChain';
 import { guardDeveloping } from '../utils/developingGuard';
 
 /** Float32 RGBA 0..1 (pipeline domain) → Uint8 RGBA 0..255 (AI IPC domain). */
@@ -202,12 +202,20 @@ class EnhanceService {
             procW,
             procH,
             params.scale as 2 | 4,
-            (p) => { if (p.total > 0) store.setUpscaleProgress(p.done / p.total); },
+            // Reserve the top 10% of the bar for the renderer-side finishing pass below, which
+            // is synchronous and can take a second on a large output — so the bar advances into
+            // the finish instead of sitting frozen at 100% while it runs.
+            (p) => { if (p.total > 0) store.setUpscaleProgress((p.done / p.total) * 0.9); },
           );
-          enhanced = uint8ToFloat32Rgba(ai.data);
-          base = new Float32Array(enhanced); // distinct editable canvas (avoid aliasing)
-          outWidth = ai.width;
-          outHeight = ai.height;
+          const aiRgba = uint8ToFloat32Rgba(ai.data); // clean model output (new editable base)
+          store.setUpscaleProgress(0.92); // entering the finishing pass (chroma/detail/sharpen)
+          // Apply the user's Chroma-noise / Detail / Sharpen sliders to the AI OUTPUT so they are
+          // not silent no-ops on this route (parity with the deterministic Lanczos route). RL
+          // deblur is intentionally skipped on AI output — see enhanceAiUpscaled's doc.
+          enhanced = enhanceAiUpscaled(aiRgba, ai.width, ai.height, params);
+          base = new Float32Array(aiRgba); // Before/After 'After' ref + editable canvas; distinct
+          outWidth = ai.width;             // buffer from `enhanced` (which may alias aiRgba on the
+          outHeight = ai.height;           // neutral-sliders pass-through path).
           mode = 'ai';
           usedAi = true;
         } catch {

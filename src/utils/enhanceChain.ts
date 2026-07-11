@@ -52,3 +52,42 @@ export function enhanceImage(rgba: Float32Array, w: number, h: number, p: Enhanc
   const enhanced = yCrCbToRgba({ y: fy, cr: fcr, cb: fcb, a: fin.a });
   return { enhanced, base, width: cw, height: ch };
 }
+
+/**
+ * Finishing pass for the AI (Real-ESRGAN) upscale route, applied to the model's OUTPUT at final
+ * resolution — the renderer-side analogue of enhanceImage's POST-Lanczos stages. It exists so the
+ * Enhance panel's Chroma-noise, Detail, Sharpen and Chroma-cleanup sliders are NOT silently no-ops
+ * when the AI route is auto-picked (they only ran on the deterministic Lanczos route before).
+ *
+ * Stages run in the SAME order and use the SAME kernels as enhanceImage, with ONE deliberate
+ * omission: the Richardson-Lucy DEBLUR (rlDeconvLuma) is SKIPPED. Real-ESRGAN already resolves
+ * sharp detail as part of super-resolution; running RL deconvolution on its crisp edges introduces
+ * ringing/overshoot rather than recovering blur (fixture evidence: on a hard-edge target RL pushed
+ * ~5.5% of pixels below the source min and clipped ~0.7% to white, vs ~1.6%/0% with RL off). The
+ * Detail sliders (alpha/hpSigma) still apply, but as an edge-masked UNSHARP graft using the AI
+ * output's own luma as the detail source (lumaGraft(y, y, …)) instead of an RL-restored luma.
+ *
+ * OPT-IN / pass-through: if no stage is requested (denoiseStrength≤0, alpha≤0, sharpness≤0,
+ * chromaClean false) the AI output is returned UNCHANGED (same reference) — so a fully-neutral
+ * slider set leaves the AI result byte-identical to the model output (no silent alteration).
+ * Runs whole-buffer in the renderer (not the tiled CPU worker), so tiledPipeline's moduleApron is
+ * not involved.
+ */
+export function enhanceAiUpscaled(rgba: Float32Array, w: number, h: number, p: EnhanceParams): Float32Array {
+  const doDenoise = p.denoiseStrength > 0;
+  const doDetail = p.alpha > 0;
+  const doSharpen = p.sharpness > 0;
+  const doChromaClean = p.chromaClean;
+  if (!doDenoise && !doDetail && !doSharpen && !doChromaClean) return rgba;
+
+  const ycc = rgbaToYCrCb(rgba);
+  let { y, cr, cb } = ycc; const a = ycc.a;
+  // 1 chroma denoise (guided by luma) — same primitive as the native route, at final res.
+  if (doDenoise) { const d = denoiseChroma(cr, cb, y, w, h, p.denoiseStrength); cr = d.cr; cb = d.cb; }
+  // 2 detail: edge-masked unsharp graft (RL deblur skipped on AI output — see doc above).
+  if (doDetail) { y = lumaGraft(y, y, w, h, p.alpha, p.hpSigma); }
+  // 3 finish: CAS luma sharpen + chroma clean, same as enhanceImage's finish.
+  if (doSharpen) { y = cas(y, w, h, p.sharpness); }
+  if (doChromaClean) { const c = cleanChroma(cr, cb, w, h); cr = c.cr; cb = c.cb; }
+  return yCrCbToRgba({ y, cr, cb, a });
+}

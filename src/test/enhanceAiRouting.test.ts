@@ -55,7 +55,9 @@ describe('EnhanceService.applyUpscale — AI routing', () => {
     expect(mockSetUpscaleMode).toHaveBeenCalledWith('ai');
     expect(checkpointService.recordLabeled).toHaveBeenCalledWith('Enhanced ×2 (AI)', 1);
     expect(imageService.updateCurrentImageData).toHaveBeenCalledWith(expect.any(Float32Array), 8, 8);
-    expect(mockSetUpscaleProgress).toHaveBeenCalledWith(0.5);
+    // AI tile progress is scaled into [0, 0.9]; the top 10% is reserved for the renderer-side
+    // finishing pass (Q2), so done/total 1/2 reports 0.45 (not 0.5).
+    expect(mockSetUpscaleProgress).toHaveBeenCalledWith(0.45);
     expect(mockSetUpscaleProgress).toHaveBeenLastCalledWith(null); // cleared in finally
     expect(enhanceService.canRevert()).toBe(true);
   });
@@ -83,5 +85,46 @@ describe('EnhanceService.applyUpscale — AI routing', () => {
     expect(mockSetUpscaleMode).toHaveBeenLastCalledWith('standard');
     expect(checkpointService.recordLabeled).toHaveBeenCalledWith('Enhanced ×2 (Standard)', 1);
     expect(enhanceService.canRevert()).toBe(true);
+  });
+});
+
+describe('EnhanceService.applyUpscale — AI route applies the Enhance sliders (Q2)', () => {
+  // Chroma-noisy 8×8 model output so denoiseStrength has measurable work.
+  const aiOut = (() => {
+    const u = new Uint8Array(8 * 8 * 4);
+    let seed = 42;
+    const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+    for (let i = 0; i < 8 * 8; i++) {
+      u[i * 4] = 128 + Math.round((rnd() - 0.5) * 80);
+      u[i * 4 + 1] = 128 + Math.round((rnd() - 0.5) * 40);
+      u[i * 4 + 2] = 128 + Math.round((rnd() - 0.5) * 80);
+      u[i * 4 + 3] = 255;
+    }
+    return u;
+  })();
+  const aiFloat = Float32Array.from(aiOut, (v) => v / 255);
+  const bytesEqual = (a: Float32Array, b: Float32Array) => a.length === b.length && a.every((v, i) => v === b[i]);
+
+  beforeEach(() => {
+    mockAiIsAvailable.mockResolvedValue(true);
+    mockAiRun.mockResolvedValue({ data: aiOut.slice(), width: 8, height: 8, backend: 'directml' });
+  });
+
+  it('neutral sliders → displayed buffer is byte-identical to the raw AI output (no silent change)', async () => {
+    await enhanceService.applyUpscale({
+      ...DEFAULT_ENHANCE_PARAMS, upscale: true, scale: 2,
+      denoiseStrength: 0, alpha: 0, sharpness: 0, chromaClean: false,
+    });
+    const shown = (imageService.updateCurrentImageData as jest.Mock).mock.calls[0][0] as Float32Array;
+    expect(bytesEqual(shown, aiFloat)).toBe(true);
+  });
+
+  it('denoiseStrength>0 → displayed buffer differs from the raw AI output (slider is live on AI)', async () => {
+    await enhanceService.applyUpscale({
+      ...DEFAULT_ENHANCE_PARAMS, upscale: true, scale: 2,
+      denoiseStrength: 10, alpha: 0, sharpness: 0, chromaClean: false,
+    });
+    const shown = (imageService.updateCurrentImageData as jest.Mock).mock.calls[0][0] as Float32Array;
+    expect(bytesEqual(shown, aiFloat)).toBe(false);
   });
 });

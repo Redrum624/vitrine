@@ -305,6 +305,15 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
           />
           Chroma cleanup
         </label>
+
+        {/* Route-aware disclosure: on the AI upscale route these sliders apply to the AI OUTPUT
+            (Chroma / Detail / Sharpen refine on top), but the Deblur stage is skipped because
+            Real-ESRGAN already resolves detail. Shown once an AI upscale has actually run. */}
+        {upscaleMode === 'ai' && (
+          <div data-testid="enhance-ai-slider-hint" style={{ fontSize: 10.5, color: 'var(--glass-text-muted)', lineHeight: 1.5 }}>
+            AI upscale already denoises and sharpens — Chroma, Detail & Sharpen refine on top; Deblur is skipped on the AI route.
+          </div>
+        )}
       </div>
 
       {error && <div role="alert" className="text-xs" style={{ color: '#f87171' }}>{error}</div>}
