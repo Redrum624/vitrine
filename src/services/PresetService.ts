@@ -1,5 +1,25 @@
 import { logger } from '../utils/Logger';
 import { imageProcessingPipeline } from './ImageProcessingPipeline';
+import { imageService } from './ImageService';
+import type { LocalAdjustmentsPipelineModule } from '../modules/LocalAdjustmentsPipelineModule';
+import type { LocalAdjustmentLayer, LocalAdjustmentParams, MaskGeometry } from '../modules/LocalAdjustmentsModule';
+
+/**
+ * A local-adjustment layer serialized into a preset. Mirrors EditPersistenceService's
+ * per-image SerializedLayer: geometry is normalized 0..1 so it is resolution-independent
+ * and rebuilds into a pixel mask at process time. The painted Float32 mask itself is NOT
+ * stored — which is why brush layers (whose mask is painted, not geometry-derived) are
+ * excluded from presets (see captureCurrentSettings / hasUnportableBrushLayers).
+ */
+export interface PresetLocalAdjustmentLayer {
+  name: string;
+  type: LocalAdjustmentLayer['type'];
+  enabled: boolean;
+  opacity: number;
+  geometry?: MaskGeometry;
+  basicAdj?: Record<string, number>;
+  parameters?: Record<string, unknown>;
+}
 
 interface ModuleInterface {
   isEnabled?(): boolean;
@@ -124,10 +144,13 @@ export interface PresetSettings {
     compressShadows: number;
   };
 
-  // Local Adjustments (simplified - just store whether any exist)
+  // Local Adjustments (radial/gradient mask layers). Brush layers are excluded because
+  // their painted mask isn't portable. A `layers` array present → apply rebuilds them;
+  // legacy presets carry only `layerCount` (no `layers`) and apply as a no-op for LA.
   localAdjustments?: {
     enabled: boolean;
-    layerCount: number;
+    layerCount?: number;
+    layers?: PresetLocalAdjustmentLayer[];
   };
 
   // Index signature for Record compatibility
@@ -766,10 +789,23 @@ export class PresetService {
                 } as typeof settings.shadowsHighlights;
                 break;
               case 'localadjustments': {
-                const layersArray = (moduleSettings as Record<string, unknown>).layers;
+                const la = module as unknown as LocalAdjustmentsPipelineModule;
+                const laParams = la.getParameters();
+                // Brush layers carry a painted mask (no geometry) that isn't portable
+                // across images, so only geometry-driven radial/linear layers are captured.
+                const portable = (laParams.layers || []).filter((l) => l.type !== 'brush');
                 settings.localAdjustments = {
-                  enabled: moduleInterface.isEnabled?.() || false,
-                  layerCount: Array.isArray(layersArray) ? layersArray.length : 0
+                  enabled: !!laParams.enabled,
+                  layerCount: portable.length,
+                  layers: portable.map((l) => ({
+                    name: l.name,
+                    type: l.type,
+                    enabled: l.enabled,
+                    opacity: l.opacity,
+                    geometry: l.geometry,
+                    basicAdj: l.basicAdj as Record<string, number> | undefined,
+                    parameters: l.parameters as Record<string, unknown> | undefined,
+                  })),
                 };
                 break;
               }
@@ -820,8 +856,7 @@ export class PresetService {
             moduleSettings = settings.shadowsHighlights as Record<string, unknown> | null;
             break;
           case 'localadjustments':
-            // Local adjustments are complex and not easily transferable
-            // Skip for now
+            this.applyLocalAdjustments(module as unknown as LocalAdjustmentsPipelineModule, settings.localAdjustments);
             continue;
         }
 
@@ -846,6 +881,61 @@ export class PresetService {
       } catch (error) {
         logger.warn(`Failed to apply settings to module ${moduleId}:`, error);
       }
+    }
+  }
+
+  /**
+   * Restore a preset's local-adjustment layers onto the pipeline LA module, mirroring
+   * EditPersistenceService.restore (clear → createLayer → geometry/params/opacity/toggle
+   * → enable/disable → invalidate). Only acts when the preset actually carries ≥1 layer:
+   * legacy presets (only `layerCount`, no `layers`) and presets with no LA data leave the
+   * current image's local adjustments untouched — exactly like every other module is
+   * skipped when its settings are absent. Geometry is normalized 0..1; masks self-heal to
+   * the real resolution on the next processImage pass, so the dims here are a seed only.
+   */
+  private applyLocalAdjustments(
+    la: LocalAdjustmentsPipelineModule,
+    laSettings: PresetSettings['localAdjustments']
+  ): void {
+    const layers = laSettings?.layers;
+    if (!Array.isArray(layers) || layers.length === 0) return;
+
+    // Take ownership of LA: clear the current layers, then rebuild from the preset.
+    for (const l of [...la.getParameters().layers]) la.removeLayer(l.id);
+
+    const { width, height } = this.getCurrentDimensions();
+    for (const sl of layers) {
+      if (!sl || sl.type === 'brush') continue; // brush masks aren't portable
+      const id = la.createLayer(sl.type, sl.name, width, height);
+      if (sl.geometry) la.setLayerGeometry(id, sl.geometry, width, height);
+      if (sl.parameters) la.updateLayerParameters(id, sl.parameters as Partial<LocalAdjustmentParams>);
+      if (sl.basicAdj) la.updateLayerBasicAdj(id, sl.basicAdj);
+      if (typeof sl.opacity === 'number') la.updateLayerOpacity(id, sl.opacity);
+      la.toggleLayer(id, sl.enabled);
+    }
+    if (laSettings?.enabled) la.enable(); else la.disable();
+    imageProcessingPipeline.invalidateModuleCache('localadjustments');
+  }
+
+  /** Current image dimensions used to seed rebuilt masks; falls back to 1×1 when no image
+   *  is loaded (normalized geometry means the mask rebuilds correctly at process time). */
+  private getCurrentDimensions(): { width: number; height: number } {
+    const img = imageService.getCurrentImage();
+    if (img && img.width > 0 && img.height > 0) return { width: img.width, height: img.height };
+    return { width: 1, height: 1 };
+  }
+
+  /**
+   * True when the current pipeline's local-adjustment state contains brush-mask layers.
+   * Their painted masks aren't stored in presets, so the Create-Preset UI surfaces a note
+   * that they'll be excluded (an explicit exclusion, not a silent drop).
+   */
+  hasUnportableBrushLayers(): boolean {
+    try {
+      const la = imageProcessingPipeline.getModule<LocalAdjustmentsPipelineModule>('localadjustments');
+      return !!la?.getParameters().layers?.some((l) => l.type === 'brush');
+    } catch {
+      return false;
     }
   }
 

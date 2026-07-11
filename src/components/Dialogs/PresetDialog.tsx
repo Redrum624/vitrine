@@ -341,6 +341,12 @@ export function PresetDialog({ isOpen, onClose, onApplyPreset }: PresetDialogPro
               <option value="cinematic">Cinematic</option>
             </select>
           </div>
+          {presetService.hasUnportableBrushLayers() && (
+            <p style={{ fontSize: 11, color: 'var(--glass-text-muted)', margin: 0, lineHeight: 1.5 }}>
+              Note: brush-mask layers aren&apos;t included in presets — their painted masks aren&apos;t portable.
+              Radial and gradient masks are saved.
+            </p>
+          )}
         </div>
       </GlassModal>
     </>
