@@ -23,6 +23,12 @@ import {
   getPhotoInsetRight,
 } from '../layout/photoRegion';
 
+// Shared by every describe block below that needs the Toolbar's Develop pill NOT to
+// collapse into the overflow menu (see "Toolbar responsive collapse" for the mechanism).
+const setInnerWidth = (w: number) => {
+  Object.defineProperty(window, 'innerWidth', { writable: true, configurable: true, value: w });
+};
+
 describe('alignment axis store field', () => {
   it('defaults to null and round-trips through the setter', () => {
     expect(useAppStore.getState().alignmentAxisX).toBeNull();
@@ -93,6 +99,7 @@ describe('Toolbar (floating pill)', () => {
   });
   afterEach(() => {
     jest.restoreAllMocks();
+    setInnerWidth(1024); // restore jsdom default
   });
 
   it('renders Auto All as the solid-accent primary', () => {
@@ -107,13 +114,69 @@ describe('Toolbar (floating pill)', () => {
     render(<Toolbar hasImage zoom={0.5} />);
     expect(screen.getByText('50%')).toBeInTheDocument();
   });
+
+  // Round-6 P8: Print/Copy Style/Paste Style get the same reactive `developing` visual
+  // disable Auto All already had (L3 review round 1) — the functional gate (guardDeveloping's
+  // toast) already existed on their handlers; this only makes the affordance visibly inert too.
+  it('greys out Auto All, Print, Copy Style, and Paste Style while developing (wide window, inline)', () => {
+    setInnerWidth(1920);
+    render(
+      <Toolbar
+        hasImage
+        zoom={1}
+        developing
+        onAutoAll={jest.fn()}
+        onPrint={jest.fn()}
+        onCopyStyle={jest.fn()}
+        onPasteStyle={jest.fn()}
+        hasStyleClipboard
+      />,
+    );
+    expect(screen.getByRole('button', { name: /auto all/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Print' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /copy style/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /paste style/i })).toBeDisabled();
+    // Title mirrors guardDeveloping's own toast copy so hover explains the greyed-out state.
+    expect(screen.getByRole('button', { name: 'Print' })).toHaveAttribute(
+      'title',
+      'Full quality still developing — try again in a moment',
+    );
+  });
+
+  it('re-enables Print, Copy Style, and Paste Style once developing clears (Paste Style still composes with hasStyleClipboard)', () => {
+    setInnerWidth(1920);
+    const { rerender } = render(
+      <Toolbar
+        hasImage
+        zoom={1}
+        developing={false}
+        onPrint={jest.fn()}
+        onCopyStyle={jest.fn()}
+        onPasteStyle={jest.fn()}
+        hasStyleClipboard={false}
+      />,
+    );
+    expect(screen.getByRole('button', { name: 'Print' })).not.toBeDisabled();
+    expect(screen.getByRole('button', { name: /copy style/i })).not.toBeDisabled();
+    // Composed, not replaced: no clipboard still disables Paste Style even though not developing.
+    expect(screen.getByRole('button', { name: /paste style/i })).toBeDisabled();
+
+    rerender(
+      <Toolbar
+        hasImage
+        zoom={1}
+        developing={false}
+        onPrint={jest.fn()}
+        onCopyStyle={jest.fn()}
+        onPasteStyle={jest.fn()}
+        hasStyleClipboard
+      />,
+    );
+    expect(screen.getByRole('button', { name: /paste style/i })).not.toBeDisabled();
+  });
 });
 
 describe('Toolbar responsive collapse (Develop pill overflow menu)', () => {
-  const setInnerWidth = (w: number) => {
-    Object.defineProperty(window, 'innerWidth', { writable: true, configurable: true, value: w });
-  };
-
   beforeEach(() => {
     jest.spyOn(electronService, 'isElectron').mockReturnValue(true);
     useAppStore.setState({ viewMode: 'develop' });
@@ -182,6 +245,31 @@ describe('Toolbar responsive collapse (Develop pill overflow menu)', () => {
     fireEvent.click(screen.getByRole('button', { name: /more actions/i }));
     fireEvent.click(within(screen.getByRole('menu')).getByRole('menuitem', { name: 'Reference' }));
     expect(onToggleReference).toHaveBeenCalledTimes(1);
+  });
+
+  // Round-6 P8: the collapsed overflow menu's Print/Copy Style/Paste Style items mirror
+  // the inline buttons' developing-disabled state — same source prop, same treatment.
+  it('greys out Print, Copy Style, and Paste Style inside the overflow menu while developing', () => {
+    setInnerWidth(1200);
+    render(
+      <Toolbar
+        hasImage
+        zoom={1}
+        developing
+        onPrint={jest.fn()}
+        onCopyStyle={jest.fn()}
+        onPasteStyle={jest.fn()}
+        hasStyleClipboard
+        onToggleReference={jest.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /more actions/i }));
+    const menu = screen.getByRole('menu');
+    expect(within(menu).getByRole('menuitem', { name: 'Print' })).toBeDisabled();
+    expect(within(menu).getByRole('menuitem', { name: /copy style/i })).toBeDisabled();
+    expect(within(menu).getByRole('menuitem', { name: /paste style/i })).toBeDisabled();
+    // Reference isn't developing-unsafe (no pixel/stat bake) — stays live.
+    expect(within(menu).getByRole('menuitem', { name: 'Reference' })).not.toBeDisabled();
   });
 
   it('closes the overflow popover on an outside click', () => {

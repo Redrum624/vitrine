@@ -139,6 +139,24 @@ describe('StatusBar footer — clean format label (Task B2, folder-scanned MIME-
   });
 });
 
+describe('ThumbnailPanel dock — clean format label for a raw MIME-ish `format` (round-6 P8)', () => {
+  // Same producer inconsistency as the footer (Task B2) — the dock tile's title attribute
+  // and no-thumbnail placeholder both used to print `image.format` verbatim. Both now route
+  // through getDisplayFormat, same as the footer.
+  const mimeImages = [
+    { id: 'mime1', path: '/p/mime1.jpg', name: 'mime1.jpg', size: 100, format: 'image/jpeg', type: 'image/jpeg', lastModified: 0, dateModified: new Date(0) },
+  ] as unknown as ImageFileInfo[];
+
+  it('shows "JPG" (not "image/jpeg") in the dock thumbnail title attribute', () => {
+    render(
+      <ThumbnailPanel images={mimeImages} selectedImage={mimeImages[0]} onImageSelect={jest.fn()} onClose={jest.fn()} visible={true} />,
+    );
+    const thumb = document.querySelector('[data-image-id="mime1"]') as HTMLElement;
+    expect(thumb).toHaveAttribute('title', 'mime1.jpg (JPG)');
+    expect(thumb.getAttribute('title')).not.toContain('image/jpeg');
+  });
+});
+
 describe('StatusBar footer — left group never overlaps the center cluster at narrow widths (Fix round 1)', () => {
   // A long name is exactly the unbounded-content case that used to overprint the
   // window-centered cluster at ~1280px (packaged smoke evidence, task-8-report.md

@@ -23,10 +23,14 @@ interface ToolbarProps {
   onActualSize?: () => void;
   zoom?: number;
   onAutoAll?: () => void;
-  /** Progressive RAW open: background full decode still running — Auto All would bake the
-   *  graded preview's stats into persistent params. The handler itself gates this (the source
-   *  of truth); disabling the button too is a cheap, optional affordance (L3 review round 1). */
-  autoAllDeveloping?: boolean;
+  /** Progressive RAW open: background full decode still running — Auto All, Print, Copy Style,
+   *  and Paste Style would each act on the graded preview's pixels/stats rather than the neutral
+   *  full-res base. Each handler already gates this itself (the source of truth, via
+   *  guardDeveloping's toast); disabling the buttons too is a cheap, optional visual affordance
+   *  so the greyed-out state matches the functional gate instead of looking clickable while it
+   *  silently no-ops (L3 review round 1 added it for Auto All; round 6 P8 extended the same
+   *  reactive store read to the other three developing-unsafe actions). */
+  developing?: boolean;
   onCopyStyle?: () => void;
   onPasteStyle?: () => void;
   hasStyleClipboard?: boolean;
@@ -80,6 +84,10 @@ const pillBtn: CSSProperties = {
 const pillIconBtn: CSSProperties = { ...pillBtn, width: '30px', padding: '0', fontSize: '15px' };
 
 const divider: CSSProperties = { width: '1px', height: '18px', margin: '0 4px', background: 'var(--glass-border)' };
+
+// Shared title copy for the four developing-gated actions (Auto All, Print, Copy Style,
+// Paste Style) — matches guardDeveloping's toast message exactly (utils/developingGuard.ts).
+const DEVELOPING_TITLE = 'Full quality still developing — try again in a moment';
 
 // A toggle that is "on" (Before/After, Reference) reads as an accent-soft tile.
 const toggleActive: CSSProperties = {
@@ -194,7 +202,7 @@ function ToolbarOverflowMenu({ items }: { items: OverflowItem[] }) {
   );
 }
 
-export function Toolbar({ onExport, onPrint, onBatchProcess, onUndo: _onUndo, onRedo: _onRedo, canUndo: _canUndo = false, canRedo: _canRedo = false, onZoomIn, onZoomOut, onFitWindow, onActualSize, zoom = 1, onAutoAll, autoAllDeveloping = false, onCopyStyle, onPasteStyle, hasStyleClipboard = false, hasImage = false, onToggleOriginal, showOriginal = false, onToggleReference, referenceMode = false, onOpenFolder, onExportSelected }: ToolbarProps) {
+export function Toolbar({ onExport, onPrint, onBatchProcess, onUndo: _onUndo, onRedo: _onRedo, canUndo: _canUndo = false, canRedo: _canRedo = false, onZoomIn, onZoomOut, onFitWindow, onActualSize, zoom = 1, onAutoAll, developing = false, onCopyStyle, onPasteStyle, hasStyleClipboard = false, hasImage = false, onToggleOriginal, showOriginal = false, onToggleReference, referenceMode = false, onOpenFolder, onExportSelected }: ToolbarProps) {
   const { viewMode, setViewMode, selectedImageIds, gallerySortAscending, toggleGallerySortDirection, alignmentAxisX } = useAppStore();
 
   // Responsive collapse + clamp (Develop pill only, G5 review). Two mechanisms
@@ -322,7 +330,13 @@ export function Toolbar({ onExport, onPrint, onBatchProcess, onUndo: _onUndo, on
       </button>
       {/* Print — secondary; moves to the overflow menu when collapsed. */}
       {!collapsed && (
-        <button onClick={onPrint} disabled={!hasImage} className="glass-pill-btn" style={pillBtn} title="Print">
+        <button
+          onClick={onPrint}
+          disabled={!hasImage || developing}
+          className="glass-pill-btn"
+          style={pillBtn}
+          title={developing ? DEVELOPING_TITLE : 'Print'}
+        >
           Print
         </button>
       )}
@@ -333,7 +347,7 @@ export function Toolbar({ onExport, onPrint, onBatchProcess, onUndo: _onUndo, on
           at every width. */}
       <button
         onClick={onAutoAll}
-        disabled={!hasImage || autoAllDeveloping}
+        disabled={!hasImage || developing}
         className="glass-pill-primary"
         style={{
           ...pillBtn,
@@ -342,7 +356,7 @@ export function Toolbar({ onExport, onPrint, onBatchProcess, onUndo: _onUndo, on
           color: '#0b0b0c',
           background: 'var(--accent)',
         }}
-        title={autoAllDeveloping ? 'Full quality still developing — try again in a moment' : 'Auto-adjust all modules based on image analysis'}
+        title={developing ? DEVELOPING_TITLE : 'Auto-adjust all modules based on image analysis'}
       >
         <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
           <path d="M8 2v2M8 12v2M2 8h2M12 8h2M4.2 4.2l1.4 1.4M10.4 10.4l1.4 1.4M4.2 11.8l1.4-1.4M10.4 5.6l1.4-1.4" />
@@ -355,15 +369,21 @@ export function Toolbar({ onExport, onPrint, onBatchProcess, onUndo: _onUndo, on
       {/* Copy/Paste Style — secondary; move to the overflow menu when collapsed. */}
       {!collapsed && (
         <>
-          <button onClick={onCopyStyle} disabled={!hasImage} className="glass-pill-btn" style={pillBtn} title="Analyse and copy the style of the current photo">
+          <button
+            onClick={onCopyStyle}
+            disabled={!hasImage || developing}
+            className="glass-pill-btn"
+            style={pillBtn}
+            title={developing ? DEVELOPING_TITLE : 'Analyse and copy the style of the current photo'}
+          >
             Copy Style
           </button>
           <button
             onClick={onPasteStyle}
-            disabled={!hasImage || !hasStyleClipboard}
+            disabled={!hasImage || developing || !hasStyleClipboard}
             className="glass-pill-btn"
             style={pillBtn}
-            title={hasStyleClipboard ? 'Apply the copied style to the current photo' : 'Copy a style first'}
+            title={developing ? DEVELOPING_TITLE : hasStyleClipboard ? 'Apply the copied style to the current photo' : 'Copy a style first'}
           >
             Paste Style
           </button>
@@ -419,9 +439,9 @@ export function Toolbar({ onExport, onPrint, onBatchProcess, onUndo: _onUndo, on
           <div style={divider} />
           <ToolbarOverflowMenu
             items={[
-              { label: 'Print', onClick: onPrint, disabled: !hasImage, title: 'Print' },
-              { label: 'Copy Style', onClick: onCopyStyle, disabled: !hasImage, title: 'Analyse and copy the style of the current photo' },
-              { label: 'Paste Style', onClick: onPasteStyle, disabled: !hasImage || !hasStyleClipboard, title: hasStyleClipboard ? 'Apply the copied style to the current photo' : 'Copy a style first' },
+              { label: 'Print', onClick: onPrint, disabled: !hasImage || developing, title: developing ? DEVELOPING_TITLE : 'Print' },
+              { label: 'Copy Style', onClick: onCopyStyle, disabled: !hasImage || developing, title: developing ? DEVELOPING_TITLE : 'Analyse and copy the style of the current photo' },
+              { label: 'Paste Style', onClick: onPasteStyle, disabled: !hasImage || developing || !hasStyleClipboard, title: developing ? DEVELOPING_TITLE : hasStyleClipboard ? 'Apply the copied style to the current photo' : 'Copy a style first' },
               { label: 'Reference', onClick: onToggleReference, disabled: !hasImage, active: referenceMode, title: 'Compare with a reference photo' },
             ]}
           />

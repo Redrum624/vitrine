@@ -13,6 +13,7 @@ import {
   formatGalleryTileMeta,
 } from '../../utils/gallerySelection';
 import { evictOldestThumbnails, MAX_THUMBNAIL_CACHE } from '../Panels/ThumbnailPanel';
+import { getDisplayFormat } from '../../utils/imageFormat';
 
 interface GalleryViewProps {
   images: ImageFileInfo[];
@@ -277,7 +278,7 @@ export function GalleryView({ images, onImageSelect, visible }: GalleryViewProps
                   }}
                   onClick={(e) => handleTileClick(image, e)}
                   onDoubleClick={handleTileDoubleClick}
-                  title={`${image.name} (${image.format})`}
+                  title={`${image.name} (${getDisplayFormat(image.format)})`}
                 >
                   {isLoading ? (
                     <div className="w-full h-full flex items-center justify-center" style={{ backgroundColor: 'var(--gray-800)' }}>
@@ -308,7 +309,7 @@ export function GalleryView({ images, onImageSelect, visible }: GalleryViewProps
                       style={{ backgroundColor: 'var(--gray-800)' }}
                       onClick={() => loadThumbnail(image)}
                     >
-                      <span className="text-xs text-center px-2" style={{ color: 'var(--gray-500)' }}>{image.format}</span>
+                      <span className="text-xs text-center px-2" style={{ color: 'var(--gray-500)' }}>{getDisplayFormat(image.format)}</span>
                     </div>
                   )}
 

@@ -394,3 +394,26 @@ describe('Toolbar — Develop|Gallery segmented (Gallery toolbar variant only)',
     });
   });
 });
+
+describe('GalleryView tile — clean format label for a raw MIME-ish `format` (round-6 P8)', () => {
+  // Not every ImageFileInfo producer stores a display-friendly `format` (see
+  // utils/imageFormat.ts's doc comment) — some store the raw MIME type. Both the tile's
+  // title attribute and its no-thumbnail placeholder must route through getDisplayFormat,
+  // same as the scrim meta (formatGalleryTileMeta) already does.
+  const mimeImages = [
+    { id: 'mime1', path: '/p/mime1.jpg', name: 'mime1.jpg', size: 100, format: 'image/jpeg', type: 'image/jpeg', lastModified: 0, dateModified: new Date(0) },
+  ] as unknown as ImageFileInfo[];
+
+  it('shows "JPG" (not "image/jpeg") in the tile title attribute', () => {
+    render(<GalleryView images={mimeImages} onImageSelect={jest.fn()} visible={true} />);
+    const tile = getTile('mime1');
+    expect(tile).toHaveAttribute('title', 'mime1.jpg (JPG)');
+    expect(tile.getAttribute('title')).not.toContain('image/jpeg');
+  });
+
+  it('shows "JPG" (not "image/jpeg") in the no-thumbnail placeholder once loading settles', async () => {
+    render(<GalleryView images={mimeImages} onImageSelect={jest.fn()} visible={true} />);
+    await waitFor(() => expect(getTile('mime1')).toHaveTextContent('JPG'));
+    expect(getTile('mime1').textContent).not.toContain('image/jpeg');
+  });
+});

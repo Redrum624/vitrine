@@ -11,6 +11,21 @@ interface ImageSizeDialogProps {
   currentWidth: number;
   currentHeight: number;
   mode: 'imageSize' | 'canvasSize';
+  /**
+   * True during the progressive-open developing window (background full RAW decode still
+   * running). The menu entries that open this dialog are already disabled while developing
+   * (v1.17.0), but a dialog instance opened just before the window started, or any future
+   * entry point that isn't gated, could still be showing while it's true. `currentWidth`/
+   * `currentHeight` are ALWAYS whatever imageService.getCurrentImage() reports — during the
+   * window that's the embedded-preview's dims (2048px-class), not the full-res sensor dims;
+   * verified there is no accessor with true full dims during the window either (the lazy
+   * original-snapshot the Before/After path uses is swapped to full dims in the same
+   * synchronous tick that clears `developing`, so it never observably differs). Rather than
+   * silently seed a dialog with numbers that may be wrong for a 20MP+ image, surface an
+   * honest "still developing" annotation next to the current-size readout instead of hiding
+   * or guessing.
+   */
+  developing?: boolean;
 }
 
 export function ImageSizeDialog({
@@ -20,6 +35,7 @@ export function ImageSizeDialog({
   currentWidth,
   currentHeight,
   mode,
+  developing = false,
 }: ImageSizeDialogProps) {
   const [width, setWidth] = useState(currentWidth);
   const [height, setHeight] = useState(currentHeight);
@@ -92,6 +108,9 @@ export function ImageSizeDialog({
           <>
             <div style={{ fontSize: 11.5, color: 'var(--glass-text-muted)' }}>
               Current: {currentWidth} x {currentHeight} px
+              {developing && (
+                <span style={{ color: 'var(--accent)' }}> (developing full quality — preview dims shown)</span>
+              )}
             </div>
 
             <div className="flex items-center gap-3">

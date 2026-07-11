@@ -1546,7 +1546,7 @@ function App() {
               onActualSize={handleActualSize}
               zoom={viewport.zoom}
               onAutoAll={handleAutoAll}
-              autoAllDeveloping={developing}
+              developing={developing}
               onCopyStyle={handleCopyStyle}
               onPasteStyle={handlePasteStyle}
               hasStyleClipboard={hasStyleClipboard}
@@ -1761,6 +1761,7 @@ function App() {
           currentWidth={imageService.getCurrentImage()?.width || 0}
           currentHeight={imageService.getCurrentImage()?.height || 0}
           mode={imageSizeMode}
+          developing={developing}
         />
       )}
 

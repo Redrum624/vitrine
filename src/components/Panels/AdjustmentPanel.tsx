@@ -22,7 +22,7 @@ import { RawDecodePanel } from './RawDecodePanel';
 import EnhanceModuleComponent from '../Modules/EnhanceModuleComponent';
 import { ModuleCardHeader } from '../Controls/ModuleCardHeader';
 import type { ModuleCardActions } from '../Controls/moduleCardActions';
-import { Sun, Droplet, Palette, Activity, Crop, Sparkles, Focus, History as HistoryIcon, Sliders } from 'lucide-react';
+import { Sun, Droplet, Palette, Activity, Crop, Sparkles, Focus, History as HistoryIcon, Sliders, Contrast } from 'lucide-react';
 import type { ReactNode } from 'react';
 import type { ImageFileInfo } from '../../services/FileSystemService';
 import { imageProcessingPipeline } from '../../services/ImageProcessingPipeline';
@@ -638,7 +638,11 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
       whitebalance: <Droplet size={15} />,
       tonecurve: <Activity size={15} />,
       enhance: <Sparkles size={15} />,
-      shadowshighlights: <Sun size={15} />,
+      // basicadj already uses Sun (also the IconSidebar rail glyph for it) — shadowshighlights
+      // needs its own identity, not on the rail, so no rail collision to worry about (round-6
+      // P8 polish). Contrast is lucide's half-filled-circle glyph, a natural fit for tone
+      // recovery between highlights and shadows.
+      shadowshighlights: <Contrast size={15} />,
       colorbalance: <Palette size={15} />,
       localadjustments: <Sliders size={15} />,
       lenscorrections: <Focus size={15} />,

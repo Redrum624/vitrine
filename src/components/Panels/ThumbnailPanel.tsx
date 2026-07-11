@@ -7,6 +7,7 @@ import { logger } from '../../utils/Logger';
 import { ChipButton } from '../Controls/ChipButton';
 import { DOCK_BOTTOM } from '../../layout/photoRegion';
 import { filterImagesByRating, handleImageClick, isRawImage } from '../../utils/gallerySelection';
+import { getDisplayFormat } from '../../utils/imageFormat';
 
 interface ThumbnailPanelProps {
   images: ImageFileInfo[];
@@ -185,7 +186,7 @@ export function ThumbnailPanel({
             ctx.textAlign = 'center';
             ctx.fillText(image.name.substring(0, 20), 75, 45);
             ctx.font = '9px sans-serif';
-            ctx.fillText(image.format || 'RAW', 75, 60);
+            ctx.fillText(getDisplayFormat(image.format) || 'RAW', 75, 60);
           }
           storeThumbnail(canvas.toDataURL());
         }
@@ -442,7 +443,7 @@ export function ThumbnailPanel({
                   e.dataTransfer.effectAllowed = 'copy';
                 }}
                 onClick={(e) => handleThumbnailClick(image, e)}
-                title={`${image.name} (${image.format})`}
+                title={`${image.name} (${getDisplayFormat(image.format)})`}
               >
                 {isLoading ? (
                   <div className="w-full h-full rounded flex items-center justify-center" style={{backgroundColor: 'var(--gray-800)'}}>
@@ -477,7 +478,7 @@ export function ThumbnailPanel({
                     onClick={() => loadThumbnail(image)}
                   >
                     <span className="text-xs text-center px-1" style={{color: 'var(--gray-500)'}}>
-                      {image.format}
+                      {getDisplayFormat(image.format)}
                     </span>
                   </div>
                 )}
