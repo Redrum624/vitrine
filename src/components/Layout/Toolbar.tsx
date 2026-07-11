@@ -322,7 +322,7 @@ export function Toolbar({ onExport, onPrint, onBatchProcess, onUndo: _onUndo, on
       </button>
       {/* Print — secondary; moves to the overflow menu when collapsed. */}
       {!collapsed && (
-        <button onClick={onPrint} disabled={!hasImage} className="glass-pill-btn" style={pillBtn} title="Print Image (Ctrl+P)">
+        <button onClick={onPrint} disabled={!hasImage} className="glass-pill-btn" style={pillBtn} title="Print">
           Print
         </button>
       )}
@@ -419,7 +419,7 @@ export function Toolbar({ onExport, onPrint, onBatchProcess, onUndo: _onUndo, on
           <div style={divider} />
           <ToolbarOverflowMenu
             items={[
-              { label: 'Print', onClick: onPrint, disabled: !hasImage, title: 'Print Image (Ctrl+P)' },
+              { label: 'Print', onClick: onPrint, disabled: !hasImage, title: 'Print' },
               { label: 'Copy Style', onClick: onCopyStyle, disabled: !hasImage, title: 'Analyse and copy the style of the current photo' },
               { label: 'Paste Style', onClick: onPasteStyle, disabled: !hasImage || !hasStyleClipboard, title: hasStyleClipboard ? 'Apply the copied style to the current photo' : 'Copy a style first' },
               { label: 'Reference', onClick: onToggleReference, disabled: !hasImage, active: referenceMode, title: 'Compare with a reference photo' },

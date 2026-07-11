@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Minus, Square, X, Copy, Info } from 'lucide-react';
 import { GlassModal } from '../Dialogs/GlassModal';
+import { useAppStore } from '../../stores/appStore';
 
 interface MenuBarProps {
   onFileOpen?: () => void;
@@ -99,6 +100,11 @@ export function MenuBar({
   const [isMaximized, setIsMaximized] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
   const [appInfo, setAppInfo] = useState<AppInfo | null>(null);
+  // Progressive RAW open: while the fast embedded-JPEG preview is on screen and the full
+  // decode runs in the background, Image Size / Canvas Size can't seed correct preview
+  // dims yet (see App.tsx's seed site) — disable those two entries for the window. Read
+  // reactively (hook selector, not getState) so the menu re-renders as `developing` flips.
+  const developing = useAppStore((s) => s.developing);
 
   // Check if window is maximized on mount and update state
   useEffect(() => {
@@ -296,14 +302,14 @@ export function MenuBar({
         {activeMenu === 'image' && (
           <div className="absolute top-full left-0 mt-0.5 border min-w-[180px] py-1 z-50" style={{backgroundColor: 'var(--gray-800)', borderColor: 'var(--border)', boxShadow: 'var(--shadow-lg)', borderRadius: '0'}}>
             <button
-              className={`w-full text-left px-4 py-1.5 text-xs bg-transparent border-0 cursor-pointer ${hasImage ? 'text-dark-200 hover:bg-dark-700' : 'text-dark-500 cursor-not-allowed'}`}
-              onClick={() => hasImage && handleMenuItemClick(onImageSize)}
+              className={`w-full text-left px-4 py-1.5 text-xs bg-transparent border-0 cursor-pointer ${hasImage && !developing ? 'text-dark-200 hover:bg-dark-700' : 'text-dark-500 cursor-not-allowed'}`}
+              onClick={() => hasImage && !developing && handleMenuItemClick(onImageSize)}
             >
               Image Size...
             </button>
             <button
-              className={`w-full text-left px-4 py-1.5 text-xs bg-transparent border-0 cursor-pointer ${hasImage ? 'text-dark-200 hover:bg-dark-700' : 'text-dark-500 cursor-not-allowed'}`}
-              onClick={() => hasImage && handleMenuItemClick(onCanvasSize)}
+              className={`w-full text-left px-4 py-1.5 text-xs bg-transparent border-0 cursor-pointer ${hasImage && !developing ? 'text-dark-200 hover:bg-dark-700' : 'text-dark-500 cursor-not-allowed'}`}
+              onClick={() => hasImage && !developing && handleMenuItemClick(onCanvasSize)}
             >
               Canvas Size...
             </button>

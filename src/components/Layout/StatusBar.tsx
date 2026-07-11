@@ -131,7 +131,14 @@ const getMemoryInfo = (): string => {
 };
 
 export function StatusBar({ currentImage, processingStats, images }: StatusBarProps) {
-  const { imageRatings, setImageRating, ratingFilter, setRatingFilter, viewMode, alignmentAxisX, selectedImageIds, developing } = useAppStore();
+  const imageRatings = useAppStore((s) => s.imageRatings);
+  const setImageRating = useAppStore((s) => s.setImageRating);
+  const ratingFilter = useAppStore((s) => s.ratingFilter);
+  const setRatingFilter = useAppStore((s) => s.setRatingFilter);
+  const viewMode = useAppStore((s) => s.viewMode);
+  const alignmentAxisX = useAppStore((s) => s.alignmentAxisX);
+  const selectedImageIds = useAppStore((s) => s.selectedImageIds);
+  const developing = useAppStore((s) => s.developing);
   const memoryInfo = getMemoryInfo();
   const currentRating = currentImage ? (imageRatings[currentImage.id] ?? 0) : 0;
   const isGallery = viewMode === 'gallery';

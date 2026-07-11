@@ -300,6 +300,8 @@ async function decodeEmbeddedPreview(filePath, maxDim = 2048, log = console) {
 
     const jpegs = findEmbeddedJpegs(buf);
     // Take the largest embedded JPEG that is clearly a real preview (not a tiny 160px thumbnail).
+    // Relies on findEmbeddedJpegs' descending sort — see comment there — so the first entry
+    // past the size threshold is the largest candidate.
     const best = jpegs.find((j) => j.length > 50000);
     if (best) jpeg = Buffer.from(buf.subarray(best.offset, best.offset + best.length));
   } finally {

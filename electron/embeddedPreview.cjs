@@ -69,6 +69,9 @@ function findEmbeddedJpegs(buf) {
       pos = start + 2; // false SOI — step past it
     }
   }
+  // Load-bearing: decodeEmbeddedPreview's "largest embedded JPEG" contract (rawDecoder.cjs)
+  // depends on this descending sort — it takes the first entry that clears its size
+  // threshold, assuming that's the largest candidate.
   found.sort((a, b) => b.length - a.length);
   return found;
 }
