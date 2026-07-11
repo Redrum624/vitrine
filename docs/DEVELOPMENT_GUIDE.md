@@ -107,7 +107,7 @@ React components organized by type:
 #### **`src/services/`**
 Core application services:
 - **ImageProcessingPipeline**: Main processing orchestration
-- **LibRawService**: RAW processing via WebAssembly
+- **RawImageService**: RAW load/decode orchestration (decode runs in the Electron main process — `electron/rawDecoder.cjs`)
 - **GPUAccelerationService**: WebGL2 GPU pipeline optimization
 - **ExportService**: Multi-format export functionality
 

@@ -1,5 +1,4 @@
 import { logger } from '../utils/Logger';
-import { libRawService, LibRawOptions, ProcessedRawData } from './LibRawService';
 import { cameraProfileService } from './CameraProfileService';
 import { rawHistogramService, HistogramData } from './RawHistogramService';
 import { noiseReductionService, NoiseReductionOptions } from './NoiseReductionService';
@@ -81,7 +80,8 @@ export class RawImageService {
 
       // Decode via the fallback chain owned by decodeRawFile: the Electron main process
       // (native dcraw_emu → libraw-wasm/Node → embedded-JPEG last resort — see
-      // electron/rawDecoder.cjs), or, in a no-IPC/browser context, the renderer LibRawService.
+      // electron/rawDecoder.cjs). There is no renderer-side decoder; without electronAPI this
+      // surfaces an error rather than fabricating pixels.
       // decodeOptions (demosaic + highlight mode) are threaded through to the native/wasm rungs.
       // `interactive` gates the L2 disk write-through (see decodeRawFile): the Canvas open path
       // persists the decode; batch export / decodeForExport do not (they must not churn the LRU).
@@ -238,7 +238,12 @@ export class RawImageService {
    * and avoids the browser SharedArrayBuffer/Emscripten issues entirely.
    */
   private async decodeRawFile(filePath: string, extension: string, decodeOptions?: RawDecodeOptions, interactive: boolean = true): Promise<RawImageData> {
-    // Try Electron main-process decoder first (native LibRaw demosaic → wasm → embedded JPEG).
+    // RAW decode is owned ENTIRELY by the Electron main process, which runs its own fallback
+    // chain: native LibRaw demosaic (dcraw_emu) → libraw-wasm/Node worker → embedded-JPEG last
+    // resort (see electron/rawDecoder.cjs). That embedded-JPEG tier makes the chain effectively
+    // total, so there is NO renderer-side decode fallback — a former iframe/libraw-wasm rung was
+    // removed (Task P9): it re-ran the identical wasm the main process had just failed on and
+    // couldn't even read the file without electronAPI, so it added zero capability.
     // decodeOptions (demosaic + highlight mode) are threaded to the main process, which mirrors
     // them onto the native and wasm rungs; the embedded-JPEG last resort ignores them by design.
     if (typeof window !== 'undefined' && window.electronAPI?.decodeRawFile) {
@@ -318,76 +323,21 @@ export class RawImageService {
 
         return rawData;
       } catch (mainProcessError) {
+        // A throw here means the main process's WHOLE chain failed (native → libraw-wasm/Node →
+        // embedded JPEG). There is nothing left to try — surface the error instead of masking it
+        // with fabricated pixels or a redundant renderer decode (see Task P9 for why the former
+        // renderer-side iframe fallback was deleted).
         const msg = mainProcessError instanceof Error ? mainProcessError.message : String(mainProcessError);
-        logger.warn(`Main-process RAW decode failed, trying LibRaw WASM: ${msg}`);
+        logger.error(`Main-process RAW decode failed for ${filePath}: ${msg}`);
+        throw mainProcessError instanceof Error ? mainProcessError : new Error(msg);
       }
     }
 
-    // Fallback: LibRaw WASM (iframe-based, works for first file per session)
-    logger.info(`Decoding RAW file with LibRaw WASM: ${extension.toUpperCase()}`);
-
-    try {
-      let buffer: ArrayBuffer;
-      if (typeof window !== 'undefined' && window.electronAPI) {
-        buffer = await window.electronAPI.readFileBuffer(filePath);
-      } else {
-        throw new Error('Browser RAW processing requires file buffer, not file path');
-      }
-
-      const result = await libRawService.processRawFileWithPreset(buffer, 'quality');
-
-      let pixelData: Uint8Array | null = null;
-      if (result.imageData instanceof Uint8Array) {
-        pixelData = result.imageData;
-      } else if (result.imageData && typeof result.imageData === 'object') {
-        const obj = result.imageData as Record<string, unknown>;
-        if (obj.data instanceof Uint8Array) pixelData = obj.data;
-        else if (obj.buffer instanceof ArrayBuffer) pixelData = new Uint8Array(obj.buffer);
-      }
-
-      if (pixelData && pixelData.length > 0) {
-        const floatData = this.convertUint8ToFloat32Array(pixelData, result.width, result.height);
-        return this.finishRawProcessing(result as ProcessedRawData, floatData, filePath);
-      }
-
-      throw new Error(`LibRaw returned unusable pixel data`);
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      logger.error(`LibRaw WASM failed for ${filePath}: ${msg}`);
-      throw error;
-    }
-  }
-
-  // Helper method to finish RAW processing with the final result.
-  // NOTE: LibRaw already applies the correct per-camera colour matrix and emits
-  // colour-managed sRGB pixels (-o 1). No JS-side colour-matrix multiply must
-  // be applied on top; that would double-transform the colours.
-  private finishRawProcessing(result: ProcessedRawData, floatData: Float32Array, filePath: string): RawImageData {
-    const rawData: RawImageData = {
-      width: result.width,
-      height: result.height,
-      data: floatData,
-      isLibRawProcessed: true,
-      fileName: filePath.split(/[\\/]/).pop() || 'unknown',
-      filePath: filePath,
-      format: filePath.substring(filePath.lastIndexOf('.')).toUpperCase(),
-      metadata: {
-        make: result.metadata.make,
-        model: result.metadata.model,
-        iso: result.metadata.iso,
-        aperture: result.metadata.aperture,
-        shutter: result.metadata.shutter,
-        focalLength: result.metadata.focal_length,
-        colorSpace: 'sRGB',
-        dateTime: new Date(result.metadata.timestamp * 1000).toISOString()
-      }
-    };
-
-    logger.info(`RAW file decoded successfully: ${result.width}x${result.height} (${result.processingTime.toFixed(2)}ms)`);
-
-    logger.debug(`RAW final result — data length: ${rawData.data.length}`);
-
-    return rawData;
+    // No Electron main-process decoder present (e.g. a non-Electron/browser context): RAW decode
+    // is unavailable — there is no renderer-side decoder. Surface it rather than return fake pixels.
+    throw new Error(
+      `RAW decode unavailable for ${extension.toUpperCase()}: the Electron main-process decoder (window.electronAPI.decodeRawFile) is not present`,
+    );
   }
 
   // Fallback mock processing method
@@ -692,67 +642,6 @@ export class RawImageService {
   // Check if format needs special processing
   needsAdvancedProcessing(extension: string): boolean {
     return ['.orf', '.cr2', '.cr3', '.nef', '.arw'].includes(extension.toLowerCase());
-  }
-
-  // Process RAW file from ArrayBuffer (for browser usage)
-  async processRawFromBuffer(
-    buffer: ArrayBuffer,
-    fileName: string,
-    preset: 'fast' | 'balanced' | 'quality' = 'balanced',
-    customOptions?: LibRawOptions
-  ): Promise<RawImageData> {
-    try {
-      logger.info(`Processing RAW buffer with LibRaw: ${fileName} (${buffer.byteLength} bytes)`);
-
-      const result = await libRawService.processRawFileWithPreset(buffer, preset, customOptions);
-
-      // Convert LibRaw output to our format
-      const floatData = this.convertUint8ToFloat32Array(result.imageData, result.width, result.height);
-
-      const extension = fileName.substring(fileName.lastIndexOf('.')).toLowerCase();
-
-      const rawData: RawImageData = {
-        width: result.width,
-        height: result.height,
-        data: floatData,
-        fileName: fileName,
-        filePath: fileName, // Use filename as path for buffer-based processing
-        format: extension.toUpperCase(),
-        metadata: {
-          make: result.metadata.make,
-          model: result.metadata.model,
-          iso: result.metadata.iso,
-          aperture: result.metadata.aperture,
-          shutter: result.metadata.shutter,
-          focalLength: result.metadata.focal_length,
-          colorSpace: 'sRGB',
-          dateTime: new Date(result.metadata.timestamp * 1000).toISOString()
-        }
-      };
-
-      logger.info(`RAW buffer processed successfully: ${result.width}x${result.height} (${result.processingTime.toFixed(2)}ms)`);
-      return rawData;
-
-    } catch (error) {
-      logger.error(`Failed to process RAW buffer for ${fileName}:`, error);
-      throw error;
-    }
-  }
-
-  // Initialize LibRaw service
-  async initializeLibRaw(): Promise<void> {
-    try {
-      await libRawService.initialize();
-      logger.info('LibRaw WebAssembly service initialized successfully');
-    } catch (error) {
-      logger.warn('Failed to initialize LibRaw WebAssembly service:', error);
-      throw error;
-    }
-  }
-
-  // Get LibRaw service statistics
-  getLibRawStats() {
-    return libRawService.getStats();
   }
 
   /**

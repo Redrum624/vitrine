@@ -60,7 +60,7 @@ ImageProcessingPipeline      // Orchestrates all processing operations
 
 #### **RAW Processing Services**
 ```typescript
-LibRawService               // Professional RAW processing via WebAssembly
+RawImageService             // RAW load/decode orchestration (decode runs in the main process — electron/rawDecoder.cjs)
 ├── AutoRawAdjustmentService // Intelligent parameter detection
 ├── CameraProfileService    // Camera-specific color profiles
 ├── NoiseReductionService   // Wavelet-based noise reduction

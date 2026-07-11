@@ -47,11 +47,13 @@ RawImageService.loadRawImage()
 If all three throw, `decodeRawFile` rethrows and `RawImageService.loadRawImage`
 propagates the error (no silent fallback to a placeholder image).
 
-There is also a renderer-side fallback, `LibRawService.ts` (an iframe-isolated
-libraw-wasm build), used only when `window.electronAPI` doesn't exist at all —
-i.e. a non-Electron/browser context. The packaged desktop app always has
-`window.electronAPI`, so this path is effectively unreachable today; it's kept
-in case of a future browser build.
+There is **no** renderer-side RAW decoder. A former iframe-isolated `libraw-wasm`
+fallback (`src/services/LibRawService.ts` + `public/libraw-worker-frame.html`) was
+removed in round-6 Task P9: it re-ran the identical `libraw-wasm` build the main
+process had just failed on (so it added zero decode capability the main-process
+chain lacked), and it could not even read the file without `window.electronAPI`.
+In a non-Electron/browser context `decodeRawFile` therefore surfaces an error
+rather than returning fabricated pixels.
 
 ## Per-image decode options
 

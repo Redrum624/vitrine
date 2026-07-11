@@ -96,7 +96,7 @@ Build:        Vite + TypeScript + ESLint
 - `RawImageService` - RAW file handling
 
 #### RAW Processing
-- `LibRawService` - WebAssembly RAW processing
+- Main-process decoder (`electron/rawDecoder.cjs`) - native `dcraw_emu` → `libraw-wasm`/Node → embedded JPEG
 - `AutoRawAdjustmentService` - Intelligent auto-adjustments
 - `CameraProfileService` - Camera-specific optimization
 

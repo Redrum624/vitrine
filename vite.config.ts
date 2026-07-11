@@ -27,8 +27,7 @@ export default defineConfig({
           services: [
             './src/services/ImageProcessingPipeline',
             './src/services/ImageService',
-            './src/services/RawImageService',
-            './src/services/LibRawService'
+            './src/services/RawImageService'
           ]
         }
       }
