@@ -88,6 +88,16 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
   // it lands in cpuBridges ⇒ GPU mode is skipped), so the source here is always the
   // raw decoded image downsampled to the preview — no crop baked in.
   const lastGpuSourceKeyRef = useRef<string | null>(null);
+  // ── Preview-source memo (downsample gating) ───────────────────────────────────
+  // The area-averaged box downsample is O(source pixels) — ~50-150ms on a 24-45MP
+  // image — and the source only changes on image switch, preview-dim change, or an
+  // in-place base swap. Mirroring the GPU sourceKey pattern above, cache the last
+  // downsampled preview by (filePath, previewW×H, baseImageVersion) so slider drags
+  // (each processCurrentImageRealTime call) reuse it instead of rescanning the full
+  // source every 50ms. Consumers never mutate it: the GPU path uploads it, the worker
+  // path structured-clones it (postMessage, no transfer list) and the main-thread
+  // pipeline copies its input (processOnMainThread does `new Float32Array(input)`).
+  const previewSourceCacheRef = useRef<{ key: string; data: Float32Array } | null>(null);
   // Trailing throttle for the GPU→CPU histogram readback (keeps the histogram live in
   // gpu mode without blocking the present path). Cleared on unmount.
   const gpuReadbackTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -232,14 +242,27 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
         // Area-averaged box downsample: each preview pixel is the mean of every source
         // pixel in its footprint (anti-aliased), instead of dropping to a single source
         // pixel per cell. Averages in the source's own value space and outputs RGBA.
-        previewData = boxDownsampleRGBA(
-          currentImage.data,
-          currentImage.width,
-          currentImage.height,
-          previewWidth,
-          previewHeight,
-          sourceChannels,
-        );
+        //
+        // Memoized per source (see previewSourceCacheRef): the scan is O(source pixels),
+        // so it runs ONCE per (image path, preview dims, base pixels) instead of on every
+        // slider drag. baseImageVersion folds in the in-place base swaps (a progressive
+        // open's background full-decode swap, a RAW re-decode, a rotate/flip bake).
+        const baseImageVersion = useAppStore.getState().baseImageVersion;
+        const previewSourceKey = `${currentImage.filePath ?? ''}_${previewWidth}x${previewHeight}_${baseImageVersion}`;
+        const cachedPreview = previewSourceCacheRef.current;
+        if (cachedPreview && cachedPreview.key === previewSourceKey) {
+          previewData = cachedPreview.data;
+        } else {
+          previewData = boxDownsampleRGBA(
+            currentImage.data,
+            currentImage.width,
+            currentImage.height,
+            previewWidth,
+            previewHeight,
+            sourceChannels,
+          );
+          previewSourceCacheRef.current = { key: previewSourceKey, data: previewData };
+        }
       }
 
       // Debug the preview data
