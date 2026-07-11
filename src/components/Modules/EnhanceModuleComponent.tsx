@@ -68,13 +68,21 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
         ? { enabled: true, strength: nrStrength, method: 'auto' as const }
         : { enabled: false };
       // Always commit NR params to the module so the pipeline (and applyUpscale's own bake pass)
-      // picks them up. The parent's onNoiseReductionChange ALSO fires a debounced full pipeline
-      // pass — but on the UPSCALE path that pass is redundant: applyUpscale bakes NR into the new
-      // base itself and triggers exactly one post-bake reprocess, and the parent's pass would run
-      // a wasted full pass on the pre-upscale preview that the bake immediately discards (round-6
-      // P7 item 4 — the NR + Upscale double-reprocess). So skip the parent trigger when upscaling.
+      // picks them up. The parent's onNoiseReductionChange ALSO fires a debounced FULL-pipeline
+      // pass — but that pass is REDUNDANT whenever another pass already reprocesses the whole
+      // pipeline, which runs noise-reduction (module 7) BEFORE enhance (module 8):
+      //   • UPSCALE path: applyUpscale bakes NR into the new base + owns exactly one post-bake
+      //     reprocess; the parent's pass would waste a full pass on the pre-upscale preview the
+      //     bake immediately discards (round-6 P7 item 4 — NR + Upscale double-reprocess).
+      //   • SHARPEN path: onParamsChange('enhance') below fires a debounced full-pipeline pass that
+      //     ALREADY includes noise-reduction with these committed params — the separate NR pass is
+      //     an identical duplicate (round-7 Q4; both call processCurrentImageRealTime on the same
+      //     committed module state). The NR module cache is param+dims-keyed and self-invalidates,
+      //     so dropping the NR trigger's own cache-invalidation is safe.
+      // Only the NR-ONLY path (neither sharpen nor upscale) has no other reprocess, so THERE the
+      // NR trigger is load-bearing and must fire.
       noiseReductionModule.setParams(nrParams);
-      if (!isUpscale) onNoiseReductionChange?.(nrParams);
+      if (!isUpscale && !paramsRef.current.sharpen) onNoiseReductionChange?.(nrParams);
 
       if (isUpscale) {
         await enhanceService.applyUpscale({ ...paramsRef.current, upscale: true });

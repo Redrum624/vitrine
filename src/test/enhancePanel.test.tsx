@@ -57,27 +57,29 @@ describe('EnhanceModuleComponent', () => {
     expect(enhanceService.applyUpscale).toHaveBeenCalledWith(expect.objectContaining({ upscale: true }));
   });
 
-  it('toggling NR on then Apply calls noiseReductionModule.setParams and onNoiseReductionChange with enabled:true', async () => {
+  it('toggling NR on then Apply (sharpen default on) commits NR params but SKIPS onNoiseReductionChange (the enhance pass carries NR)', async () => {
     const onNR = jest.fn();
     const nrMod = makeNrModule();
     render(<EnhanceModuleComponent module={enhanceModule} noiseReductionModule={nrMod} onNoiseReductionChange={onNR} />);
-    // NR starts disabled (NoiseReductionModule default enabled:false)
+    // NR starts disabled (NoiseReductionModule default enabled:false); enhance sharpen defaults ON.
     fireEvent.click(screen.getByRole('button', { name: /noise.?reduction/i }));
-    // Now NR is on; click Apply
+    // Now NR is on; click Apply — sharpen path fires onParamsChange('enhance'), whose full-pipeline
+    // pass runs noise-reduction (module 7) before enhance (module 8), so the separate NR reprocess
+    // is a redundant duplicate and must NOT fire (round-7 Q4).
     fireEvent.click(screen.getByText('Apply Enhance'));
     expect(nrMod.setParams).toHaveBeenCalledWith({ enabled: true, strength: expect.any(Number), method: 'auto' });
-    expect(onNR).toHaveBeenCalledWith({ enabled: true, strength: expect.any(Number), method: 'auto' });
+    expect(onNR).not.toHaveBeenCalled();
   });
 
-  it('NR off: Apply calls noiseReductionModule.setParams with enabled:false and onNoiseReductionChange with enabled:false', async () => {
+  it('NR off + sharpen on: Apply commits noiseReductionModule.setParams(enabled:false) but SKIPS onNoiseReductionChange', async () => {
     const onNR = jest.fn();
     const nrMod = makeNrModule();
-    // NR module defaults to enabled:false — no setup call needed
+    // NR module defaults to enabled:false — no setup call needed; enhance sharpen defaults ON.
     render(<EnhanceModuleComponent module={enhanceModule} noiseReductionModule={nrMod} onNoiseReductionChange={onNR} />);
-    // NR starts off; don't toggle; click Apply
+    // NR starts off; don't toggle; click Apply — sharpen path carries the reprocess.
     fireEvent.click(screen.getByText('Apply Enhance'));
     expect(nrMod.setParams).toHaveBeenCalledWith({ enabled: false });
-    expect(onNR).toHaveBeenCalledWith({ enabled: false });
+    expect(onNR).not.toHaveBeenCalled();
   });
 
   it('renders an "AI" badge when the store upscaleMode is "ai"', () => {
@@ -239,13 +241,34 @@ describe('EnhanceModuleComponent — NR + Upscale single reprocess (P7 item 4)',
     expect(enhanceService.applyUpscale).toHaveBeenCalledWith(expect.objectContaining({ upscale: true }));
   });
 
-  it('sharpen path (no upscale) STILL fires onNoiseReductionChange — that reprocess is what applies enhance', () => {
+  it('sharpen path with NR on commits NR params but SKIPS the redundant onNoiseReductionChange (enhance pass carries NR)', () => {
     const onNR = jest.fn();
+    const onParamsChange = jest.fn();
     const nrMod = makeNrModule();
-    render(<EnhanceModuleComponent module={enhanceModule} noiseReductionModule={nrMod} onNoiseReductionChange={onNR} />);
-    fireEvent.click(screen.getByRole('button', { name: /noise.?reduction/i }));
+    render(<EnhanceModuleComponent module={enhanceModule} noiseReductionModule={nrMod} onNoiseReductionChange={onNR} onParamsChange={onParamsChange} />);
+    fireEvent.click(screen.getByRole('button', { name: /noise.?reduction/i })); // enable NR (sharpen defaults on)
     fireEvent.click(screen.getByText('Apply Enhance'));
+    // NR params ARE committed (the enhance pass's full pipeline runs noise-reduction before enhance)...
+    expect(nrMod.setParams).toHaveBeenCalledWith({ enabled: true, strength: expect.any(Number), method: 'auto' });
+    // ...but the separate NR reprocess is a duplicate of the enhance pass → NOT fired (round-7 Q4).
+    expect(onNR).not.toHaveBeenCalled();
+    // The enhance pass IS the single reprocess that applies both NR and enhance.
+    expect(onParamsChange).toHaveBeenCalledWith(expect.objectContaining({ enabled: true, sharpen: true, upscale: false }));
+  });
+
+  it('NR-only path (sharpen OFF, upscale off) fires onNoiseReductionChange — it is the ONLY reprocess', () => {
+    const onNR = jest.fn();
+    const onParamsChange = jest.fn();
+    const nrMod = makeNrModule();
+    render(<EnhanceModuleComponent module={enhanceModule} noiseReductionModule={nrMod} onNoiseReductionChange={onNR} onParamsChange={onParamsChange} />);
+    fireEvent.click(screen.getByRole('button', { name: /noise.?reduction/i })); // enable NR
+    fireEvent.click(screen.getByRole('button', { name: /^sharpen$/i }));          // disable sharpen (default on)
+    fireEvent.click(screen.getByText('Apply Enhance'));
+    // No sharpen/upscale pass exists, so the NR trigger is load-bearing and must fire.
+    expect(nrMod.setParams).toHaveBeenCalledWith({ enabled: true, strength: expect.any(Number), method: 'auto' });
     expect(onNR).toHaveBeenCalledWith({ enabled: true, strength: expect.any(Number), method: 'auto' });
+    // Sharpen is off → no enhance param pass.
+    expect(onParamsChange).not.toHaveBeenCalled();
   });
 });
 
