@@ -353,13 +353,15 @@ export class ImageService {
    *    while we were decoding → don't swap, so this stale-options full decode never replaces the
    *    reDecode's fresh working image.
    *
-   * The ONE case that also skips the WRITE is a fresher re-decode of THIS SAME path (options
-   * changed while the image is still current): reDecode may already have overwritten the base with
-   * its new-options pixels, and writing our stale-options pixels would clobber it. When the open
-   * has instead moved to a DIFFERENT image (generation/identity), no same-path re-decode competes
-   * (reDecode bails on an identity change), so the write is always safe there. The options
-   * recorded on the cache write are the CAPTURED ones (the decodeOptions param), never the current
-   * store state — they are the buffer's true decode provenance.
+   * The ONE case that also skips the WRITE is a stale-options decode of THIS SAME path (store
+   * options differ from this decode's captured options while this path is still the current
+   * image — regardless of generation, so an out-of-order landing after a same-path reopen can't
+   * clobber either): the path may already hold fresher-options pixels (from reDecode or a reopen
+   * that cache-hit them), and getBase is options-blind on read. Same-path same-options rewrites
+   * are content-identical and different-path writes can never collide, so the skip loses no
+   * legitimate pay-forward. The options recorded on the cache write are the CAPTURED ones (the
+   * decodeOptions param), never the current store state — they are the buffer's true decode
+   * provenance.
    */
   private async developFullDecode(
     filePath: string,
@@ -390,12 +392,13 @@ export class ImageService {
       // WRITE-BEFORE-GUARD (deliberate — see doc comment): cache this fully-paid decode under its
       // own (path, captured-options) key so a superseded open still pays forward to the next
       // reopen. The base cache holds the FULL 16-bit decode only (the preview is never cached).
-      // Skip the write ONLY when a fresher re-decode of this SAME path is in play (options changed
-      // while the image is still current): writing our stale-options pixels would clobber the
-      // reDecode's fresh base. When the open moved to a different image, no same-path re-decode
-      // competes, so the write is safe. Options recorded are the CAPTURED decodeOptions param
-      // (this buffer's true provenance), never the current store state.
-      const wouldClobberFresherReDecode = !generationSuperseded && !identityChanged && optionsChanged;
+      // Skip the write ONLY when this decode's options are stale for this SAME still-current path
+      // (getBase is options-blind on read; the path may already hold fresher-options pixels from
+      // reDecode or a reopen that cache-hit them). Deliberately NOT conditioned on generation: a
+      // stale decode landing out-of-order after a same-path reopen must not clobber either.
+      // Options recorded are the CAPTURED decodeOptions param (this buffer's true provenance),
+      // never the current store state.
+      const wouldClobberFresherReDecode = !identityChanged && optionsChanged;
       if (!wouldClobberFresherReDecode) {
         imageCacheService.setBase(
           filePath,
