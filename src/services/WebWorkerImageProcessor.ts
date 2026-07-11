@@ -1,5 +1,6 @@
 import { logger } from '../utils/Logger';
 import { pipelineWorkerUrl } from '../workers/pipelineWorkerUrl';
+import { spatialApron, effectiveTileSize, planApronTile } from '../utils/tiledPipeline';
 
 export interface WorkerImageData {
   width: number;
@@ -237,12 +238,22 @@ export class WebWorkerImageProcessor {
     const { width, height, data } = imageData;
 
     try {
-      // Calculate tile dimensions using the specified tile size
-      const tilesX = Math.ceil(width / tileSize);
-      const tilesY = Math.ceil(height / tileSize);
+      // Spatial (kernel-based) modules read neighbour pixels; a bare tile boundary cuts the kernel
+      // off from the adjacent tile and leaves a visible SEAM. Borrow an apron of neighbour pixels
+      // around each tile — sized to the ACTUAL summed kernel radius of the enabled modules — and
+      // crop it after processing (see processTile + src/utils/tiledPipeline.ts). apron 0 for
+      // point-operation-only pipelines, so tiling stays free there.
+      const apron = spatialApron(pipeline);
+      // A wide kernel on a small tile wastes compute on the apron; grow the tile to cap that
+      // overhead. No-op for the common single-filter case on the production 2048/4096 tiles.
+      const effTile = effectiveTileSize(tileSize, apron);
+
+      // Calculate tile dimensions using the (possibly grown) effective tile size
+      const tilesX = Math.ceil(width / effTile);
+      const tilesY = Math.ceil(height / effTile);
       const totalTiles = tilesX * tilesY;
 
-      logger.info(`Processing ${totalTiles} tiles (${tilesX}x${tilesY}) with ${this.maxWorkers} workers`);
+      logger.info(`Processing ${totalTiles} tiles (${tilesX}x${tilesY}, ${effTile}px, apron ${apron}px) with ${this.maxWorkers} workers`);
 
       // Create result array
       const processedData = new Float32Array(data.length);
@@ -256,9 +267,10 @@ export class WebWorkerImageProcessor {
             imageData,
             tileX,
             tileY,
-            tileSize,
+            effTile,
             pipeline,
-            processedData
+            processedData,
+            apron
           );
           tilePromises.push(promise);
         }
@@ -293,25 +305,24 @@ export class WebWorkerImageProcessor {
     tileY: number,
     tileSize: number,
     pipeline: WorkerModuleConfig[],
-    resultArray: Float32Array
+    resultArray: Float32Array,
+    apron = 0
   ): Promise<void> {
     const { width, height, data, channels } = imageData;
 
-    // Calculate tile bounds using the specified tile size
-    const startX = tileX * tileSize;
-    const startY = tileY * tileSize;
-    const tileWidth = Math.min(tileSize, width - startX);
-    const tileHeight = Math.min(tileSize, height - startY);
+    // Padded-extract + crop geometry: the tile is grown by `apron` px of neighbour context on each
+    // interior side (clamped at the image borders — there the padded edge IS the image edge, so the
+    // module's own clamp policy applies exactly as untiled). Only the interior `core` region is
+    // written back, so the redundantly-processed apron pixels never reach the output.
+    const plan = planApronTile(tileX, tileY, tileSize, width, height, apron);
+    const { coreX, coreY, coreW, coreH, padX, padY, padW, padH, apronLeft, apronTop } = plan;
 
-    // Extract tile data
-    const tileDataSize = tileWidth * tileHeight * channels;
-    const tileData = new Float32Array(tileDataSize);
-
-    for (let y = 0; y < tileHeight; y++) {
-      for (let x = 0; x < tileWidth; x++) {
-        const srcIndex = ((startY + y) * width + (startX + x)) * channels;
-        const dstIndex = (y * tileWidth + x) * channels;
-
+    // Extract the padded tile data
+    const tileData = new Float32Array(padW * padH * channels);
+    for (let y = 0; y < padH; y++) {
+      for (let x = 0; x < padW; x++) {
+        const srcIndex = ((padY + y) * width + (padX + x)) * channels;
+        const dstIndex = (y * padW + x) * channels;
         for (let c = 0; c < channels; c++) {
           tileData[dstIndex + c] = data[srcIndex + c];
         }
@@ -319,14 +330,15 @@ export class WebWorkerImageProcessor {
     }
 
     try {
-      // Process tile
+      // Process the PADDED tile as a standalone image (the worker sees full kernel context for
+      // every interior pixel).
       const worker = await this.getAvailableWorker();
       const result = await this.sendMessage(worker, 'PROCESS_TILE', {
         tileData,
         tileX,
         tileY,
-        tileWidth,
-        tileHeight,
+        tileWidth: padW,
+        tileHeight: padH,
         fullWidth: width,
         fullHeight: height,
         channels,
@@ -337,12 +349,11 @@ export class WebWorkerImageProcessor {
         throw new Error(result.error || 'Tile processing failed');
       }
 
-      // Copy processed tile back to result array
-      for (let y = 0; y < tileHeight; y++) {
-        for (let x = 0; x < tileWidth; x++) {
-          const srcIndex = (y * tileWidth + x) * channels;
-          const dstIndex = ((startY + y) * width + (startX + x)) * channels;
-
+      // Copy ONLY the interior (core) region back, cropping the apron off the padded result.
+      for (let y = 0; y < coreH; y++) {
+        for (let x = 0; x < coreW; x++) {
+          const srcIndex = ((apronTop + y) * padW + (apronLeft + x)) * channels;
+          const dstIndex = ((coreY + y) * width + (coreX + x)) * channels;
           for (let c = 0; c < channels; c++) {
             resultArray[dstIndex + c] = result.data[srcIndex + c];
           }
@@ -354,12 +365,11 @@ export class WebWorkerImageProcessor {
     } catch (error) {
       logger.error(`Failed to process tile ${tileX},${tileY}:`, error);
 
-      // Copy original data on failure
-      for (let y = 0; y < tileHeight; y++) {
-        for (let x = 0; x < tileWidth; x++) {
-          const srcIndex = ((startY + y) * width + (startX + x)) * channels;
-          const dstIndex = (y * tileWidth + x) * channels;
-
+      // Copy original core data on failure (apron pixels belong to neighbouring tiles)
+      for (let y = 0; y < coreH; y++) {
+        for (let x = 0; x < coreW; x++) {
+          const srcIndex = ((coreY + y) * width + (coreX + x)) * channels;
+          const dstIndex = srcIndex;
           for (let c = 0; c < channels; c++) {
             resultArray[dstIndex + c] = data[srcIndex + c];
           }
