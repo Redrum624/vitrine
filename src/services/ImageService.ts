@@ -270,13 +270,18 @@ export class ImageService {
           };
 
           // Cache the decoded base under the size-agnostic base key so a reopen serves it
-          // without re-running the (multi-second) LibRaw decode.
+          // without re-running the (multi-second) LibRaw decode. WRITE-BEFORE-GUARD (deliberate,
+          // symmetric with developFullDecode): this write happens BEFORE the stale-load generation
+          // guard below, so even a decode that the user has already switched away from still pays
+          // forward to the next reopen. The base cache is path-keyed and options-coherent, so a
+          // superseded-but-valid decode is still correct FOR ITS OWN KEY. Options recorded are the
+          // CAPTURED decodeOptions (this buffer's true provenance), never the current store state.
           imageCacheService.setBase(
             filePath,
             rawData.data,
             rawData.width,
             rawData.height,
-            { isRaw: true, autoAdjustmentResult, ...rawData.metadata }
+            { isRaw: true, autoAdjustmentResult, decodeOptions, ...rawData.metadata }
           );
 
           logger.info(`RAW image loaded successfully: ${result.width}x${result.height}`);
@@ -336,13 +341,25 @@ export class ImageService {
    * pipeline modules, re-apply — normalized mask geometry re-bakes at the full dims). Mirrors
    * RawImageService.reDecode's swap sequence and identity guard.
    *
-   * All guards run BEFORE any mutation, so a superseded open never corrupts state or writes a
-   * stale base to the cache:
-   *  - generation: a newer loadImage() started → discard (that open owns the screen + affordance).
-   *  - identity: the current image is no longer this path → discard.
+   * WRITE-BEFORE-GUARD (deliberate): the full decode costs ~4.3s and its pixels are VALID for
+   * their own (path, captured-options) base-cache key regardless of whether this open still owns
+   * the screen. So we write the base cache BEFORE the state-swap guards — a superseded open then
+   * still PAYS FORWARD to the next reopen of that path instead of discarding a fully-paid decode.
+   * The base cache is path-keyed and options-coherent, so caching a superseded-but-valid result
+   * under its own key is safe. The state-swap guards then bail WITHOUT touching current state:
+   *  - generation: a newer loadImage() started → don't swap (that open owns the screen + affordance).
+   *  - identity: the current image is no longer this path → don't swap.
    *  - decode-options: the user changed demosaic/highlight via the RAW Decode panel (reDecode)
-   *    while we were decoding → discard, so this stale-options full decode never overwrites the
-   *    reDecode's fresh base.
+   *    while we were decoding → don't swap, so this stale-options full decode never replaces the
+   *    reDecode's fresh working image.
+   *
+   * The ONE case that also skips the WRITE is a fresher re-decode of THIS SAME path (options
+   * changed while the image is still current): reDecode may already have overwritten the base with
+   * its new-options pixels, and writing our stale-options pixels would clobber it. When the open
+   * has instead moved to a DIFFERENT image (generation/identity), no same-path re-decode competes
+   * (reDecode bails on an identity change), so the write is always safe there. The options
+   * recorded on the cache write are the CAPTURED ones (the decodeOptions param), never the current
+   * store state — they are the buffer's true decode provenance.
    */
   private async developFullDecode(
     filePath: string,
@@ -354,35 +371,57 @@ export class ImageService {
     try {
       const rawData = await fullPromise;
 
-      if (generation !== this.loadGeneration) {
-        logger.info(`Progressive full decode of ${filePath} discarded: superseded by a newer open`);
-        return;
-      }
-      const stillCurrent = this.currentImage;
-      if (!stillCurrent || stillCurrent.filePath !== filePath) {
-        logger.info(`Progressive full decode of ${filePath} discarded: current image changed`);
-        return;
-      }
-      const opts = useAppStore.getState().rawDecodeOptions;
-      if (opts.demosaic !== decodeOptions.demosaic || opts.highlightMode !== decodeOptions.highlightMode) {
-        logger.info(`Progressive full decode of ${filePath} discarded: decode options changed (re-decode superseded it)`);
-        return;
-      }
-
+      // Validate the decoded pixels BEFORE anything else — never write garbage to the base cache.
       const dimensionValidation = ValidationService.validateDimensions(rawData.width, rawData.height);
       if (!dimensionValidation.valid) {
         logger.warn(`Progressive full decode produced invalid dimensions: ${dimensionValidation.error}`);
         return;
       }
 
-      // Swap the base to the full 16-bit decode. Base cache gets the FULL decode only.
-      imageCacheService.setBase(
-        filePath,
-        rawData.data,
-        rawData.width,
-        rawData.height,
-        { isRaw: true, autoAdjustmentResult: undefined, ...rawData.metadata },
-      );
+      // Supersession flags (see this method's doc comment). Computed once, up front, so the
+      // write-before-guard decision and the state-swap bail below read a consistent snapshot.
+      const generationSuperseded = generation !== this.loadGeneration;
+      const stillCurrent = this.currentImage;
+      const identityChanged = !stillCurrent || stillCurrent.filePath !== filePath;
+      const storeOpts = useAppStore.getState().rawDecodeOptions;
+      const optionsChanged =
+        storeOpts.demosaic !== decodeOptions.demosaic || storeOpts.highlightMode !== decodeOptions.highlightMode;
+
+      // WRITE-BEFORE-GUARD (deliberate — see doc comment): cache this fully-paid decode under its
+      // own (path, captured-options) key so a superseded open still pays forward to the next
+      // reopen. The base cache holds the FULL 16-bit decode only (the preview is never cached).
+      // Skip the write ONLY when a fresher re-decode of this SAME path is in play (options changed
+      // while the image is still current): writing our stale-options pixels would clobber the
+      // reDecode's fresh base. When the open moved to a different image, no same-path re-decode
+      // competes, so the write is safe. Options recorded are the CAPTURED decodeOptions param
+      // (this buffer's true provenance), never the current store state.
+      const wouldClobberFresherReDecode = !generationSuperseded && !identityChanged && optionsChanged;
+      if (!wouldClobberFresherReDecode) {
+        imageCacheService.setBase(
+          filePath,
+          rawData.data,
+          rawData.width,
+          rawData.height,
+          { isRaw: true, autoAdjustmentResult: undefined, decodeOptions, ...rawData.metadata },
+        );
+      }
+
+      // State-swap guards: a superseded open must NOT touch the current image / UI (a newer open
+      // owns the screen + the "Developing…" affordance). The base cache is already written above.
+      if (generationSuperseded) {
+        logger.info(`Progressive full decode of ${filePath} superseded by a newer open — base cached, not swapped`);
+        return;
+      }
+      if (identityChanged) {
+        logger.info(`Progressive full decode of ${filePath} discarded: current image changed — base cached, not swapped`);
+        return;
+      }
+      if (optionsChanged) {
+        logger.info(`Progressive full decode of ${filePath} discarded: decode options changed (re-decode superseded it)`);
+        return;
+      }
+
+      // Swap the base to the full 16-bit decode.
       this.processingPipeline?.clearCache(); // module results cached against preview dims are stale
       // Defer (don't copy) the original snapshot for the full-res base — this swap is the
       // progressive open's "real" load moment (graded preview -> neutral full decode), so it

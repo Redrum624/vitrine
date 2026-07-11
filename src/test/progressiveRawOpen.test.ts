@@ -97,7 +97,7 @@ describe('ImageService.loadImage — progressive RAW open', () => {
     expect(useAppStore.getState().developing).toBe(false); // affordance cleared
   });
 
-  it('bails when the image is switched during the background full decode (no clobber)', async () => {
+  it('caches the superseded decode without swapping when the image is switched mid-decode (write-before-guard, no clobber)', async () => {
     const fullA = deferred<ReturnType<typeof makeFullPayload>>();
     decodeApi().mockImplementation(async (path: string) =>
       path === '/a.orf' ? fullA.promise : makeFullPayload(12, 6, 200));
@@ -114,12 +114,22 @@ describe('ImageService.loadImage — progressive RAW open', () => {
     expect(imageService.getCurrentImage()?.filePath).toBe('/b.orf');
     expect(imageService.getCurrentImage()?.width).toBe(12);
 
-    // A's stale full decode lands — must BAIL (generation superseded), leaving B intact.
+    // A's superseded full decode lands — it must NOT swap state (B stays on screen), but the
+    // fully-paid pixels ARE written to A's base cache (write-before-guard) so a reopen of A pays
+    // forward instead of paying for the ~4.3s decode a second time.
     fullA.resolve(makeFullPayload(10, 5, 50));
     await flush();
-    expect(imageService.getCurrentImage()?.filePath).toBe('/b.orf');
+    expect(imageService.getCurrentImage()?.filePath).toBe('/b.orf'); // current state untouched
     expect(imageService.getCurrentImage()?.width).toBe(12);
-    expect(imageCacheService.getBase('/a.orf')).toBeNull(); // A's full never cached (bailed first)
+    expect(imageCacheService.getBase('/a.orf')?.width).toBe(10);      // A's superseded decode cached
+
+    // Reopening A now serves from the base cache — NO second decode IPC and no progressive preview.
+    decodeApi().mockClear();
+    previewApi().mockClear();
+    const reopenedA = await imageService.loadImage('/a.orf', undefined, () => {});
+    expect(reopenedA.width).toBe(10);              // served from cache (the superseded full decode)
+    expect(decodeApi()).not.toHaveBeenCalled();    // no re-decode — the paid decode paid forward
+    expect(previewApi()).not.toHaveBeenCalled();   // no progressive preview on a cache hit
   });
 
   it('supersedes the swap when decode options change during the background decode (re-decode wins)', async () => {
@@ -137,7 +147,33 @@ describe('ImageService.loadImage — progressive RAW open', () => {
     full.resolve(makeFullPayload(8, 4, 200));
     await flush();
     expect(imageService.getCurrentImage()?.width).toBe(4);            // still the preview — swap bailed
-    expect(imageCacheService.getBase('/photo.orf')).toBeNull();  // stale full never cached
+    // Write-before-guard is deliberately SKIPPED in this one case: the image is still current and
+    // only the options changed, so a fresher re-decode of THIS SAME path may already own the base —
+    // caching our stale-options pixels would clobber it. (When the open instead moves to a DIFFERENT
+    // image, the superseded decode IS cached — see the switch-mid-decode test above.)
+    expect(imageCacheService.getBase('/photo.orf')).toBeNull();  // stale-options full never cached
+  });
+
+  it('caches a superseded decode WITHOUT swapping the working image (write-before-guard invariant)', async () => {
+    const fullA = deferred<ReturnType<typeof makeFullPayload>>();
+    decodeApi().mockImplementation(async (path: string) =>
+      path === '/a.orf' ? fullA.promise : makeFullPayload(12, 6, 200));
+
+    // Open A progressively — preview on screen, A's full decode pending.
+    await imageService.loadImage('/a.orf', undefined, () => {});
+    // Switch to B — this bumps the load generation and swaps B in (updateCurrentImageData for B).
+    await imageService.loadImage('/b.orf', undefined, () => {});
+    await flush();
+
+    // From here on, any updateCurrentImageData call would be A's stale decode clobbering B.
+    const swap = jest.spyOn(imageService, 'updateCurrentImageData');
+    fullA.resolve(makeFullPayload(10, 5, 50));
+    await flush();
+
+    expect(swap).not.toHaveBeenCalled();                        // superseded decode never swaps state
+    expect(imageService.getCurrentImage()?.filePath).toBe('/b.orf');
+    expect(imageCacheService.getBase('/a.orf')?.width).toBe(10); // …but it IS cached for reopen
+    swap.mockRestore();
   });
 
   it('warm path (base-cache hit) takes NO preview IPC and serves the full decode', async () => {
