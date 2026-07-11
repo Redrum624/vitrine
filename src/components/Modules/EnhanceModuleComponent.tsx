@@ -51,6 +51,7 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
       hpSigma: DEFAULT_ENHANCE_PARAMS.hpSigma,
       psfSigma: DEFAULT_ENHANCE_PARAMS.psfSigma,
       rlIters: DEFAULT_ENHANCE_PARAMS.rlIters,
+      denoiseStrength: DEFAULT_ENHANCE_PARAMS.denoiseStrength,
       chromaClean: DEFAULT_ENHANCE_PARAMS.chromaClean,
     });
   }, [update]);
@@ -256,6 +257,16 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
           onChange={(v) => update({ alpha: v })}
         />
         <SliderRow
+          label="Detail radius"
+          value={params.hpSigma}
+          defaultValue={DEFAULT_ENHANCE_PARAMS.hpSigma}
+          min={0.5}
+          max={3}
+          step={0.1}
+          formatValue={(v) => `${v.toFixed(1)} px`}
+          onChange={(v) => update({ hpSigma: v })}
+        />
+        <SliderRow
           label="Deblur radius"
           value={params.psfSigma}
           defaultValue={DEFAULT_ENHANCE_PARAMS.psfSigma}
@@ -273,6 +284,17 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
           max={30}
           step={1}
           onChange={(v) => update({ rlIters: v })}
+        />
+
+        <SliderRow
+          label="Chroma noise"
+          value={params.denoiseStrength}
+          defaultValue={DEFAULT_ENHANCE_PARAMS.denoiseStrength}
+          min={0}
+          max={10}
+          step={0.5}
+          formatValue={(v) => (v === 0 ? 'Off' : v.toFixed(1))}
+          onChange={(v) => update({ denoiseStrength: v })}
         />
 
         <label className="flex items-center gap-2" style={{ fontSize: 11.5, color: 'var(--glass-text-label)', cursor: 'pointer' }}>

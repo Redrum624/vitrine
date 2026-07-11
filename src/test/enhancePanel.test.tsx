@@ -248,3 +248,31 @@ describe('EnhanceModuleComponent — NR + Upscale single reprocess (P7 item 4)',
     expect(onNR).toHaveBeenCalledWith({ enabled: true, strength: expect.any(Number), method: 'auto' });
   });
 });
+
+describe('EnhanceModuleComponent — Chroma noise + Detail radius sliders (P10 R4)', () => {
+  beforeEach(() => {
+    enhanceModule.resetParams();
+    useAppStore.setState({ upscaleProgress: null, upscaleMode: null });
+    mockOriginalDims = null;
+  });
+
+  it('exposes the joint-bilateral chroma denoise (denoiseStrength) and graft radius (hpSigma) as sliders', () => {
+    render(<EnhanceModuleComponent module={enhanceModule} noiseReductionModule={makeNrModule()} />);
+    expect(screen.getByLabelText('Chroma noise')).toBeInTheDocument();
+    expect(screen.getByLabelText('Detail radius')).toBeInTheDocument();
+  });
+
+  it('the Chroma noise slider drives EnhanceParams.denoiseStrength (P7\'s filter is now reachable)', () => {
+    const setParamsSpy = jest.spyOn(enhanceModule, 'setParams');
+    render(<EnhanceModuleComponent module={enhanceModule} noiseReductionModule={makeNrModule()} />);
+    fireEvent.change(screen.getByLabelText('Chroma noise'), { target: { value: '5' } });
+    expect(setParamsSpy).toHaveBeenCalledWith({ denoiseStrength: 5 });
+  });
+
+  it('the Detail radius slider drives EnhanceParams.hpSigma', () => {
+    const setParamsSpy = jest.spyOn(enhanceModule, 'setParams');
+    render(<EnhanceModuleComponent module={enhanceModule} noiseReductionModule={makeNrModule()} />);
+    fireEvent.change(screen.getByLabelText('Detail radius'), { target: { value: '2' } });
+    expect(setParamsSpy).toHaveBeenCalledWith({ hpSigma: 2 });
+  });
+});
