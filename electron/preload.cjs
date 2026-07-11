@@ -40,6 +40,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   writeImageMetadata: (filePath, metadata) => ipcRenderer.invoke('write-image-metadata', filePath, metadata),
   writeImageRating: (filePath, rating) => ipcRenderer.invoke('write-image-rating', filePath, rating),
   readImageRating: (filePath) => ipcRenderer.invoke('read-image-rating', filePath),
+  // Move files to the OS trash / Windows Recycle Bin (never a permanent delete).
+  trashItems: (filePaths) => ipcRenderer.invoke('trash-items', filePaths),
 
   // Generic durable JSON store (userData; survives app updates)
   storeGet: (key) => ipcRenderer.invoke('store-get', key),

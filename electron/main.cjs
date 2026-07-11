@@ -922,6 +922,29 @@ ipcMain.handle('read-image-rating', async (event, filePath) => {
   }
 });
 
+// Move files to the OS trash / Windows Recycle Bin (Gallery Del → "Move to Recycle
+// Bin"). NEVER a permanent delete: each path goes through shell.trashItem, which is
+// reversible from the Recycle Bin. Trashes each path independently and returns a
+// per-path { path, ok, error } so a partially-failed batch cleanly splits into
+// successes (dropped from the session list) and failures (kept, with a toast). Paths
+// pass the same deny-list guard as the write handlers — a trash IS a destructive
+// operation, so a compromised renderer must not trash a protected system location.
+ipcMain.handle('trash-items', async (event, filePaths) => {
+  if (!Array.isArray(filePaths)) return [];
+  const results = [];
+  for (const filePath of filePaths) {
+    try {
+      const safe = validateWritePath(filePath);
+      await shell.trashItem(safe);
+      results.push({ path: filePath, ok: true });
+    } catch (error) {
+      console.warn('Failed to trash item:', filePath, error && error.message);
+      results.push({ path: filePath, ok: false, error: (error && error.message) || 'trash failed' });
+    }
+  }
+  return results;
+});
+
 // Generic JSON key-value store under userData (survives app updates — userData is
 // outside the install dir). Keys are hashed to a safe filename. Used for per-image
 // edit persistence and any other durable renderer state.

@@ -74,6 +74,15 @@ interface MessageBoxReturnValue {
   response: number;
 }
 
+/** Per-file result of the `trash-items` IPC (Gallery Del → Recycle Bin). One
+ *  entry per requested path, in the same order; `ok:false` carries the reason so
+ *  a partially-failed batch keeps its failures in the session list with a toast. */
+export interface TrashItemResult {
+  path: string;
+  ok: boolean;
+  error?: string;
+}
+
 export interface ElectronAPI {
   // File operations
   fileExists: (path: string) => Promise<boolean>;
@@ -177,6 +186,9 @@ export interface ElectronAPI {
   writeImageMetadata: (filePath: string, metadata: EmbeddableMetadata) => Promise<boolean>;
   writeImageRating: (filePath: string, rating: number) => Promise<{ ok: boolean; method?: string; path?: string; error?: string }>;
   readImageRating: (filePath: string) => Promise<number | null>;
+  /** Move files to the OS trash / Windows Recycle Bin (NEVER a permanent delete);
+   *  returns a per-path { path, ok, error } result. Used by the Gallery Del flow. */
+  trashItems: (filePaths: string[]) => Promise<TrashItemResult[]>;
   storeGet: <T = unknown>(key: string) => Promise<T | null>;
   storeSet: (key: string, value: unknown) => Promise<boolean>;
   storeDelete: (key: string) => Promise<boolean>;

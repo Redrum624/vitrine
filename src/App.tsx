@@ -15,6 +15,8 @@ import { ExportProgressBar } from './components/ExportProgressBar';
 import { BatchProcessingDialog } from './components/Dialogs/BatchProcessingDialog';
 import { PresetDialog } from './components/Dialogs/PresetDialog';
 import { ImageSizeDialog } from './components/Dialogs/ImageSizeDialog';
+import { GalleryRemoveDialog } from './components/Dialogs/GalleryRemoveDialog';
+import { computeRemoval, trashImages, shouldHandleGalleryDelete } from './utils/galleryRemove';
 import { NotificationSystem } from './components/UI/NotificationSystem';
 import { useNotifications } from './hooks/useNotifications';
 import { ShortcutsHelpDialog } from './components/Dialogs/ShortcutsHelpDialog';
@@ -474,6 +476,9 @@ function App() {
   const [isBatchDialogOpen, setIsBatchDialogOpen] = useState(false);
   const [isPresetDialogOpen, setIsPresetDialogOpen] = useState(false);
   const [isShortcutsDialogOpen, setIsShortcutsDialogOpen] = useState(false);
+  // Gallery Del-remove (Task P11): the ids the confirm dialog is acting on (a
+  // snapshot of the selection taken when Del is pressed). null = dialog closed.
+  const [removeTargetIds, setRemoveTargetIds] = useState<string[] | null>(null);
   const [isWelcomeVisible, setIsWelcomeVisible] = useState(false);
   const [availableImages, setAvailableImages] = useState<ImageFileInfo[]>([]);
   // Mirrors availableImages OUTSIDE React state so handleFolderSelected can detect a
@@ -841,6 +846,85 @@ function App() {
       setIsExportDialogOpen(true);
     }
   }, [availableImages]);
+
+  // Gallery Del-remove (Task P11) — the single source that mutates the folder
+  // listing everywhere (gallery grid, filmstrip dock, thumbnail panel all read
+  // `availableImages`). Drops `idsToRemove` from the list, advances the open
+  // photo when it was itself removed (next → prev → clear canvas), and prunes the
+  // removed ids from the selection. Non-destructive on disk: persisted per-image
+  // edits are intentionally left untouched (a session removal is not a "forget
+  // edits"; a Recycle-Bin'd file's edits simply become orphaned — acceptable).
+  const applyRemoval = useCallback((idsToRemove: string[]) => {
+    if (idsToRemove.length === 0) return;
+    const currentId = currentImageRef.current?.id ?? null;
+    const result = computeRemoval(availableImages, idsToRemove, currentId);
+    prevAvailableImagesRef.current = result.images;
+    setAvailableImages(result.images);
+    setShowThumbnailPanel(result.images.length > 0);
+    if (result.currentChanged) setCurrentImage(result.currentImage);
+    const removeSet = new Set(idsToRemove);
+    const store = useAppStore.getState();
+    store.setSelection(store.selectedImageIds.filter((id) => !removeSet.has(id)), null);
+  }, [availableImages]);
+
+  const handleRemoveFromSession = useCallback(() => {
+    applyRemoval(removeTargetIds ?? []);
+    setRemoveTargetIds(null);
+  }, [removeTargetIds, applyRemoval]);
+
+  const handleMoveToTrash = useCallback(async () => {
+    const ids = removeTargetIds ?? [];
+    setRemoveTargetIds(null);
+    if (ids.length === 0) return;
+    if (!window.electronAPI?.trashItems) {
+      showError('Move to Recycle Bin', 'Trash is not available in this environment');
+      return;
+    }
+    try {
+      const { trashedIds, failedNames } = await trashImages(availableImages, ids, window.electronAPI);
+      if (trashedIds.length > 0) applyRemoval(trashedIds);
+      if (failedNames.length > 0) {
+        showError(
+          'Some files could not be moved',
+          `${failedNames.length} file(s) stayed in the list: ${failedNames.join(', ')}`,
+        );
+      } else {
+        showSuccess('Moved to Recycle Bin', `${trashedIds.length} photo(s) moved to the Recycle Bin`);
+      }
+    } catch {
+      showError('Move to Recycle Bin', 'Failed to move the selected photos to the Recycle Bin');
+    }
+  }, [removeTargetIds, availableImages, applyRemoval, showError, showSuccess]);
+
+  // Gallery-scoped Del: opens the confirm dialog for the current selection. Never
+  // fires in Develop view (the mask-delete Del handler owns Del there), while an
+  // input/dialog has focus, or with an empty selection — all gated by the pure
+  // `shouldHandleGalleryDelete` predicate. Capture-phase so it settles the intent
+  // before any bubble-phase listener; re-subscribes when the dialog open-state
+  // flips so the "already open" guard reads a fresh value.
+  useEffect(() => {
+    const onGalleryDelete = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      const ids = useAppStore.getState().selectedImageIds;
+      // Any GlassModal open (our own confirm, or Export/etc. reachable from the
+      // gallery toolbar) marks itself aria-modal — never open the remove dialog
+      // behind or on top of one.
+      const anyModalOpen = removeTargetIds !== null || document.querySelector('[aria-modal="true"]') !== null;
+      if (!shouldHandleGalleryDelete({
+        key: e.key,
+        viewMode: useAppStore.getState().viewMode,
+        targetTagName: t?.tagName,
+        isContentEditable: t?.isContentEditable,
+        dialogOpen: anyModalOpen,
+        selectionCount: ids?.length ?? 0,
+      })) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setRemoveTargetIds(ids);
+    };
+    document.addEventListener('keydown', onGalleryDelete, true);
+    return () => document.removeEventListener('keydown', onGalleryDelete, true);
+  }, [removeTargetIds]);
 
   // Opens the native folder picker and loads the result via the existing
   // folder-load path — shared by the Welcome screen's "Open Folder" and the
@@ -1725,6 +1809,15 @@ function App() {
           shortcuts={keyboardShortcutsService.getAllShortcuts()}
         />
       )}
+
+      {/* Gallery Del-remove confirm dialog (Task P11) */}
+      <GalleryRemoveDialog
+        isOpen={removeTargetIds !== null}
+        count={removeTargetIds?.length ?? 0}
+        onCancel={() => setRemoveTargetIds(null)}
+        onRemoveFromSession={handleRemoveFromSession}
+        onMoveToTrash={handleMoveToTrash}
+      />
 
       {/* Print Dialog */}
       {isPrintDialogOpen && (() => {
