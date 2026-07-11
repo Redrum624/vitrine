@@ -32,9 +32,9 @@ export interface ExportOptions {
   preserveMetadata: boolean;
   includeProcessingHistory: boolean;
   customMetadata: Record<string, string>;
-  // EXIF copyright/artist + IPTC-as-XMP fields to embed into the exported file.
-  // Built by CopyrightService.toEmbeddableMetadata; forwarded straight to the
-  // main-process writer, which embeds it during the encode.
+  // EXIF copyright/artist + IPTC-as-XMP fields to embed into the exported file:
+  // an optional passthrough forwarded straight to the main-process writer, which
+  // embeds it during the encode.
   metadata?: EmbeddableMetadata;
 
   // Sharpening

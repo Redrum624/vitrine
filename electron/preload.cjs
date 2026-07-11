@@ -11,7 +11,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // File system
   readFile: (filePath) => ipcRenderer.invoke('read-file', filePath),
-  readFileBuffer: (filePath) => ipcRenderer.invoke('read-file-buffer', filePath),
   decodeRawFile: (filePath, options) => ipcRenderer.invoke('decode-raw-file', filePath, options),
   decodeRawPreview: (filePath, maxDim) => ipcRenderer.invoke('decode-raw-preview', filePath, maxDim),
   // Disk-persisted base cache (L2): read a decode persisted from an earlier session; write-through

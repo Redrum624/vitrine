@@ -421,13 +421,13 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
         } catch (workerErr) {
           // Worker failed (URL resolution, crash, timeout) → graceful main-thread fallback.
           logger.warn('Worker processing failed, falling back to main thread:', workerErr instanceof Error ? workerErr.message : String(workerErr));
-          processedData = await imageProcessingPipeline.processImage(previewData, processingContext, false);
+          processedData = await imageProcessingPipeline.processImage(previewData, processingContext, { useWebWorkers: false });
           outputWidth  = processingContext.width;
           outputHeight = processingContext.height;
         }
       } else {
         // Tiny preview — keep it on the main thread (worker overhead not worth it).
-        processedData = await imageProcessingPipeline.processImage(previewData, processingContext, false);
+        processedData = await imageProcessingPipeline.processImage(previewData, processingContext, { useWebWorkers: false });
         // CRITICAL: CropModule mutates processingContext.width/height in place.
         outputWidth  = processingContext.width;
         outputHeight = processingContext.height;

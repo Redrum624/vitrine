@@ -71,13 +71,13 @@ describe('Worker config → pipeline translation (applyWorkerConfig)', () => {
     const direct = new ImageProcessingPipeline();
     setParams(direct, 'basicadj', { exposure: 0.3, contrast: 0.25, vibrance: 0.15 });
     setParams(direct, 'temperature', { temperature: 5000, tint: -0.05 });
-    const expected = await direct.processImage(new Float32Array(input), context, false);
+    const expected = await direct.processImage(new Float32Array(input), context, { useWebWorkers: false });
 
     // Pipeline B: configured via the worker config path (what the worker runs).
     const config = buildConfig(direct);
     const viaConfig = new ImageProcessingPipeline();
     viaConfig.applyWorkerConfig(config);
-    const actual = await viaConfig.processImage(new Float32Array(input), context, false);
+    const actual = await viaConfig.processImage(new Float32Array(input), context, { useWebWorkers: false });
 
     expect(actual.length).toBe(expected.length);
     let maxDiff = 0;
@@ -103,7 +103,7 @@ describe('Worker config → pipeline translation (applyWorkerConfig)', () => {
 
     const target = new ImageProcessingPipeline();
     target.applyWorkerConfig(config);
-    const out = await target.processImage(new Float32Array(input), context, false);
+    const out = await target.processImage(new Float32Array(input), context, { useWebWorkers: false });
 
     // basicadj disabled + every other module identity → output == input.
     let maxDiff = 0;

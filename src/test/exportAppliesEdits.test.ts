@@ -38,7 +38,7 @@ describe('Export applies edits (regression for missing-edits export)', () => {
     basic!.setParams({ exposure: 1.0 });
 
     // Mirror the export call signature exactly (main thread, no caching).
-    const out = await pipeline.processImage(new Float32Array(input), context, false, undefined, false);
+    const out = await pipeline.processImage(new Float32Array(input), context, { useWebWorkers: false, cacheResults: false });
 
     expect(out.length).toBe(input.length);
     // The export buffer MUST reflect the edit.
@@ -52,7 +52,7 @@ describe('Export applies edits (regression for missing-edits export)', () => {
     const context: ProcessingContext = { width, height, channels: 4 };
 
     const pipeline = new ImageProcessingPipeline();
-    const out = await pipeline.processImage(new Float32Array(input), context, false, undefined, false);
+    const out = await pipeline.processImage(new Float32Array(input), context, { useWebWorkers: false, cacheResults: false });
 
     expect(maxImageDifference(input, out)).toBeLessThan(0.01);
   });

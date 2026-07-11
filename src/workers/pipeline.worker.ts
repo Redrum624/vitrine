@@ -89,7 +89,7 @@ async function runPipeline(
   pipeline.applyWorkerConfig(config);
   const context: ProcessingContext = { width, height, channels };
   // useWebWorkers=false → CPU in-worker, NO nested workers (no recursion).
-  return pipeline.processImage(data, context, false);
+  return pipeline.processImage(data, context, { useWebWorkers: false });
 }
 
 ctx.addEventListener('message', async (event: MessageEvent) => {
@@ -118,7 +118,7 @@ ctx.addEventListener('message', async (event: MessageEvent) => {
           channels: imageData.channels,
         };
         pipeline.applyWorkerConfig(pipelineConfig);
-        const result = await pipeline.processImage(imageData.data, context, false);
+        const result = await pipeline.processImage(imageData.data, context, { useWebWorkers: false });
         const processingTime = performance.now() - startTime;
         // context.width / context.height now hold the TRUE output dims (post-crop).
         ctx.postMessage(

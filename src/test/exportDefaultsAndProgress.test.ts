@@ -38,8 +38,10 @@ describe('ImageProcessingPipeline progress hook', () => {
     await pipeline.processImage(
       input,
       { width: 4, height: 4, channels: 4 },
-      false,
-      (done, total) => calls.push([done, total]),
+      {
+        useWebWorkers: false,
+        onProgress: (done, total) => calls.push([done, total]),
+      },
     );
 
     expect(processed).toBe(1);
@@ -55,7 +57,7 @@ describe('ImageProcessingPipeline progress hook', () => {
     pipeline.addModule(makeFakeModule(() => { processed++; }), 0);
 
     const input = new Float32Array(4 * 4 * 4);
-    const out = await pipeline.processImage(input, { width: 4, height: 4, channels: 4 }, false);
+    const out = await pipeline.processImage(input, { width: 4, height: 4, channels: 4 }, { useWebWorkers: false });
 
     expect(out).toBeInstanceOf(Float32Array);
     expect(processed).toBe(1);

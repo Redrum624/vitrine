@@ -175,7 +175,7 @@ class EnhanceService {
       const edited = await imageProcessingPipeline.processImage(
         new Float32Array(original.data),
         { width, height, channels: 4 },
-        true,
+        { useWebWorkers: true },
       );
 
       // Capture snapshot before the (AI or worker) call (cheap), but do not commit it yet.

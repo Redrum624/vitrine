@@ -21,8 +21,6 @@ export default defineConfig({
           vendor: ['react', 'react-dom', 'zustand'],
           // UI components and icons
           ui: ['lucide-react'],
-          // Image processing and WASM
-          processing: ['libraw-wasm'],
           // Services and utilities
           services: [
             './src/services/ImageProcessingPipeline',
@@ -47,7 +45,6 @@ export default defineConfig({
   },
   // Optimize dependencies
   optimizeDeps: {
-    include: ['react', 'react-dom', 'zustand', 'lucide-react'],
-    exclude: ['libraw-wasm'] // Exclude WASM from pre-bundling
+    include: ['react', 'react-dom', 'zustand', 'lucide-react']
   }
 })

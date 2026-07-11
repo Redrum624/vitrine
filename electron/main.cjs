@@ -1076,18 +1076,6 @@ ipcMain.handle('base-cache-write', async (event, filePath, options, payload) => 
   }
 });
 
-// Read file as ArrayBuffer for RAW files
-ipcMain.handle('read-file-buffer', async (event, filePath) => {
-  try {
-    const buffer = await fs.promises.readFile(filePath);
-    // Convert Node.js Buffer to ArrayBuffer
-    return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
-  } catch (error) {
-    console.error('Error reading file as buffer:', error);
-    throw new Error(`Failed to read file as buffer: ${error.message}`);
-  }
-});
-
 // App event handlers
 app.whenReady().then(() => {
   // Create splash screen first

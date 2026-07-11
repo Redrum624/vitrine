@@ -1,12 +1,10 @@
 /**
- * Contract tests for PrintDialog (Task B3 — it previously had NO coverage;
- * printSoftProof.test.tsx exercises PrintModule, an unmounted/unrelated
- * component). Covers: renders via the shared GlassModal chrome (role=dialog +
+ * Contract tests for PrintDialog (Task B3 — the live print UI previously had NO
+ * coverage). Covers: renders via the shared GlassModal chrome (role=dialog +
  * accessible name), the Resolution SliderRow defaults to 300 DPI, the close
  * chip / Cancel button fire onClose, and Print invokes printService.printImage
  * with the dialog's current options. The service is mocked; only the
- * dialog->service wiring is verified (same pattern as printSoftProof.test.tsx
- * / batchEnqueue.test.tsx).
+ * dialog->service wiring is verified (same pattern as batchEnqueue.test.tsx).
  */
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 

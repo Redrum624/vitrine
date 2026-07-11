@@ -70,7 +70,7 @@ class MultiExportService {
           let height = img.height;
           if (pipeline) {
             const context = { width: img.width, height: img.height, channels: 4 };
-            const processed = await pipeline.processImage(img.data, context, false, undefined, false);
+            const processed = await pipeline.processImage(img.data, context, { useWebWorkers: false, cacheResults: false });
             if (processed && typeof processed === 'object' && 'data' in processed) {
               const p = processed as unknown as { data: Float32Array; width: number; height: number };
               data = p.data;

@@ -57,7 +57,7 @@ async function processUntiled(img: WorkerImageData, config: WorkerModuleConfig[]
   const pipeline = new ImageProcessingPipeline();
   pipeline.applyWorkerConfig(config);
   const ctx: ProcessingContext = { width: img.width, height: img.height, channels: img.channels };
-  return pipeline.processImage(img.data.slice(), ctx, false);
+  return pipeline.processImage(img.data.slice(), ctx, { useWebWorkers: false });
 }
 
 /**
@@ -82,7 +82,7 @@ async function processTiled(
     const pipeline = new ImageProcessingPipeline();
     pipeline.applyWorkerConfig(data.pipeline as WorkerModuleConfig[]);
     const ctx: ProcessingContext = { width: tileWidth, height: tileHeight, channels };
-    const out = await pipeline.processImage(tileData, ctx, false);
+    const out = await pipeline.processImage(tileData, ctx, { useWebWorkers: false });
     return {
       success: true,
       data: out,

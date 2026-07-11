@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight, Folder, HardDrive, Image, FolderOpen } from 
 import { fileSystemService, DriveInfo, FolderInfo, ImageFileInfo } from '../../services/FileSystemService';
 import { logger } from '../../utils/Logger';
 import { isElectron } from '../../types/electron';
+import { getDisplayFormat } from '../../utils/imageFormat';
 
 interface FileBrowserProps {
   onImageSelected?: (image: ImageFileInfo) => void;
@@ -348,7 +349,7 @@ export function FileBrowser({ onImageSelected, onFolderSelected }: FileBrowserPr
                 <div className="flex-1 min-w-0">
                   <div className="text-xs truncate" style={{color: 'var(--gray-300)'}}>{image.name}</div>
                   <div className="text-xs" style={{color: 'var(--gray-400)'}}>
-                    {image.dimensions ? `${image.dimensions.width}×${image.dimensions.height}` : image.format}
+                    {image.dimensions ? `${image.dimensions.width}×${image.dimensions.height}` : getDisplayFormat(image.format || image.name)}
                     {' • '}
                     {fileSystemService.formatFileSize(image.size)}
                   </div>
@@ -449,7 +450,7 @@ export function FileBrowser({ onImageSelected, onFolderSelected }: FileBrowserPr
                 <div className="flex-1 min-w-0">
                   <div className="text-xs truncate" style={{color: 'var(--gray-300)'}}>{image.name}</div>
                   <div className="text-xs" style={{color: 'var(--gray-400)'}}>
-                    {image.dimensions ? `${image.dimensions.width}×${image.dimensions.height}` : image.format}
+                    {image.dimensions ? `${image.dimensions.width}×${image.dimensions.height}` : getDisplayFormat(image.format || image.name)}
                     {' • '}
                     {fileSystemService.formatFileSize(image.size)}
                   </div>

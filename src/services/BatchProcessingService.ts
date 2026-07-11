@@ -343,7 +343,7 @@ export class BatchProcessingService {
           width: imageData.width,
           height: imageData.height,
           channels: 4
-        }, true, undefined, false);
+        }, { cacheResults: false });
       }
 
       // Export the processed image

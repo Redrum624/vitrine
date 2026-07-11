@@ -6,8 +6,7 @@ import type { ImageFile } from '../types';
  * Minimal structural shape of an exifreader tag. exifreader decodes EXIF string
  * tags into `.description` and numeric tags into `.value` (the readable text is
  * also exposed on `.description`). We only read those two fields, so a narrow
- * local type avoids a hard dependency on exifreader's full declaration. This
- * mirrors the same pattern used by CopyrightService.
+ * local type avoids a hard dependency on exifreader's full declaration.
  */
 interface ExifReaderTag {
   description?: unknown;

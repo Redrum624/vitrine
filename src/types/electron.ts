@@ -83,7 +83,6 @@ export interface ElectronAPI {
 
   // File system
   readFile: (filePath: string) => Promise<Buffer>;
-  readFileBuffer: (filePath: string) => Promise<ArrayBuffer>;
   decodeRawFile: (filePath: string, options?: RawDecodeOptions) => Promise<{ data: ArrayBuffer; width: number; height: number; channels: number; bitDepth?: number }>;
   /** Fast progressive-open preview: the embedded JPEG, oriented + downscaled to fit maxDim
    *  (8-bit RGB). Rejects when no embedded preview exists. See ImageService progressive open. */

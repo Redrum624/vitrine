@@ -49,21 +49,21 @@ describe('ImageProcessingPipeline module cache vs export path', () => {
 
   it('caches module results for preview processing (default)', async () => {
     const pipeline = makeNonIdentityPipeline();
-    await pipeline.processImage(makeImage(w, h), ctx, false);
+    await pipeline.processImage(makeImage(w, h), ctx, { useWebWorkers: false });
     expect(cacheSizeOf(pipeline)).toBeGreaterThan(0);
   });
 
   it('does NOT cache module results when cacheResults=false (export path)', async () => {
     const pipeline = makeNonIdentityPipeline();
-    const out = await pipeline.processImage(makeImage(w, h), ctx, false, undefined, false);
+    const out = await pipeline.processImage(makeImage(w, h), ctx, { useWebWorkers: false, cacheResults: false });
     expect(out).toBeInstanceOf(Float32Array);
     expect(out.length).toBe(w * h * 4);
     expect(cacheSizeOf(pipeline)).toBe(0);
   });
 
   it('export-path processing produces the same pixels as cached preview processing', async () => {
-    const a = await makeNonIdentityPipeline().processImage(makeImage(w, h), ctx, false);
-    const b = await makeNonIdentityPipeline().processImage(makeImage(w, h), ctx, false, undefined, false);
+    const a = await makeNonIdentityPipeline().processImage(makeImage(w, h), ctx, { useWebWorkers: false });
+    const b = await makeNonIdentityPipeline().processImage(makeImage(w, h), ctx, { useWebWorkers: false, cacheResults: false });
     expect(Array.from(b)).toEqual(Array.from(a));
   });
 });

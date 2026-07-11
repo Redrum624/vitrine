@@ -248,9 +248,11 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
           const processedData = await pipeline.processImage(
             source.data,
             context,
-            false,
-            (done, total) => setProgress(0.1 + 0.75 * (total > 0 ? done / total : 1)),
-            false,
+            {
+              useWebWorkers: false,
+              onProgress: (done, total) => setProgress(0.1 + 0.75 * (total > 0 ? done / total : 1)),
+              cacheResults: false,
+            },
           );
 
           if (processedData && typeof processedData === 'object' && 'data' in processedData) {

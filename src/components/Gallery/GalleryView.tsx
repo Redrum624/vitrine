@@ -185,9 +185,11 @@ export function GalleryView({ images, onImageSelect, visible }: GalleryViewProps
   // ResizeObserver reports real dimensions and this effect re-runs.
   useEffect(() => {
     if (!visible) return;
-    if (!canVirtualize && viewportSize.width === 0) return;
+    // Unmeasured first commit: viewportSize is {0,0}, so width===0 already implies
+    // !canVirtualize (which requires height>0) — the width check alone gates the burst.
+    if (viewportSize.width === 0) return;
     visibleImages.forEach((img) => { void loadThumbnail(img); });
-  }, [visible, visibleImages, loadThumbnail, canVirtualize, viewportSize.width]);
+  }, [visible, visibleImages, loadThumbnail, viewportSize.width]);
 
   const handleScroll = () => setScrollTop(scrollRef.current?.scrollTop ?? 0);
 

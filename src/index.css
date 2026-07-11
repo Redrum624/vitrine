@@ -265,6 +265,10 @@ body {
   box-shadow: var(--glass-shadow);
 }
 
+/* Floating chrome surface. Unlike .glass-card (which bakes --radius-card), this
+   carries NO border-radius: each floating element sets its own per the anatomy
+   spec — toolbar pill 14, icon rail / filmstrip dock 16 (--radius-dock),
+   overflow menu 10. */
 .glass-chrome {
   background: var(--glass-bg-chrome);
   border: 1px solid var(--glass-border);

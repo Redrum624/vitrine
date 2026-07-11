@@ -102,7 +102,7 @@ export function testCompletePipeline(): void {
   };
 
   // Process test image (synchronous for testing)
-  imageProcessingPipeline.processImage(testImageData, context, false)
+  imageProcessingPipeline.processImage(testImageData, context, { useWebWorkers: false })
     .then((processedData) => {
       if (processedData.length !== testImageData.length) {
         logger.error('Processed data length mismatch');
@@ -162,7 +162,7 @@ export async function testWebWorkerProcessing(): Promise<void> {
 
   try {
     const startTime = performance.now();
-    const processedData = await imageProcessingPipeline.processImage(testImageData, context, true);
+    const processedData = await imageProcessingPipeline.processImage(testImageData, context, { useWebWorkers: true });
     const processingTime = performance.now() - startTime;
 
     logger.info(`Web Worker processing completed in ${processingTime.toFixed(2)}ms`);

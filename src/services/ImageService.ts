@@ -785,7 +785,8 @@ export class ImageService {
    *
    * Note: this returns SOURCE pixels (RAW neutral demosaic for RAW, decoded
    * file pixels otherwise) — the editor's adjustment pipeline is NOT applied
-   * here. See OutputCollectionService.exportCollection for that limitation.
+   * here. A caller that needs edited output must run the pipeline on these
+   * pixels itself (see MultiExportService/BatchProcessingService).
    */
   async decodeForExport(filePath: string): Promise<ImageData> {
     const pathValidation = ValidationService.validateFilePath(filePath);

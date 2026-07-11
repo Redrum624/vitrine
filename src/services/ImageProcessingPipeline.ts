@@ -59,6 +59,19 @@ export interface ProcessingContext {
   channels: number;
 }
 
+/** Trailing options for {@link ImageProcessingPipeline.processImage}. Replaces the
+ *  former `(input, context, useWebWorkers, onProgress, cacheResults)` positional tail —
+ *  a call site that reads `..., false, undefined, false)` is otherwise opaque. */
+export interface ProcessImageOptions {
+  /** Route large images through the Web Worker pool (default true). Exports force `false`. */
+  useWebWorkers?: boolean;
+  /** Per-module progress callback (export path yields between modules). */
+  onProgress?: (completed: number, total: number) => void;
+  /** Park each module's full-resolution result in the module cache (default true).
+   *  Exports pass `false` to avoid hundreds of MB of cached buffers at 24MP+. */
+  cacheResults?: boolean;
+}
+
 export interface PipelineModule {
   getId(): string;
   getName(): string;
@@ -397,8 +410,7 @@ export class ImageProcessingPipeline {
     );
   }
 
-  // Generate cache key for module parameters (disabled for debugging)
-  // @ts-ignore - temporarily unused during debugging
+  // Generate cache key for module parameters (used by the main-thread cache check below)
   private getModuleCacheKey(module: PipelineModule): string {
     const params = this.getModuleParams(module, module.getId());
     return JSON.stringify(params);
@@ -431,10 +443,9 @@ export class ImageProcessingPipeline {
   async processImage(
     input: Float32Array,
     context: ProcessingContext,
-    useWebWorkers = true,
-    onProgress?: (completed: number, total: number) => void,
-    cacheResults = true,
+    options: ProcessImageOptions = {},
   ): Promise<Float32Array> {
+    const { useWebWorkers = true, onProgress, cacheResults = true } = options;
     const imageData = {
       width: context.width,
       height: context.height,

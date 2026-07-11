@@ -258,7 +258,7 @@ describe('Worker-failure → main-thread fallback (AdjustmentPanel catch-branch 
 
   it('fallback contract: main-thread processImage returns valid data when worker throws', async () => {
     // Simulate the fallback branch of AdjustmentPanel's catch block:
-    //   processedData = await imageProcessingPipeline.processImage(previewData, processingContext, false)
+    //   processedData = await imageProcessingPipeline.processImage(previewData, processingContext, { useWebWorkers: false })
     //   outputWidth  = processingContext.width
     //   outputHeight = processingContext.height
     //
