@@ -242,8 +242,11 @@ const WRITE_ALLOWLIST: Allow[] = [
     base: 'EnhanceService.ts',
     contains: 'imageService.updateCurrentImageData(new Float32Array(rp.data)',
     why:
-      '_popAndRestore is a private helper; its sole caller revert() gates with guardDeveloping ' +
-      'before invoking it (see EnhanceService.revert()).',
+      '_popAndRestore has TWO callers: revert() (gated with guardDeveloping) and unwindToDepth() ' +
+      '(ungated, but a no-op during developing — the restore stack is provably empty in that ' +
+      'window: onImageSwitched clears it on every fresh open and the only pusher, applyUpscale, ' +
+      'is itself gated). A new caller that can run with a non-empty stack during developing ' +
+      'must be gated.',
   },
 ];
 
