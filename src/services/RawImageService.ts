@@ -268,7 +268,10 @@ export class RawImageService {
         // ~122MB persist (atomic temp+rename in main) is negligible — and it makes the NEXT session's
         // cold open of this (path, options) land full quality in ~1s. Keyed by the CAPTURED
         // decodeOptions (this buffer's true provenance), matching the L1 base cache's coherence.
-        if (!fromDiskCache && window.electronAPI.baseCacheWrite) {
+        // 16-bit only: the 8-bit embedded-JPEG fallback is a TRANSIENT degradation (native decode
+        // may succeed next session), and the cache key doesn't include bitDepth — persisting the
+        // fallback would lock 8-bit pixels in across sessions under the 16-bit entry's key.
+        if (!fromDiskCache && result.bitDepth === 16 && window.electronAPI.baseCacheWrite) {
           try {
             void window.electronAPI.baseCacheWrite(filePath, decodeOptions, {
               data: result.data,

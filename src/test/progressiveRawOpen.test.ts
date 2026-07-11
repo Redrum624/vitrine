@@ -268,6 +268,23 @@ describe('ImageService.loadImage — disk-persisted base cache (L2, Task R4)', (
     expect(wPayload.height).toBe(4);
   });
 
+  it('(disk miss, 8-bit fallback) an embedded-JPEG fallback decode is NEVER written through to disk', async () => {
+    // A transient native-decode failure degrades to the 8-bit embedded-JPEG rung. The cache key
+    // carries no bitDepth, so persisting it would lock 8-bit pixels in across sessions under the
+    // key a 16-bit native decode would use. Write-through must skip anything that isn't 16-bit.
+    baseReadApi().mockResolvedValue(null); // miss
+    decodeApi().mockImplementation(async () => {
+      const px = new Uint8Array(8 * 4 * 3).fill(200);
+      return { data: px.buffer.slice(0), width: 8, height: 4, channels: 3, bitDepth: 8 };
+    });
+
+    await imageService.loadImage('/photo.orf', undefined, () => {});
+    await flush();
+
+    expect(decodeApi()).toHaveBeenCalledTimes(1);        // the (degraded) decode ran
+    expect(baseWriteApi()).not.toHaveBeenCalled();       // …but the fallback is never persisted
+  });
+
   it('(disk hit, superseded) an image switch before the disk read lands bails the swap but still pays A forward', async () => {
     const diskA = deferred<ReturnType<typeof makeFullPayload>>();
     baseReadApi().mockImplementation(async (path: string) =>
