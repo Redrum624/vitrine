@@ -14,8 +14,14 @@
  * useWebWorkers=false)`). We then compare the tiled output against the same pipeline run over the
  * whole image untiled. Before the apron fix this test FAILS with a large boundary discrepancy.
  *
- * Widest CLEAN live kernel used here: ShadowsHighlights mask box-blur (radius = ceil(maskBlur),
- * clamp edges — see ShadowsHighlightsModule.blurMask).
+ * Two live spatial modules are exercised end-to-end:
+ *  - ShadowsHighlights mask box-blur (radius = ceil(maskBlur), clamp edges — the widest CLEAN
+ *    single kernel; see ShadowsHighlightsModule.blurMask).
+ *  - The enhance chain (RL-deconv double-blur cone + series highpass — the widest DERIVED kernel;
+ *    see the moduleApron enhance case). Its test image pins edgeMask's buffer-global `mmax`
+ *    normalisation by planting identical maximum-gradient stamps in every tile (see
+ *    buildEnhanceSeamImage), so the only tiled-vs-untiled difference left is kernel contamination
+ *    — which the apron must reduce to EXACTLY zero (bit-equal interior arithmetic).
  */
 
 import { ImageProcessingPipeline, type ProcessingContext } from '../services/ImageProcessingPipeline';
@@ -25,13 +31,10 @@ import {
   type WorkerModuleConfig,
   type ProcessingResult,
 } from '../services/WebWorkerImageProcessor';
-import {
-  spatialApron,
-  planApronTile,
-  effectiveTileSize,
-  moduleApron,
-} from '../utils/tiledPipeline';
+import * as tiledPipeline from '../utils/tiledPipeline';
 import { createNoiseImage, maxImageDifference } from './testUtils';
+
+const { spatialApron, planApronTile, effectiveTileSize, moduleApron, MAX_WORKER_TILE } = tiledPipeline;
 
 jest.mock('../utils/Logger', () => ({
   logger: { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() },
@@ -144,6 +147,106 @@ describe('CPU worker tiled pipeline — spatial-filter seams', () => {
   });
 });
 
+/**
+ * Dark noise + identical maximum-gradient stamps, for the enhance seam test.
+ *
+ * - DARK noise ([0.02, 0.22]): RL-deconv divides by the local blur (`rel = y/max(conv, eps)`), so
+ *   small `conv` AMPLIFIES boundary-clamp contamination — pushing the detectable seam band as far
+ *   out as the chain can carry it (the strictest exercise of the apron).
+ * - STAMPS (12x12: 2px zero ring, ones core, one corner carved): edgeMask normalises by the
+ *   buffer-GLOBAL max Sobel magnitude `mmax` — a statistic no apron can bound. The carved corner
+ *   realises the pattern [[0,0,1],[0,·,1],[0,1,1]] whose magnitude sqrt(4²+2²)=sqrt(20) is the
+ *   THEORETICAL CEILING for values in [0,1] (gx=4 forces the shared corners to values where
+ *   |gy|<=2), so every stamp attains the exact global maximum and NO clamped tile edge can exceed
+ *   it. Stamps repeat every 100px -> every padded tile contains a complete stamp -> per-tile mmax
+ *   === untiled mmax, and the only remaining tiled-vs-untiled difference is kernel contamination.
+ */
+function buildEnhanceSeamImage(W: number, H: number): Float32Array {
+  const data = createNoiseImage(W, H, 11);
+  for (let i = 0; i < data.length; i += 4) {
+    data[i] = 0.02 + 0.2 * data[i];
+    data[i + 1] = 0.02 + 0.2 * data[i + 1];
+    data[i + 2] = 0.02 + 0.2 * data[i + 2];
+    data[i + 3] = 1;
+  }
+  const carved = new Set(['2,2', '3,2', '2,3', '2,4']);
+  for (let sy = 40; sy + 12 <= H; sy += 100) {
+    for (let sx = 40; sx + 12 <= W; sx += 100) {
+      for (let y = 0; y < 12; y++) {
+        for (let x = 0; x < 12; x++) {
+          const core = x >= 2 && x < 10 && y >= 2 && y < 10 && !carved.has(`${x},${y}`);
+          const v = core ? 1 : 0;
+          const idx = ((sy + y) * W + (sx + x)) * 4;
+          data[idx] = v;
+          data[idx + 1] = v;
+          data[idx + 2] = v;
+          data[idx + 3] = 1;
+        }
+      }
+    }
+  }
+  return data;
+}
+
+describe('CPU worker tiled pipeline — enhance chain (RL-deconv cone) seams', () => {
+  // Low iterations + max deblur radius: the derived apron (23) stays test-sized while the
+  // RL double-blur term still dominates the formula (2*1*9 + 4 = 22 > edgeMask 7). With the OLD
+  // under-derived formula (rlIters*r + max(7,hp) + 1 = 17) this config leaves a measured ~7.0e-7
+  // residual seam that violates the bit-exactness assertion below; the corrected 23 covers the
+  // full worst-case cone and yields EXACTLY 0.
+  const enhanceConfig: WorkerModuleConfig[] = [
+    {
+      moduleId: 'enhance',
+      enabled: true,
+      params: {
+        enabled: true, sharpen: true, upscale: false, scale: 2,
+        denoiseStrength: 0, psfSigma: 3.0, rlIters: 1,
+        alpha: 0.8, hpSigma: 1.2, sharpness: 0.4, chromaClean: true,
+      },
+    },
+  ];
+
+  const WIDTH = 1000; // > effectiveTileSize(TILE, 23) = 767 so the grid has >= 2 tiles
+  const HEIGHT = 120;
+  const TILE = 64;
+
+  it('derives the corrected apron for this config (RL double-blur + series highpass)', () => {
+    // 1 + max(edgeMask 7, 2*rlIters*gaussRadius(3.0) + gaussRadius(1.2)) = 1 + max(7, 18+4) = 23
+    expect(spatialApron(enhanceConfig)).toBe(23);
+  });
+
+  it('tiled enhance is BIT-EXACT vs untiled at the derived apron, and a too-small apron seams', async () => {
+    const img: WorkerImageData = {
+      width: WIDTH,
+      height: HEIGHT,
+      channels: 4,
+      data: buildEnhanceSeamImage(WIDTH, HEIGHT),
+    };
+
+    // Guard: >= 2 tiles (else the test is vacuous).
+    const apron = spatialApron(enhanceConfig);
+    const eff = effectiveTileSize(TILE, apron);
+    expect(Math.ceil(WIDTH / eff) * Math.ceil(HEIGHT / eff)).toBeGreaterThan(1);
+
+    const untiled = await processUntiled(img, enhanceConfig);
+    // Sanity: enhance actually changed the image.
+    expect(maxImageDifference(untiled, img.data)).toBeGreaterThan(0.01);
+
+    // SENSITIVITY GUARD (proves the harness detects seams at all): force an apron well inside the
+    // contamination band — the boundary must show a real discrepancy (measured ~6.0e-6).
+    const spy = jest.spyOn(tiledPipeline, 'spatialApron').mockReturnValue(11);
+    const seamy = await processTiled(img, enhanceConfig, TILE);
+    spy.mockRestore();
+    expect(maxImageDifference(seamy, untiled)).toBeGreaterThan(5e-7);
+
+    // THE assertion: at the derived apron every interior pixel's full dependency cone fits inside
+    // its padded tile, so the arithmetic is IDENTICAL to the untiled run -> exactly 0 (assert a
+    // defensive 1e-7). The OLD formula (apron 17) leaves ~7.0e-7 here and FAILS this bound.
+    const tiled = await processTiled(img, enhanceConfig, TILE);
+    expect(maxImageDifference(tiled, untiled)).toBeLessThan(1e-7);
+  }, 120000);
+});
+
 describe('spatialApron — kernel radius from params', () => {
   it('sums the radius of every enabled spatial module (chained passes)', () => {
     const config: WorkerModuleConfig[] = [
@@ -176,13 +279,28 @@ describe('spatialApron — kernel radius from params', () => {
     expect(moduleApron('shadowshighlights', { maskBlur: 4, bilateralFilter: true })).toBe(5);
   });
 
-  it('enhance radius scales with the RL-deconv iteration cone', () => {
-    // sharpen path, defaults psfSigma=1 (r3) x rlIters=12 + lumaGraft(7) + CAS(1) = 44
+  it('enhance radius = CAS + max(edgeMask, RL double-blur cone + series highpass)', () => {
+    // rlDeconvLuma applies TWO gaussianBlur1 passes per iteration (the convolution AND the
+    // correlation — enhanceRestore.ts:9 and :12), so the cone grows 2*gaussRadius(psfSigma) per
+    // iteration; lumaGraft's highpass(hpSigma) runs on the RL OUTPUT (series → adds) while its
+    // edgeMask (7) runs on the original luma (parallel → max); CAS adds 1 in series.
+    // Defaults: 1 + max(7, 2*12*ceil(3*1.0) + ceil(3*1.2)) = 1 + max(7, 72 + 4) = 77.
     const r = moduleApron('enhance', {
       enabled: true, sharpen: true, upscale: false,
       psfSigma: 1.0, rlIters: 12, hpSigma: 1.2, denoiseStrength: 0, chromaClean: true,
     });
-    expect(r).toBe(12 * 3 + 7 + 1);
+    expect(r).toBe(1 + Math.max(7, 2 * 12 * 3 + 4));
+    expect(r).toBe(77);
+    // Tiny RL cone: 2*1*ceil(3*0.5=2) + ceil(3*0.5)=2 -> 6 < edgeMask 7 -> the parallel branch wins.
+    expect(moduleApron('enhance', {
+      enabled: true, sharpen: true, upscale: false,
+      psfSigma: 0.5, rlIters: 1, hpSigma: 0.5, denoiseStrength: 0, chromaClean: false,
+    })).toBe(1 + 7);
+    // No RL (rlIters 0): luma = CAS only (1); chroma = cleanChroma r4 dominates.
+    expect(moduleApron('enhance', {
+      enabled: true, sharpen: true, upscale: false,
+      psfSigma: 1.0, rlIters: 0, hpSigma: 1.2, denoiseStrength: 0, chromaClean: true,
+    })).toBe(4);
     // disabled / upscale path contributes nothing to the same-res convolution apron
     expect(moduleApron('enhance', { enabled: false })).toBe(0);
     expect(moduleApron('enhance', { enabled: true, sharpen: true, upscale: true })).toBe(0);
@@ -238,5 +356,28 @@ describe('planApronTile — padded-extract + crop geometry', () => {
     expect(t.padX).toBe(100);
     expect(t.padW).toBe(100);
     expect(t.apronLeft).toBe(0);
+  });
+});
+
+describe('effectiveTileSize — growth heuristic and OOM cap', () => {
+  it('never shrinks below the caller tile and is a no-op for apron 0', () => {
+    expect(effectiveTileSize(2048, 0)).toBe(2048);
+    expect(effectiveTileSize(2048, 10)).toBe(2048); // production tile untouched for small aprons
+    expect(effectiveTileSize(2048, 29)).toBe(2048); // noise-reduction fits too
+  });
+
+  it('grows a small tile to keep the apron overhead under the cap', () => {
+    // minTile = ceil(4*apron / APRON_OVERHEAD_CAP): apron 23 -> 767
+    expect(effectiveTileSize(64, 23)).toBe(Math.ceil((4 * 23) / tiledPipeline.APRON_OVERHEAD_CAP));
+  });
+
+  it('caps growth at MAX_WORKER_TILE so extreme aprons cannot OOM the worker', () => {
+    // A maxed-out enhance stack (rlIters 30, psfSigma 3 -> apron ~550) would demand an ~18000px
+    // tile (~5 GB Float32 RGBA). Correctness beats overhead: clamp at the hugeTileSize (4096).
+    expect(MAX_WORKER_TILE).toBe(4096);
+    expect(effectiveTileSize(2048, 550)).toBe(4096);
+    expect(effectiveTileSize(4096, 550)).toBe(4096);
+    // and still never shrinks a caller tile that already exceeds the cap
+    expect(effectiveTileSize(5000, 550)).toBe(5000);
   });
 });

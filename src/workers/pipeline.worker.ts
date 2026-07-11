@@ -142,9 +142,12 @@ ctx.addEventListener('message', async (event: MessageEvent) => {
         // Tiles are processed as standalone images. The caller (WebWorkerImageProcessor.processTile)
         // grows each tile by an APRON of neighbour pixels sized to the enabled modules' summed kernel
         // radius (spatialApron), so every INTERIOR pixel already has full kernel context here; the
-        // caller then crops the apron off. Spatial filters (blur/sharpen/NLM/ShadowsHighlights mask
-        // blur/…) are therefore seam-free at tile boundaries. tileWidth/tileHeight are the PADDED
-        // dims; fullWidth/fullHeight remain informational only.
+        // caller then crops the apron off. BOUNDED-CONVOLUTION filters (blur/sharpen/NLM/
+        // ShadowsHighlights mask blur/the enhance kernel cone) are therefore seam-free at tile
+        // boundaries. NOT covered (see moduleApron in src/utils/tiledPipeline.ts): geometric warps
+        // (lens distortion/perspective/CA, crop rotation — displacement scales with image size) and
+        // global statistics (enhance edgeMask mmax). tileWidth/tileHeight are the PADDED dims;
+        // fullWidth/fullHeight remain informational only.
         const resolvedChannels = channels ?? 4;
         const result = await runPipeline(
           tileData, tileWidth, tileHeight, resolvedChannels, pipelineConfig,

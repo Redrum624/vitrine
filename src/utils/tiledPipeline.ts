@@ -8,12 +8,19 @@
  * boundary those neighbours belong to the ADJACENT tile. Without them the filter clamps at the
  * tile edge, producing a visible SEAM every `tileSize` pixels.
  *
- * The standard fix (mirrors the AI upscaler's overlapped tiling in `electron/aiUpscaler.cjs`):
+ * The fix (mirrors the AI upscaler's overlapped tiling in `electron/aiUpscaler.cjs`):
  * extract each tile with an APRON of `apron` extra pixels borrowed from its neighbours, process
  * the padded tile, then CROP the apron away so only interior pixels — which now saw real
  * neighbour context — land in the output. Edge tiles get less apron on the border side; there the
  * padded edge IS the image edge, so the module's own edge policy (all live spatial modules clamp)
  * applies exactly as it would on the untiled image.
+ *
+ * SCOPE — the apron makes BOUNDED-CONVOLUTION modules seam-free (blur / sharpen / NLM /
+ * ShadowsHighlights mask blur / the enhance chain's kernel cone). It does NOT cover geometric
+ * warps (lens distortion/perspective/CA, crop rotation), whose sampling displacement scales with
+ * image size rather than a fixed kernel radius — see the NOTE on {@link moduleApron}. Nor can it
+ * bound truly global statistics (e.g. enhance edgeMask's `mmax` normalisation — see the enhance
+ * case comment), though those produce smooth per-tile gain differences, not hard seams.
  *
  * `apron` must be >= the summed kernel radius of the enabled spatial modules (they run chained in
  * one worker pass, so contamination from the padded edge accumulates radius-by-radius through the
@@ -67,10 +74,24 @@ export function moduleApron(moduleId: string, params: Record<string, unknown>): 
     case 'enhance': {
       // enhanceImage sharpen chain (src/utils/enhanceChain.ts) — every pass is a clamped
       // gaussianBlur1 or a 3x3 stencil. The luma dependency cone is the dominant term:
-      //   RL-deconv iterates `rlIters` blurs of radius gaussRadius(psfSigma)  -> cone grows per iter
-      //   lumaGraft: edgeMask(Sobel+blur sigma2 => r6 -> ~7) parallel to highpass(hpSigma)
-      //   CAS: 3x3 => +1
-      // chroma path: optional denoiseChroma + cleanChroma(sigma 1.2 => r4). Take the max of the two.
+      //   RL-deconv (rlDeconvLuma, enhanceRestore.ts): each iteration applies TWO gaussianBlur1
+      //     passes — the convolution (:9) AND the correlation (:12) — and est(k+1) depends on
+      //     est(k) through both, so the cone grows 2*gaussRadius(psfSigma) PER ITERATION
+      //     -> 2*rlIters*gaussRadius(psfSigma) total.
+      //   lumaGraft (enhanceOps.ts:57-60): hp = highpass(RL OUTPUT, hpSigma) chains IN SERIES on
+      //     the RL cone (adds gaussRadius(hpSigma)); the edgeMask branch (Sobel r1 + blur sigma
+      //     2.0 => r6 -> 7) runs on the ORIGINAL luma — a parallel branch -> max of the two.
+      //   CAS: 3x3 => +1 in series after.
+      //   => luma = 1 + max(7, 2*rlIters*gaussRadius(psfSigma) + gaussRadius(hpSigma))
+      //      (defaults psfSigma=1, rlIters=12, hpSigma=1.2 -> 1 + max(7, 2*12*3 + 4) = 77)
+      // chroma path: optional denoiseChroma then cleanChroma(sigma 1.2 => r4) IN SERIES (adds);
+      // luma/chroma merge pointwise in yCrCbToRgba -> overall max of the two branches.
+      //
+      // RESIDUAL (not kernel-bounded, cannot be aproned): edgeMask normalises by the buffer-GLOBAL
+      // max gradient `mmax` (enhanceOps.ts:33). When a padded tile's local max gradient differs
+      // from the full image's, the sharpen gain differs slightly per tile — a smooth,
+      // amplitude-bounded difference, not a hard convolution seam. The integration seam test pins
+      // mmax by planting identical max-gradient features in every tile.
       const enabled = params.enabled === true;
       const sharpen = params.sharpen !== false;
       const upscale = params.upscale === true;
@@ -82,8 +103,7 @@ export function moduleApron(moduleId: string, params: Record<string, unknown>): 
       const chromaClean = params.chromaClean !== false;
       let luma = 1; // CAS 3x3
       if (rlIters > 0 && psfSigma > 0) {
-        luma += rlIters * gaussRadius(psfSigma);
-        luma += Math.max(7, gaussRadius(hpSigma));
+        luma += Math.max(7, 2 * rlIters * gaussRadius(psfSigma) + gaussRadius(hpSigma));
       }
       let chroma = 0;
       if (denoiseStrength > 0) chroma += gaussRadius(0.4 + 0.12 * denoiseStrength);
@@ -125,17 +145,29 @@ export function spatialApron(pipeline: WorkerModuleConfig[]): number {
 export const APRON_OVERHEAD_CAP = 0.12;
 
 /**
+ * Hard ceiling on tile growth — matches WebWorkerImageProcessor's `hugeTileSize` (the largest tile
+ * the worker path is ever asked to allocate). A maxed-out enhance stack (rlIters 30, psfSigma 3 ->
+ * apron ~550) would otherwise demand an ~18000-px tile: a single Float32 RGBA tile buffer of
+ * ~5 GB -> worker OOM. Capped, the buffer stays <= ~270 MB.
+ */
+export const MAX_WORKER_TILE = 4096;
+
+/**
  * Tile size to actually use for a given `apron`. The apron adds an `apron`-px border to every tile,
  * so the redundant-compute overhead is ~`4*apron/tileSize`; a small tile with a wide kernel is
  * wasteful. Grow the tile just enough to keep that overhead <= {@link APRON_OVERHEAD_CAP}, and
  * never shrink (the caller's size already encodes the memory budget). No-op when `apron` is 0 or
  * the tile is already large enough — the common case: the 2048-px production tile is untouched for
  * any apron up to ~61 px (a single spatial filter), so only heavy multi-filter stacks grow it.
+ *
+ * Growth is clamped at {@link MAX_WORKER_TILE}: for extreme aprons (maxed-out enhance stacks) the
+ * redundant-pixel overhead may then exceed the ~12-15% target — accepted trade-off, correctness
+ * (a seam-free result within worker memory limits) beats overhead there.
  */
 export function effectiveTileSize(tileSize: number, apron: number): number {
   if (apron <= 0) return tileSize;
   const minTile = Math.ceil((4 * apron) / APRON_OVERHEAD_CAP);
-  return Math.max(tileSize, minTile);
+  return Math.max(tileSize, Math.min(minTile, MAX_WORKER_TILE));
 }
 
 /** Per-tile geometry for an apron-overlapped tile. All coords are in full-image pixels. */
