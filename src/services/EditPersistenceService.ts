@@ -1,7 +1,7 @@
 import { imageProcessingPipeline } from './ImageProcessingPipeline';
 import { imageService } from './ImageService';
 import { LocalAdjustmentsPipelineModule } from '../modules/LocalAdjustmentsPipelineModule';
-import type { MaskGeometry } from '../modules/LocalAdjustmentsModule';
+import type { MaskGeometry, LocalAdjustmentParams } from '../modules/LocalAdjustmentsModule';
 import { logger } from '../utils/Logger';
 import { useAppStore } from '../stores/appStore';
 import type { RawDecodeOptions } from '../types/electron';
@@ -101,6 +101,7 @@ class EditPersistenceService {
         for (const sl of saved.layers) {
           const id = la.createLayer(sl.type, sl.name, width, height);
           if (sl.geometry) la.setLayerGeometry(id, sl.geometry, width, height);
+          if (sl.parameters) la.updateLayerParameters(id, sl.parameters as Partial<LocalAdjustmentParams>);
           if (sl.basicAdj) la.updateLayerBasicAdj(id, sl.basicAdj);
           if (typeof sl.opacity === 'number') la.updateLayerOpacity(id, sl.opacity);
           la.toggleLayer(id, sl.enabled);

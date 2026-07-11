@@ -44,4 +44,24 @@ describe('EditPersistenceService', () => {
     const ok = editPersistenceService.restore({ version: 999, modules: {} }, 10, 10);
     expect(ok).toBe(false);
   });
+
+  it('serialize → restore round-trips per-layer LocalAdjustmentParams (was silently reset to defaults)', () => {
+    const id = la().createLayer('radial_gradient', 'Test', 20, 20);
+    la().updateLayerParameters(id, { exposure: 0.5, saturation: 30 });
+
+    const state = editPersistenceService.serialize();
+
+    // Simulate reopening the image: reset everything, then restore.
+    imageProcessingPipeline.resetAllModules();
+    for (const l of la().getParameters().layers) la().removeLayer(l.id);
+
+    editPersistenceService.restore(state, 20, 20);
+
+    const layers = la().getParameters().layers;
+    expect(layers.length).toBe(1);
+    // Before the fix, restore() never called updateLayerParameters — every
+    // per-layer LocalAdjustmentParams field silently reset to createLayer's defaults.
+    expect(layers[0].parameters.exposure).toBe(0.5);
+    expect(layers[0].parameters.saturation).toBe(30);
+  });
 });

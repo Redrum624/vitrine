@@ -2,9 +2,11 @@ import { checkpointService } from '../services/CheckpointService';
 import { imageProcessingPipeline } from '../services/ImageProcessingPipeline';
 import { imageService } from '../services/ImageService';
 import { BasicAdjustmentsModule } from '../modules/BasicAdjustmentsModule';
+import { LocalAdjustmentsPipelineModule } from '../modules/LocalAdjustmentsPipelineModule';
 
 describe('CheckpointService', () => {
   const basicadj = () => imageProcessingPipeline.getModule<BasicAdjustmentsModule>('basicadj')!;
+  const la = () => imageProcessingPipeline.getModule<LocalAdjustmentsPipelineModule>('localadjustments')!;
 
   beforeEach(() => {
     jest.spyOn(imageService, 'getCurrentImage').mockReturnValue(
@@ -93,6 +95,24 @@ describe('CheckpointService', () => {
     expect(checkpointService.getActiveId()).toBe(c.id);
     expect(checkpointService.canRedo()).toBe(false);
     expect(checkpointService.redo()).toBe(false); // newest → no-op
+  });
+
+  it('undo()/redo() round-trip per-layer LocalAdjustmentParams (CheckpointService.restore path)', () => {
+    const id = la().createLayer('radial_gradient', 'Test', 10, 10);
+    la().updateLayerParameters(id, { exposure: 0.2 });
+    checkpointService.record('A');
+
+    la().updateLayerParameters(id, { exposure: 0.8 });
+    checkpointService.record('B');
+    expect(la().getParameters().layers[0].parameters.exposure).toBeCloseTo(0.8, 5);
+
+    expect(checkpointService.undo()).toBe(true);
+    // Before the fix, editPersistenceService.restore() never re-applied per-layer
+    // parameters, so this would come back at the createLayer default (0), not 0.2.
+    expect(la().getParameters().layers[0].parameters.exposure).toBeCloseTo(0.2, 5);
+
+    expect(checkpointService.redo()).toBe(true);
+    expect(la().getParameters().layers[0].parameters.exposure).toBeCloseTo(0.8, 5);
   });
 
   it('canUndo/canRedo are false with zero or one checkpoint', () => {
