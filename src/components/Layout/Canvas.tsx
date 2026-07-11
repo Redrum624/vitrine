@@ -64,7 +64,23 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
   // can detect that a LATER call has since started — see the setRawDecodeOptions
   // race guard below.
   const activeLoadPathRef = useRef<string | null>(null);
-  const { viewport, setViewport, processedImageData, isAdjustingRotation, selectedTool, triggerReprocessing, showGrid, showRulers, showOriginal, isProcessing, renderMode, gpuResultVersion, setRenderMode } = useAppStore();
+  // Per-field selectors (not a whole-store `useAppStore()` subscription) — Canvas only
+  // re-renders when one of ITS OWN fields actually changes, not on every store update
+  // elsewhere (e.g. Gallery-only fields like ratingFilter/selectedImageIds). Same pattern as
+  // the GalleryView/ThumbnailPanel conversion (Task R1).
+  const viewport = useAppStore((s) => s.viewport);
+  const setViewport = useAppStore((s) => s.setViewport);
+  const processedImageData = useAppStore((s) => s.processedImageData);
+  const isAdjustingRotation = useAppStore((s) => s.isAdjustingRotation);
+  const selectedTool = useAppStore((s) => s.selectedTool);
+  const triggerReprocessing = useAppStore((s) => s.triggerReprocessing);
+  const showGrid = useAppStore((s) => s.showGrid);
+  const showRulers = useAppStore((s) => s.showRulers);
+  const showOriginal = useAppStore((s) => s.showOriginal);
+  const isProcessing = useAppStore((s) => s.isProcessing);
+  const renderMode = useAppStore((s) => s.renderMode);
+  const gpuResultVersion = useAppStore((s) => s.gpuResultVersion);
+  const setRenderMode = useAppStore((s) => s.setRenderMode);
   // Whether attach() succeeded on this canvas (WebGL2 present available). When false the
   // app behaves exactly as before: GL canvas stays hidden and renderMode is forced 'cpu'.
   // Kept as React state (not just a ref) so JSX visibility re-renders when it changes.

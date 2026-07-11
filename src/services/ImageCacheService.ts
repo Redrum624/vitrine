@@ -316,17 +316,32 @@ export class ImageCacheService {
   }
 
   /**
+   * Number of entries currently in the given category (base vs sized) — never the whole cache.
+   * Used to keep the `maxEntries` backstop honest per category (see shouldCleanup/cleanup):
+   * counting against the COMBINED cache.size let a category with many small entries (e.g. lots
+   * of sized/thumbnail entries) trip the entries backstop for the OTHER category (e.g. a new
+   * base) even though that category itself was nowhere near its own limit — cleanup() then
+   * evicted base entries (expensive RAW decodes) to satisfy a count threshold it could never
+   * actually reach that way, since it only ever removes entries from its own category.
+   */
+  private categoryEntryCount(isBase: boolean): number {
+    let count = 0;
+    for (const key of this.cache.keys()) {
+      if (this.isBaseKey(key) === isBase) count++;
+    }
+    return count;
+  }
+
+  /**
    * Check if cleanup is needed for an incoming entry of the given category (base vs sized).
-   * Size is checked against that category's OWN budget/current-size — a base entry can never
-   * trigger cleanup of the sized budget, or vice versa. The entry-count ceiling (`maxEntries`)
-   * remains a shared, whole-cache backstop (both categories combined stay well under it in
-   * practice).
+   * Both the size AND the entry-count checks are against that category's OWN accounting — a
+   * base entry can never trigger cleanup of the sized budget/count, or vice versa.
    */
   private shouldCleanup(incomingSize: number, isBase: boolean): boolean {
     const currentSize = isBase ? this.baseCurrentSize : this.currentSize;
     const budget = isBase ? this.baseMaxSize : this.maxSize;
     const wouldExceedSize = (currentSize + incomingSize) > (budget * this.CLEANUP_THRESHOLD);
-    const wouldExceedEntries = this.cache.size >= this.maxEntries;
+    const wouldExceedEntries = this.categoryEntryCount(isBase) >= this.maxEntries;
 
     return wouldExceedSize || wouldExceedEntries;
   }
@@ -335,7 +350,7 @@ export class ImageCacheService {
    * Cleanup old or least used entries — restricted to the SAME category (base vs sized) as the
    * incoming entry. Candidates are filtered to that category before sorting, so a base
    * eviction can only ever remove other base entries (never a sized/thumbnail entry) and vice
-   * versa; each category is evicted against its own budget.
+   * versa; each category is evicted against its own budget AND its own entry count.
    */
   private cleanup(incomingSize: number, isBase: boolean): void {
     const budget = isBase ? this.baseMaxSize : this.maxSize;
@@ -354,14 +369,21 @@ export class ImageCacheService {
     let removedCount = 0;
     let removedSize = 0;
     const startSize = isBase ? this.baseCurrentSize : this.currentSize;
+    const startEntries = entries.length; // THIS category's own count, not the whole cache
 
     for (const [key, entry] of entries) {
-      if (startSize - removedSize <= targetSize &&
-          this.cache.size - removedCount <= targetEntries) {
+      const sizeAtTarget = startSize - removedSize <= targetSize;
+      const entriesAtTarget = startEntries - removedCount <= targetEntries;
+      if (sizeAtTarget && entriesAtTarget) {
         break;
       }
 
-      if (startSize - removedSize + incomingSize <= budget) {
+      // Early-exit once the incoming entry already fits within budget — but ONLY when the
+      // entries count is also satisfied. A category can have ample size headroom (e.g. many
+      // tiny base entries under a 700MB budget) while still being way over its entries target;
+      // without the `entriesAtTarget` guard this exit fired immediately on every call and the
+      // entries backstop could never actually evict anything for such a category.
+      if (entriesAtTarget && startSize - removedSize + incomingSize <= budget) {
         break;
       }
 
@@ -447,11 +469,13 @@ export class ImageCacheService {
     this.maxEntries = maxEntries;
     this.baseMaxSize = maxBaseSize;
 
-    // Trigger cleanup if necessary, independently per category
-    if (this.currentSize > this.maxSize || this.cache.size > this.maxEntries) {
+    // Trigger cleanup if necessary, independently per category — entry counts are checked
+    // against EACH category's own count (categoryEntryCount), never the combined cache.size,
+    // for the same reason cleanup() itself is category-scoped (see shouldCleanup's doc comment).
+    if (this.currentSize > this.maxSize || this.categoryEntryCount(false) > this.maxEntries) {
       this.cleanup(0, false);
     }
-    if (this.baseCurrentSize > this.baseMaxSize) {
+    if (this.baseCurrentSize > this.baseMaxSize || this.categoryEntryCount(true) > this.maxEntries) {
       this.cleanup(0, true);
     }
 

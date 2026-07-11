@@ -6,6 +6,22 @@ const { writeImageFile, writeImageMetadata } = require('./imageWriter.cjs');
 const { markSelfWrite, createFolderChangeDebouncer } = require('./selfWriteRegistry.cjs');
 const aiUpscaler = require('./aiUpscaler.cjs');
 
+// Canonical RAW extension superset recognized by this app — duplicated (dot-prefixed) from
+// `src/utils/rawExtensions.ts`'s `RAW_EXTENSIONS_DOTTED` (see that file's doc comment for why
+// it's a union, not an intersection, of the historically drifted UI/decode lists). main.cjs is
+// CommonJS and cannot `import` that ESM/TS module directly, so this is a manually-kept-in-sync
+// duplicate rather than a shared import — update BOTH places if the supported RAW formats change.
+//
+// Task L4 (post-review polish): this replaces THREE independently-maintained local rawFormats
+// arrays (read-image-as-data-url, write-image-rating, read-image-rating) that had drifted apart —
+// the read-image-as-data-url preview list was missing '.sr2'/'.srf'/'.x3f', so those RAW formats
+// silently got no embedded-preview thumbnail even though rating read/write already supported them.
+const RAW_FORMATS = [
+  '.cr2', '.cr3', '.nef', '.nrw', '.arw', '.sr2', '.srf', '.orf', '.dng', '.raf', '.rw2',
+  '.pef', '.srw', '.x3f', '.raw', '.mrw', '.dcr', '.k25', '.kdc', '.erf', '.mef', '.mos',
+  '.rwl',
+];
+
 // Keep a global reference of the window objects
 let mainWindow;
 let splashWindow;
@@ -620,10 +636,9 @@ function cacheRawThumb(key, url) {
 ipcMain.handle('read-image-as-data-url', async (event, filePath) => {
   try {
     const ext = path.extname(filePath).toLowerCase();
-    const rawFormats = ['.cr2', '.cr3', '.nef', '.nrw', '.arw', '.orf', '.dng', '.raf', '.rw2', '.pef', '.srw'];
 
     // For RAW files, extract an embedded JPEG preview.
-    if (rawFormats.includes(ext)) {
+    if (RAW_FORMATS.includes(ext)) {
       const cached = rawThumbCache.get(filePath);
       if (cached) return cached;
 
@@ -860,8 +875,7 @@ ipcMain.handle('write-image-rating', async (event, filePath, rating) => {
   try {
     const safeFilePath = validateWritePath(filePath);
     const ext = path.extname(safeFilePath).toLowerCase();
-    const rawFormats = ['.cr2', '.cr3', '.nef', '.nrw', '.arw', '.sr2', '.srf', '.orf', '.dng', '.raf', '.rw2', '.pef', '.srw', '.x3f'];
-    if (rawFormats.includes(ext)) {
+    if (RAW_FORMATS.includes(ext)) {
       const { buildXmpPacket } = require('./imageWriter.cjs');
       const sidecar = safeFilePath.slice(0, -ext.length) + '.xmp';
       // Mark BEFORE writing so the folder watcher swallows the resulting
@@ -892,8 +906,7 @@ ipcMain.handle('read-image-rating', async (event, filePath) => {
     const sharp = require('sharp');
     const { parseXmpRating } = require('./imageWriter.cjs');
     const ext = path.extname(filePath).toLowerCase();
-    const rawFormats = ['.cr2', '.cr3', '.nef', '.nrw', '.arw', '.sr2', '.srf', '.orf', '.dng', '.raf', '.rw2', '.pef', '.srw', '.x3f'];
-    if (rawFormats.includes(ext)) {
+    if (RAW_FORMATS.includes(ext)) {
       const sidecar = filePath.slice(0, -ext.length) + '.xmp';
       try {
         return parseXmpRating(await fs.promises.readFile(sidecar, 'utf8'));
