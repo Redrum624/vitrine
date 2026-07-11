@@ -1050,6 +1050,32 @@ ipcMain.handle('decode-raw-preview', async (event, filePath, maxDim) => {
   }
 });
 
+// Disk-persisted base cache (L2): serve a decoded RAW base persisted from an EARLIER SESSION for
+// this exact (path, decode options) so a 2nd-session cold open gets full quality from a fast NVMe
+// read (~1s) instead of the ~4.3s native LibRaw decode. Returns the SAME shape as decode-raw-file
+// ({ data, width, height, channels, bitDepth }) or null on a miss. See electron/baseCache.cjs.
+ipcMain.handle('base-cache-read', async (event, filePath, options) => {
+  try {
+    return await require('./baseCache.cjs').read(filePath, options);
+  } catch (error) {
+    console.warn('base-cache-read failed:', error.message);
+    return null; // a cache read failure is never fatal — the renderer decodes fresh
+  }
+});
+
+// Write-through: persist a freshly-decoded base (fire-and-forget from the renderer; atomic
+// temp+rename + LRU eviction happen here off the renderer's critical path). Keyed by the captured
+// decode options for coherence. The PREVIEW is never written here (only full decodes route in).
+ipcMain.handle('base-cache-write', async (event, filePath, options, payload) => {
+  try {
+    await require('./baseCache.cjs').write(filePath, options, payload);
+    return true;
+  } catch (error) {
+    console.warn('base-cache-write failed:', error.message);
+    return false;
+  }
+});
+
 // Read file as ArrayBuffer for RAW files
 ipcMain.handle('read-file-buffer', async (event, filePath) => {
   try {
@@ -1078,6 +1104,17 @@ app.whenReady().then(() => {
 
   // Remove the default menu bar
   Menu.setApplicationMenu(null);
+
+  // Initialise the disk-persisted base cache (L2) and rebuild its in-memory index by scanning the
+  // cache dir. Cheap (a dir listing + one stat/sidecar read per entry, ~a few dozen entries) but
+  // wrapped in try/catch so a broken cache dir can never break startup. Must run after app-ready
+  // (userData path is only valid then).
+  try {
+    const indexed = require('./baseCache.cjs').init(path.join(app.getPath('userData'), 'base-cache'));
+    console.log(`Base cache (L2) initialised: ${indexed} persisted RAW base(s) indexed`);
+  } catch (baseCacheInitError) {
+    console.warn('Base cache init failed (continuing without disk cache):', baseCacheInitError.message);
+  }
 
   // Purge stale RAW-decode temp dirs (left behind if a previous session crashed
   // mid-decode; the per-decode cleanup is best-effort only). Deferred so it

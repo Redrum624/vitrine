@@ -228,8 +228,33 @@ export class RawImageService {
     // them onto the native and wasm rungs; the embedded-JPEG last resort ignores them by design.
     if (typeof window !== 'undefined' && window.electronAPI?.decodeRawFile) {
       try {
-        logger.info(`Decoding RAW file via Electron main process: ${extension.toUpperCase()}`);
-        const result = await window.electronAPI.decodeRawFile(filePath, decodeOptions);
+        // L2 disk-persisted base cache: try a decode persisted from an EARLIER SESSION for this
+        // exact (path, options) before paying the ~4.3s native LibRaw decode. A ~122MB NVMe read +
+        // IPC is well under 1s. The disk read returns the SAME { data, width, height, channels,
+        // bitDepth } shape as `decode-raw-file`, so the code below is byte-identical either way.
+        // This is the L2 tier behind the in-memory L1 base cache (ImageCacheService), which
+        // ImageService.loadImage already checked first — read order is L1 → L2 → LibRaw. The
+        // progressive PREVIEW never routes through here, so it is never disk-cached.
+        let result: { data: ArrayBuffer; width: number; height: number; channels?: number; bitDepth?: number } | null = null;
+        let fromDiskCache = false;
+        if (window.electronAPI.baseCacheRead) {
+          try {
+            const disk = await window.electronAPI.baseCacheRead(filePath, decodeOptions);
+            if (disk) {
+              result = disk;
+              fromDiskCache = true;
+              logger.info(`RAW served from disk base cache (L2): ${extension.toUpperCase()}`);
+            }
+          } catch (diskReadError) {
+            // A disk-cache read failure is never fatal — fall through to the real decode.
+            logger.warn('Disk base-cache read failed; decoding fresh', diskReadError);
+          }
+        }
+
+        if (!result) {
+          logger.info(`Decoding RAW file via Electron main process: ${extension.toUpperCase()}`);
+          result = await window.electronAPI.decodeRawFile(filePath, decodeOptions);
+        }
 
         // Native LibRaw demosaic returns 16-bit pixels; the embedded-JPEG
         // fallback returns 8-bit. Convert from whichever depth we got.
@@ -237,6 +262,25 @@ export class RawImageService {
         const floatData = result.bitDepth === 16
           ? this.convertUint16ToFloat32Array(new Uint16Array(result.data), result.width, result.height, channels)
           : this.convertUint8ToFloat32Array(new Uint8Array(result.data), result.width, result.height);
+
+        // Write-through to the disk cache on a FRESH decode only (a disk hit is already persisted).
+        // Fire-and-forget, off the critical path: the ~4.3s decode was already paid, so a one-time
+        // ~122MB persist (atomic temp+rename in main) is negligible — and it makes the NEXT session's
+        // cold open of this (path, options) land full quality in ~1s. Keyed by the CAPTURED
+        // decodeOptions (this buffer's true provenance), matching the L1 base cache's coherence.
+        if (!fromDiskCache && window.electronAPI.baseCacheWrite) {
+          try {
+            void window.electronAPI.baseCacheWrite(filePath, decodeOptions, {
+              data: result.data,
+              width: result.width,
+              height: result.height,
+              channels: result.channels ?? channels,
+              bitDepth: result.bitDepth,
+            })?.catch?.(() => { /* persist failure never breaks the open */ });
+          } catch (diskWriteError) {
+            logger.warn('Disk base-cache write-through failed (non-fatal)', diskWriteError);
+          }
+        }
 
         logger.info(`RAW decoded via main process: ${result.width}x${result.height}, ${result.bitDepth ?? 8}-bit, ${channels}ch`);
 

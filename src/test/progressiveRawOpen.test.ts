@@ -41,6 +41,8 @@ const flush = () => new Promise((r) => setTimeout(r, 0));
 
 const decodeApi = () => (window as unknown as { electronAPI: { decodeRawFile: jest.Mock } }).electronAPI.decodeRawFile;
 const previewApi = () => (window as unknown as { electronAPI: { decodeRawPreview: jest.Mock } }).electronAPI.decodeRawPreview;
+const baseReadApi = () => (window as unknown as { electronAPI: { baseCacheRead: jest.Mock } }).electronAPI.baseCacheRead;
+const baseWriteApi = () => (window as unknown as { electronAPI: { baseCacheWrite: jest.Mock } }).electronAPI.baseCacheWrite;
 
 beforeEach(() => {
   imageCacheService.clear();
@@ -50,6 +52,10 @@ beforeEach(() => {
   (window as unknown as { electronAPI: unknown }).electronAPI = {
     decodeRawFile: jest.fn().mockImplementation(async () => makeFullPayload(8, 4, 200)),
     decodeRawPreview: jest.fn().mockImplementation(async () => makePreviewPayload(4, 2, 100)),
+    // Disk base cache (L2). Default: a MISS (null) + a resolving write, so every existing test keeps
+    // its exact old behaviour (disk absent → decode runs; write-through is a harmless no-op mock).
+    baseCacheRead: jest.fn().mockResolvedValue(null),
+    baseCacheWrite: jest.fn().mockResolvedValue(true),
     storeGet: jest.fn(),
     storeSet: jest.fn(),
   };
@@ -220,6 +226,74 @@ describe('ImageService.loadImage — progressive RAW open', () => {
     fullA.resolve(makeFullPayload(10, 5, 50));
     await flush();
     expect(useAppStore.getState().developing).toBe(false);
+  });
+});
+
+describe('ImageService.loadImage — disk-persisted base cache (L2, Task R4)', () => {
+  it('(disk hit) serves full quality from the disk cache with NO LibRaw decode — via the same guarded swap', async () => {
+    // Fresh session: L1 (in-memory) is empty (cleared in beforeEach); the disk cache holds the full
+    // 16-bit decode for this (path, options). The progressive PREVIEW still paints first (unchanged);
+    // the disk hit just makes full quality land ~1s later instead of ~5.5s.
+    baseReadApi().mockResolvedValue(makeFullPayload(8, 4, 200));
+
+    const fullDims: string[] = [];
+    const result = await imageService.loadImage('/photo.orf', undefined, (w, h) => fullDims.push(`${w}x${h}`));
+    expect(result.width).toBe(4);                       // preview paints first
+    expect(previewApi()).toHaveBeenCalledTimes(1);
+
+    await flush();                                       // developFullDecode awaits the disk-served full
+
+    expect(decodeApi()).not.toHaveBeenCalled();          // the ~4.3s LibRaw decode IPC never ran
+    expect(baseReadApi()).toHaveBeenCalledWith('/photo.orf', DEFAULT_RAW_DECODE_OPTIONS);
+    expect(imageService.getCurrentImage()?.width).toBe(8); // full quality swapped in (guarded swap)
+    expect(fullDims).toEqual(['8x4']);
+    expect(imageCacheService.getBase('/photo.orf')?.width).toBe(8); // promoted into L1 for the session
+    expect(baseWriteApi()).not.toHaveBeenCalled();       // a disk HIT is already persisted — no rewrite
+  });
+
+  it('(disk miss) runs the decode and WRITES THROUGH to disk with the CAPTURED options', async () => {
+    useAppStore.getState().setRawDecodeOptions({ demosaic: 'ahd', highlightMode: 'off' });
+    baseReadApi().mockResolvedValue(null); // miss
+
+    await imageService.loadImage('/photo.orf', undefined, () => {});
+    await flush();
+
+    expect(decodeApi()).toHaveBeenCalledTimes(1);        // miss → the real decode runs
+    expect(baseWriteApi()).toHaveBeenCalledTimes(1);     // …and write-through persists it
+    const [wPath, wOpts, wPayload] = baseWriteApi().mock.calls[0];
+    expect(wPath).toBe('/photo.orf');
+    expect(wOpts).toEqual({ demosaic: 'ahd', highlightMode: 'off' }); // captured options, not stale store
+    expect(wPayload.bitDepth).toBe(16);                  // the FULL 16-bit decode (never the preview)
+    expect(wPayload.width).toBe(8);
+    expect(wPayload.height).toBe(4);
+  });
+
+  it('(disk hit, superseded) an image switch before the disk read lands bails the swap but still pays A forward', async () => {
+    const diskA = deferred<ReturnType<typeof makeFullPayload>>();
+    baseReadApi().mockImplementation(async (path: string) =>
+      path === '/a.orf' ? diskA.promise : makeFullPayload(12, 6, 200));
+    previewApi().mockImplementation(async (path: string) =>
+      path === '/a.orf' ? makePreviewPayload(4, 2, 100) : makePreviewPayload(6, 3, 150));
+
+    // Open A — preview shown, A's disk read still pending.
+    const rA = await imageService.loadImage('/a.orf', undefined, () => {});
+    expect(rA.width).toBe(4);
+
+    // Open B — disk hit resolves immediately, B swaps in.
+    await imageService.loadImage('/b.orf', undefined, () => {});
+    await flush();
+    expect(imageService.getCurrentImage()?.filePath).toBe('/b.orf');
+    expect(imageService.getCurrentImage()?.width).toBe(12);
+
+    // A's disk read lands late — the generation/identity guards must BAIL the swap (B stays on
+    // screen), but the write-before-guard still promotes A's fully-valid base into L1 for a reopen.
+    diskA.resolve(makeFullPayload(10, 5, 50));
+    await flush();
+    expect(imageService.getCurrentImage()?.filePath).toBe('/b.orf'); // guards intact — no clobber
+    expect(imageService.getCurrentImage()?.width).toBe(12);
+    expect(imageCacheService.getBase('/a.orf')?.width).toBe(10);     // A paid forward into L1
+    expect(decodeApi()).not.toHaveBeenCalled();                     // both served from disk, never LibRaw
+    expect(baseWriteApi()).not.toHaveBeenCalled();                  // disk HITs don't rewrite the disk
   });
 });
 

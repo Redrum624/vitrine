@@ -88,6 +88,16 @@ export interface ElectronAPI {
   /** Fast progressive-open preview: the embedded JPEG, oriented + downscaled to fit maxDim
    *  (8-bit RGB). Rejects when no embedded preview exists. See ImageService progressive open. */
   decodeRawPreview: (filePath: string, maxDim?: number) => Promise<{ data: ArrayBuffer; width: number; height: number; channels: number; bitDepth?: number }>;
+  /** Disk-persisted base cache (L2): read a decoded RAW base persisted from an earlier session for
+   *  this exact (path, decode options). Returns the same shape as decodeRawFile, or null on a miss.
+   *  See electron/baseCache.cjs + RawImageService.decodeRawFile. */
+  baseCacheRead: (filePath: string, options?: RawDecodeOptions) => Promise<{ data: ArrayBuffer; width: number; height: number; channels: number; bitDepth?: number } | null>;
+  /** Write-through a freshly-decoded RAW base to disk (fire-and-forget). Keyed by (path, options). */
+  baseCacheWrite: (
+    filePath: string,
+    options: RawDecodeOptions | undefined,
+    payload: { data: ArrayBuffer; width: number; height: number; channels?: number; bitDepth?: number },
+  ) => Promise<boolean>;
   readImageAsDataURL: (filePath: string) => Promise<string>;
   writeFile: (filePath: string, data: Buffer | string) => Promise<boolean>;
   writeLog: (logEntry: Record<string, unknown>) => Promise<boolean>;

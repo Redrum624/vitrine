@@ -14,6 +14,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   readFileBuffer: (filePath) => ipcRenderer.invoke('read-file-buffer', filePath),
   decodeRawFile: (filePath, options) => ipcRenderer.invoke('decode-raw-file', filePath, options),
   decodeRawPreview: (filePath, maxDim) => ipcRenderer.invoke('decode-raw-preview', filePath, maxDim),
+  // Disk-persisted base cache (L2): read a decode persisted from an earlier session; write-through
+  // a fresh decode (fire-and-forget). Keyed by (path, decode options). See electron/baseCache.cjs.
+  baseCacheRead: (filePath, options) => ipcRenderer.invoke('base-cache-read', filePath, options),
+  baseCacheWrite: (filePath, options, payload) => ipcRenderer.invoke('base-cache-write', filePath, options, payload),
   readImageAsDataURL: (filePath) => ipcRenderer.invoke('read-image-as-data-url', filePath),
   writeFile: (filePath, data) => ipcRenderer.invoke('write-file', filePath, data),
   writeLog: (logEntry) => ipcRenderer.invoke('write-log', logEntry),
