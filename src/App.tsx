@@ -295,6 +295,82 @@ export function imageFileInfoFromOpenedPath(filePath: string): ImageFileInfo {
   };
 }
 
+// ─── Base-mutating transform actions (rotate / flip / resize) ────────────────
+// Each of these bakes new pixels into the working base via
+// `imageService.updateCurrentImageData`, so each is gated on the progressive-open
+// `developing` window (final whole-branch review, critical #1): during that window
+// the working image is the camera's ~2048px embedded preview, and the background
+// full-decode swap (same generation/path/options — all three ImageService guards
+// pass) would silently replace the freshly transformed base seconds later, undoing
+// the edit. Module-level and dependency-injected (like `openFolderFromDialog`
+// above) so the REAL handlers stay unit-testable without rendering the full App
+// component graph; the App component binds its toast callbacks in thin
+// useCallback wrappers below.
+
+export interface TransformToasts {
+  showInfo: (title: string, message: string) => void;
+  showSuccess: (title: string, message: string) => void;
+}
+
+function getBaseImageContext(): { data: Float32Array; ctx: FilterContext } | null {
+  const img = imageService.getCurrentImage();
+  if (!img) return null;
+  return {
+    data: img.data,
+    ctx: { width: img.width, height: img.height, channels: 4 }
+  };
+}
+
+export function rotateCurrentImageCW(toasts: TransformToasts): void {
+  if (guardDeveloping(toasts.showInfo, 'Rotate')) return;
+  const img = getBaseImageContext();
+  if (!img) return;
+  const result = rotateImage90CW(img.data, img.ctx);
+  imageService.updateCurrentImageData(result.data, result.width, result.height);
+  useAppStore.getState().triggerReprocessing();
+  toasts.showSuccess('Rotated', '90° clockwise');
+}
+
+export function rotateCurrentImageCCW(toasts: TransformToasts): void {
+  if (guardDeveloping(toasts.showInfo, 'Rotate')) return;
+  const img = getBaseImageContext();
+  if (!img) return;
+  const result = rotateImage90CCW(img.data, img.ctx);
+  imageService.updateCurrentImageData(result.data, result.width, result.height);
+  useAppStore.getState().triggerReprocessing();
+  toasts.showSuccess('Rotated', '90° counter-clockwise');
+}
+
+export function flipCurrentImageHorizontal(toasts: TransformToasts): void {
+  if (guardDeveloping(toasts.showInfo, 'Flip')) return;
+  const img = getBaseImageContext();
+  if (!img) return;
+  const result = flipHorizontal(img.data, img.ctx);
+  imageService.updateCurrentImageData(result, img.ctx.width, img.ctx.height);
+  useAppStore.getState().triggerReprocessing();
+  toasts.showSuccess('Flipped', 'Horizontal');
+}
+
+export function flipCurrentImageVertical(toasts: TransformToasts): void {
+  if (guardDeveloping(toasts.showInfo, 'Flip')) return;
+  const img = getBaseImageContext();
+  if (!img) return;
+  const result = flipVertical(img.data, img.ctx);
+  imageService.updateCurrentImageData(result, img.ctx.width, img.ctx.height);
+  useAppStore.getState().triggerReprocessing();
+  toasts.showSuccess('Flipped', 'Vertical');
+}
+
+export function resizeCurrentImage(toasts: TransformToasts, newWidth: number, newHeight: number): void {
+  if (guardDeveloping(toasts.showInfo, 'Image Size')) return;
+  const img = getBaseImageContext();
+  if (!img) return;
+  const result = resizeImage(img.data, img.ctx, newWidth, newHeight);
+  imageService.updateCurrentImageData(result.data, result.width, result.height);
+  useAppStore.getState().triggerReprocessing();
+  toasts.showSuccess('Resized', `${result.width} x ${result.height}`);
+}
+
 function App() {
   const { setViewport, resetZoom, viewport, processedImageData, setSelectedTool: storeSetSelectedTool, showGrid, showRulers, showOriginal, toggleGrid, toggleRulers, toggleOriginal, referenceMode, referenceImageUrl, referenceImageName, toggleReferenceMode, setReferenceImage, lastProcessingTimeMs, modulesActive, modulesTotal, alignmentAxisX, setAlignmentAxisX, viewMode, selectedImageIds, developing } = useAppStore();
   const [selectedTool, setSelectedToolLocal] = useState<string | null>('file-explorer'); // Default to file explorer
@@ -488,50 +564,14 @@ function App() {
   }, [showError]);
 
   // ─── Image transforms ─────────────────────────────────────────────────
-  const getImageContext = useCallback((): { data: Float32Array; ctx: FilterContext } | null => {
-    const img = imageService.getCurrentImage();
-    if (!img) return null;
-    return {
-      data: img.data,
-      ctx: { width: img.width, height: img.height, channels: 4 }
-    };
-  }, []);
+  // Base-mutating logic lives in the module-level transform actions above
+  // (exported for tests); these wrappers just bind the App's toast callbacks.
+  const handleRotateCW = useCallback(() => rotateCurrentImageCW({ showInfo, showSuccess }), [showInfo, showSuccess]);
+  const handleRotateCCW = useCallback(() => rotateCurrentImageCCW({ showInfo, showSuccess }), [showInfo, showSuccess]);
 
-  const handleRotateCW = useCallback(() => {
-    const img = getImageContext();
-    if (!img) return;
-    const result = rotateImage90CW(img.data, img.ctx);
-    imageService.updateCurrentImageData(result.data, result.width, result.height);
-    useAppStore.getState().triggerReprocessing();
-    showSuccess('Rotated', '90\u00B0 clockwise');
-  }, [getImageContext, showSuccess]);
+  const handleFlipHorizontal = useCallback(() => flipCurrentImageHorizontal({ showInfo, showSuccess }), [showInfo, showSuccess]);
 
-  const handleRotateCCW = useCallback(() => {
-    const img = getImageContext();
-    if (!img) return;
-    const result = rotateImage90CCW(img.data, img.ctx);
-    imageService.updateCurrentImageData(result.data, result.width, result.height);
-    useAppStore.getState().triggerReprocessing();
-    showSuccess('Rotated', '90\u00B0 counter-clockwise');
-  }, [getImageContext, showSuccess]);
-
-  const handleFlipHorizontal = useCallback(() => {
-    const img = getImageContext();
-    if (!img) return;
-    const result = flipHorizontal(img.data, img.ctx);
-    imageService.updateCurrentImageData(result, img.ctx.width, img.ctx.height);
-    useAppStore.getState().triggerReprocessing();
-    showSuccess('Flipped', 'Horizontal');
-  }, [getImageContext, showSuccess]);
-
-  const handleFlipVertical = useCallback(() => {
-    const img = getImageContext();
-    if (!img) return;
-    const result = flipVertical(img.data, img.ctx);
-    imageService.updateCurrentImageData(result, img.ctx.width, img.ctx.height);
-    useAppStore.getState().triggerReprocessing();
-    showSuccess('Flipped', 'Vertical');
-  }, [getImageContext, showSuccess]);
+  const handleFlipVertical = useCallback(() => flipCurrentImageVertical({ showInfo, showSuccess }), [showInfo, showSuccess]);
 
   // ─── Auto adjustments ─────────────────────────────────────────────────
   const handleAutoLevels = useCallback(() => {
@@ -594,14 +634,10 @@ function App() {
   }, [showSuccess, showInfo]);
 
   // ─── Image resize ─────────────────────────────────────────────────────
-  const handleImageResize = useCallback((newWidth: number, newHeight: number) => {
-    const img = getImageContext();
-    if (!img) return;
-    const result = resizeImage(img.data, img.ctx, newWidth, newHeight);
-    imageService.updateCurrentImageData(result.data, result.width, result.height);
-    useAppStore.getState().triggerReprocessing();
-    showSuccess('Resized', `${result.width} x ${result.height}`);
-  }, [getImageContext, showSuccess]);
+  const handleImageResize = useCallback(
+    (newWidth: number, newHeight: number) => resizeCurrentImage({ showInfo, showSuccess }, newWidth, newHeight),
+    [showInfo, showSuccess]
+  );
 
   // ─── Auto All ──────────────────────────────────────────────────────────
   const handleAutoAll = useCallback(() => {

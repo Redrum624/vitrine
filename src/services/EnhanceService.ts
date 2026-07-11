@@ -4,8 +4,10 @@ import { enhanceWorkerClient } from './EnhanceWorkerClient';
 import { aiUpscaleClient } from './AiUpscaleClient';
 import { checkpointService } from './CheckpointService';
 import { editPersistenceService } from './EditPersistenceService';
+import { notificationService } from './NotificationService';
 import { useAppStore } from '../stores/appStore';
 import { EnhanceParams } from '../utils/enhanceChain';
+import { guardDeveloping } from '../utils/developingGuard';
 
 /** Float32 RGBA 0..1 (pipeline domain) → Uint8 RGBA 0..255 (AI IPC domain). */
 function float32ToUint8Rgba(f: Float32Array): Uint8Array {
@@ -85,6 +87,17 @@ class EnhanceService {
   }
 
   async applyUpscale(params: EnhanceParams): Promise<void> {
+    // Base-MUTATING: bakes a whole new original/current base (setOriginalImage +
+    // updateCurrentImageData) and sets the `bakedUpscale` marker. During the
+    // progressive-open developing window the working image is the ~2048px embedded
+    // preview: feasibility would compute on preview dims, and the background
+    // full-decode swap would clobber the upscaled base while `bakedUpscale` stays
+    // set — permanently early-returning EditPersistenceService.flush(), so every
+    // subsequent edit on the image silently stops persisting (final whole-branch
+    // review, critical #1). Gated HERE (the single choke point for all callers)
+    // rather than in the UI trigger; batch flows use BatchProcessingService and
+    // never run inside the interactive `developing` window.
+    if (guardDeveloping(notificationService.info.bind(notificationService), 'Enhance Upscale')) return;
     if (this.inFlight) return;
 
     const original = imageService.getOriginalImage();
