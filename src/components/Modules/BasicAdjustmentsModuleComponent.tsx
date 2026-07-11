@@ -307,7 +307,7 @@ export function BasicAdjustmentsModuleComponent({
             <button
               onClick={() => deleteMask(selectedMask.id)}
               className="inline-flex items-center justify-center"
-              style={{ padding: 4, borderRadius: 6, color: 'var(--red-400)', background: 'transparent' }}
+              style={{ padding: 4, borderRadius: 6, color: '#f87171', background: 'transparent' }}
               title="Delete mask (Del)"
             >
               <Trash2 className="w-3.5 h-3.5" />
