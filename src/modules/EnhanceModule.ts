@@ -1,6 +1,6 @@
 import { DEFAULT_ENHANCE_PARAMS, EnhanceParams, enhanceImage } from '../utils/enhanceChain';
 
-type Ctx = { width: number; height: number; channels: number };
+type Ctx = { width: number; height: number; channels: number; edgeMaskGlobalMax?: number };
 
 export class EnhanceModule {
   private params: EnhanceParams = { ...DEFAULT_ENHANCE_PARAMS };
@@ -13,7 +13,9 @@ export class EnhanceModule {
   process(input: Float32Array, ctx: Ctx): Float32Array {
     const p = this.params;
     if (!p.enabled || !p.sharpen || p.upscale) return new Float32Array(input);
-    return enhanceImage(input, ctx.width, ctx.height, { ...p, upscale: false }).enhanced;
+    // ctx.edgeMaskGlobalMax is set only on the tiled CPU worker path → edgeMask normalises by the
+    // full-image max (seam-free). Undefined on the whole-image path → edgeMask uses its buffer max.
+    return enhanceImage(input, ctx.width, ctx.height, { ...p, upscale: false }, ctx.edgeMaskGlobalMax).enhanced;
   }
 }
 export const enhanceModule = new EnhanceModule();

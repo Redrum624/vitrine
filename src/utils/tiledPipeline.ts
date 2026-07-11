@@ -18,9 +18,12 @@
  * SCOPE — the apron makes BOUNDED-CONVOLUTION modules seam-free (blur / sharpen / NLM /
  * ShadowsHighlights mask blur / the enhance chain's kernel cone). It does NOT cover geometric
  * warps (lens distortion/perspective/CA, crop rotation), whose sampling displacement scales with
- * image size rather than a fixed kernel radius — see the NOTE on {@link moduleApron}. Nor can it
- * bound truly global statistics (e.g. enhance edgeMask's `mmax` normalisation — see the enhance
- * case comment), though those produce smooth per-tile gain differences, not hard seams.
+ * image size rather than a fixed kernel radius — see the NOTE on {@link moduleApron}. Truly global
+ * statistics (enhance edgeMask's `mmax` normalisation) are NOT an apron problem — they are handled
+ * out-of-band: {@link pipelineUsesEdgeMask} flags the enhance-sharpen case, and the caller threads
+ * the full-image max (computeGlobalEdgeMax) into every tile so all tiles normalise by the SAME
+ * constant. Because normalisation is POINTWISE, this adds no spatial dependency and does not affect
+ * the apron math below.
  *
  * `apron` must be >= the summed kernel radius of the enabled spatial modules (they run chained in
  * one worker pass, so contamination from the padded edge accumulates radius-by-radius through the
@@ -87,11 +90,12 @@ export function moduleApron(moduleId: string, params: Record<string, unknown>): 
       // chroma path: optional denoiseChroma then cleanChroma(sigma 1.2 => r4) IN SERIES (adds);
       // luma/chroma merge pointwise in yCrCbToRgba -> overall max of the two branches.
       //
-      // RESIDUAL (not kernel-bounded, cannot be aproned): edgeMask normalises by the buffer-GLOBAL
-      // max gradient `mmax` (enhanceOps.ts:33). When a padded tile's local max gradient differs
-      // from the full image's, the sharpen gain differs slightly per tile — a smooth,
-      // amplitude-bounded difference, not a hard convolution seam. The integration seam test pins
-      // mmax by planting identical max-gradient features in every tile.
+      // edgeMask normalises by a GLOBAL max gradient `mmax` (enhanceOps.ts). This is NOT an apron
+      // concern (it's a whole-image statistic, not a kernel neighbourhood): the caller computes the
+      // full-image max once (computeGlobalEdgeMax) and threads it to every tile via the enhance
+      // module's ProcessingContext, so all tiles normalise by the SAME constant — matching the
+      // untiled gain, no per-tile step. Normalisation is POINTWISE, so it adds NO spatial dependency
+      // and does not change the apron radius derived here. See {@link pipelineUsesEdgeMask}.
       const enabled = params.enabled === true;
       const sharpen = params.sharpen !== false;
       const upscale = params.upscale === true;
@@ -139,6 +143,24 @@ export function spatialApron(pipeline: WorkerModuleConfig[]): number {
     total += moduleApron(moduleId, params ?? {});
   }
   return total;
+}
+
+/**
+ * Does this pipeline run the enhance chain's `edgeMask` (i.e. lumaGraft)? Only then is the global
+ * `mmax` normalisation relevant, so the tiled worker path computes + threads the full-image Sobel
+ * max only when this is true (skipping the extra O(N) sweep otherwise). Mirrors the exact gate
+ * enhanceImage uses to run lumaGraft: an ENABLED enhance-sharpen (non-upscale) module with
+ * rlIters > 0 AND psfSigma > 0 (enhanceChain.ts — lumaGraft is inside that `if`).
+ */
+export function pipelineUsesEdgeMask(pipeline: WorkerModuleConfig[]): boolean {
+  const enh = pipeline.find((m) => m.moduleId === 'enhance');
+  if (!enh || !enh.enabled) return false;
+  const p = enh.params ?? {};
+  const sharpen = p.sharpen !== false;
+  const upscale = p.upscale === true;
+  const rlIters = num(p, 'rlIters', 12);
+  const psfSigma = num(p, 'psfSigma', 1.0);
+  return sharpen && !upscale && rlIters > 0 && psfSigma > 0;
 }
 
 /** Overhead cap for the apron's redundant border pixels, as a fraction of the core tile area. */

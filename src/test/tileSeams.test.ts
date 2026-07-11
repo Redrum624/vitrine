@@ -18,10 +18,12 @@
  *  - ShadowsHighlights mask box-blur (radius = ceil(maskBlur), clamp edges — the widest CLEAN
  *    single kernel; see ShadowsHighlightsModule.blurMask).
  *  - The enhance chain (RL-deconv double-blur cone + series highpass — the widest DERIVED kernel;
- *    see the moduleApron enhance case). Its test image pins edgeMask's buffer-global `mmax`
- *    normalisation by planting identical maximum-gradient stamps in every tile (see
- *    buildEnhanceSeamImage), so the only tiled-vs-untiled difference left is kernel contamination
- *    — which the apron must reduce to EXACTLY zero (bit-equal interior arithmetic).
+ *    see the moduleApron enhance case). Its test image (buildEnhanceDensityImage) gives each tile
+ *    a DIFFERENT edge density, so edgeMask's global `mmax` normalisation genuinely matters: the
+ *    tiled run matches the untiled run only when BOTH the apron covers the kernel cone AND the
+ *    full-image edge-mask max is threaded to every tile (computeGlobalEdgeMax → ProcessingContext).
+ *    Two sensitivity guards prove each failure mode seams (too-small apron; per-tile normalisation),
+ *    then the combined path is bit-exact.
  */
 
 import { ImageProcessingPipeline, type ProcessingContext } from '../services/ImageProcessingPipeline';
@@ -34,7 +36,7 @@ import {
 import * as tiledPipeline from '../utils/tiledPipeline';
 import { createNoiseImage, maxImageDifference } from './testUtils';
 
-const { spatialApron, planApronTile, effectiveTileSize, moduleApron, MAX_WORKER_TILE } = tiledPipeline;
+const { spatialApron, planApronTile, effectiveTileSize, moduleApron, MAX_WORKER_TILE, pipelineUsesEdgeMask } = tiledPipeline;
 
 jest.mock('../utils/Logger', () => ({
   logger: { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() },
@@ -63,11 +65,20 @@ async function processUntiled(img: WorkerImageData, config: WorkerModuleConfig[]
 /**
  * Drive the REAL processTiledImage with an in-process transport: the "worker" runs the real
  * pipeline synchronously on whatever tile buffer the stitching code sends (padded, once aproned).
+ *
+ * Mirrors pipeline.worker.ts PROCESS_TILE faithfully: the real processTiledImage computes the
+ * full-image edgeMaskGlobalMax and sends it in the message; this stub, like the real worker, puts
+ * it on the tile's ProcessingContext so edgeMask normalises by the global constant.
+ *
+ * `ignoreGlobalMax` (default false) simulates the PRE-FIX worker that never threaded the value:
+ * the tile then normalises by its OWN buffer max (per-tile) — used only by the sensitivity guard
+ * to prove the harness catches the per-tile normalisation seam.
  */
 async function processTiled(
   img: WorkerImageData,
   config: WorkerModuleConfig[],
   tileSize: number,
+  { ignoreGlobalMax = false }: { ignoreGlobalMax?: boolean } = {},
 ): Promise<Float32Array> {
   const processor = WebWorkerImageProcessor.getInstance();
   const priv = processor as unknown as PrivateProcessor;
@@ -81,7 +92,12 @@ async function processTiled(
     const channels = (data.channels as number) ?? 4;
     const pipeline = new ImageProcessingPipeline();
     pipeline.applyWorkerConfig(data.pipeline as WorkerModuleConfig[]);
-    const ctx: ProcessingContext = { width: tileWidth, height: tileHeight, channels };
+    const ctx: ProcessingContext = {
+      width: tileWidth,
+      height: tileHeight,
+      channels,
+      edgeMaskGlobalMax: ignoreGlobalMax ? undefined : (data.edgeMaskGlobalMax as number | undefined),
+    };
     const out = await pipeline.processImage(tileData, ctx, { useWebWorkers: false });
     return {
       success: true,
@@ -148,41 +164,42 @@ describe('CPU worker tiled pipeline — spatial-filter seams', () => {
 });
 
 /**
- * Dark noise + identical maximum-gradient stamps, for the enhance seam test.
+ * DIFFERENT edge densities per tile region — the honest test for global edgeMask normalisation.
  *
- * - DARK noise ([0.02, 0.22]): RL-deconv divides by the local blur (`rel = y/max(conv, eps)`), so
- *   small `conv` AMPLIFIES boundary-clamp contamination — pushing the detectable seam band as far
- *   out as the chain can carry it (the strictest exercise of the apron).
- * - STAMPS (12x12: 2px zero ring, ones core, one corner carved): edgeMask normalises by the
- *   buffer-GLOBAL max Sobel magnitude `mmax` — a statistic no apron can bound. The carved corner
- *   realises the pattern [[0,0,1],[0,·,1],[0,1,1]] whose magnitude sqrt(4²+2²)=sqrt(20) is the
- *   THEORETICAL CEILING for values in [0,1] (gx=4 forces the shared corners to values where
- *   |gy|<=2), so every stamp attains the exact global maximum and NO clamped tile edge can exceed
- *   it. Stamps repeat every 100px -> every padded tile contains a complete stamp -> per-tile mmax
- *   === untiled mmax, and the only remaining tiled-vs-untiled difference is kernel contamination.
+ * edgeMask normalises Sobel magnitudes by the buffer-global max gradient `mmax`. When tiled and
+ * normalised PER TILE, a tile whose local max differs from the whole image's applies a different
+ * sharpen gain → a smooth per-tile step at the crop lines. The old test dodged this by planting
+ * identical maximum-gradient stamps in every tile (per-tile mmax === global). This image does the
+ * OPPOSITE — it makes the per-tile maxes genuinely differ, so the seam is REAL unless the global
+ * max is threaded to every tile:
+ *
+ * - DARK grey high-frequency noise EVERYWHERE ([0.02, 0.22]): RL-deconv divides by the local blur
+ *   (`rel = y/max(conv, eps)`), so small `conv` AMPLIFIES contamination — this is what lets the
+ *   too-small-apron sensitivity guard detect a kernel seam, and it gives the highpass a real signal
+ *   so the mask-normalisation difference reaches the output. Its Sobel max (~1) is the whole faint
+ *   background.
+ * - ONE strong hard vertical edge (black→white) in the LEFT tile only (x≈250). With TILE=64 the
+ *   effective tile is 767px, so the grid is 2 tiles: left core [0,767), right core [767,1000). The
+ *   right tile's padded region starts at 767-23=744, well right of x=250, so the strong edge (Sobel
+ *   magnitude 4) is the whole-image max AND the left tile's local max, but NOT the right tile's —
+ *   the right tile sees only the faint ~1 background. Per-tile normalisation therefore over-amplifies
+ *   the right region's sharpen; threading the global max makes every tile match the untiled gain.
  */
-function buildEnhanceSeamImage(W: number, H: number): Float32Array {
+function buildEnhanceDensityImage(W: number, H: number): Float32Array {
   const data = createNoiseImage(W, H, 11);
   for (let i = 0; i < data.length; i += 4) {
-    data[i] = 0.02 + 0.2 * data[i];
-    data[i + 1] = 0.02 + 0.2 * data[i + 1];
-    data[i + 2] = 0.02 + 0.2 * data[i + 2];
-    data[i + 3] = 1;
+    const v = 0.02 + 0.2 * data[i]; // grey so luma === v; dark → RL amplifies contamination
+    data[i] = v; data[i + 1] = v; data[i + 2] = v; data[i + 3] = 1;
   }
-  const carved = new Set(['2,2', '3,2', '2,3', '2,4']);
-  for (let sy = 40; sy + 12 <= H; sy += 100) {
-    for (let sx = 40; sx + 12 <= W; sx += 100) {
-      for (let y = 0; y < 12; y++) {
-        for (let x = 0; x < 12; x++) {
-          const core = x >= 2 && x < 10 && y >= 2 && y < 10 && !carved.has(`${x},${y}`);
-          const v = core ? 1 : 0;
-          const idx = ((sy + y) * W + (sx + x)) * 4;
-          data[idx] = v;
-          data[idx + 1] = v;
-          data[idx + 2] = v;
-          data[idx + 3] = 1;
-        }
-      }
+  // Hard vertical edge at x=250 (3px black band | 3px white band): a pure vertical step → Sobel
+  // gx=4, gy=0, magnitude 4 — well above the faint background's max, and located only in the left
+  // tile (its padded region never reaches the right tile).
+  const edgeX = 250;
+  for (let y = 0; y < H; y++) {
+    for (let x = edgeX - 3; x < edgeX + 3; x++) {
+      const v = x < edgeX ? 0 : 1;
+      const idx = (y * W + x) * 4;
+      data[idx] = v; data[idx + 1] = v; data[idx + 2] = v; data[idx + 3] = 1;
     }
   }
   return data;
@@ -215,33 +232,41 @@ describe('CPU worker tiled pipeline — enhance chain (RL-deconv cone) seams', (
     expect(spatialApron(enhanceConfig)).toBe(23);
   });
 
-  it('tiled enhance is BIT-EXACT vs untiled at the derived apron, and a too-small apron seams', async () => {
+  it('tiled enhance is BIT-EXACT vs untiled with the global edge-mask max; both a too-small apron and per-tile normalisation seam', async () => {
     const img: WorkerImageData = {
       width: WIDTH,
       height: HEIGHT,
       channels: 4,
-      data: buildEnhanceSeamImage(WIDTH, HEIGHT),
+      data: buildEnhanceDensityImage(WIDTH, HEIGHT),
     };
 
-    // Guard: >= 2 tiles (else the test is vacuous).
+    // Guard: >= 2 tiles (else the test is vacuous), and the tile split is the intended left/right.
     const apron = spatialApron(enhanceConfig);
     const eff = effectiveTileSize(TILE, apron);
-    expect(Math.ceil(WIDTH / eff) * Math.ceil(HEIGHT / eff)).toBeGreaterThan(1);
+    expect(Math.ceil(WIDTH / eff) * Math.ceil(HEIGHT / eff)).toBe(2);
 
     const untiled = await processUntiled(img, enhanceConfig);
     // Sanity: enhance actually changed the image.
     expect(maxImageDifference(untiled, img.data)).toBeGreaterThan(0.01);
 
-    // SENSITIVITY GUARD (proves the harness detects seams at all): force an apron well inside the
-    // contamination band — the boundary must show a real discrepancy (measured ~6.0e-6).
+    // SENSITIVITY GUARD A — apron: force an apron well inside the RL contamination band; the
+    // boundary must show a real KERNEL discrepancy (proves the harness detects convolution seams).
     const spy = jest.spyOn(tiledPipeline, 'spatialApron').mockReturnValue(11);
-    const seamy = await processTiled(img, enhanceConfig, TILE);
+    const seamyApron = await processTiled(img, enhanceConfig, TILE);
     spy.mockRestore();
-    expect(maxImageDifference(seamy, untiled)).toBeGreaterThan(5e-7);
+    expect(maxImageDifference(seamyApron, untiled)).toBeGreaterThan(5e-7);
 
-    // THE assertion: at the derived apron every interior pixel's full dependency cone fits inside
-    // its padded tile, so the arithmetic is IDENTICAL to the untiled run -> exactly 0 (assert a
-    // defensive 1e-7). The OLD formula (apron 17) leaves ~7.0e-7 here and FAILS this bound.
+    // SENSITIVITY GUARD B — per-tile normalisation (the P3 residual, RED without the fix): correct
+    // apron, but the worker ignores the threaded global edge-mask max, so each tile normalises by
+    // its OWN buffer max. The right tile (faint texture only) over-amplifies its sharpen vs the
+    // untiled whole-image gain → a real, honest seam this image is designed to expose. This is the
+    // assertion the old test's max-gradient stamps dodged; it fails the bit-exact bound below.
+    const seamyNorm = await processTiled(img, enhanceConfig, TILE, { ignoreGlobalMax: true });
+    expect(maxImageDifference(seamyNorm, untiled)).toBeGreaterThan(1e-3);
+
+    // THE assertion: correct apron AND the global edge-mask max threaded to every tile → every
+    // interior pixel's full dependency cone fits its padded tile and every tile normalises by the
+    // SAME constant, so the arithmetic is IDENTICAL to the untiled run → exactly 0 (defensive 1e-7).
     const tiled = await processTiled(img, enhanceConfig, TILE);
     expect(maxImageDifference(tiled, untiled)).toBeLessThan(1e-7);
   }, 120000);
@@ -304,6 +329,29 @@ describe('spatialApron — kernel radius from params', () => {
     // disabled / upscale path contributes nothing to the same-res convolution apron
     expect(moduleApron('enhance', { enabled: false })).toBe(0);
     expect(moduleApron('enhance', { enabled: true, sharpen: true, upscale: true })).toBe(0);
+  });
+});
+
+describe('pipelineUsesEdgeMask — gate for the global edge-mask sweep', () => {
+  const enh = (params: Record<string, unknown>): WorkerModuleConfig[] => [
+    { moduleId: 'enhance', enabled: true, params: { enabled: true, sharpen: true, upscale: false, psfSigma: 1.0, rlIters: 12, ...params } },
+  ];
+  it('true for an enabled enhance-sharpen module with an active RL/edgeMask pass', () => {
+    expect(pipelineUsesEdgeMask(enh({}))).toBe(true);
+  });
+  it('false when the enhance module is disabled', () => {
+    expect(pipelineUsesEdgeMask([{ moduleId: 'enhance', enabled: false, params: { enabled: true, sharpen: true } }])).toBe(false);
+  });
+  it('false on the upscale path or when sharpen is off (edgeMask does not run there)', () => {
+    expect(pipelineUsesEdgeMask(enh({ upscale: true }))).toBe(false);
+    expect(pipelineUsesEdgeMask(enh({ sharpen: false }))).toBe(false);
+  });
+  it('false when RL is off (rlIters 0 or psfSigma 0 → lumaGraft/edgeMask never runs)', () => {
+    expect(pipelineUsesEdgeMask(enh({ rlIters: 0 }))).toBe(false);
+    expect(pipelineUsesEdgeMask(enh({ psfSigma: 0 }))).toBe(false);
+  });
+  it('false for a pipeline with no enhance module', () => {
+    expect(pipelineUsesEdgeMask([{ moduleId: 'exposure', enabled: true, params: { exposure: 0.3 } }])).toBe(false);
   });
 });
 

@@ -57,6 +57,11 @@ export interface ProcessingContext {
   width: number;
   height: number;
   channels: number;
+  /** Full-image Sobel-gradient max for the enhance edge mask, threaded ONLY on the tiled CPU
+   *  worker path (WebWorkerImageProcessor → pipeline.worker PROCESS_TILE) so every tile's edgeMask
+   *  normalises by the same global constant (seam-free sharpen gain). Absent on the whole-image /
+   *  main-thread path — edgeMask then uses its own buffer max (byte-identical to before). */
+  edgeMaskGlobalMax?: number;
 }
 
 /** Trailing options for {@link ImageProcessingPipeline.processImage}. Replaces the

@@ -1,6 +1,7 @@
 import { logger } from '../utils/Logger';
 import { pipelineWorkerUrl } from '../workers/pipelineWorkerUrl';
-import { spatialApron, effectiveTileSize, planApronTile } from '../utils/tiledPipeline';
+import { spatialApron, effectiveTileSize, planApronTile, pipelineUsesEdgeMask } from '../utils/tiledPipeline';
+import { computeGlobalEdgeMax } from '../utils/enhanceOps';
 
 export interface WorkerImageData {
   width: number;
@@ -248,6 +249,16 @@ export class WebWorkerImageProcessor {
       // overhead. No-op for the common single-filter case on the production 2048/4096 tiles.
       const effTile = effectiveTileSize(tileSize, apron);
 
+      // Global edge-mask normalisation (two-pass, pass 1 here): the enhance sharpen chain's edgeMask
+      // normalises Sobel magnitudes by the buffer max — per-TILE when tiled → a smooth per-tile
+      // sharpen-gain step at crop lines. Compute the full-image max ONCE (one extra O(N) luma-Sobel
+      // sweep, only when an enhance-sharpen edgeMask is actually in the pipeline) and thread it to
+      // every tile so all tiles normalise by the SAME constant (matches the untiled whole-image
+      // gain). Pointwise → no new spatial dependency, so the apron above is unchanged.
+      const edgeMaskGlobalMax = pipelineUsesEdgeMask(pipeline)
+        ? computeGlobalEdgeMax(data, width, height)
+        : undefined;
+
       // Calculate tile dimensions using the (possibly grown) effective tile size
       const tilesX = Math.ceil(width / effTile);
       const tilesY = Math.ceil(height / effTile);
@@ -270,7 +281,8 @@ export class WebWorkerImageProcessor {
             effTile,
             pipeline,
             processedData,
-            apron
+            apron,
+            edgeMaskGlobalMax
           );
           tilePromises.push(promise);
         }
@@ -306,7 +318,8 @@ export class WebWorkerImageProcessor {
     tileSize: number,
     pipeline: WorkerModuleConfig[],
     resultArray: Float32Array,
-    apron = 0
+    apron = 0,
+    edgeMaskGlobalMax?: number
   ): Promise<void> {
     const { width, height, data, channels } = imageData;
 
@@ -342,7 +355,10 @@ export class WebWorkerImageProcessor {
         fullWidth: width,
         fullHeight: height,
         channels,
-        pipeline
+        pipeline,
+        // Full-image edge-mask max (undefined unless the pipeline runs the enhance edgeMask); the
+        // worker puts it on the ProcessingContext so this tile's edgeMask normalises globally.
+        edgeMaskGlobalMax
       }) as TileProcessingResult;
 
       if (!result.success) {

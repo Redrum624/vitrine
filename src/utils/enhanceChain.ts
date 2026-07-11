@@ -16,14 +16,17 @@ export const DEFAULT_ENHANCE_PARAMS: EnhanceParams = {
 };
 export interface EnhanceResult { enhanced: Float32Array; base: Float32Array; width: number; height: number; }
 
-export function enhanceImage(rgba: Float32Array, w: number, h: number, p: EnhanceParams): EnhanceResult {
+export function enhanceImage(rgba: Float32Array, w: number, h: number, p: EnhanceParams, edgeMaskGlobalMax?: number): EnhanceResult {
   // 0+1 native res: denoise chroma, RL-deconv deblur + luma graft
+  // edgeMaskGlobalMax (optional): the full-image Sobel-gradient max, supplied by the tiled CPU
+  // worker path so lumaGraft's edgeMask normalises by the SAME constant in every tile (seam-free
+  // sharpen gain). Undefined on the untiled/whole-image path → edgeMask uses its own buffer max.
   const ycc = rgbaToYCrCb(rgba);
   let { y, cr, cb } = ycc; const a = ycc.a;
   if (p.denoiseStrength > 0) { const d = denoiseChroma(cr, cb, y, w, h, p.denoiseStrength); cr = d.cr; cb = d.cb; }
   if (p.rlIters > 0 && p.psfSigma > 0) {
     const restored = rlDeconvLuma(y, w, h, p.psfSigma, p.rlIters);
-    y = lumaGraft(y, restored, w, h, p.alpha, p.hpSigma);
+    y = lumaGraft(y, restored, w, h, p.alpha, p.hpSigma, edgeMaskGlobalMax);
   }
   let cur = yCrCbToRgba({ y, cr, cb, a }); let cw = w, ch = h;
   let base: Float32Array;

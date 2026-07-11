@@ -65,6 +65,10 @@ interface ProcessTileMessage {
     fullWidth?: number;
     fullHeight?: number;
     channels?: number;
+    /** Full-image Sobel-gradient max for the enhance edge mask (undefined unless the pipeline runs
+     *  it). Placed on the ProcessingContext so every tile's edgeMask normalises by the SAME global
+     *  constant → seam-free sharpen gain (see WebWorkerImageProcessor.processTiledImage). */
+    edgeMaskGlobalMax?: number;
     pipeline: WorkerModuleConfig[];
   };
 }
@@ -85,9 +89,12 @@ async function runPipeline(
   height: number,
   channels: number,
   config: WorkerModuleConfig[],
+  edgeMaskGlobalMax?: number,
 ): Promise<Float32Array> {
   pipeline.applyWorkerConfig(config);
-  const context: ProcessingContext = { width, height, channels };
+  // edgeMaskGlobalMax rides on the context (undefined unless the tiled caller computed it) so the
+  // enhance module's edgeMask normalises by the full-image max instead of this tile's local max.
+  const context: ProcessingContext = { width, height, channels, edgeMaskGlobalMax };
   // useWebWorkers=false → CPU in-worker, NO nested workers (no recursion).
   return pipeline.processImage(data, context, { useWebWorkers: false });
 }
@@ -138,19 +145,20 @@ ctx.addEventListener('message', async (event: MessageEvent) => {
 
       case 'PROCESS_TILE': {
         const startTime = performance.now();
-        const { tileData, tileWidth, tileHeight, tileX, tileY, channels, pipeline: pipelineConfig } = msg.data;
+        const { tileData, tileWidth, tileHeight, tileX, tileY, channels, edgeMaskGlobalMax, pipeline: pipelineConfig } = msg.data;
         // Tiles are processed as standalone images. The caller (WebWorkerImageProcessor.processTile)
         // grows each tile by an APRON of neighbour pixels sized to the enabled modules' summed kernel
         // radius (spatialApron), so every INTERIOR pixel already has full kernel context here; the
         // caller then crops the apron off. BOUNDED-CONVOLUTION filters (blur/sharpen/NLM/
         // ShadowsHighlights mask blur/the enhance kernel cone) are therefore seam-free at tile
-        // boundaries. NOT covered (see moduleApron in src/utils/tiledPipeline.ts): geometric warps
-        // (lens distortion/perspective/CA, crop rotation — displacement scales with image size) and
-        // global statistics (enhance edgeMask mmax). tileWidth/tileHeight are the PADDED dims;
-        // fullWidth/fullHeight remain informational only.
+        // boundaries. NOT covered by the apron (see moduleApron in src/utils/tiledPipeline.ts):
+        // geometric warps (lens distortion/perspective/CA, crop rotation — displacement scales with
+        // image size). The enhance edgeMask's global `mmax` statistic IS handled — out-of-band via
+        // edgeMaskGlobalMax on the ProcessingContext (threaded below), so it is not an apron gap.
+        // tileWidth/tileHeight are the PADDED dims; fullWidth/fullHeight remain informational only.
         const resolvedChannels = channels ?? 4;
         const result = await runPipeline(
-          tileData, tileWidth, tileHeight, resolvedChannels, pipelineConfig,
+          tileData, tileWidth, tileHeight, resolvedChannels, pipelineConfig, edgeMaskGlobalMax,
         );
         const processingTime = performance.now() - startTime;
         ctx.postMessage(
