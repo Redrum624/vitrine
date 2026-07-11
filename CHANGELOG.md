@@ -4,6 +4,17 @@ All notable changes to **Photo Editor Pro** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.16.0] - 2026-07-10
+
+### Added
+- **RAW photos open near-instantly (progressive open).** Opening a RAW now paints the camera's embedded preview in ~0.5 s (measured on a 20 MP ORF: 5.5 s → 0.50 s cold, ~11×) with your saved edits already applied, while the full 16-bit LibRaw decode develops in the background and swaps in seamlessly (~5.5 s) — a "Developing full quality…" note shows in the footer meanwhile. Pixel-precise actions (Auto adjustments, Rotate/Flip, Image Size, Enhance upscale, Print, Copy Style, export sizing) are gated until full quality lands so nothing ever bakes numbers from the low-res preview; batch processing always uses the full decode. The critical-path IPC payload shrank from 122 MB to 9.4 MB (~13×) because the full 16-bit buffer transfer moved off the first-paint path into the background step. Affects: `electron/rawDecoder.cjs`, `electron/embeddedPreview.cjs` (new), `electron/main.cjs`, `src/services/RawImageService.ts`, `src/services/ImageService.ts`, `src/utils/developingGuard.ts` (new), `src/components/Layout/Canvas.tsx`.
+
+### Changed
+- **Switching photos is dramatically snappier.** Three compounding causes fixed: (1) the keyboard-shortcut system tore itself down and re-registered on every image open (an effect-dependency churn bug that profiled like a full app remount), and the canvas wasted ~0.7 s re-drawing the *previous* photo at full resolution before the new one even dispatched — decode dispatch now starts at ~380 ms after the click (was 912 ms) with zero stale redraws; (2) persisted edits are restored *before* the first processing pass instead of ~350 ms after it, eliminating both the second full pass (2 → 1) and the visible "unedited flash" on every edited photo — heavy warm reopen ~0.96 s (was 1.98 s); (3) the 310 MB Before/After original snapshot is no longer copied on every open — it materializes lazily on first use (copy-on-write), saving ~90 ms and 310 MB of allocation per open. Affects: `src/App.tsx`, `src/components/Layout/Canvas.tsx`, `src/services/ImageService.ts`.
+- Rapidly switching A→B→A no longer re-runs a superseded load (the image-load guard now uses a per-call token instead of path equality, so a stale resumed call can't re-dispatch a duplicate RAW decode).
+- Session-cache polish: the entry-count cap now counts per category, so large RAW bases no longer evict thumbnail slots; the main process's RAW format list is consolidated into one constant (closing a `.sr2`/`.srf`/`.x3f` preview gap).
+- A regression test now locks the GPU canvas-sizing resize-observer chain (the load-bearing effect chain documented in Canvas.tsx).
+
 ## [1.15.0] - 2026-07-10
 
 ### Added

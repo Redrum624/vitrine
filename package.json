@@ -1,6 +1,6 @@
 {
   "name": "photo_app",
-  "version": "1.15.0",
+  "version": "1.16.0",
   "description": "Professional photo editor",
   "main": "electron/main.cjs",
   "scripts": {

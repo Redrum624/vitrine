@@ -1,8 +1,8 @@
 # Photo Editor Pro
 
-![Version](https://img.shields.io/badge/Version-1.15.0-blue)
+![Version](https://img.shields.io/badge/Version-1.16.0-blue)
 ![TypeScript](https://img.shields.io/badge/TypeScript-0_errors-blue)
-![Tests](https://img.shields.io/badge/Tests-1356_passing-brightgreen)
+![Tests](https://img.shields.io/badge/Tests-1421_passing-brightgreen)
 ![Lint](https://img.shields.io/badge/Lint-clean-brightgreen)
 ![GPU](https://img.shields.io/badge/GPU-WebGL2_accelerated-success)
 
@@ -78,6 +78,7 @@ electron-builder's full staging output (unpacked app, block maps) stays in `rele
 
 - **RAW processing** — native LibRaw (`dcraw_emu`) Bayer demosaic in the Electron main process for 15+ formats (CR2/CR3, NEF, ARW, ORF, DNG, RW2, PEF, …), decoding with DCB demosaic + blended highlight reconstruction by default; `libraw-wasm` and embedded-JPEG fallbacks ensure every RAW opens.
 - **Per-image RAW decode control** — a "RAW Decode" panel (shown only for RAW files) lets you choose the demosaic algorithm (AHD/DCB) and highlight-recovery mode (Off/Blend/Reconstruct) per photo; changing either re-decodes from disk, and the choice is saved per image and applied on export.
+- **Instant RAW preview (progressive open)** — opening a RAW paints the camera's embedded preview in ~0.5 s with your saved edits applied, while the full 16-bit decode develops in the background and swaps in seamlessly ("Developing full quality…" shows in the footer); pixel-precise actions (Auto adjustments, transforms, upscale, print, copy style) wait for full quality automatically.
 - **GPU-accelerated preview** — resident-texture WebGL2 pipeline: image uploaded to the GPU once, all modules run as fragment-shader passes with zero GPU→CPU readback; CPU/Web-Worker fallback runs off the main thread when WebGL2 is unavailable.
 - **AI super-resolution upscale** — Real-ESRGAN x4plus (onnxruntime-node + DirectML) runs in the main process for sharper ×2/×4 enlargements when a GPU is available, with tiled bounded-memory inference, live progress, an AI/Standard badge, and automatic fallback to the deterministic Lanczos path.
 - **Export** — JPEG, PNG, TIFF, or WebP in 8-bit or 16-bit; sRGB or wide-gamut (Adobe RGB, ProPhoto, Rec.2020) with generated ICC profiles; EXIF/XMP metadata embedded; Enhance output (sharpen/upscale) baked in automatically.
