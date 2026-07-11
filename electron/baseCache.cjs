@@ -148,6 +148,12 @@ function init(dir, opts = {}) {
       const key = name.slice(0, -'.bin'.length);
       if (!jsonKeys.has(key)) safeUnlinkSync(path.join(cacheDir, name));
     }
+    // Sweep *.tmp orphans (crash BEFORE either rename — write() stages both files as
+    // <key>.<ext>.<rnd>.tmp first). They're ~122MB each, invisible to the LRU budget, and no
+    // in-flight write survives a restart, so any .tmp at init time is garbage by definition.
+    for (const name of names) {
+      if (name.endsWith('.tmp')) safeUnlinkSync(path.join(cacheDir, name));
+    }
   } catch (_) {
     /* best-effort — a broken cache dir must never break startup */
   }

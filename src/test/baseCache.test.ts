@@ -182,4 +182,22 @@ describe('baseCache fs round-trip', () => {
     expect(hit).not.toBeNull();
     expect(new Uint16Array(hit!.data)[0]).toBe(55);
   });
+
+  it('init sweeps *.tmp orphans (crash before the renames) — they never accumulate', async () => {
+    // A crash between writeFile(tmp) and the renames leaves <key>.<ext>.<rnd>.tmp staging files
+    // (~122MB each in production) that are invisible to the LRU budget. init must delete every
+    // .tmp: no in-flight write survives a restart, so any .tmp at init time is garbage.
+    await baseCache.write(src, OPTS, makePayload(8, 4, 55)); // one committed entry stays intact
+    const orphanBin = path.join(dir, 'deadbeef-cafe0123.bin.k3xq9z.tmp');
+    const orphanJson = path.join(dir, 'deadbeef-cafe0123.json.k3xq9z.tmp');
+    fs.writeFileSync(orphanBin, Buffer.alloc(64, 1));
+    fs.writeFileSync(orphanJson, '{"partial":true}');
+
+    const count = baseCache.init(dir, { budget: baseCache.DEFAULT_BUDGET_BYTES });
+
+    expect(fs.existsSync(orphanBin)).toBe(false);
+    expect(fs.existsSync(orphanJson)).toBe(false);
+    expect(count).toBe(1); // the committed entry survives the sweep
+    expect(await baseCache.read(src, OPTS)).not.toBeNull();
+  });
 });

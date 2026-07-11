@@ -31,9 +31,19 @@
  * near-zero false positives.
  *
  * KNOWN BOUNDARY (read intentionally): this catches new *call sites* of the KNOWN primitives and
- * every new base WRITE. A brand-new analysis primitive (a new function that reads base pixels to
- * bake params) is only covered once its name is added to PRIMITIVES — do that in the same change
- * that introduces it. The allow-lists are asserted non-stale, so they can't rot into a rubber stamp.
+ * every new base WRITE. Two classes need a manual step in the SAME change that introduces them:
+ *   1. A brand-new analysis PRIMITIVE (a new function that reads base pixels to bake params) is
+ *      only covered once its name is added to PRIMITIVES.
+ *   2. OUTPUT EMISSION — an action that reads current pixels to EMIT them somewhere durable
+ *      (print, export/resize seeding, copy-image-to-clipboard, share, save-as). This was the
+ *      round-1 breach class (Print emitted low-res preview pixels; export seeded preview dims).
+ *      The existing emitters are gated (Print via guardDeveloping; ExportDialog via dims-write
+ *      gating), but a NEW emitter (e.g. "Copy image to clipboard") reading
+ *      getCurrentImage().data during developing would ship preview pixels with this tripwire
+ *      GREEN — raw `.data` reads are deliberately not scanned (see WHY above). When adding any
+ *      feature that sends current pixels outside the app, gate it with guardDeveloping AND add
+ *      its entry point to PRIMITIVES.
+ * The allow-lists are asserted non-stale, so they can't rot into a rubber stamp.
  *
  * Precedent for source-scanning tests: keyboardShortcutsSingleRegistration.test.ts,
  * mainRawFormatsConsolidation.test.ts.
