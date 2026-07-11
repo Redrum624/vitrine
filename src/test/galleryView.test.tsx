@@ -274,6 +274,24 @@ describe('GalleryView numpad/number rating keys (dead-key-in-gallery regression)
     expect(useAppStore.getState().imageRatings.img3).toBeUndefined();
     expect(window.electronAPI!.writeImageRating).not.toHaveBeenCalled();
   });
+
+  it('does NOT rate beneath an open modal (Del-remove dialog: selection is non-empty by construction; rating writes XMP to disk)', () => {
+    useAppStore.setState({ selectedImageIds: ['img1', 'img3'] });
+    render(<GalleryView images={images} onImageSelect={jest.fn()} visible={true} />);
+    // Simulate any GlassModal being open (the Del-remove confirm, Export, …).
+    const modal = document.createElement('div');
+    modal.setAttribute('aria-modal', 'true');
+    document.body.appendChild(modal);
+    try {
+      fireEvent.keyDown(document, { key: '3' });
+
+      expect(useAppStore.getState().imageRatings.img1).toBeUndefined();
+      expect(useAppStore.getState().imageRatings.img3).toBeUndefined();
+      expect(window.electronAPI!.writeImageRating).not.toHaveBeenCalled();
+    } finally {
+      modal.remove();
+    }
+  });
 });
 
 /**

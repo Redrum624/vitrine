@@ -148,7 +148,8 @@ export const APRON_OVERHEAD_CAP = 0.12;
  * Hard ceiling on tile growth — matches WebWorkerImageProcessor's `hugeTileSize` (the largest tile
  * the worker path is ever asked to allocate). A maxed-out enhance stack (rlIters 30, psfSigma 3 ->
  * apron ~550) would otherwise demand an ~18000-px tile: a single Float32 RGBA tile buffer of
- * ~5 GB -> worker OOM. Capped, the buffer stays <= ~270 MB.
+ * ~5 GB -> worker OOM. Capped, the PADDED buffer (core 4096 + 2×apron) stays <= ~430 MB at the
+ * extreme apron (~5196² × 16 B) — comparable to the pre-existing 4096 huge-tile envelope.
  */
 export const MAX_WORKER_TILE = 4096;
 

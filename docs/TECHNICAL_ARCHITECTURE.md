@@ -78,24 +78,26 @@ GPUAccelerationService      // WebGL2 high-performance processing
 
 #### **Advanced Editing Services**
 ```typescript
-LocalAdjustmentsService     // Brush, gradient, and parametric adjustments
-├── LuminosityMaskService   // Automatic luminosity-based selections
+LocalAdjustmentsModule      // Radial/gradient mask layers, per-layer adjustments
 ├── ColorRangeService       // HSV/LAB/RGB color model selections
 ├── AdvancedBlendingService // 30+ professional blend modes
 ├── MaskRefinementService   // Edge detection and mask optimization
-├── GraduatedFiltersService // Linear/radial/angular gradients
-└── SpotRemovalService      // Healing, cloning, content-aware tools
+└── GraduatedFiltersService // Linear/radial/angular gradients
 ```
 
 #### **Workflow Services**
 ```typescript
 ExportService              // Multi-format export with quality settings
 ├── BatchProcessingService // Queue-based batch operations
-├── PrintService          // Color-managed printing with soft proofing
-├── WebGalleryService     // Automated gallery generation
-├── CopyrightService      // IPTC/XMP metadata management
-└── WatermarkService      // Text and logo watermarking
+├── MultiExportService     // Multi-select export, per-image saved edits
+├── PresetService          // Adjustment snapshots incl. Local Adjustments layers
+└── PrintService           // Color-managed printing with soft proofing
 ```
+
+> Historical note: the LuminosityMask, SpotRemoval, WebGallery, Copyright, and
+> Watermark services (and their pre-Glass module components) were removed in
+> v1.18.0 after a reachability audit proved them orphaned since the Glass UI
+> redesign — no live UI path reached them.
 
 ## 🔧 **Processing Pipeline**
 
