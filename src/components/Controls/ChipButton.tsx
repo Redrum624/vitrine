@@ -20,7 +20,7 @@ interface ChipButtonProps {
  * rgba(255,255,255,.04) fill / .1 border, 11.5px text. Active (and hover, per
  * the spec's "chips → accent soft/ring/text" hover rule) = accent-soft fill +
  * accent-ring border + accent text, 150ms transition; press = scale(.97).
- * See design_handoff_glass_ui/README.md ("Chips/tiles", "Interactions & Behavior").
+ * See the Glass UI design spec ("Chips/tiles", "Interactions & Behavior").
  */
 export function ChipButton({
   children,

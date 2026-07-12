@@ -295,6 +295,9 @@ postcss.config.js.map
 
 # Superpowers / SDD scratch (internal agent notes, plans, progress ledger)
 .superpowers/
+# Committed design/implementation plans + specs are internal dev-process docs —
+# keep them local, out of the public repo.
+docs/superpowers/
 
 # Local RAW/test fixtures (large binaries)
 /test/
@@ -302,3 +305,7 @@ postcss.config.js.map
 # Internal planning / analysis artifacts (not part of the shipped repo)
 idea-eval/
 docs/go-public-plan.html
+docs/analyses/
+docs/pre-ship-audit-*.html
+# Internal design-handoff bundle (mockups + reference shots; not shipped)
+design_handoff_glass_ui/

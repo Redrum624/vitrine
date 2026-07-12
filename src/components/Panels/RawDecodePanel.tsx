@@ -73,7 +73,7 @@ interface RawDecodePanelProps {
  * in the Glass · Sectioned redesign): jest-dom's `toHaveValue`/`toBeDisabled`/title-attribute
  * assertions in rawDecodePanel.test.tsx need a genuine form control, and a native <select>
  * restyled with the same glass tokens reads identically to the rest of the card system
- * without trading away that test contract (see design_handoff_glass_ui — "keep hidden
+ * without trading away that test contract (see the Glass UI design spec — "keep hidden
  * selects" is the sanctioned fallback when a control swap would weaken value-binding).
  */
 export function RawDecodePanel({ currentImage }: RawDecodePanelProps) {

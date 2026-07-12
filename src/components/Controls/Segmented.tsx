@@ -17,7 +17,7 @@ interface SegmentedProps<T extends string> {
  * Glass · Sectioned segmented control: container rgba(0,0,0,.35) radius 9
  * padding 3; active segment = accent-soft fill / accent-ring border / accent
  * text. Generic over any string-literal union (mode tiles, channel tabs,
- * Develop|Gallery toggle, ...). See design_handoff_glass_ui/README.md
+ * Develop|Gallery toggle, ...). See the Glass UI design spec
  * ("Chips/tiles" → Segmented controls).
  *
  * Keyboard: implements the ARIA Authoring Practices "tabs" pattern with

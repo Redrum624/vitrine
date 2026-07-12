@@ -4,7 +4,7 @@
  * chrome (ModuleCardHeader: 28px accent icon chip + title + state subtitle + Auto⚡
  * then Reset↺ chips, same order every module) and the standalone Histogram glass card.
  *
- * Anatomy comes from design_handoff_glass_ui/README.md ("Module card system") and the
+ * Anatomy comes from the Glass UI design spec ("Module card system") and the
  * reference shots (4a-develop.png, 4a-module-*.png).
  */
 import { Sun } from 'lucide-react';

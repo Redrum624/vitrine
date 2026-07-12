@@ -3,7 +3,7 @@
  * glass-ui redesign). These are the four foundation primitives every module
  * card will consume later: SectionLabel, ChipButton, Segmented, SliderRow.
  *
- * Values asserted here come straight from design_handoff_glass_ui/README.md
+ * Values asserted here come straight from the Glass UI design spec
  * ("Module card system" + "Design Tokens") and 4a Dev Handoff.dc.html (§2, §4).
  */
 import { render, screen, fireEvent } from '@testing-library/react';

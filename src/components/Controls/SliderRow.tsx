@@ -49,7 +49,7 @@ interface SliderRowProps {
  * track (optionally gradient), center detent line at the default value, and a
  * 14px thumb that grows + accent-rings on hover/drag (see .glass-slider-thumb
  * in src/index.css). Double-click resets to `defaultValue` (existing app
- * behavior). See design_handoff_glass_ui/README.md ("Slider row") and
+ * behavior). See the Glass UI design spec ("Slider row") and
  * 4a Dev Handoff.dc.html §4.
  */
 export function SliderRow({

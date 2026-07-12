@@ -39,7 +39,7 @@
   --transition-normal: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   --transition-slow: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 
-  /* "Glass · Sectioned" redesign tokens (design_handoff_glass_ui, §2).
+  /* "Glass · Sectioned" redesign tokens (the Glass UI design spec, §2).
      Accent derives from --primary-500 so it stays swappable; soft/ring are
      the accent at 14%/35% alpha. Existing gray scale above stays untouched
      for legacy surfaces until each module is ported. */

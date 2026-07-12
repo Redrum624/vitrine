@@ -7,7 +7,7 @@ interface SectionLabelProps {
 
 /**
  * Glass · Sectioned module-card section header: 10px/700 uppercase accent
- * text followed by a fading hairline. See design_handoff_glass_ui/README.md
+ * text followed by a fading hairline. See the Glass UI design spec
  * ("Module card system" → Section labels) and 4a Dev Handoff.dc.html §4 (Body).
  */
 export function SectionLabel({ children, className = '' }: SectionLabelProps) {

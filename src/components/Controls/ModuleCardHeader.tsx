@@ -53,7 +53,7 @@ function HeaderChip({ label, onClick, children }: { label: string; onClick: () =
  * Unified module-card header (Glass · Sectioned, §4). Padding 13×16, bg
  * rgba(0,0,0,.3), bottom hairline; 28px accent icon chip · title · state
  * subtitle · Auto⚡ then Reset↺ (same order on every module — modules without
- * an auto function show Reset only). See design_handoff_glass_ui/README.md
+ * an auto function show Reset only). See the Glass UI design spec
  * ("Module card system" → Header) and 4a-module-*.png.
  */
 export function ModuleCardHeader({ icon, title, subtitle, onAuto, onReset }: ModuleCardHeaderProps) {
