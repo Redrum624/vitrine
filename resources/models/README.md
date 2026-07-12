@@ -44,8 +44,9 @@ expensive steps, and its error names each missing file and its feature.
 To deliberately build a CPU-only installer (both AI features hidden at runtime — AI upscale
 falls back to Lanczos, AI motion deblur's control does not appear), use the escape hatch:
 
-- `ALLOW_MISSING_MODELS=1 npm run build:win` (works through the npm chain), or
-- `node scripts/preflight-models.cjs --allow-missing-models` (direct invocation)
+- `ALLOW_MISSING_MODELS=1 npm run build:win` (bash / POSIX shells), or
+- `$env:ALLOW_MISSING_MODELS='1'; npm run build:win` (PowerShell — the Windows default), or
+- `node scripts/preflight-models.cjs --allow-missing-models` (direct invocation, any shell)
 
 which downgrades the failure to a prominent warning. Place the files listed above in this
 directory before building to include the AI features in the installer. New models must be

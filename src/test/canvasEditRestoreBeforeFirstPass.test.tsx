@@ -40,6 +40,7 @@ jest.mock('../services/EditPersistenceService', () => ({
     getSavedRawDecodeOptions: jest.fn(async () => null),
     validateSavedRawDecodeOptions: jest.fn((saved) => saved ?? null),
     validateBakedUpscaleIntent: jest.fn(() => null),
+    validateBakeOrder: jest.fn(() => undefined),
     restoreForPath: jest.fn(async () => false),
   },
 }));

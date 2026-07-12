@@ -7,7 +7,10 @@ interface ModuleState {
 }
 
 interface ModuleInterface {
-  isEnabled?(): boolean;
+  // Boolean field/getter on the real pipeline modules — NOT a method. The former `isEnabled?()`
+  // typing made captureCurrentModuleSettings call it as a function, which threw and dropped the
+  // module from capture (round-9 MEDIUM-3).
+  isEnabled?: boolean;
   getParameters?(): Record<string, unknown>;
   getParams?(): Record<string, unknown>;
   getState?(): Record<string, unknown>;
@@ -196,7 +199,7 @@ export class HistoryService {
 
           if (moduleSettings) {
             settings[moduleId] = {
-              enabled: moduleInterface.isEnabled?.() || true,
+              enabled: moduleInterface.isEnabled ?? true,
               parameters: moduleSettings
             };
           }

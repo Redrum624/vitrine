@@ -808,7 +808,7 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
           // (single bake), so the reopen re-apply replays correctly for single AND stacked bakes.
           useAppStore.getState().setDeblurIntent(!!savedState?.bakedDeblur);
           useAppStore.getState().setBakeOrder(
-            savedState?.bakeOrder ?? [
+            editPersistenceService.validateBakeOrder(savedState?.bakeOrder) ?? [
               ...(savedState?.bakedUpscale ? (['upscale'] as const) : []),
               ...(savedState?.bakedDeblur ? (['deblur'] as const) : []),
             ],
