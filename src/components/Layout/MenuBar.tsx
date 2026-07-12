@@ -522,7 +522,7 @@ export function MenuBar({
             </button>
             <button
               className="w-full text-left px-4 py-1.5 text-xs text-dark-200 hover:bg-dark-700 bg-transparent border-0 cursor-pointer"
-              onClick={() => openExternal('https://github.com/Redrum624/vitrine')}
+              onClick={() => openExternal('https://github.com/Redrum624/Vitrine')}
             >
               View on GitHub
             </button>

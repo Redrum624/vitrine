@@ -5,7 +5,7 @@ and pull requests — are welcome.
 
 ## Reporting bugs & requesting features
 
-Please open a [GitHub issue](https://github.com/Redrum624/vitrine/issues) using the
+Please open a [GitHub issue](https://github.com/Redrum624/Vitrine/issues) using the
 appropriate template. For bugs, include your Windows version, the camera/file format
 involved (if relevant), steps to reproduce, and what you expected vs. what happened.
 
@@ -15,8 +15,8 @@ Requires **Node.js 18+** (the repo uses **pnpm**; npm also works). Windows is th
 supported target.
 
 ```bash
-git clone https://github.com/Redrum624/vitrine.git
-cd vitrine
+git clone https://github.com/Redrum624/Vitrine.git
+cd Vitrine
 pnpm install
 pnpm run electron-dev   # Vite dev server + Electron
 ```

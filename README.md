@@ -1,7 +1,7 @@
 # Vitrine
 
-[![Downloads](https://img.shields.io/github/downloads/Redrum624/vitrine/total?style=for-the-badge&label=downloads&color=1f6feb)](https://github.com/Redrum624/vitrine/releases)
-[![Latest release](https://img.shields.io/github/v/release/Redrum624/vitrine?style=for-the-badge&label=latest&color=8957e5)](https://github.com/Redrum624/vitrine/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/Redrum624/Vitrine/total?style=for-the-badge&label=downloads&color=1f6feb)](https://github.com/Redrum624/Vitrine/releases)
+[![Latest release](https://img.shields.io/github/v/release/Redrum624/Vitrine?style=for-the-badge&label=latest&color=8957e5)](https://github.com/Redrum624/Vitrine/releases/latest)
 
 ![Tests](https://img.shields.io/badge/Tests-1834_passing-brightgreen)
 ![Lint](https://img.shields.io/badge/Lint-clean-brightgreen)
@@ -41,7 +41,7 @@ clean full-screen **glass workspace** that keeps every tool one click away.
 ### Download (recommended)
 
 **Just want to use Vitrine?** Download the latest **`Vitrine Setup X.Y.Z.exe`** from the
-[**Releases**](https://github.com/Redrum624/vitrine/releases) page and run it — no other
+[**Releases**](https://github.com/Redrum624/Vitrine/releases) page and run it — no other
 software required. The installer adds a desktop shortcut and a Start Menu entry.
 
 - **Windows 10 or 11** (64-bit)
@@ -53,8 +53,8 @@ For development, or to build your own installer. Requires **Node.js 18+** (the r
 **pnpm**; npm also works). Windows is the supported target.
 
 ```bash
-git clone https://github.com/Redrum624/vitrine.git
-cd vitrine
+git clone https://github.com/Redrum624/Vitrine.git
+cd Vitrine
 pnpm install            # or: npm install
 pnpm run electron-dev   # Vite dev server + Electron (opens automatically on port 3005)
 ```
@@ -185,6 +185,20 @@ npm run test:e2e     # Playwright end-to-end tests
 2. Make changes with proper TypeScript types
 3. Keep `npm run typecheck`, `npm run lint`, and `npm run test` green
 4. Commit with conventional commits and open a Pull Request
+
+## Downloads over time
+
+![Downloads over time](.github/badges/downloads.svg)
+
+*Sampled daily from the GitHub Releases API — the curve builds from launch day forward.*
+
+## Star History
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=Redrum624/Vitrine&type=Date&theme=dark">
+  <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=Redrum624/Vitrine&type=Date">
+  <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=Redrum624/Vitrine&type=Date">
+</picture>
 
 ## License
 

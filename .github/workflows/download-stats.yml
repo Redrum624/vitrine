@@ -1,0 +1,30 @@
+name: Download stats
+
+on:
+  schedule:
+    - cron: "17 4 * * *"   # daily, off the top of the hour
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  sample-and-render:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Sample release download counts
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node .github/scripts/sample-downloads.cjs sample --repo "${{ github.repository }}" --data .github/badges/downloads-data.json
+
+      - name: Render chart
+        run: node .github/scripts/sample-downloads.cjs render --data .github/badges/downloads-data.json --out .github/badges/downloads.svg
+
+      - name: Commit if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/badges/
+          git diff --cached --quiet || { git commit -m "chore: update download stats [skip ci]"; git push; }
