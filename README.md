@@ -1,12 +1,8 @@
 # Vitrine
 
-### [⬇ Download for Windows](https://github.com/Redrum624/vitrine/releases/latest)
-
-[![Download the Windows installer](https://img.shields.io/badge/⬇%20Download-Windows%20Installer-2ea44f?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/Redrum624/vitrine/releases/latest)
-[![Total downloads](https://img.shields.io/github/downloads/Redrum624/vitrine/total?style=for-the-badge&label=downloads&color=1f6feb)](https://github.com/Redrum624/vitrine/releases)
+[![Downloads](https://img.shields.io/github/downloads/Redrum624/vitrine/total?style=for-the-badge&label=downloads&color=1f6feb)](https://github.com/Redrum624/vitrine/releases)
 [![Latest release](https://img.shields.io/github/v/release/Redrum624/vitrine?style=for-the-badge&label=latest&color=8957e5)](https://github.com/Redrum624/vitrine/releases/latest)
 
-![Version](https://img.shields.io/badge/Version-1.24.0-blue)
 ![Tests](https://img.shields.io/badge/Tests-1834_passing-brightgreen)
 ![Lint](https://img.shields.io/badge/Lint-clean-brightgreen)
 ![GPU](https://img.shields.io/badge/GPU-WebGL2_accelerated-success)
