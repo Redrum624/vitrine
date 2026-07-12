@@ -799,7 +799,10 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
           // marker and a later edit's flush can't destroy it. onImageSwitched cleared it at loadImage
           // start; this reinstates the persisted intent so the Enhance panel offers a one-click
           // re-apply and Export warns instead of silently exporting at native res. NOT auto-applied.
-          useAppStore.getState().setUpscaleIntent(savedState?.bakedUpscale ?? null);
+          // Routed through the sync shape validator (mirrors the rawDecodeOptions guard just above):
+          // an out-of-enum scale/mode from an old/buggy build or a tampered store must not reach the
+          // store/Enhance panel as a fabricated intent.
+          useAppStore.getState().setUpscaleIntent(editPersistenceService.validateBakedUpscaleIntent(savedState?.bakedUpscale));
           editPersistenceService.restoreState(savedState, decoded.width, decoded.height, image.path);
         },
         (fullWidth, fullHeight) => {

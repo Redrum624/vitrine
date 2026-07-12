@@ -70,7 +70,7 @@ interface RestorePoint {
   data: Float32Array;
   width: number;
   height: number;
-  scale: number;
+  scale: 2 | 4;
   // Route the bake used ('ai' | 'standard') — kept so a partial revert of a multi-level upscale can
   // restore the remaining level's durable intent ({scale, mode}) accurately, not just its scale.
   mode: 'ai' | 'standard';
@@ -291,9 +291,15 @@ class EnhanceService {
       // so the remaining top describes the active baked level after this pop.
       const top = this.restoreStack[this.restoreStack.length - 1];
       imageService.setBakedUpscale({ scale: top.scale, nativeWidth: top.width, nativeHeight: top.height });
-      // The remaining baked level is still active — keep the store intent in sync with it (a still
-      // baked image is exported via resolveExportSource, so its persisted state is left as-is).
+      // The remaining baked level is still active — keep the store intent in sync with it.
       useAppStore.getState().setUpscaleIntent({ scale: top.scale, mode: top.mode });
+      // Persist the re-seeded intent NOW. flush() would early-return here (isBakedUpscaleActive is
+      // still true — a level remains), so without this explicit write a quit right after a partial
+      // unwind leaves the disk holding the JUST-POPPED (now-wrong) level's {scale,mode} — a stale
+      // intent a future reopen would offer to re-apply. persistNow bypasses that early-return and
+      // writes serialize()'s current snapshot, which already reflects the restored (remaining-level)
+      // module params and the just-updated store intent above (serialize() reads it fresh).
+      editPersistenceService.persistNow();
     }
     return true;
   }

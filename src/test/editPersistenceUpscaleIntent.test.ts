@@ -59,7 +59,7 @@ describe('EditPersistenceService — durable upscale intent (Q7)', () => {
     });
 
     it('restores a state that DOES carry the marker without throwing (marker is a store concern)', () => {
-      const state = { version: 1, modules: {}, bakedUpscale: { scale: 4, mode: 'standard' as const } };
+      const state = { version: 1, modules: {}, bakedUpscale: { scale: 4 as const, mode: 'standard' as const } };
       expect(editPersistenceService.restore(state, 100, 100)).toBe(true);
     });
   });
@@ -116,5 +116,52 @@ describe('EditPersistenceService — durable upscale intent (Q7)', () => {
       expect(storeSetMock).toHaveBeenCalledTimes(1);
       expect(storeSetMock.mock.calls[0][1].bakedUpscale).toBeUndefined();
     });
+  });
+});
+
+/**
+ * Round-8 S1 item 1: Canvas.tsx seeded `savedState?.bakedUpscale` into the store UNVALIDATED —
+ * unlike rawDecodeOptions, which routes through validateSavedRawDecodeOptions before reaching
+ * the store/decoder (see editPersistenceRawOptionsValidation.test.ts). validateBakedUpscaleIntent
+ * is the synchronous shape guard closing that gap: a corrupt/out-of-enum persisted value must not
+ * seed a fabricated upscale intent (which would surface a bogus "re-apply" notice / export
+ * warning). Unlike decode options there is no safe DEFAULT to substitute, so corrupt input → null.
+ */
+describe('validateBakedUpscaleIntent — synchronous Canvas-path guard', () => {
+  it('returns a valid {scale:2, mode:"ai"} intent unchanged', () => {
+    expect(editPersistenceService.validateBakedUpscaleIntent({ scale: 2, mode: 'ai' }))
+      .toEqual({ scale: 2, mode: 'ai' });
+  });
+
+  it('returns a valid {scale:4, mode:"standard"} intent unchanged', () => {
+    expect(editPersistenceService.validateBakedUpscaleIntent({ scale: 4, mode: 'standard' }))
+      .toEqual({ scale: 4, mode: 'standard' });
+  });
+
+  it('returns null for an out-of-enum scale (e.g. 3)', () => {
+    expect(editPersistenceService.validateBakedUpscaleIntent({ scale: 3, mode: 'ai' })).toBeNull();
+  });
+
+  it('returns null for an out-of-enum mode', () => {
+    expect(editPersistenceService.validateBakedUpscaleIntent({ scale: 2, mode: 'x' })).toBeNull();
+  });
+
+  it('returns null when scale is missing', () => {
+    expect(editPersistenceService.validateBakedUpscaleIntent({ mode: 'ai' })).toBeNull();
+  });
+
+  it('returns null when mode is missing', () => {
+    expect(editPersistenceService.validateBakedUpscaleIntent({ scale: 2 })).toBeNull();
+  });
+
+  it('returns null for a structurally-corrupt (non-object) value', () => {
+    expect(editPersistenceService.validateBakedUpscaleIntent('not-an-object')).toBeNull();
+    expect(editPersistenceService.validateBakedUpscaleIntent(42)).toBeNull();
+    expect(editPersistenceService.validateBakedUpscaleIntent(['x'])).toBeNull();
+  });
+
+  it('returns null for an absent (undefined/null) value', () => {
+    expect(editPersistenceService.validateBakedUpscaleIntent(undefined)).toBeNull();
+    expect(editPersistenceService.validateBakedUpscaleIntent(null)).toBeNull();
   });
 });

@@ -39,6 +39,7 @@ jest.mock('../services/EditPersistenceService', () => ({
     // Legacy methods must remain UNCALLED by the open flow — spies to prove that.
     getSavedRawDecodeOptions: jest.fn(async () => null),
     validateSavedRawDecodeOptions: jest.fn((saved) => saved ?? null),
+    validateBakedUpscaleIntent: jest.fn(() => null),
     restoreForPath: jest.fn(async () => false),
   },
 }));

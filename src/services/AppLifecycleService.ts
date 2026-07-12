@@ -97,6 +97,11 @@ class AppLifecycleService {
   private createUnsavedChangesModal(message: string, callback: (result: boolean) => void): HTMLElement {
     const modal = document.createElement('div');
     modal.className = 'fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50';
+    // aria-modal (+ role=dialog) makes keyboardScope.ts's keyboardEventBlocked() guard cover this
+    // dialog for free: every document-/window-level listener that routes through it (six, per Q1's
+    // round-7 sweep) now early-returns while this confirm is up, instead of firing beneath it.
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-modal', 'true');
 
     modal.innerHTML = `
       <div class="bg-dark-800 rounded-lg p-6 max-w-md mx-4 border border-dark-700">
@@ -149,14 +154,21 @@ class AppLifecycleService {
 
     closeWithoutSavingBtn?.addEventListener('click', () => callback(true));
 
-    // Close on escape key
+    // Close on escape key. Capture phase + stopImmediatePropagation (the Q5/Q6 popover
+    // convention — InfoPopover / GalleryTileContextMenu): this dialog is created imperatively
+    // (appendChild), not via the aria-modal React tree, so without this its bubble-phase Esc used
+    // to co-fire with ThumbnailPanel's own bubble-phase Esc listener (closing the filmstrip out
+    // from under this confirm). Consuming Escape here first — before any bubble-phase listener
+    // sees it — closes that regardless of DOM registration order; aria-modal above is the
+    // belt-and-suspenders guard for every OTHER listener that routes through keyboardEventBlocked.
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        document.removeEventListener('keydown', handleKeyDown);
+        e.stopImmediatePropagation();
+        document.removeEventListener('keydown', handleKeyDown, true);
         callback(false);
       }
     };
-    document.addEventListener('keydown', handleKeyDown);
+    document.addEventListener('keydown', handleKeyDown, true);
 
     return modal;
   }

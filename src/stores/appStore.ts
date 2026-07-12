@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { AppState, Layer, ViewportState, ProcessedImageData, RenderMode } from '../types';
-import { DEFAULT_RAW_DECODE_OPTIONS, type RawDecodeOptions } from '../types/electron';
+import { DEFAULT_RAW_DECODE_OPTIONS, type RawDecodeOptions, type BakedUpscaleIntent } from '../types/electron';
 
 interface AppStore extends AppState {
   setSelectedTool: (toolId: string | null) => void;
@@ -44,8 +44,8 @@ interface AppStore extends AppState {
   // Distinct from upscaleMode (the in-session AI/Standard badge): this survives the reopen window
   // so the Enhance panel can offer a one-click re-apply and the Export dialog can warn instead of
   // silently exporting at native res. serialize() reads it so the marker round-trips through flush.
-  upscaleIntent: { scale: number; mode: 'ai' | 'standard' } | null;
-  setUpscaleIntent: (v: { scale: number; mode: 'ai' | 'standard' } | null) => void;
+  upscaleIntent: BakedUpscaleIntent | null;
+  setUpscaleIntent: (v: BakedUpscaleIntent | null) => void;
   // RAW decode options applied to the CURRENT image's base pixels. Changed only via a
   // re-decode (RawImageService.reDecode) or restored from per-image persistence on open —
   // never a live edit, so it stays in lock-step with the actually-decoded base.

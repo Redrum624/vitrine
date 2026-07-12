@@ -117,7 +117,7 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
     if (!upscaleIntent) return;
     setBusy(true); setError(null);
     try {
-      await enhanceService.applyUpscale({ ...module.getParams(), upscale: true, scale: upscaleIntent.scale as 2 | 4 });
+      await enhanceService.applyUpscale({ ...module.getParams(), upscale: true, scale: upscaleIntent.scale });
       setRevertVersion((v) => v + 1);
       enhanceService.markEnhanceApplied();
     } catch (e) {

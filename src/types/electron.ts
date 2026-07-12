@@ -11,6 +11,14 @@ export const DEFAULT_RAW_DECODE_OPTIONS: RawDecodeOptions = {
   highlightMode: 'blend',
 };
 
+// Durable upscale INTENT persisted per-image (Q7): {scale, mode} when an upscale bake is active
+// OR a reopened image carries a persisted-but-not-yet-reapplied upscale. `scale` is narrowed to
+// the two scales the Enhance UI offers (EnhanceService.SUPPORTED_UPSCALE_SCALES / EnhanceParams).
+export interface BakedUpscaleIntent {
+  scale: 2 | 4;
+  mode: 'ai' | 'standard';
+}
+
 // Electron API types
 interface DialogFilter {
   name: string;
@@ -211,9 +219,8 @@ export interface ElectronAPI {
   /** Move files to the OS trash / Windows Recycle Bin (NEVER a permanent delete);
    *  returns a per-path { path, ok, error } result. Used by the Gallery Del flow. */
   trashItems: (filePaths: string[]) => Promise<TrashItemResult[]>;
-  /** Reveals a file in the OS file manager (Explorer), selecting it — read-only,
-   *  never writes/deletes. Used by the Gallery tile context menu's "Show in
-   *  Explorer" (Task Q5). */
+  /** Read-only reveal — deny-list deliberately skipped, see main.cjs. Never writes/deletes.
+   *  Used by the Gallery tile context menu's "Show in Explorer" (Task Q5). */
   showItemInFolder: (filePath: string) => Promise<{ ok: boolean; error?: string }>;
   storeGet: <T = unknown>(key: string) => Promise<T | null>;
   storeSet: (key: string, value: unknown) => Promise<boolean>;

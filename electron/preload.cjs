@@ -45,7 +45,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   readImageRating: (filePath) => ipcRenderer.invoke('read-image-rating', filePath),
   // Move files to the OS trash / Windows Recycle Bin (never a permanent delete).
   trashItems: (filePaths) => ipcRenderer.invoke('trash-items', filePaths),
-  // Reveals a file in the OS file manager (Explorer), selecting it — read-only.
+  // Read-only reveal — deny-list deliberately skipped, see main.cjs.
   showItemInFolder: (filePath) => ipcRenderer.invoke('show-item-in-folder', filePath),
 
   // Generic durable JSON store (userData; survives app updates)

@@ -4,7 +4,7 @@ import { LocalAdjustmentsPipelineModule } from '../modules/LocalAdjustmentsPipel
 import type { MaskGeometry, LocalAdjustmentParams } from '../modules/LocalAdjustmentsModule';
 import { logger } from '../utils/Logger';
 import { useAppStore } from '../stores/appStore';
-import { DEFAULT_RAW_DECODE_OPTIONS, type RawDecodeOptions } from '../types/electron';
+import { DEFAULT_RAW_DECODE_OPTIONS, type RawDecodeOptions, type BakedUpscaleIntent } from '../types/electron';
 
 const STORE_VERSION = 1;
 
@@ -22,6 +22,22 @@ function isValidRawDecodeOptions(o: unknown): o is RawDecodeOptions {
   const highlightOk =
     opts.highlightMode === 'off' || opts.highlightMode === 'blend' || opts.highlightMode === 'reconstruct';
   return demosaicOk && highlightOk;
+}
+
+/**
+ * Shape-validate a persisted `bakedUpscale` intent value. Same rationale as
+ * isValidRawDecodeOptions: the store JSON is durable and survives app updates, so a value
+ * written by an older/buggy build (or a hand-edited/partially-corrupt store) can carry a
+ * scale/mode outside the current enums. Unlike decode options there is no safe DEFAULT to
+ * substitute — fabricating a {scale,mode} would falsely claim a bake that never happened — so
+ * corrupt or absent input simply means "no durable upscale intent" (null).
+ */
+function isValidBakedUpscaleIntent(o: unknown): o is BakedUpscaleIntent {
+  if (!o || typeof o !== 'object') return false;
+  const v = o as Record<string, unknown>;
+  const scaleOk = v.scale === 2 || v.scale === 4;
+  const modeOk = v.mode === 'ai' || v.mode === 'standard';
+  return scaleOk && modeOk;
 }
 
 type LayerType = 'brush' | 'linear_gradient' | 'radial_gradient' | 'parametric';
@@ -53,7 +69,7 @@ interface EditState {
   // Optional + never version-bumped, so old saved states (no field) restore cleanly as "no intent".
   // Written by persistBakedUpscaleIntent (on bake) and emitted by serialize() from the store's
   // upscaleIntent, so it round-trips through flush (does not get destroyed by a later edit's save).
-  bakedUpscale?: { scale: number; mode: 'ai' | 'standard' };
+  bakedUpscale?: BakedUpscaleIntent;
 }
 
 /**
@@ -219,6 +235,17 @@ class EditPersistenceService {
     return isValidRawDecodeOptions(saved) ? saved : DEFAULT_RAW_DECODE_OPTIONS;
   }
 
+  /**
+   * Shape-validate an ALREADY-FETCHED persisted `bakedUpscale` intent value — the synchronous
+   * seed for the store's upscaleIntent. Canvas's open flow reads this from the single up-front
+   * getSavedEditState result (mirrors validateSavedRawDecodeOptions for the sibling
+   * rawDecodeOptions field, same one-IPC-read rationale). A corrupt or missing value returns
+   * null (no intent) — there is no safe DEFAULT to substitute here, unlike decode options.
+   */
+  validateBakedUpscaleIntent(saved: unknown): BakedUpscaleIntent | null {
+    return isValidBakedUpscaleIntent(saved) ? saved : null;
+  }
+
   /** Debounced save of the current image's edits — call after any edit. */
   scheduleSave(): void {
     if (this.saveTimer) clearTimeout(this.saveTimer);
@@ -253,7 +280,7 @@ class EditPersistenceService {
    * SAME upscale when re-applied on reopen. The flush baseline is set to what we just wrote so a later
    * revert's persistNow (marker-free) is correctly seen as a change.
    */
-  persistBakedUpscaleIntent(baseState: EditState, scale: number, mode: 'ai' | 'standard'): void {
+  persistBakedUpscaleIntent(baseState: EditState, scale: 2 | 4, mode: 'ai' | 'standard'): void {
     const img = imageService.getCurrentImage();
     if (!img?.filePath || !window.electronAPI?.storeSet) return;
     const state: EditState = { ...baseState, bakedUpscale: { scale, mode } };
