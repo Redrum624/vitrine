@@ -255,6 +255,12 @@ export class WebWorkerImageProcessor {
       // sweep, only when an enhance-sharpen edgeMask is actually in the pipeline) and thread it to
       // every tile so all tiles normalise by the SAME constant (matches the untiled whole-image
       // gain). Pointwise → no new spatial dependency, so the apron above is unchanged.
+      //
+      // NOTE — this sweeps the pipeline-INPUT `data`, but edgeMask runs after the upstream point-ops
+      // (exposure/tone) that shift luma, so the constant is an APPROXIMATION of the true post-upstream
+      // max. Investigated + decided WONTFIX (bounded by clamp01 on the brighten side, uniform/seam-
+      // free, alpha-gated, >48MP-only; the 1/8-downsample refinement only trades it for a same-
+      // direction underestimate at real cost). Full analysis: moduleApron enhance case in tiledPipeline.ts.
       const edgeMaskGlobalMax = pipelineUsesEdgeMask(pipeline)
         ? computeGlobalEdgeMax(data, width, height)
         : undefined;

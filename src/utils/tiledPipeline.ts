@@ -96,6 +96,30 @@ export function moduleApron(moduleId: string, params: Record<string, unknown>): 
       // module's ProcessingContext, so all tiles normalise by the SAME constant — matching the
       // untiled gain, no per-tile step. Normalisation is POINTWISE, so it adds NO spatial dependency
       // and does not change the apron radius derived here. See {@link pipelineUsesEdgeMask}.
+      //
+      // POST-UPSTREAM mmax approximation — investigated 2026-07-12, WONTFIX (decided).
+      // computeGlobalEdgeMax sweeps the pipeline-INPUT luma, but edgeMask runs AFTER the upstream
+      // point-ops (exposure/tone) that shift luma — so the threaded constant is approximate vs the
+      // untiled path's own post-upstream buffer max. It stays SEAM-FREE regardless (one constant for
+      // ALL tiles); only the absolute sharpen gain drifts, and UNIFORMLY. Direction & bound: for a
+      // pure-power sRGB transfer a uniform linear exposure ×k scales every gamma-space Sobel gradient
+      // by exactly k^(1/γ) (the L^(1/γ−1) terms cancel), so a +2EV push (k=4, γ≈2.2) lifts the true
+      // max ~1.8× → the input max UNDERSHOOTS it → mag/mmax overshoots → mask clamps at 1. clamp01
+      // BOUNDS the harmful (brighten) side: mid-edge mask inflated ≤ 1.8^0.75 ≈ 1.55×, and the
+      // strong edges that drive mmax already clamp to 1 in BOTH paths (near-zero delta there); a
+      // darken instead OVERSHOOTS the denominator → gentle, uniform WEAKER sharpen (benign, no seam,
+      // and highlight clipping only shrinks the true max further, never past it).
+      // Refinement considered & rejected: a 1/8-downsampled whole-image pass through the point-op
+      // chain to estimate the post-upstream max. Downsampling AVERAGES local gradient peaks away, so
+      // its max UNDERESTIMATES the true max — the SAME harmful over-sharpen direction as today, just
+      // smaller; a "safety factor" to lift it is content-dependent (a fudge, not a principled
+      // correction), and Sobel magnitudes are resolution-dependent (a downsampled max needs a second
+      // correction on top) — all for an extra O(N) downsample + point-op-chain pass on the SLOWEST
+      // (>48MP) path. The residual is bounded + uniform + alpha-strength-gated + >48MP/sharpen-
+      // enabled/brighten-only, i.e. within a perceptual epsilon for realistic edits and NOT a seam;
+      // not worth the added cost or the dishonest correction factor. Full numbers: .superpowers/sdd
+      // task-z3 report. (The sweep site — WebWorkerImageProcessor computeGlobalEdgeMax(data) — links
+      // back here.)
       const enabled = params.enabled === true;
       const sharpen = params.sharpen !== false;
       const upscale = params.upscale === true;
