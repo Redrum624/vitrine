@@ -109,23 +109,32 @@ async function ensureSession() {
     const modelPath = resolveModelPath();
     if (!fs.existsSync(modelPath)) { backend = null; return null; }
     ort = require('onnxruntime-node');
+    // Backend detection by CONSTRUCTION, not timing: create with ['dml'] ONLY first — ORT
+    // throws at session init when the DirectML EP can't bind (no device / unsupported ops;
+    // the spike's opset-21 model reproduced exactly that hard-fail). Success = DirectML is
+    // genuinely running the graph. The v1 timing heuristic (warmup < 900ms == DML)
+    // misclassified under GPU contention — right after a GPU enhance-chain apply the warmup
+    // exceeded the threshold on a REAL DML session and the feature hid itself (round-8
+    // review LOW #4, reproduced live by the v1.20.0 packaged smoke).
     let created = null;
-    for (const eps of [['dml', 'cpu'], ['cpu']]) {
+    try {
+      created = await ort.InferenceSession.create(modelPath, { executionProviders: ['dml'] });
+      backend = 'directml';
+    } catch (_) {
       try {
-        created = await ort.InferenceSession.create(modelPath, { executionProviders: eps });
-        break;
-      } catch (_) { created = null; }
+        created = await ort.InferenceSession.create(modelPath, { executionProviders: ['cpu'] });
+        backend = 'cpu';
+      } catch (_2) { created = null; backend = null; }
     }
-    if (!created) { backend = null; return null; }
+    if (!created) return null;
     session = created;
-    // Probe the backend honestly with a MIN_INPUT-sized warmup (must be >= 384 or NAFNet throws/garbles).
-    // DML ~350 ms at 384; CPU ~1.2 s. A <900 ms result means DirectML genuinely bound.
+    // Warmup at MIN_INPUT (>= 384 or NAFNet throws/garbles) — primes the graph so the first
+    // real tile doesn't pay compile/upload costs. A THROW here means the session can't run
+    // at all: reclassify to cpu (hides the feature) rather than advertise a broken DML.
     try {
       const probe = new Float32Array(3 * MIN_INPUT * MIN_INPUT);
       const feeds = {}; feeds[session.inputNames[0]] = new ort.Tensor('float32', probe, [1, 3, MIN_INPUT, MIN_INPUT]);
-      const t0 = Date.now();
       await session.run(feeds);
-      backend = (Date.now() - t0) < 900 ? 'directml' : 'cpu';
     } catch (_) {
       backend = 'cpu';
     }
