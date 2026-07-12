@@ -133,23 +133,26 @@ describe('Performance Benchmarks', () => {
       const module = new WhiteBalanceModule();
       module.setParams({ temperature: 5000 });
 
-      // Measure small image (32x32 = 1024 pixels)
-      const smallInput = generateTestImage(32, 32);
-      const smallContext: ProcessingContext = { width: 32, height: 32, channels: 4 };
-      const smallStats = measurePerformance(() => {
-        module.process(smallInput, smallContext);
-      });
+      // Use images large enough that timing is PIXEL-dominated, not overhead/noise-dominated.
+      // Tiny images (e.g. 32×32) spend most of their time in fixed per-call overhead, so the
+      // ratio was noise and flaked on shared CI runners. 128×128 → 256×256 is exactly 4× the
+      // pixels, so a linear op should be ~4× the time.
+      const smallInput = generateTestImage(128, 128);
+      const smallContext: ProcessingContext = { width: 128, height: 128, channels: 4 };
+      const largeInput = generateTestImage(256, 256);
+      const largeContext: ProcessingContext = { width: 256, height: 256, channels: 4 };
 
-      // Measure 4x larger image (64x64 = 4096 pixels)
-      const largeInput = generateTestImage(64, 64);
-      const largeContext: ProcessingContext = { width: 64, height: 64, channels: 4 };
-      const largeStats = measurePerformance(() => {
-        module.process(largeInput, largeContext);
-      });
+      // Warm up (discard first run's JIT cost) before measuring.
+      module.process(smallInput, smallContext);
+      module.process(largeInput, largeContext);
 
-      // Time should scale - 4x pixels should take more time, but not wildly more
-      // (allow up to 10x due to overhead and non-linear effects)
-      const ratio = largeStats.avg / smallStats.avg;
+      const smallStats = measurePerformance(() => { module.process(smallInput, smallContext); }, 5);
+      const largeStats = measurePerformance(() => { module.process(largeInput, largeContext); }, 5);
+
+      // Compare BEST-CASE (min) times — least affected by transient CI-runner preemption.
+      // 4× pixels should be ~4× linear; a threshold of 10 still catches a catastrophic
+      // (e.g. accidental O(n²)) regression while tolerating micro-benchmark noise.
+      const ratio = largeStats.min / smallStats.min;
       expect(ratio).toBeLessThan(10);
     });
   });
