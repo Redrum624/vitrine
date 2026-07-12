@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pre-Ship Audit — Photo Editor Pro v1.21.0</title>
+<style>
+  body { max-width: 960px; margin: 2rem auto; padding: 0 1rem; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; line-height: 1.6; color: #1a1a1a; background: #fafafa; }
+  h1 { font-size: 1.8rem; border-bottom: 2px solid #ddd; padding-bottom: .4rem; }
+  h2 { font-size: 1.3rem; margin-top: 2rem; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: .92rem; }
+  th, td { border: 1px solid #ccc; padding: .5rem .6rem; text-align: left; vertical-align: top; }
+  th { background: #eee; }
+  tr:nth-child(even) td { background: #f2f2f2; }
+  code { background: #ececec; padding: .1rem .3rem; border-radius: 3px; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .88em; }
+  .crit { color: #b00; font-weight: 700; }
+  .imp { color: #c60; font-weight: 700; }
+  .min { color: #666; }
+  .pass { color: #080; font-weight: 600; }
+  .fixed { color: #080; }
+  .defer { color: #a06; font-weight: 600; }
+  .lead { color: #444; }
+  @media (prefers-color-scheme: dark) {
+    body { background: #16181c; color: #d8dade; }
+    h1 { border-color: #333; } h2 { color: #cbd; }
+    th { background: #23262c; } td { border-color: #333; } tr:nth-child(even) td { background: #1c1f24; }
+    code { background: #23262c; color: #e6c07b; }
+    .crit { color: #ff6b6b; } .imp { color: #ffa94d; } .min { color: #999; }
+    .pass, .fixed { color: #69db7c; } .defer { color: #e599f7; } .lead { color: #aaa; }
+  }
+</style>
+</head>
+<body>
+<h1>Pre-Ship Audit — Photo Editor Pro v1.21.0</h1>
+<p class="lead">Three read-only auditors (dependency hygiene, security, memory / unbounded growth), each finding adversarially verified against the real code and the by-design ledger. Run at v1.21.0 (1,798 tests, empty tracked-issue list) before the v1.22.0 hardening release.</p>
+
+<h2>Confirmed findings (one per dimension)</h2>
+<table>
+<thead><tr><th>Dim</th><th>Sev</th><th>Location</th><th>Issue</th><th>Disposition</th></tr></thead>
+<tbody>
+<tr><td>security</td><td class="imp">Important</td><td><code>electron/main.cjs:802</code></td><td>The generic <code>write-file</code> IPC's deny-list blocks only system dirs, not user-writable autorun sinks (Startup folder, PowerShell profile, <code>.ssh</code>) — a compromised renderer could escalate a file-write to persistent code execution.</td><td class="fixed">FIX in round 10 (deny-list + extension allow-list)</td></tr>
+<tr><td>memory</td><td class="imp">Important</td><td><code>src/components/Layout/FileBrowser.tsx:47</code></td><td>A <code>folder-changed</code> IPC listener is registered on every folder expand/collapse and never removed — the renderer listener array grows unbounded across a browsing session (N-fold redundant reloads + MaxListeners warning).</td><td class="fixed">FIX in round 10</td></tr>
+<tr><td>deps</td><td class="imp">Important</td><td><code>.gitignore:239</code> + <code>package.json:43-50</code></td><td>The pnpm lockfile is git-ignored (the "kept" package-lock.json doesn't exist) and all runtime deps float on <code>^</code> ranges — a fresh clone can pull a <code>sharp</code> that mismatches the exactly-pinned native binary. Downgraded from Critical (single-dev-machine builds are de-facto reproducible).</td><td class="fixed">FIX in round 10 (commit lockfile + pin native deps)</td></tr>
+<tr><td>deps</td><td class="imp">Important</td><td><code>package.json:68</code></td><td>Electron ^39 (installed 39.8.10) is an end-of-life major — Electron patches only the latest 3 majors (current 43), so no further Chromium/Node security fixes reach it.</td><td class="defer">DEFERRED — own release (major bump + full regression/smoke)</td></tr>
+</tbody>
+</table>
+
+<h2>Minor findings folded into the fix wave</h2>
+<table>
+<thead><tr><th>Location</th><th>Issue</th></tr></thead>
+<tbody>
+<tr><td><code>AppLifecycleService.ts:118</code></td><td>Unsaved-close modal interpolates a registry-derived <code>message</code> into <code>innerHTML</code> unescaped (defense-in-depth — escape it).</td></tr>
+<tr><td><code>main.cjs:926</code></td><td><code>write-image-rating</code>'s error rethrow checks the wrong prefix (<code>'Path traversal rejected'</code> vs the actual <code>'Path'</code> message) — a swallowed classification bug.</td></tr>
+<tr><td><code>main.cjs:526</code> / window <code>closed</code></td><td>Folder <code>fs.watch</code> handles aren't closed on window close (bounded in practice; defense-in-depth teardown).</td></tr>
+<tr><td><code>librawWasmNode.cjs:108</code></td><td>A hung wasm decode (fallback rung) never fires terminate — add a per-call timeout race.</td></tr>
+<tr><td><code>index.html:20</code></td><td>Packaged desktop app fetches the Inter font from Google's CDN (a network dependency + CSP surface) — self-host or accept.</td></tr>
+<tr><td><code>package.json:58</code></td><td><code>@types/electron</code> is a deprecated stub (Electron ships its own types) — dead dep, remove.</td></tr>
+</tbody>
+</table>
+
+<h2>What passed (the record)</h2>
+<p>The audit is as much a record of what's <em>correctly bounded</em> as of what isn't — nine dimensions verified clean:</p>
+<ul>
+<li class="pass">Electron window config: <code>contextIsolation:true</code>, <code>nodeIntegration:false</code>, <code>sandbox:true</code>, <code>webSecurity:true</code> on BOTH windows.</li>
+<li class="pass">A real CSP meta (<code>script-src 'self' 'wasm-unsafe-eval'</code>, <code>object-src 'none'</code>, no <code>unsafe-inline</code> for scripts); deny-by-default <code>setWindowOpenHandler</code>; structured-origin <code>will-navigate</code>.</li>
+<li class="pass">Every destructive IPC routes through <code>validateWritePath</code> (path.resolve collapses traversal); hostile-input parsers (rawMetadata, baseCache) bounds-check every offset.</li>
+<li class="pass">No hardcoded secrets/keys anywhere in src/electron/scripts.</li>
+<li class="pass">In-memory image cache: dual-budget LRU (500MB sized + 700MB base), independently evicted, oversized entries refused.</li>
+<li class="pass">Disk base cache: 2GB LRU whose in-memory index is budget-bounded (not open-count); temp files cleaned on init AND mid-session failure.</li>
+<li class="pass">GPU pipeline: singleton holds one image's textures — <code>setSource</code> deletes the previous before uploading; mask cache LRU-capped at 32.</li>
+<li class="pass">Per-image state released at the switch choke point: checkpoints capped at 200 + reset per path; <code>restoreStack</code> + <code>bakedBaseState</code> cleared; single-slot debounce timers.</li>
+<li class="pass">The unsaved-close modal + its capture-phase Esc listener are removed on all four dismissal paths; onnx sessions are resident singletons by design (fixed cost, not growth).</li>
+</ul>
+<p class="lead">Note: several heavy "accumulator" services (BackgroundProcessing, MultiThreading, Pyramid, MemoryStreaming, PerformanceProfiler) are dead code — never imported, tree-shaken from the bundle, their timers never run. Candidate purge.</p>
+
+<h2>Write-path policy — accepted residual limitations (v1.22.0)</h2>
+<p class="lead">The write-file deny-list survived three adversarial passes; it now <strong>fails closed</strong> — it enumerates the allowed roots (drive-letter + normal UNC share) and rejects every other root form (Volume-GUID / GLOBALROOT device paths, verbatim-namespace prefixes, trailing-dot/space and 8.3/symlink parents), at the pure validator without relying on realpath. The following residuals are documented and accepted for a local desktop app whose threat model requires a prior renderer compromise:</p>
+<ul>
+<li><strong>Leaf-symlink/junction TOCTOU</strong> — realpath resolves only the parent; a pre-existing leaf symlink into a sink is followed by the write. Requires symlink-create privilege (admin / Developer Mode); backstopped by the extension allow-list for the two file-drop handlers.</li>
+<li><strong>Extension allow-list covers 2 of 5 write handlers</strong> — <code>write-image-metadata</code> / <code>write-image-rating</code> / <code>trash-items</code> rely on the deny-list alone (they operate on existing images / the recycle bin).</li>
+<li><strong>UNC shares are admitted by design</strong> — legitimate exports to <code>\\nas\…</code> must work; <code>\\localhost\C$</code>-style admin-share aliasing is elevation-gated, outside the non-elevated-renderer model.</li>
+<li><strong>Inert guard-passers</strong> — reserved device names (<code>NUL</code>/<code>CON</code>) and the bare raw-volume handle (<code>\\.\C:</code>) pass the root check but address null/console/raw-volume (admin-gated), never a filesystem sink; the extension allow-list blocks them on the file-drop handlers.</li>
+<li><strong>The deny-list is an enumerated set</strong> (system dirs + Startup + PowerShell profiles + <code>~/.ssh</code>), not every Windows persistence vector — deliberately a deny-list so arbitrary user export folders stay writable; the extension allow-list is the defense-in-depth layer.</li>
+</ul>
+</body>
+</html>
