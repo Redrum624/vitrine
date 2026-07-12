@@ -225,6 +225,11 @@ test-images/
 *.arw
 *.orf
 
+# Exception: a small (~2MB) header-truncated ORF committed as a test fixture for
+# src/test/rawMetadata.test.ts. CI has no access to local RAW files, so this one
+# must be tracked. Only the TIFF/EXIF header is kept; the raw sensor data is cut.
+!/src/test/fixtures/P2060833.header.ORF
+
 # Documentation builds
 docs/_build/
 docs/dist/

@@ -4,10 +4,14 @@
  * (Task Q6). exifreader throws "Invalid image format" on these containers, so
  * this hand parser is the reliable source LibRaw's metadata rides on.
  *
- * The headline case parses the REAL Olympus PEN-F ORF fixture (test/P2060833.ORF)
- * end to end — proving the parser works on a genuine proprietary RAW that
- * exifreader cannot touch. The remaining cases cover the synthetic edge paths
- * (non-TIFF, truncated, big-endian) that the binary fixture can't exercise.
+ * The headline case parses a REAL Olympus PEN-F ORF fixture
+ * (src/test/fixtures/P2060833.header.ORF) end to end — proving the parser works
+ * on a genuine proprietary RAW that exifreader cannot touch. The fixture is
+ * header-truncated (~2MB: the full TIFF/EXIF IFD region; the raw sensor data is
+ * cut) so it can be committed for CI without bloating the repo — every field the
+ * tests assert lives in the header, well within the first 1MB. The remaining
+ * cases cover the synthetic edge paths (non-TIFF, truncated, big-endian) that
+ * the binary fixture can't exercise.
  */
 import * as fs from 'fs';
 import * as path from 'path';
@@ -28,7 +32,7 @@ const { parseRawExif, readRawMetadataFile } = require('../../electron/rawMetadat
   readRawMetadataFile: (filePath: string, prefixBytes?: number) => Promise<RawExif>;
 };
 
-const ORF_FIXTURE = path.resolve(__dirname, '../../test/P2060833.ORF');
+const ORF_FIXTURE = path.resolve(__dirname, 'fixtures/P2060833.header.ORF');
 
 describe('parseRawExif — real ORF fixture', () => {
   test('extracts full camera EXIF from the Olympus PEN-F ORF', () => {
