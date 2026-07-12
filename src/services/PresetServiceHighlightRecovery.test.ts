@@ -88,3 +88,31 @@ describe('PresetService — Highlight Recovery round-trip', () => {
     presetService.deletePreset('legacy_no_hr_preset');
   });
 });
+
+/**
+ * Regression lock for the isEnabled type-bug repair (Z2 review follow-up): before round 9,
+ * `moduleInterface.isEnabled?.()` threw "is not a function" for EVERY module exposing isEnabled
+ * as a boolean field — silently dropping tonecurve/colorbalance/shadowshighlights (and
+ * lenscorrections) from preset capture. HR's own tests above cover the new module; this suite
+ * locks the REPAIRED capture of a formerly-dropped one so the throw-and-drop can't return.
+ */
+describe('PresetService — formerly-dropped module capture (isEnabled repair)', () => {
+  test('tonecurve params are captured into the preset (threw-and-dropped before round 9)', () => {
+    // ToneCurvePipelineModule exposes `isEnabled` as a plain boolean field — exactly the shape
+    // that made the old `moduleInterface.isEnabled?.()` throw during capture.
+    const tc = imageProcessingPipeline.getModule('tonecurve') as unknown as {
+      isEnabled: boolean;
+      setEnabled: (v: boolean) => void;
+    };
+    expect(typeof tc.isEnabled).toBe('boolean'); // the bug-triggering shape, pinned
+    tc.setEnabled(true);
+
+    const presetId = presetService.createPresetFromCurrent('TC Look', '', 'custom', []);
+    const preset = presetService.getPreset(presetId)!;
+
+    // The load-bearing assertion: the block EXISTS (capture no longer throws-and-drops it).
+    expect(preset.settings.toneCurve).toBeDefined();
+
+    presetService.deletePreset(presetId);
+  });
+});

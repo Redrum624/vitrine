@@ -161,7 +161,7 @@ describe('readRawMetadataFile — bounded prefix read', () => {
     expect(md.lens).toBe('OLYMPUS M.17mm F1.8');
   });
 
-  test('returns {} (no throw) for a non-existent file', async () => {
+  test('rejects for a non-existent file (the IPC handler catches this and returns null)', async () => {
     await expect(readRawMetadataFile(path.resolve(__dirname, 'does-not-exist.orf'))).rejects.toThrow();
   });
 });
