@@ -192,14 +192,6 @@ npm run test:e2e     # Playwright end-to-end tests
 
 *Sampled daily from the GitHub Releases API — the curve builds from launch day forward.*
 
-## Star History
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=Redrum624/Vitrine&type=Date&theme=dark">
-  <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=Redrum624/Vitrine&type=Date">
-  <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=Redrum624/Vitrine&type=Date">
-</picture>
-
 ## License
 
 **Source-available, non-commercial.** Vitrine is licensed under the
