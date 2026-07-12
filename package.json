@@ -1,0 +1,154 @@
+{
+  "name": "photo_app",
+  "version": "1.24.0",
+  "description": "Vitrine — a free, non-destructive RAW photo editor for Windows",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "start": "npm run build && electron .",
+    "dev": "node scripts/dev.cjs",
+    "dev-server-only": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "electron": "electron electron/main.cjs",
+    "electron-dev": "concurrently \"npm run dev-server-only\" \"wait-on http://localhost:3005 && electron electron/main.cjs\"",
+    "dev-managed": "node scripts/dev.cjs",
+    "electron-build": "npm run build && electron-builder",
+    "dist": "npm run build && electron-builder --publish=never",
+    "clean:dist": "node -e \"const fs=require('fs');fs.rmSync('dist',{recursive:true,force:true});fs.rmSync('release',{recursive:true,force:true})\"",
+    "clean:installer": "node -e \"require('fs').rmSync('installer',{recursive:true,force:true})\"",
+    "preflight:models": "node scripts/preflight-models.cjs",
+    "build:win": "npm run clean:installer && npm run clean:dist && npm run preflight:models && npm run build && node scripts/build-installer.cjs --win --publish=never && node scripts/gen-readme-txt.cjs && node scripts/gen-license-files.cjs && node scripts/collect-installer.cjs",
+    "release:win": "npm run build:win && node scripts/gh-release.cjs",
+    "build:win:dir": "npm run clean:dist && npm run preflight:models && npm run build && node scripts/build-installer.cjs --win --dir --publish=never",
+    "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
+    "lint:fix": "eslint . --ext ts,tsx --fix",
+    "typecheck": "tsc --noEmit",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:headed": "playwright test --headed"
+  },
+  "keywords": [],
+  "author": "Redrum624",
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Redrum624/Vitrine.git"
+  },
+  "type": "module",
+  "dependencies": {
+    "@img/sharp-win32-x64": "0.34.5",
+    "exifreader": "^4.23.5",
+    "libraw-wasm": "^1.1.2",
+    "lucide-react": "^0.562.0",
+    "onnxruntime-node": "1.27.0",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1",
+    "sharp": "0.34.5",
+    "zustand": "^5.0.8"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.36.0",
+    "@playwright/test": "^1.57.0",
+    "@tailwindcss/postcss": "^4.1.13",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.1",
+    "@types/jest": "^30.0.0",
+    "@types/node": "^25.0.3",
+    "@types/react": "^19.1.13",
+    "@types/react-dom": "^19.1.9",
+    "@typescript-eslint/eslint-plugin": "^8.44.1",
+    "@typescript-eslint/parser": "^8.44.1",
+    "@vitejs/plugin-react": "^5.0.3",
+    "autoprefixer": "^10.4.21",
+    "concurrently": "^9.2.1",
+    "electron": "43.1.0",
+    "electron-builder": "^26.0.12",
+    "eslint": "^9.36.0",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "eslint-plugin-react-refresh": "^0.4.21",
+    "identity-obj-proxy": "^3.0.0",
+    "jest": "^30.2.0",
+    "jest-environment-jsdom": "^30.2.0",
+    "png-to-ico": "^3.0.1",
+    "png2icons": "^2.0.1",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^4.1.13",
+    "terser": "^5.44.0",
+    "ts-jest": "^29.4.6",
+    "typescript": "^5.9.2",
+    "vite": "^7.1.7",
+    "wait-on": "^9.0.1"
+  },
+  "build": {
+    "appId": "com.photoeditorpro.app",
+    "productName": "Vitrine",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "node_modules/**/*"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.ico",
+      "verifyUpdateCodeSignature": false,
+      "artifactName": "${productName} Setup ${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Vitrine"
+    },
+    "extraResources": [
+      {
+        "from": "assets",
+        "to": "assets",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "vendor/libraw",
+        "to": "vendor/libraw",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "public/libraw",
+        "to": "libraw",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "resources/models",
+        "to": "models",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "asarUnpack": [
+      "electron/librawWasmWorker.cjs",
+      "electron/librawWasmNode.cjs",
+      "**/node_modules/sharp/**",
+      "**/node_modules/@img/**",
+      "**/node_modules/onnxruntime-node/**"
+    ]
+  }
+}

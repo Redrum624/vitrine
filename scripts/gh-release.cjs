@@ -1,0 +1,165 @@
+#!/usr/bin/env node
+/**
+ * gh-release.cjs
+ * Creates (or updates) a GitHub release for the current package version.
+ *
+ * Usage: node scripts/gh-release.cjs
+ *   - Reads version from package.json
+ *   - Locates built artifacts in release/
+ *   - Extracts release notes from CHANGELOG.md (## [version] section)
+ *   - Runs: gh release create v<version> <files> --title "..." --notes-file <tmp>
+ *   - If release already exists: gh release upload v<version> <files> --clobber
+ *   - Prints the release URL on success
+ *
+ * Requires: gh CLI authenticated (gh auth status).
+ */
+
+'use strict';
+
+const fs                        = require('fs');
+const path                      = require('path');
+const { spawnSync }             = require('child_process');
+const os                        = require('os');
+
+const ROOT    = path.join(__dirname, '..');
+const RELEASE = path.join(ROOT, 'release');
+const REPO    = 'Redrum624/Vitrine';
+
+// ---------------------------------------------------------------------------
+// Helper: run gh with an explicit arg array (no shell interpolation)
+// ---------------------------------------------------------------------------
+function gh(...args) {
+  console.log(`[gh-release] $ gh ${args.join(' ')}`);
+  const result = spawnSync('gh', args, { encoding: 'utf8', stdio: ['inherit', 'pipe', 'inherit'] });
+  if (result.error) {
+    console.error(`[gh-release] spawn error: ${result.error.message}`);
+    process.exit(1);
+  }
+  return result;
+}
+
+// ---------------------------------------------------------------------------
+// 1. Read version
+// ---------------------------------------------------------------------------
+const pkg     = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+const VERSION = pkg.version;
+const TAG     = `v${VERSION}`;
+
+console.log(`[gh-release] Targeting release ${TAG}`);
+
+// ---------------------------------------------------------------------------
+// 2. Locate artifacts
+// ---------------------------------------------------------------------------
+const CANDIDATES = [
+  `Vitrine Setup ${VERSION}.exe`,
+  `Vitrine ${VERSION} README.txt`,
+  'LICENSE',
+  'THIRD-PARTY-LICENSES.md',
+];
+
+const existing = [];
+const missing  = [];
+
+for (const name of CANDIDATES) {
+  const full = path.join(RELEASE, name);
+  if (fs.existsSync(full)) {
+    existing.push(full);
+    console.log(`[gh-release]   Found: ${name}`);
+  } else {
+    missing.push(name);
+    console.warn(`[gh-release]   MISSING (skipping): ${name}`);
+  }
+}
+
+if (existing.length === 0) {
+  console.error('[gh-release] ERROR: No artifacts found in release/. Run npm run build:win first.');
+  process.exit(1);
+}
+
+// ---------------------------------------------------------------------------
+// 3. Extract release notes from CHANGELOG.md
+// ---------------------------------------------------------------------------
+const changelogPath = path.join(ROOT, 'CHANGELOG.md');
+let notes = `Release ${TAG}`;
+
+if (fs.existsSync(changelogPath)) {
+  const changelog = fs.readFileSync(changelogPath, 'utf8');
+  // Match ## [VERSION] section up to the next ## [ or end of file
+  const re = new RegExp(
+    `## \\[${escapeRegex(VERSION)}\\][^\\n]*\\n([\\s\\S]*?)(?=\\n## \\[|$)`,
+  );
+  const m = changelog.match(re);
+  if (m) {
+    notes = m[1].trim();
+    console.log(`[gh-release] Extracted ${notes.split('\n').length} lines of release notes from CHANGELOG.md`);
+  } else {
+    console.warn(`[gh-release] WARNING: No CHANGELOG section found for [${VERSION}], using default notes.`);
+  }
+} else {
+  console.warn('[gh-release] WARNING: CHANGELOG.md not found, using default notes.');
+}
+
+// ---------------------------------------------------------------------------
+// 4. Write notes to a temp file (keeps args clean — no shell quoting needed)
+// ---------------------------------------------------------------------------
+const notesFile = path.join(os.tmpdir(), `gh-release-notes-${VERSION}.md`);
+fs.writeFileSync(notesFile, notes, 'utf8');
+
+// ---------------------------------------------------------------------------
+// 5. Check whether the release already exists
+// ---------------------------------------------------------------------------
+function releaseExists() {
+  const r = gh('release', 'view', TAG, '--repo', REPO);
+  return r.status === 0;
+}
+
+// ---------------------------------------------------------------------------
+// 6. Create or update the release
+// ---------------------------------------------------------------------------
+let releaseUrl = '';
+
+if (releaseExists()) {
+  console.log(`[gh-release] Release ${TAG} already exists — uploading/clobbering assets.`);
+  const up = gh('release', 'upload', TAG, ...existing, '--clobber', '--repo', REPO);
+  if (up.status !== 0) {
+    console.error('[gh-release] ERROR: gh release upload failed.');
+    process.exit(1);
+  }
+  const view = gh('release', 'view', TAG, '--repo', REPO, '--json', 'url');
+  if (view.status === 0) {
+    try { releaseUrl = JSON.parse(view.stdout).url; } catch { /* ignore */ }
+  }
+} else {
+  const title = `Vitrine ${TAG}`;
+  const create = gh(
+    'release', 'create', TAG,
+    ...existing,
+    '--title', title,
+    '--notes-file', notesFile,
+    '--repo', REPO,
+  );
+  if (create.status !== 0) {
+    console.error('[gh-release] ERROR: gh release create failed.');
+    process.exit(1);
+  }
+  releaseUrl = (create.stdout || '').trim();
+}
+
+// ---------------------------------------------------------------------------
+// 7. Done
+// ---------------------------------------------------------------------------
+try { fs.unlinkSync(notesFile); } catch { /* best-effort cleanup */ }
+
+console.log('');
+console.log('[gh-release] SUCCESS');
+console.log(`[gh-release] Release URL: ${releaseUrl}`);
+if (missing.length) {
+  console.log(`[gh-release] Missing artifacts (not uploaded): ${missing.join(', ')}`);
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+function escapeRegex(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}

@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Enhance panel redesign — mockup</title>
+<style>
+  :root{
+    --gray-950:#0a0a0a;--gray-900:#141414;--gray-850:#1a1a1a;--gray-800:#1f1f1f;--gray-750:#262626;
+    --gray-700:#2e2e2e;--gray-600:#404040;--gray-400:#9aa0a6;--gray-300:#b8bcc2;--white:#fff;
+    --border:#2a2a2a;--primary-600:#2563eb;--primary-500:#3b82f6;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:#0e0e0e;color:var(--gray-300);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;line-height:1.5;padding:28px}
+  h1{font-size:1.25rem;color:#fff;margin:0 0 4px}
+  .sub{color:var(--gray-400);font-size:.85rem;margin:0 0 22px}
+  .stage{display:flex;gap:40px;flex-wrap:wrap;align-items:flex-start}
+  .col{flex:0 0 auto}
+  .caption{color:var(--gray-400);font-size:.78rem;margin:0 0 10px;max-width:360px}
+  .tag{display:inline-block;background:#13315c;color:#9ec1ff;font-weight:600;font-size:.7rem;padding:2px 8px;border-radius:10px;margin-bottom:8px}
+  /* ---- the actual app panel ---- */
+  .panel{width:360px;background:var(--gray-850);border:1px solid var(--border);border-radius:12px;overflow:hidden}
+  .panel-head{display:flex;align-items:center;gap:8px;padding:14px 18px 10px}
+  .panel-head .ic{width:18px;height:18px;color:#9ec1ff}
+  .panel-head h2{font-size:.95rem;color:#fff;margin:0;font-weight:600}
+  .panel-head .desc{font-size:.72rem;color:var(--gray-400);margin-left:auto}
+  .body{padding:6px 18px 18px;display:flex;flex-direction:column;gap:14px}
+  .label{font-size:.72rem;font-weight:500;color:var(--gray-300)}
+  .val{font-size:.72rem;font-family:ui-monospace,Consolas,monospace;color:var(--gray-400)}
+  .row{display:flex;flex-direction:column;gap:6px}
+  .row .top{display:flex;align-items:center;justify-content:space-between}
+  input[type=range]{-webkit-appearance:none;width:100%;height:4px;border-radius:2px;background:var(--gray-700);outline:none}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;background:#fff;cursor:pointer;transition:transform .1s}
+  input[type=range]::-webkit-slider-thumb:hover{transform:scale(1.3)}
+  /* mode toggle buttons */
+  .toggles{display:flex;gap:8px}
+  .toggle{flex:1;display:flex;align-items:center;justify-content:center;gap:7px;padding:9px 10px;border-radius:9px;border:1px solid var(--border);background:var(--gray-800);color:var(--gray-300);font-size:.82rem;font-weight:500;cursor:pointer}
+  .toggle .dot{width:8px;height:8px;border-radius:50%;background:var(--gray-600)}
+  .toggle.on{background:#11254a;border-color:var(--primary-500);color:#dbe7ff}
+  .toggle.on .dot{background:var(--primary-500);box-shadow:0 0 0 3px rgba(59,130,246,.25)}
+  /* scale selector */
+  .scalewrap{display:flex;align-items:center;gap:8px}
+  .scalewrap .label{margin-right:auto}
+  .seg{display:flex;border:1px solid var(--border);border-radius:8px;overflow:hidden}
+  .seg button{padding:5px 14px;background:var(--gray-800);color:var(--gray-300);border:0;font-size:.78rem;cursor:pointer;font-family:ui-monospace,monospace}
+  .seg button.on{background:var(--primary-600);color:#fff}
+  /* section accordion */
+  .section{border:1px solid var(--border);border-radius:10px;overflow:hidden}
+  .sec-head{display:flex;align-items:center;gap:8px;padding:9px 12px;background:var(--gray-800);cursor:pointer}
+  .sec-head .chev{color:var(--gray-400);font-size:.7rem;width:12px}
+  .sec-head .t{font-size:.8rem;color:#e6e6e6;font-weight:500}
+  .sec-head .reset{margin-left:auto;color:var(--gray-400);font-size:.68rem;background:transparent;border:0;cursor:pointer}
+  .sec-body{padding:12px;display:flex;flex-direction:column;gap:13px}
+  .check{display:flex;align-items:center;gap:8px;font-size:.76rem;color:var(--gray-300);cursor:pointer}
+  .check input{accent-color:var(--primary-500)}
+  /* apply / revert */
+  .apply{width:100%;padding:11px;border-radius:9px;border:1px solid var(--primary-500);background:var(--primary-600);color:#fff;font-size:.84rem;font-weight:600;cursor:pointer}
+  .revert{width:100%;padding:8px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--gray-300);font-size:.78rem;cursor:pointer}
+  .note{font-size:.7rem;color:var(--gray-400);background:var(--gray-900);border:1px solid var(--border);border-radius:8px;padding:8px 10px;display:flex;gap:7px}
+  .note .i{color:#9ec1ff;flex:0 0 auto}
+  .divider{height:1px;background:var(--border);margin:2px 0}
+  .enwrap{display:flex;align-items:center;gap:8px}
+  .enwrap .label{margin-right:auto}
+  .pill-en{position:relative;width:34px;height:18px;border-radius:10px;background:var(--gray-600);cursor:pointer}
+  .pill-en.on{background:var(--primary-600)}
+  .pill-en::after{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:#fff;transition:left .12s}
+  .pill-en.on::after{left:18px}
+  @media (prefers-color-scheme: light){body{background:#0e0e0e}} /* keep dark; app is dark */
+</style>
+</head>
+<body>
+  <h1>Enhance panel — redesign to match the other modules</h1>
+  <p class="sub">Current panel uses bare <code>&lt;button&gt;</code>/<code>&lt;details&gt;</code>/unstyled range inputs. Both options below reuse the app's real conventions: <code>.slider</code> rows (label + mono value), <code>Section</code> accordions (<code>--border</code> #2a2a2a / <code>--gray-800</code> headers), primary-blue Apply, muted note card. Shown at the real 360px panel width.</p>
+
+  <p class="sub" style="color:#9ec1ff;margin-top:-14px">Updated: Enhance now has THREE capabilities — <b>Noise Reduction</b> + <b>Sharpen</b> + <b>Upscale</b> (the standalone Noise Reduction sidebar tool is removed; its GPU NLM engine still runs at pipeline slot 7). One <b>Apply Enhance</b> runs whichever toggles are on.</p>
+  <div class="stage">
+    <!-- ============ OPTION A — 3 capability ============ -->
+    <div class="col">
+      <span class="tag">OPTION A — three mode toggles (recommended)</span>
+      <p class="caption">Three independent mode buttons (any combination on). Scale appears under Upscale. A “Detail &amp; quality” accordion holds the per-mode advanced sliders, collapsed by default. One Apply runs the lot.</p>
+      <div class="panel">
+        <div class="panel-head">
+          <span class="ic">✦</span><h2>Enhance</h2><span class="desc">denoise · sharpen · upscale</span>
+        </div>
+        <div class="body">
+          <div class="toggles">
+            <div class="toggle on" style="flex-direction:column;gap:4px;padding:10px 6px"><span class="dot"></span><span style="font-size:.74rem">Noise<br>Reduction</span></div>
+            <div class="toggle on" style="flex-direction:column;gap:4px;padding:10px 6px"><span class="dot"></span><span style="font-size:.74rem">Sharpen</span></div>
+            <div class="toggle on" style="flex-direction:column;gap:4px;padding:10px 6px"><span class="dot"></span><span style="font-size:.74rem">Upscale</span></div>
+          </div>
+
+          <div class="scalewrap">
+            <span class="label">Scale</span>
+            <div class="seg"><button>2×</button><button class="on">4×</button></div>
+          </div>
+
+          <!-- expanded section example -->
+          <div class="section">
+            <div class="sec-head"><span class="chev">▾</span><span class="t">Detail &amp; quality</span><button class="reset">Reset</button></div>
+            <div class="sec-body">
+              <div class="row"><div class="top"><span class="label" style="color:#9ec1ff">Noise reduction strength</span><span class="val">50</span></div><input type="range" min="0" max="100" step="1" value="50"></div>
+              <div class="divider"></div>
+              <div class="row"><div class="top"><span class="label">Sharpen strength</span><span class="val">0.40</span></div><input type="range" min="0" max="1" step="0.05" value="0.4"></div>
+              <div class="row"><div class="top"><span class="label">Detail amount</span><span class="val">0.80</span></div><input type="range" min="0" max="1" step="0.05" value="0.8"></div>
+              <div class="row"><div class="top"><span class="label">Deblur radius</span><span class="val">1.0 px</span></div><input type="range" min="0.5" max="3" step="0.1" value="1"></div>
+              <div class="row"><div class="top"><span class="label">Deblur iterations</span><span class="val">12</span></div><input type="range" min="0" max="30" step="1" value="12"></div>
+              <label class="check"><input type="checkbox" checked> Chroma cleanup</label>
+            </div>
+          </div>
+
+          <button class="apply">Apply Enhance (×4)</button>
+          <button class="revert">Revert Enhance</button>
+          <div class="note"><span class="i">ⓘ</span><span>Upscale applies in this session; reopening the image returns the original.</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ OPTION B — 3 capability accordions ============ -->
+    <div class="col">
+      <span class="tag">OPTION B — three accordion sections</span>
+      <p class="caption">Each capability is a collapsible <code>Section</code> with an enable pill (Lens-Corrections style). Most module-consistent; taller. One Apply runs whichever are enabled.</p>
+      <div class="panel">
+        <div class="panel-head">
+          <span class="ic">✦</span><h2>Enhance</h2><span class="desc">denoise · sharpen · upscale</span>
+        </div>
+        <div class="body">
+          <div class="section">
+            <div class="sec-head"><span class="chev">▾</span><span class="t">Noise Reduction</span><span class="pill-en on"></span></div>
+            <div class="sec-body">
+              <div class="row"><div class="top"><span class="label">Strength</span><span class="val">50</span></div><input type="range" min="0" max="100" step="1" value="50"></div>
+            </div>
+          </div>
+          <div class="section">
+            <div class="sec-head"><span class="chev">▾</span><span class="t">Sharpen</span><span class="pill-en on"></span></div>
+            <div class="sec-body">
+              <div class="row"><div class="top"><span class="label">Sharpen strength</span><span class="val">0.40</span></div><input type="range" min="0" max="1" step="0.05" value="0.4"></div>
+              <div class="row"><div class="top"><span class="label">Detail amount</span><span class="val">0.80</span></div><input type="range" min="0" max="1" step="0.05" value="0.8"></div>
+            </div>
+          </div>
+          <div class="section">
+            <div class="sec-head"><span class="chev">▾</span><span class="t">Upscale</span><span class="pill-en on"></span></div>
+            <div class="sec-body">
+              <div class="scalewrap"><span class="label">Scale</span><div class="seg"><button>2×</button><button class="on">4×</button></div></div>
+            </div>
+          </div>
+          <button class="apply">Apply Enhance (×4)</button>
+          <button class="revert">Revert Enhance</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

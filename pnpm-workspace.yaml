@@ -1,0 +1,20 @@
+# pnpm settings (pnpm 10.13+ moved these out of package.json's "pnpm" field).
+# Allow build/postinstall scripts ONLY for these known, trusted native/tooling
+# dependencies. pnpm blocks dependency scripts by default and FAILS the install
+# in CI (ERR_PNPM_IGNORED_BUILDS) unless every package with a build script is
+# explicitly acknowledged here.
+#
+# `allowBuilds` is the pnpm v11 key: a package -> boolean map. (The v10
+# `onlyBuiltDependencies` LIST was removed in v11 and is silently ignored, which
+# is why an earlier fix using it failed CI identically.) Each entry must be `true`
+# (not pnpm's auto-inserted "set this to true or false" placeholder) for the
+# script to actually run. These packages legitimately need their install scripts
+# to set up native binaries or platform bindings.
+allowBuilds:
+  electron: true
+  electron-winstaller: true
+  esbuild: true
+  exifreader: true
+  onnxruntime-node: true
+  sharp: true
+  unrs-resolver: true

@@ -1,0 +1,23 @@
+{
+  "$comment": "Single source of truth for the AI model files that the Windows installer bundles via electron-builder extraResources (build.extraResources: resources/models -> models). scripts/preflight-models.cjs reads this to FAIL the build loudly when a model is missing, so a fresh clone never ships an installer with an AI feature silently absent. To add a future model: append an entry here (file + feature required; sizeBytes/sha256 optional/documentary). Sizes and hashes mirror resources/models/README.md.",
+  "models": [
+    {
+      "file": "RealESRGAN_x4plus.onnx",
+      "feature": "Enhance -> Upscale (AI super-resolution, Real-ESRGAN x4plus)",
+      "sizeBytes": 446757,
+      "sha256": "36b217f0ef1c4a88c7bb493c188c15314724dec19f46ae5393f27c4fa7cfc5b4"
+    },
+    {
+      "file": "real_esrgan_x4plus.data",
+      "feature": "Enhance -> Upscale (AI super-resolution, Real-ESRGAN external weights)",
+      "sizeBytes": 66737664,
+      "sha256": "1bcfa110ca9d9c59594630d73a679d2582b947b9103b10de6743c762f6d006f6"
+    },
+    {
+      "file": "NAFNet-GoPro-width32.onnx",
+      "feature": "Enhance -> Motion deblur (AI, NAFNet-GoPro-width32)",
+      "sizeBytes": 69732591,
+      "sha256": "32a602cf7e553a79be57059ccbbdd500345a4b90df305a55724be9d22f6dd115"
+    }
+  ]
+}

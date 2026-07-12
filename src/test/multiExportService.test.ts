@@ -1,0 +1,153 @@
+/**
+ * Unit tests for MultiExportService.exportMany.
+ *
+ * Verifies the core guarantees: each image is exported with ITS OWN saved edits
+ * (reset → restoreForPath per image), output names use the _PEP suffix and never
+ * clobber (auto-suffix vs both on-disk files and same-run names), cancellation
+ * stops the loop, per-image failures are collected without aborting, and the
+ * editor's pre-export state is always restored afterward.
+ *
+ * All heavy collaborators are mocked so this is a pure logic test.
+ */
+
+// --- Mocks --------------------------------------------------------------
+const loadImageForExport = jest.fn();
+const getCurrentImage = jest.fn();
+const resetAllModules = jest.fn();
+const processImage = jest.fn();
+const getProcessingPipeline = jest.fn(() => ({ resetAllModules, processImage }));
+
+jest.mock('../services/ImageService', () => ({
+  imageService: { loadImageForExport, getCurrentImage, getProcessingPipeline },
+}));
+
+const flush = jest.fn();
+const serialize = jest.fn(() => ({ snapshot: 'CURRENT' }));
+const restore = jest.fn();
+const getSavedEditState = jest.fn();
+const restoreState = jest.fn();
+
+jest.mock('../services/EditPersistenceService', () => ({
+  editPersistenceService: { flush, serialize, restore, getSavedEditState, restoreState },
+}));
+
+const exportImage = jest.fn();
+jest.mock('../services/ExportService', () => ({
+  exportService: { exportImage },
+}));
+
+import { multiExportService } from '../services/MultiExportService';
+
+const fileExists = jest.fn();
+
+const controls = (over: Partial<{ isCancelled: () => boolean }> = {}) => ({
+  outputDirectory: 'C:\\out',
+  onProgress: jest.fn(),
+  isCancelled: over.isCancelled ?? (() => false),
+});
+
+const okOptions = { format: 'jpeg' as const };
+
+beforeEach(() => {
+  jest.clearAllMocks();
+  (window as unknown as { electronAPI: { fileExists: typeof fileExists } }).electronAPI = { fileExists };
+  fileExists.mockResolvedValue(false);
+  loadImageForExport.mockImplementation(async () => ({ width: 100, height: 50, data: new Float32Array(100 * 50 * 4) }));
+  getCurrentImage.mockReturnValue({ width: 200, height: 120 });
+  processImage.mockImplementation(async (d: Float32Array) => d);
+  getSavedEditState.mockResolvedValue(null);
+  restoreState.mockReturnValue(true);
+  exportImage.mockResolvedValue({ success: true, outputPath: 'out' });
+});
+
+describe('exportMany — per-image edits', () => {
+  it('resets then restores each image\'s saved edits before processing', async () => {
+    await multiExportService.exportMany(['/i/a.jpg', '/i/b.png'], okOptions, controls());
+    // Fetches each image's state once, then restores it (behaviour-identical to the old
+    // restoreForPath, but the single read also lets us detect an unapplied upscale intent).
+    expect(getSavedEditState).toHaveBeenCalledWith('/i/a.jpg');
+    expect(getSavedEditState).toHaveBeenCalledWith('/i/b.png');
+    expect(restoreState).toHaveBeenCalledWith(null, 100, 50, '/i/a.jpg');
+    expect(restoreState).toHaveBeenCalledWith(null, 100, 50, '/i/b.png');
+    // resetAllModules runs per image (2) plus once in the finally restore = 3.
+    expect(resetAllModules).toHaveBeenCalledTimes(3);
+  });
+
+  it('exports each image with a _PEP filename into the chosen folder', async () => {
+    await multiExportService.exportMany(['/i/a.jpg', '/i/b.png'], okOptions, controls());
+    expect(exportImage).toHaveBeenCalledTimes(2);
+    expect(exportImage.mock.calls[0][3]).toMatchObject({ outputDirectory: 'C:\\out', filename: 'a_PEP.jpg' });
+    expect(exportImage.mock.calls[1][3]).toMatchObject({ filename: 'b_PEP.jpg' });
+  });
+});
+
+describe('exportMany — unapplied upscale intent (Q7, NO silent loss)', () => {
+  it('records images whose saved state carries a bakedUpscale intent in summary.upscaleSkipped', async () => {
+    getSavedEditState.mockImplementation(async (path: string) =>
+      path === '/i/a.jpg' ? { version: 1, modules: {}, bakedUpscale: { scale: 2, mode: 'ai' } } : null,
+    );
+    const summary = await multiExportService.exportMany(['/i/a.jpg', '/i/b.png'], okOptions, controls());
+    // Both still export (at native resolution) — the intent is surfaced, never silently dropped.
+    expect(summary.exported).toEqual(['a_PEP.jpg', 'b_PEP.jpg']);
+    expect(summary.upscaleSkipped).toEqual(['a']);
+  });
+
+  it('leaves upscaleSkipped empty when no selected image carries an intent', async () => {
+    const summary = await multiExportService.exportMany(['/i/a.jpg', '/i/b.png'], okOptions, controls());
+    expect(summary.upscaleSkipped).toEqual([]);
+  });
+});
+
+describe('exportMany — collision handling', () => {
+  it('auto-suffixes when a file already exists on disk', async () => {
+    // First candidate exists; the bumped one does not.
+    fileExists.mockImplementation(async (p: string) => p.endsWith('a_PEP.jpg'));
+    await multiExportService.exportMany(['/i/a.jpg'], okOptions, controls());
+    expect(exportImage.mock.calls[0][3].filename).toBe('a_PEP_1.jpg');
+  });
+
+  it('auto-suffixes when two sources share a base name', async () => {
+    await multiExportService.exportMany(['/x/a.jpg', '/y/a.png'], okOptions, controls());
+    expect(exportImage.mock.calls[0][3].filename).toBe('a_PEP.jpg');
+    expect(exportImage.mock.calls[1][3].filename).toBe('a_PEP_1.jpg');
+  });
+});
+
+describe('exportMany — cancellation & failures', () => {
+  it('stops before the next image when cancelled', async () => {
+    let calls = 0;
+    const isCancelled = () => calls++ > 0; // false for first check, true afterwards
+    const summary = await multiExportService.exportMany(['/i/a.jpg', '/i/b.jpg', '/i/c.jpg'], okOptions, controls({ isCancelled }));
+    expect(exportImage).toHaveBeenCalledTimes(1);
+    expect(summary.exported).toEqual(['a_PEP.jpg']);
+  });
+
+  it('collects a failed export and continues with the rest', async () => {
+    exportImage
+      .mockResolvedValueOnce({ success: false, error: 'disk full' })
+      .mockResolvedValueOnce({ success: true });
+    const summary = await multiExportService.exportMany(['/i/a.jpg', '/i/b.jpg'], okOptions, controls());
+    expect(summary.failed).toEqual([{ path: '/i/a.jpg', error: 'disk full' }]);
+    expect(summary.exported).toEqual(['b_PEP.jpg']);
+  });
+
+  it('collects a thrown error and continues', async () => {
+    loadImageForExport.mockRejectedValueOnce(new Error('decode failed'));
+    const summary = await multiExportService.exportMany(['/i/a.jpg', '/i/b.jpg'], okOptions, controls());
+    expect(summary.failed[0]).toEqual({ path: '/i/a.jpg', error: 'decode failed' });
+    expect(summary.exported).toEqual(['b_PEP.jpg']);
+  });
+});
+
+describe('exportMany — editor state restore', () => {
+  it('always restores the snapshot with the current image dims in finally', async () => {
+    await multiExportService.exportMany(['/i/a.jpg'], okOptions, controls());
+    expect(restore).toHaveBeenCalledWith({ snapshot: 'CURRENT' }, 200, 120);
+  });
+
+  it('restores even when every image fails', async () => {
+    loadImageForExport.mockRejectedValue(new Error('boom'));
+    await multiExportService.exportMany(['/i/a.jpg', '/i/b.jpg'], okOptions, controls());
+    expect(restore).toHaveBeenCalledWith({ snapshot: 'CURRENT' }, 200, 120);
+  });
+});

@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <linearGradient id="bgGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1a1a1a"/>
+      <stop offset="100%" style="stop-color:#0d0d0d"/>
+    </linearGradient>
+    <linearGradient id="bladeGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#b0b0b0"/>
+      <stop offset="100%" style="stop-color:#505050"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background rounded square -->
+  <rect x="0" y="0" width="256" height="256" rx="40" ry="40" fill="url(#bgGradient)"/>
+
+  <!-- Outer lens ring -->
+  <circle cx="128" cy="128" r="93" fill="none" stroke="#454545" stroke-width="5"/>
+
+  <!-- Inner dark background -->
+  <circle cx="128" cy="128" r="85" fill="#0a0a0a"/>
+
+  <!-- 8 blades with gradient -->
+  <g fill="url(#bladeGradient)" stroke="#252525" stroke-width="1">
+    <path d="M98,46 A85,85 0 0,1 158,46 L128,75 L98,105 Z"/>
+    <path d="M98,46 A85,85 0 0,1 158,46 L128,75 L98,105 Z" transform="rotate(45, 128, 128)"/>
+    <path d="M98,46 A85,85 0 0,1 158,46 L128,75 L98,105 Z" transform="rotate(90, 128, 128)"/>
+    <path d="M98,46 A85,85 0 0,1 158,46 L128,75 L98,105 Z" transform="rotate(135, 128, 128)"/>
+    <path d="M98,46 A85,85 0 0,1 158,46 L128,75 L98,105 Z" transform="rotate(180, 128, 128)"/>
+    <path d="M98,46 A85,85 0 0,1 158,46 L128,75 L98,105 Z" transform="rotate(225, 128, 128)"/>
+    <path d="M98,46 A85,85 0 0,1 158,46 L128,75 L98,105 Z" transform="rotate(270, 128, 128)"/>
+    <path d="M98,46 A85,85 0 0,1 158,46 L128,75 L98,105 Z" transform="rotate(315, 128, 128)"/>
+  </g>
+
+  <!-- Center opening -->
+  <circle cx="128" cy="128" r="25" fill="#0a0a0a"/>
+</svg>

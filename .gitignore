@@ -1,0 +1,311 @@
+# Dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Production builds
+/dist
+/build
+/out
+*.tgz
+*.tar.gz
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Coverage directory used by tools like istanbul
+coverage/
+*.lcov
+
+# nyc test coverage
+.nyc_output
+
+# Grunt intermediate storage
+.grunt
+
+# Bower dependency directory
+bower_components
+
+# node-waf configuration
+.lock-wscript
+
+# Compiled binary addons
+build/Release
+
+# Dependency directories
+jspm_packages/
+
+# Snowpack dependency directory
+web_modules/
+
+# TypeScript cache
+*.tsbuildinfo
+
+# Optional npm cache directory
+.npm
+
+# Optional eslint cache
+.eslintcache
+
+# Optional stylelint cache
+.stylelintcache
+
+# Microbundle cache
+.rpt2_cache/
+.rts2_cache_cjs/
+.rts2_cache_es/
+.rts2_cache_umd/
+
+# Optional REPL history
+.node_repl_history
+
+# Output of 'npm pack'
+*.tgz
+
+# Yarn Integrity file
+.yarn-integrity
+
+# dotenv environment variable files
+.env
+.env.development.local
+.env.test.local
+.env.production.local
+.env.local
+
+# parcel-bundler cache
+.cache
+.parcel-cache
+
+# Next.js build output
+.next
+
+# Nuxt.js build / generate output
+.nuxt
+dist
+
+# Gatsby files
+.cache/
+public
+
+# Storybook build outputs
+.out
+.storybook-out
+storybook-static
+
+# Temporary folders
+tmp/
+temp/
+
+# Logs
+logs
+*.log
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Windows image file caches
+Thumbs.db
+ehthumbs.db
+
+# Folder config file
+Desktop.ini
+
+# Recycle Bin used on file shares
+$RECYCLE.BIN/
+
+# Windows Installer files
+*.cab
+*.msi
+*.msm
+*.msp
+
+# Windows shortcuts
+*.lnk
+
+# IDE and Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Vim
+*.swp
+*.swo
+
+# Emacs
+*~
+\#*\#
+/.emacs.desktop
+/.emacs.desktop.lock
+*.elc
+auto-save-list
+tramp
+.\#*
+
+# SublimeText
+*.tmlanguage.cache
+*.tmPreferences.cache
+*.stTheme.cache
+*.sublime-workspace
+*.sublime-project
+
+# Electron-specific
+dist-electron/
+release/
+installer/
+
+# LibRaw and native binaries
+*.so
+*.dll
+*.dylib
+libraw.wasm
+libraw.js
+
+# Emscripten SDK (local wasm toolchain; was a stray bare gitlink with no .gitmodules)
+wasm-build/emsdk/
+
+# Image processing cache
+cache/
+processed/
+temp-images/
+
+# Bundled AI model weights — too large for git (~64MB); kept locally and bundled into the
+# installer via electron-builder extraResources. See resources/models/README.md to obtain them.
+resources/models/*.onnx
+resources/models/*.data
+
+# Test files and coverage
+test-results/
+coverage/
+.nyc_output/
+
+# Build artifacts
+*.o
+*.a
+*.lib
+*.exe
+
+# Package files
+*.dmg
+*.pkg
+*.deb
+*.rpm
+*.snap
+*.appx
+*.msi
+
+# Development databases
+*.sqlite
+*.db
+
+# Configuration files with secrets
+config/secrets.json
+.env.secret
+
+# Large sample files
+samples/
+test-images/
+*.raw
+*.dng
+*.cr2
+*.cr3
+*.nef
+*.arw
+*.orf
+
+# Exception: a small (~2MB) header-truncated ORF committed as a test fixture for
+# src/test/rawMetadata.test.ts. CI has no access to local RAW files, so this one
+# must be tracked. Only the TIFF/EXIF header is kept; the raw sensor data is cut.
+!/src/test/fixtures/P2060833.header.ORF
+
+# Documentation builds
+docs/_build/
+docs/dist/
+
+# Backup files
+*.backup
+*.bak
+*.orig
+
+# Lock files — commit pnpm-lock.yaml (this project installs with pnpm) for reproducible,
+# audited installs; ignore the other package managers' lockfiles.
+yarn.lock
+
+# Auto-generated files
+src/generated/
+auto-generated/
+
+# System files
+*.tmp
+*.temp
+.fuse_hidden*
+
+# macOS
+.AppleDouble
+.LSOverride
+Icon?
+
+# Linux
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+
+# Pytest
+.pytest_cache/
+.tox/
+
+# JetBrains IDEs
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# VS Code workspace files
+*.code-workspace
+
+# Electron forge
+.webpack/
+
+# Native node modules
+prebuilds/
+
+# Sass
+.sass-cache/
+*.css.map
+
+# PostCSS
+postcss.config.js.map
+
+# Claude Code files
+.claude/
+*.claude
+
+# Superpowers / SDD scratch (internal agent notes, plans, progress ledger)
+.superpowers/
+# Committed design/implementation plans + specs are internal dev-process docs —
+# keep them local, out of the public repo.
+docs/superpowers/
+
+# Local RAW/test fixtures (large binaries)
+/test/
+
+# Internal planning / analysis artifacts (not part of the shipped repo)
+idea-eval/
+docs/go-public-plan.html
+docs/analyses/
+docs/pre-ship-audit-*.html
+# Internal design-handoff bundle (mockups + reference shots; not shipped)
+design_handoff_glass_ui/

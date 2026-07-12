@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vitrine</title>
+    <style>
+        /* Glass · Sectioned design tokens — mirrors src/index.css :root (this file is
+           standalone in the splash BrowserWindow and cannot import the app stylesheet). */
+        :root {
+            --accent: #3b82f6;
+            --accent-soft: rgba(59, 130, 246, .14);
+            --accent-ring: rgba(59, 130, 246, .35);
+            --glass-bg: rgba(15, 15, 19, .78);
+            --glass-border: rgba(255, 255, 255, .08);
+            --glass-shadow: 0 32px 90px rgba(0, 0, 0, .6), inset 0 1px 0 rgba(255, 255, 255, .06);
+            --text-title: #f0f0f2;
+            --text-label: #c2c2ca;
+            --text-secondary: #a8a8b0;
+            --text-muted: #7a7a82;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            /* Same workspace backdrop as the main app, scaled to the 500x400 window */
+            background: radial-gradient(700px 500px at 42% 45%, #121216, #08080a);
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            overflow: hidden;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+
+        .splash-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 26px;
+            padding: 20px;
+        }
+
+        @keyframes dcRise {
+            from { opacity: 0; transform: translateY(10px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+
+        .dc-rise {
+            animation: dcRise 380ms cubic-bezier(.2, .7, .3, 1) both;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            .dc-rise { animation: none; }
+            .progress-bar::after { animation: none; }
+            .spinner { animation-duration: 2s; }
+        }
+
+        .logo-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .logo-icon {
+            width: 96px;
+            height: 96px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 20px;
+            box-shadow: 0 24px 60px rgba(0, 0, 0, .55);
+        }
+
+        .logo-title {
+            font-size: 20px;
+            color: var(--text-title);
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 3px;
+            margin-top: 18px;
+        }
+
+        .logo-subtitle {
+            font-size: 10px;
+            color: var(--accent);
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 4px;
+            margin-top: 8px;
+        }
+
+        .loading-section {
+            background: var(--glass-bg);
+            border: 1px solid var(--glass-border);
+            border-radius: 20px;
+            padding: 18px 20px;
+            min-width: 350px;
+            box-shadow: var(--glass-shadow);
+            animation-delay: 70ms;
+        }
+
+        .status-text {
+            color: var(--text-label);
+            font-size: 12px;
+            font-weight: 500;
+            margin-bottom: 12px;
+            text-align: center;
+            min-height: 18px;
+        }
+
+        .progress-bar-container {
+            width: 100%;
+            height: 5px;
+            background: rgba(255, 255, 255, .09);
+            border-radius: 3px;
+            overflow: hidden;
+            position: relative;
+            box-shadow: inset 0 1px 2px rgba(0, 0, 0, .6);
+        }
+
+        .progress-bar {
+            height: 100%;
+            background: var(--accent);
+            border-radius: 3px;
+            transition: width 0.3s ease;
+            width: 0%;
+            position: relative;
+            overflow: hidden;
+            box-shadow: 0 0 12px var(--accent-ring);
+        }
+
+        .progress-bar::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(
+                90deg,
+                transparent,
+                rgba(255, 255, 255, 0.25),
+                transparent
+            );
+            animation: shimmer 2s infinite;
+        }
+
+        @keyframes shimmer {
+            0% {
+                transform: translateX(-100%);
+            }
+            100% {
+                transform: translateX(100%);
+            }
+        }
+
+        .progress-percentage {
+            color: var(--text-secondary);
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: 11px;
+            font-weight: 600;
+            text-align: center;
+            margin-top: 8px;
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border: 2px solid var(--accent-ring);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 8px;
+            vertical-align: middle;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        .version {
+            position: absolute;
+            bottom: 10px;
+            right: 15px;
+            color: var(--text-muted);
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: 10px;
+            font-weight: 500;
+        }
+
+        .error-message {
+            color: #f87171;
+            font-size: 12px;
+            margin-top: 10px;
+            text-align: center;
+            display: none;
+        }
+
+        .error-message.show {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div class="splash-container">
+        <div class="logo-container dc-rise">
+            <div class="logo-icon">
+                <!-- Inline SVG Logo -->
+                <svg viewBox="0 0 256 256" width="96" height="96">
+                    <defs>
+                        <linearGradient id="bgGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" style="stop-color:#1a1a1a"/>
+                            <stop offset="100%" style="stop-color:#0d0d0d"/>
+                        </linearGradient>
+                        <linearGradient id="bladeGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" style="stop-color:#b0b0b0"/>
+                            <stop offset="100%" style="stop-color:#505050"/>
+                        </linearGradient>
+                    </defs>
+                    <rect x="0" y="0" width="256" height="256" rx="40" ry="40" fill="url(#bgGradient)"/>
+                    <circle cx="128" cy="128" r="93" fill="none" stroke="#454545" stroke-width="5"/>
+                    <circle cx="128" cy="128" r="85" fill="#0a0a0a"/>
+                    <g fill="url(#bladeGradient)" stroke="#252525" stroke-width="1">
+                        <path d="M98,46 A85,85 0 0,1 158,46 L128,75 L98,105 Z"/>
+                        <path d="M98,46 A85,85 0 0,1 158,46 L128,75 L98,105 Z" transform="rotate(45, 128, 128)"/>
+                        <path d="M98,46 A85,85 0 0,1 158,46 L128,75 L98,105 Z" transform="rotate(90, 128, 128)"/>
+                        <path d="M98,46 A85,85 0 0,1 158,46 L128,75 L98,105 Z" transform="rotate(135, 128, 128)"/>
+                        <path d="M98,46 A85,85 0 0,1 158,46 L128,75 L98,105 Z" transform="rotate(180, 128, 128)"/>
+                        <path d="M98,46 A85,85 0 0,1 158,46 L128,75 L98,105 Z" transform="rotate(225, 128, 128)"/>
+                        <path d="M98,46 A85,85 0 0,1 158,46 L128,75 L98,105 Z" transform="rotate(270, 128, 128)"/>
+                        <path d="M98,46 A85,85 0 0,1 158,46 L128,75 L98,105 Z" transform="rotate(315, 128, 128)"/>
+                    </g>
+                    <circle cx="128" cy="128" r="25" fill="#0a0a0a"/>
+                </svg>
+            </div>
+            <div class="logo-title">Vitrine</div>
+            <div class="logo-subtitle">Develop. Display.</div>
+        </div>
+
+        <div class="loading-section dc-rise">
+            <div class="status-text">
+                <span class="spinner"></span>
+                <span id="status-message">Initializing...</span>
+            </div>
+            <div class="progress-bar-container">
+                <div class="progress-bar" id="progress-bar"></div>
+            </div>
+            <div class="progress-percentage" id="progress-percentage">0%</div>
+            <div class="error-message" id="error-message"></div>
+        </div>
+    </div>
+
+    <div class="version" id="version">v1.0.0</div>
+
+    <script>
+        window.addEventListener('DOMContentLoaded', () => {
+            const progressBar = document.getElementById('progress-bar');
+            const progressPercentage = document.getElementById('progress-percentage');
+            const statusMessage = document.getElementById('status-message');
+            const errorMessage = document.getElementById('error-message');
+            const versionElement = document.getElementById('version');
+
+            // Load version from Electron API
+            if (window.electronAPI?.getAppVersion) {
+                window.electronAPI.getAppVersion().then(version => {
+                    versionElement.textContent = `v${version}`;
+                }).catch(() => {
+                    versionElement.textContent = 'v1.0.0';
+                });
+            }
+
+            // Handle progress updates from main process
+            if (window.electronAPI?.onSplashProgress) {
+                window.electronAPI.onSplashProgress((data) => {
+                    const { progress, message, error } = data;
+
+                    if (error) {
+                        errorMessage.textContent = error;
+                        errorMessage.classList.add('show');
+                        return;
+                    }
+
+                    if (message) {
+                        statusMessage.textContent = message;
+                    }
+
+                    if (progress !== undefined) {
+                        const percentage = Math.min(100, Math.max(0, progress));
+                        progressBar.style.width = percentage + '%';
+                        progressPercentage.textContent = Math.round(percentage) + '%';
+                    }
+                });
+            }
+
+            // Fallback: simulate initial progress if no updates
+            let fallbackProgress = 0;
+            const messages = [
+                'Initializing...',
+                'Loading modules...',
+                'Preparing workspace...'
+            ];
+            let msgIndex = 0;
+
+            const fallbackInterval = setInterval(() => {
+                if (fallbackProgress < 30) {
+                    fallbackProgress += Math.random() * 5;
+                    progressBar.style.width = fallbackProgress + '%';
+                    progressPercentage.textContent = Math.round(fallbackProgress) + '%';
+
+                    if (fallbackProgress > msgIndex * 10 && msgIndex < messages.length) {
+                        statusMessage.textContent = messages[msgIndex];
+                        msgIndex++;
+                    }
+                }
+            }, 200);
+
+            // Clear fallback when we receive real updates
+            let realUpdatesReceived = false;
+            if (window.electronAPI?.onSplashProgress) {
+                window.electronAPI.onSplashProgress(() => {
+                    if (!realUpdatesReceived) {
+                        realUpdatesReceived = true;
+                        clearInterval(fallbackInterval);
+                    }
+                });
+            }
+        });
+    </script>
+</body>
+</html>
