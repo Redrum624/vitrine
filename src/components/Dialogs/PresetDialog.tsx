@@ -154,6 +154,10 @@ export function PresetDialog({ isOpen, onClose, onApplyPreset }: PresetDialogPro
         logger.info(`Imported ${result.imported} presets, skipped ${result.skipped}`);
       }
 
+      if (result.warnings.length > 0) {
+        logger.warn('Import warnings:', result.warnings);
+      }
+
       if (result.errors.length > 0) {
         logger.error('Import errors:', result.errors);
       }

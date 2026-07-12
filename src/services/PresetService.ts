@@ -1,6 +1,9 @@
 import { logger } from '../utils/Logger';
 import { imageProcessingPipeline } from './ImageProcessingPipeline';
 import { imageService } from './ImageService';
+import { notificationService } from './NotificationService';
+import { sanitizeImportedPreset } from './presetShapeValidation';
+import { formatSkippedNames } from '../components/Dialogs/formatSkippedNames';
 import type { LocalAdjustmentsPipelineModule } from '../modules/LocalAdjustmentsPipelineModule';
 import type { LocalAdjustmentLayer, LocalAdjustmentParams, MaskGeometry } from '../modules/LocalAdjustmentsModule';
 
@@ -694,40 +697,52 @@ export class PresetService {
     return JSON.stringify(exportData, null, 2);
   }
 
-  // Import presets from file
-  importPresets(jsonData: string): { imported: number; skipped: number; errors: string[] } {
-    const result = { imported: 0, skipped: 0, errors: [] as string[] };
+  // Import presets from file. This is the TRUST BOUNDARY for user-supplied preset JSON
+  // (round-10 H1): app-created presets always capture complete settings blocks, so
+  // imports are the only route for malformed shapes into the store. Every preset runs
+  // through sanitizeImportedPreset — known-invalid settings blocks are DROPPED (block,
+  // not preset) with a per-preset warning; presets that can't be salvaged are skipped.
+  // Both outcomes surface a notification listing preset names (multi-export toast idiom).
+  importPresets(jsonData: string): { imported: number; skipped: number; errors: string[]; warnings: string[] } {
+    const result = { imported: 0, skipped: 0, errors: [] as string[], warnings: [] as string[] };
+    const skippedNames: string[] = [];
+    const droppedFrom: string[] = [];
 
     try {
       const data = JSON.parse(jsonData);
 
-      if (!data.presets || !Array.isArray(data.presets)) {
+      if (!data || !Array.isArray(data.presets)) {
         throw new Error('Invalid preset file format');
       }
 
-      for (const preset of data.presets) {
-        try {
-          // Validate preset structure
-          if (!preset.id || !preset.name || !preset.settings) {
-            result.errors.push(`Invalid preset structure: ${preset.name || 'unnamed'}`);
-            continue;
-          }
-
-          // Check if preset already exists
-          if (this.presets.has(preset.id)) {
-            result.skipped++;
-            continue;
-          }
-
-          // Add imported timestamp
-          preset.modifiedAt = new Date().toISOString();
-
-          this.presets.set(preset.id, preset);
-          result.imported++;
-
-        } catch (error) {
-          result.errors.push(`Failed to import preset ${preset.name}: ${error}`);
+      for (const raw of data.presets) {
+        const sanitized = sanitizeImportedPreset(raw);
+        if (!sanitized.ok) {
+          result.errors.push(`Invalid preset structure (${sanitized.name}): ${sanitized.reason}`);
+          skippedNames.push(sanitized.name);
+          continue;
         }
+
+        const preset = sanitized.preset;
+
+        // Check if preset already exists
+        if (this.presets.has(preset.id)) {
+          result.skipped++;
+          continue;
+        }
+
+        if (sanitized.droppedBlocks.length > 0) {
+          result.warnings.push(
+            `${preset.name}: dropped invalid settings block(s): ${sanitized.droppedBlocks.join(', ')}`
+          );
+          droppedFrom.push(`${preset.name} (${sanitized.droppedBlocks.join(', ')})`);
+        }
+
+        // Add imported timestamp
+        preset.modifiedAt = new Date().toISOString();
+
+        this.presets.set(preset.id, preset);
+        result.imported++;
       }
 
       if (result.imported > 0) {
@@ -735,8 +750,22 @@ export class PresetService {
         logger.info(`Imported ${result.imported} presets`);
       }
 
+      if (skippedNames.length > 0) {
+        notificationService.warning(
+          'Presets skipped on import',
+          `${skippedNames.length} malformed preset${skippedNames.length !== 1 ? 's were' : ' was'} skipped: ${formatSkippedNames(skippedNames)}`
+        );
+      }
+      if (droppedFrom.length > 0) {
+        notificationService.warning(
+          'Preset import',
+          `Invalid settings were dropped from: ${formatSkippedNames(droppedFrom)}`
+        );
+      }
+
     } catch (error) {
       result.errors.push(`Failed to parse preset file: ${error}`);
+      notificationService.error('Preset import failed', 'The file is not a valid preset export.');
     }
 
     return result;

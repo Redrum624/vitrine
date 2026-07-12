@@ -77,8 +77,24 @@ export class LensCorrectionsPipelineModule implements PipelineModule {
   // Active whenever ANY section is enabled. (The previous gate also required a
   // top-level `enabled` flag that nothing ever set, so the whole module silently
   // never ran in the live pipeline — this derives enablement from the sections.)
+  //
+  // Null-safety (round-10 H1 belt-and-suspenders): this getter is read OUTSIDE
+  // process()'s try (the process gate and the pipeline's isModuleActive), so a
+  // partial `lensCorrectionsParams` — reachable only through a bug upstream, since
+  // imported presets are shape-validated at the import trust boundary — used to
+  // THROW here. Fail safe instead: warn loudly and report the module disabled.
+  // Deliberately NOT a structural merge in setParameters: a merge would silently
+  // accept half-formed params as valid state and mask the upstream bug; the warn
+  // + disabled floor keeps the bug observable without crashing the pipeline.
   get isEnabled(): boolean {
     const p = this.params.lensCorrectionsParams;
+    if (!p || !p.vignetting || !p.distortion || !p.chromaticAberration ||
+        !p.profile || !p.blur || !p.filmGrain) {
+      logger.warn(
+        'LensCorrections: lensCorrectionsParams is missing sections (partial setParameters upstream?) — treating module as disabled'
+      );
+      return false;
+    }
     return (
       p.vignetting.enabled ||
       p.distortion.enabled ||
