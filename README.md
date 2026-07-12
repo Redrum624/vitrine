@@ -1,12 +1,12 @@
 # Vitrine
 
-![Version](https://img.shields.io/badge/Version-1.23.0-blue)
+![Version](https://img.shields.io/badge/Version-1.24.0-blue)
 ![TypeScript](https://img.shields.io/badge/TypeScript-0_errors-blue)
 ![Tests](https://img.shields.io/badge/Tests-1834_passing-brightgreen)
 ![Lint](https://img.shields.io/badge/Lint-clean-brightgreen)
 ![GPU](https://img.shields.io/badge/GPU-WebGL2_accelerated-success)
 
-![Electron](https://img.shields.io/badge/Electron_39-191970?logo=electron&logoColor=white)
+![Electron](https://img.shields.io/badge/Electron_43-191970?logo=electron&logoColor=white)
 ![React](https://img.shields.io/badge/React_19-20232A?logo=react&logoColor=61DAFB)
 ![TypeScript](https://img.shields.io/badge/TypeScript_5.9-3178C6?logo=typescript&logoColor=white)
 ![Vite](https://img.shields.io/badge/Vite_7-646CFF?logo=vite&logoColor=white)
@@ -106,7 +106,7 @@ electron-builder's full staging output (unpacked app, block maps) stays in `rele
 ## Architecture
 
 ### Technology stack
-- **Desktop**: Electron 39
+- **Desktop**: Electron 43
 - **Frontend**: React 19 + TypeScript 5.9 + Vite 7 + Zustand 5
 - **Styling**: Tailwind CSS 4
 - **Processing**: resident-texture WebGL2 GPU pipeline (zero-readback, presents to

@@ -1,8 +1,13 @@
 # Changelog
 
-All notable changes to **Photo Editor Pro** are documented in this file.
-The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
-project adheres to [Semantic Versioning](https://semver.org/).
+All notable changes to **Vitrine** (formerly Photo Editor Pro) are documented in
+this file. The format is based on [Keep a Changelog](https://keepachangelog.com/),
+and this project adheres to [Semantic Versioning](https://semver.org/).
+
+## [1.24.0] - 2026-07-12
+
+### Changed
+- **Upgraded the Electron runtime from 39 to 43** (Chromium 150, Node 24). Electron 39 had reached end-of-life and no longer received Chromium or Node security patches; moving to the current stable line restores that coverage. The app's Electron usage sits entirely on the long-lived core (`app` / `BrowserWindow` / `ipcMain` / `dialog` / `shell` / `Menu`) with modern security defaults already in place (context isolation, sandbox, no remote module), so the four-major bump needed **no application code changes**. Verified end-to-end on the new runtime: the full 1834-test suite, type-check, lint, a fresh installer build, and the packaged RAW smoke (progressive open + disk base cache, which exercises libraw-wasm's SharedArrayBuffer via the COOP/COEP header hook) all pass. The native modules (`sharp`, `onnxruntime-node`) are N-API prebuilds and load unchanged against Node 24. Affects: `package.json`, `pnpm-lock.yaml`.
 
 ## [1.23.0] - 2026-07-12
 

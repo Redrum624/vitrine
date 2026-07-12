@@ -23,7 +23,7 @@ const os                        = require('os');
 
 const ROOT    = path.join(__dirname, '..');
 const RELEASE = path.join(ROOT, 'release');
-const REPO    = 'Redrum624/photo_app';
+const REPO    = 'Redrum624/vitrine';
 
 // ---------------------------------------------------------------------------
 // Helper: run gh with an explicit arg array (no shell interpolation)
