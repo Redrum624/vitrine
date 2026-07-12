@@ -35,8 +35,18 @@ onnxruntime-node + DirectML). DirectML-gated: on a CPU-only machine the control 
   the upstream [xinntao/Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN) license.
 - **License:** BSD-3-Clause, © 2021 Xintao Wang (redistributable; see `THIRD-PARTY-LICENSES.md`).
 
-## Building without the model
+## Building without the models
 
-If these files are absent, the build still succeeds but the packaged app's AI upscale will report
-unavailable and Enhance → Upscale falls back to the deterministic Lanczos path. Place the files here
-before running `npm run build:win` to include AI upscale in the installer.
+Since round 9 the build **fails loudly** when any file listed in `models.manifest.json` is
+missing — `npm run build:win` / `build:win:dir` run `scripts/preflight-models.cjs` before the
+expensive steps, and its error names each missing file and its feature.
+
+To deliberately build a CPU-only installer (both AI features hidden at runtime — AI upscale
+falls back to Lanczos, AI motion deblur's control does not appear), use the escape hatch:
+
+- `ALLOW_MISSING_MODELS=1 npm run build:win` (works through the npm chain), or
+- `node scripts/preflight-models.cjs --allow-missing-models` (direct invocation)
+
+which downgrades the failure to a prominent warning. Place the files listed above in this
+directory before building to include the AI features in the installer. New models must be
+added to `models.manifest.json` — the preflight reads only that manifest.
