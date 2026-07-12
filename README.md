@@ -15,50 +15,83 @@
 
 ![Vitrine](docs/screenshot.png)
 
-**Vitrine** — the darkroom, behind glass.
+> **Vitrine** — *the darkroom, behind glass.*
 
-A **desktop RAW photo editor** built with Electron + React, featuring a WebGL2/CPU
-processing pipeline, native LibRaw demosaicing, colour-managed export, and
-non-destructive local adjustments.
+**Vitrine is a free RAW photo editor for Windows.** Open a photo straight off your
+camera — Olympus, Canon, Nikon, Sony, Panasonic, or Adobe DNG — and develop it
+non-destructively: exposure and colour, tone curves, local masks, lens fixes, AI
+denoise and upscaling, then export in the format and colour space you need. Every
+edit is saved per photo and re-applied when you reopen it; your original file is
+never touched.
 
-*A free, non-destructive RAW photo editor for Windows — a lightweight alternative to Lightroom and darktable for Olympus ORF, Canon CR2/CR3, Nikon NEF, Sony ARW, and Adobe DNG files.*
+It's a lightweight, no-subscription alternative to Lightroom and darktable, with a
+clean full-screen **glass workspace** that keeps every tool one click away.
+
+### Why Vitrine
+
+- 📷 **Real RAW** — native LibRaw decoding for 15+ camera formats (CR2/CR3, NEF, ARW, ORF, DNG, RW2, PEF…), with per-photo demosaic and highlight-recovery control.
+- ⚡ **Fast** — a GPU pipeline develops your edits in real time; RAW files open in ~0.5 s (embedded preview) while the full 16-bit decode swaps in behind the scenes.
+- ✨ **AI where it counts** — Real-ESRGAN ×2/×4 super-resolution and NAFNet motion-deblur run on your GPU, alongside classic denoise, sharpen, and dehaze.
+- 🎨 **Truly non-destructive** — adjustments are stored per image and replayed on reopen; the source file is never modified.
+- 🆓 **Free, no account** — download the installer and start editing. No sign-up, no subscription.
 
 ## Installation
 
-### Prerequisites
-- Node.js 18+ and a package manager (the repo is set up for **pnpm**; npm also works)
-- Windows, macOS, or Linux · 8 GB+ RAM (16 GB+ recommended for large RAW files)
+### Download (recommended)
 
-### Option A — Prebuilt installer (Windows)
+**Just want to use Vitrine?** Download the latest **`Vitrine Setup X.Y.Z.exe`** from the
+[**Releases**](https://github.com/Redrum624/vitrine/releases) page and run it — no other
+software required. The installer adds a desktop shortcut and a Start Menu entry.
 
-Download the latest `Vitrine Setup X.Y.Z.exe` from the
-[Releases](https://github.com/Redrum624/vitrine/releases) page and run it.
-The installer creates a desktop shortcut and Start Menu entry; no extra
-dependencies are needed.
+- **Windows 10 or 11** (64-bit)
+- 8 GB RAM minimum · 16 GB+ recommended for large RAW files
 
-### Option B — Install & run from source (development)
+### Build from source
+
+For development, or to build your own installer. Requires **Node.js 18+** (the repo uses
+**pnpm**; npm also works). Windows is the supported target.
 
 ```bash
 git clone https://github.com/Redrum624/vitrine.git
-cd photo_app
+cd vitrine
 pnpm install            # or: npm install
-pnpm run electron-dev   # Vite dev server + Electron
+pnpm run electron-dev   # Vite dev server + Electron (opens automatically on port 3005)
 ```
 
-The app opens automatically once the Vite dev server is ready (port 3005).
-
-### Option C — Build a Windows release from source
+Build a distributable Windows installer:
 
 ```bash
 npm run build:win       # clean -> tsc + vite build -> NSIS installer -> collect into installer/
-# Output: installer/Vitrine Setup 1.11.0.exe (+ README.txt, LICENSE, THIRD-PARTY-LICENSES.md)
+# Output: installer/Vitrine Setup 1.24.0.exe (+ README.txt, LICENSE, THIRD-PARTY-LICENSES.md)
 npm run build:win:dir   # fast unpacked build (no installer, quick iteration)
-npm run dist            # electron-builder for the current platform
 ```
 
 The user-facing distributables are collected into a clean **`installer/`** folder at the repo root:
 the versioned `Setup …​.exe`, a plain-text `README.txt`, `LICENSE`, and `THIRD-PARTY-LICENSES.md`.
 electron-builder's full staging output (unpacked app, block maps) stays in `release/`.
+
+## A closer look
+
+**One RAW file, developed non-destructively** — straight off the camera on the left, finished on the right.
+
+![Before and after — RAW to developed](docs/shots/before-after.png)
+
+**RAW, handled properly.** Choose the demosaic algorithm and highlight-recovery mode per photo, and read camera/lens details straight from the RAW container.
+
+| RAW Decode (per-photo) | Camera & lens, from the RAW |
+|:--:|:--:|
+| ![RAW Decode panel](docs/shots/raw-decode.png) | ![Camera and lens EXIF](docs/shots/exif.png) |
+
+**Every tool in one consistent card system** — a floating glass workspace where each module reads the same.
+
+| | |
+|:--:|:--:|
+| ![Basic Adjustments](docs/shots/basic-adjustments.png) | ![Enhance](docs/shots/enhance.png) |
+| **Basic Adjustments** — exposure, tone & colour, with mask tools | **Enhance** — AI denoise, sharpen, upscale & motion-deblur |
+| ![Tone Curve](docs/shots/tone-curve.png) | ![Color Balance](docs/shots/color-balance.png) |
+| **Tone Curve** — master + per-channel RGB | **Color Balance** — 8-channel HSL grading |
+| ![White Balance](docs/shots/white-balance.png) | ![Crop & Transform](docs/shots/crop-transform.png) |
+| **White Balance** — temp/tint + auto-neutral | **Crop & Transform** — ratios, rotate, auto-straighten |
 
 ## Modules
 
@@ -133,7 +166,7 @@ npm run dev          # dev server (vite) + Electron via scripts/dev.cjs
 npm run build        # tsc + vite build
 npm run typecheck    # tsc --noEmit
 npm run lint         # eslint (0 problems)
-npm run test         # jest (1087 tests)
+npm run test         # jest (1834 tests)
 npm run test:e2e     # Playwright end-to-end tests
 ```
 
