@@ -72,7 +72,9 @@ class MultiExportService {
           const savedState = await editPersistenceService.getSavedEditState(path);
           pipeline?.resetAllModules();
           editPersistenceService.restoreState(savedState, img.width, img.height, path);
-          if (savedState?.bakedUpscale) summary.upscaleSkipped.push(baseNameOf(path));
+          // Z1: an unapplied durable upscale OR deblur intent means this image exports on its
+          // pre-bake base — record it so the completion toast never silently drops the enhancement.
+          if (savedState?.bakedUpscale || savedState?.bakedDeblur) summary.upscaleSkipped.push(baseNameOf(path));
 
           // Process at full resolution on the main thread (matches ExportDialog).
           // cacheResults=false keeps full-res module results out of the pipeline cache.

@@ -803,6 +803,16 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
           // an out-of-enum scale/mode from an old/buggy build or a tampered store must not reach the
           // store/Enhance panel as a fabricated intent.
           useAppStore.getState().setUpscaleIntent(editPersistenceService.validateBakedUpscaleIntent(savedState?.bakedUpscale));
+          // Seed the durable DEBLUR intent + stacked bake order (Z1) from the same saved read. The
+          // order defaults from whichever markers exist when no explicit bakeOrder was persisted
+          // (single bake), so the reopen re-apply replays correctly for single AND stacked bakes.
+          useAppStore.getState().setDeblurIntent(!!savedState?.bakedDeblur);
+          useAppStore.getState().setBakeOrder(
+            savedState?.bakeOrder ?? [
+              ...(savedState?.bakedUpscale ? (['upscale'] as const) : []),
+              ...(savedState?.bakedDeblur ? (['deblur'] as const) : []),
+            ],
+          );
           editPersistenceService.restoreState(savedState, decoded.width, decoded.height, image.path);
           // Panels that MIRROR module params into local state (RawDecodePanel's Highlight
           // recovery slider, LA layer lists, …) may have already read their module before

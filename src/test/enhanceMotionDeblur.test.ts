@@ -35,14 +35,17 @@ jest.mock('../services/AiDeblurClient', () => ({ aiDeblurClient: { isAvailable: 
 jest.mock('../services/AiUpscaleClient', () => ({ aiUpscaleClient: { isAvailable: jest.fn(async () => false), run: jest.fn() } }));
 jest.mock('../services/EnhanceWorkerClient', () => ({ enhanceWorkerClient: { run: jest.fn() } }));
 jest.mock('../services/CheckpointService', () => ({ checkpointService: { record: jest.fn(), recordLabeled: jest.fn(), setBakeBridge: jest.fn() } }));
+const mockPersistDeblur = jest.fn();
 jest.mock('../services/EditPersistenceService', () => ({ editPersistenceService: {
-  serialize: jest.fn(() => ({})), restore: jest.fn(), flush: mockFlush, persistNow: jest.fn(), persistBakedUpscaleIntent: jest.fn(),
+  serialize: jest.fn(() => ({})), restore: jest.fn(), flush: mockFlush, persistNow: jest.fn(),
+  persistBakedUpscaleIntent: jest.fn(), persistBakedDeblurIntent: mockPersistDeblur,
 } }));
 jest.mock('../services/NotificationService', () => ({ notificationService: { info: mockInfo } }));
 jest.mock('../stores/appStore', () => ({ useAppStore: { getState: () => ({
   developing: mockDeveloping,
   setIsProcessing: jest.fn(), setDeblurProgress: mockSetDeblurProgress,
   setUpscaleMode: jest.fn(), setUpscaleIntent: jest.fn(),
+  setDeblurIntent: jest.fn(), setBakeOrder: jest.fn(),
   notifyExternalParamsChange: jest.fn(), triggerReprocessing: jest.fn(),
 }) } }));
 
@@ -121,8 +124,9 @@ describe('EnhanceService.applyMotionDeblur — bake + revert', () => {
     expect(imageService.setOriginalImage).toHaveBeenCalledWith(expect.any(Float32Array), 384, 384);
     expect(imageService.setBakedDeblur).toHaveBeenCalled();
     expect(checkpointService.recordLabeled).toHaveBeenCalledWith('Motion deblur (AI)', 1);
-    // Pre-deblur edits are flushed to disk before the marker suppresses persistence.
-    expect(mockFlush).toHaveBeenCalled();
+    // Z1: the durable deblur intent (pre-deblur edits + bakedDeblur marker) is written to disk via
+    // persistBakedDeblurIntent — replacing the pre-Z1 plain flush (which persisted no intent).
+    expect(mockPersistDeblur).toHaveBeenCalled();
     expect(enhanceService.canRevert()).toBe(true);
   });
 

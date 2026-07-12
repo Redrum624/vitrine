@@ -4,18 +4,21 @@
 let mockOriginalDims: { width: number; height: number } | null = null;
 import { render, screen, fireEvent, act } from '@testing-library/react';
 let mockBaked = false;
+let mockDeblurBaked = false;
 jest.mock('../services/ImageService', () => ({ imageService: {
   getOriginalImage: jest.fn(() => (mockOriginalDims ? { data: new Float32Array(4), ...mockOriginalDims } : null)),
   getOriginalImageDimensions: jest.fn(() => mockOriginalDims),
   getCurrentImage: jest.fn(() => null),
   isBakedUpscaleActive: jest.fn(() => mockBaked),
+  isBakedDeblurActive: jest.fn(() => mockDeblurBaked),
 } }));
 jest.mock('../services/EnhanceService', () => ({
   // getUpscaleFeasibility is a PURE helper — use the real implementation so the
   // disabled states / tooltip numbers under test are the production ones.
   getUpscaleFeasibility: jest.requireActual('../services/EnhanceService').getUpscaleFeasibility,
   enhanceService: {
-    applyUpscale: jest.fn(async () => {}), revert: jest.fn(), canRevert: () => false,
+    applyUpscale: jest.fn(async () => {}), applyMotionDeblur: jest.fn(async () => {}),
+    revert: jest.fn(), canRevert: () => false,
     markEnhanceApplied: jest.fn(), isEnhanceStale: jest.fn(() => false),
   },
 }));
@@ -347,6 +350,57 @@ describe('EnhanceModuleComponent — reopen upscale re-apply notice (Q7)', () =>
   });
 
   it('shows no notice when there is no persisted intent', () => {
+    render(<EnhanceModuleComponent module={enhanceModule} noiseReductionModule={makeNrModule()} />);
+    expect(screen.queryByTestId('upscale-reapply-notice')).toBeNull();
+  });
+});
+
+describe('EnhanceModuleComponent — reopen re-apply notice for deblur + stacked (Z1)', () => {
+  beforeEach(() => {
+    enhanceModule.resetParams();
+    mockBaked = false;
+    mockDeblurBaked = false;
+    mockOriginalDims = { width: 2000, height: 1500 };
+    useAppStore.setState({ upscaleProgress: null, upscaleMode: null, upscaleIntent: null, deblurIntent: false, bakeOrder: [], developing: false });
+    (enhanceService.applyUpscale as jest.Mock).mockClear();
+    (enhanceService.applyUpscale as jest.Mock).mockResolvedValue(undefined);
+    (enhanceService.applyMotionDeblur as jest.Mock).mockClear();
+    (enhanceService.applyMotionDeblur as jest.Mock).mockResolvedValue(undefined);
+  });
+  afterEach(() => {
+    mockBaked = false;
+    mockDeblurBaked = false;
+    useAppStore.setState({ upscaleIntent: null, deblurIntent: false, bakeOrder: [], developing: false });
+  });
+
+  it('shows the notice for a deblur-only persisted intent', () => {
+    useAppStore.setState({ deblurIntent: true });
+    render(<EnhanceModuleComponent module={enhanceModule} noiseReductionModule={makeNrModule()} />);
+    expect(screen.getByTestId('upscale-reapply-notice')).toHaveTextContent(/deblur/i);
+  });
+
+  it('re-apply of a deblur-only intent runs applyMotionDeblur', async () => {
+    useAppStore.setState({ deblurIntent: true });
+    render(<EnhanceModuleComponent module={enhanceModule} noiseReductionModule={makeNrModule()} />);
+    await act(async () => { fireEvent.click(screen.getByTestId('upscale-reapply-btn')); });
+    expect(enhanceService.applyMotionDeblur).toHaveBeenCalled();
+    expect(enhanceService.applyUpscale).not.toHaveBeenCalled();
+  });
+
+  it('a stacked intent shows a combined notice and replays upscale THEN deblur in bakeOrder', async () => {
+    useAppStore.setState({ upscaleIntent: { scale: 2, mode: 'ai' }, deblurIntent: true, bakeOrder: ['upscale', 'deblur'] });
+    render(<EnhanceModuleComponent module={enhanceModule} noiseReductionModule={makeNrModule()} />);
+    const notice = screen.getByTestId('upscale-reapply-notice');
+    expect(notice).toHaveTextContent(/×2/);
+    expect(notice).toHaveTextContent(/deblur/i);
+    await act(async () => { fireEvent.click(screen.getByTestId('upscale-reapply-btn')); });
+    expect(enhanceService.applyUpscale).toHaveBeenCalledWith(expect.objectContaining({ upscale: true, scale: 2 }));
+    expect(enhanceService.applyMotionDeblur).toHaveBeenCalled();
+  });
+
+  it('hides the notice once a deblur is baked (re-applied in-session)', () => {
+    mockDeblurBaked = true;
+    useAppStore.setState({ deblurIntent: true });
     render(<EnhanceModuleComponent module={enhanceModule} noiseReductionModule={makeNrModule()} />);
     expect(screen.queryByTestId('upscale-reapply-notice')).toBeNull();
   });

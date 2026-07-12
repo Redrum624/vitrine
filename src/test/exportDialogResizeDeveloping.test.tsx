@@ -24,10 +24,12 @@ jest.mock('../services/ExportService', () => ({
 }));
 
 let mockExportBaked = false;
+let mockExportDeblurBaked = false;
 jest.mock('../services/ImageService', () => ({
   imageService: {
     getProcessingPipeline: jest.fn(() => null),
     isBakedUpscaleActive: jest.fn(() => mockExportBaked),
+    isBakedDeblurActive: jest.fn(() => mockExportDeblurBaked),
   },
 }));
 
@@ -152,6 +154,48 @@ describe('ExportDialog — unapplied upscale warning (Q7, NO silent loss)', () =
         multiPaths={['/a.orf', '/b.orf']}
       />,
     );
+    expect(screen.queryByTestId('export-upscale-warning')).toBeNull();
+  });
+});
+
+describe('ExportDialog — unapplied DEBLUR warning (Z1, NO silent loss)', () => {
+  beforeEach(() => {
+    mockExportBaked = false;
+    mockExportDeblurBaked = false;
+    useAppStore.setState({ developing: false, upscaleIntent: null, deblurIntent: false });
+  });
+  afterEach(() => {
+    cleanup();
+    mockExportBaked = false;
+    mockExportDeblurBaked = false;
+    useAppStore.setState({ developing: false, upscaleIntent: null, deblurIntent: false });
+  });
+
+  it('warns when a persisted deblur intent exists but the base is NOT baked (reopened, not re-applied)', () => {
+    useAppStore.setState({ deblurIntent: true });
+    renderDialog();
+    const warn = screen.getByTestId('export-upscale-warning');
+    expect(warn).toHaveTextContent(/deblur/i);
+    expect(warn).toHaveTextContent(/pre-deblur/i);
+  });
+
+  it('does NOT warn when the deblur is currently baked (re-applied → export honors it)', () => {
+    mockExportDeblurBaked = true;
+    useAppStore.setState({ deblurIntent: true });
+    renderDialog();
+    expect(screen.queryByTestId('export-upscale-warning')).toBeNull();
+  });
+
+  it('surfaces BOTH bakes when upscale AND deblur intents are pending', () => {
+    useAppStore.setState({ upscaleIntent: { scale: 2, mode: 'ai' }, deblurIntent: true });
+    renderDialog();
+    const warn = screen.getByTestId('export-upscale-warning');
+    expect(warn).toHaveTextContent(/×2/);
+    expect(warn).toHaveTextContent(/deblur/i);
+  });
+
+  it('does NOT warn when there is no bake intent at all', () => {
+    renderDialog();
     expect(screen.queryByTestId('export-upscale-warning')).toBeNull();
   });
 });

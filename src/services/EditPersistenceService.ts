@@ -70,6 +70,24 @@ interface EditState {
   // Written by persistBakedUpscaleIntent (on bake) and emitted by serialize() from the store's
   // upscaleIntent, so it round-trips through flush (does not get destroyed by a later edit's save).
   bakedUpscale?: BakedUpscaleIntent;
+  // Durable DEBLUR intent (Z1, mirror of bakedUpscale): a PRESENCE marker (no payload — motion
+  // deblur is dimension-preserving and AI-only, so there is nothing but "a deblur was baked" to
+  // record). Written by persistBakedDeblurIntent (on bake) and emitted by serialize() from the
+  // store's deblurIntent. Optional + never version-bumped → old states restore as "no deblur".
+  bakedDeblur?: Record<string, never>;
+  // Ordered replay list when MULTIPLE bakes are stacked (Z1): e.g. ['upscale','deblur']. Present
+  // only when >1 bake is in the durable intent — a single bake is fully described by bakedUpscale
+  // / bakedDeblur alone. Emitted by serialize() from the store's bakeOrder; consumed by the reopen
+  // re-apply so the bakes replay in the exact order they were originally applied.
+  bakeOrder?: ('upscale' | 'deblur')[];
+  // Edits made AFTER a bake (Z1 — the standing MEDIUM). A bake resets the pipeline modules to
+  // NEUTRAL (the pre-bake edits are incorporated into the new base pixels), so a normal flush of the
+  // post-bake module state would clobber the pre-bake `modules` above. Instead the post-bake edits
+  // are REDIRECTED here (same shapes as the top level) while `modules` stays frozen at the pre-bake
+  // state. On reopen + re-apply they are replayed on top of the re-derived baked base. NOT emitted
+  // by serialize() (it is a persistence-only concern) — written exclusively by flush()'s redirect
+  // path, so checkpoints (which snapshot serialize()) never capture it and stay orthogonal to it.
+  editsOnBakedBase?: { modules: Record<string, Record<string, unknown>>; localAdjustments?: { enabled: boolean; layers: SerializedLayer[] } };
 }
 
 /**
@@ -81,6 +99,13 @@ interface EditState {
 class EditPersistenceService {
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
   private baseline = ''; // serialized post-load state — edits are saved only once it changes
+  // POST-BAKE REDIRECT state (Z1). While a bake marker is live, flush() writes the current
+  // post-bake edits into `editsOnBakedBase` on top of this FROZEN pre-bake top-level, instead of
+  // clobbering the pre-bake `modules`. Set by the persist writers at bake time (and re-synced by
+  // persistNow after a partial unwind); cleared on a full unwind. `bakedEditsBaseline` tracks the
+  // LAST-written post-bake edits so an untouched post-bake state writes nothing.
+  private bakedBaseState: EditState | null = null;
+  private bakedEditsBaseline = '';
 
   private keyForPath(path: string): string {
     return `edits:${path}`;
@@ -110,8 +135,15 @@ class EditPersistenceService {
     // from serialize() — which now includes bakedUpscale — so a later unrelated edit's flush writes
     // a state that STILL carries the marker instead of silently destroying it (P2 progressive
     // destruction). Null while no upscale is active/pending → the field is simply omitted.
-    const intent = useAppStore.getState().upscaleIntent;
+    const store = useAppStore.getState();
+    const intent = store.upscaleIntent;
     if (intent) state.bakedUpscale = { scale: intent.scale, mode: intent.mode };
+    // Deblur intent + stacked bake order mirror the upscale marker: emitted from the store so they
+    // round-trip through flush (a later unrelated edit's save re-writes them instead of destroying
+    // them — the same P2 progressive-destruction guard). bakeOrder is emitted only when >1 bake is
+    // stacked; a single bake is fully described by its marker alone.
+    if (store.deblurIntent) state.bakedDeblur = {};
+    if (store.bakeOrder.length > 1) state.bakeOrder = [...store.bakeOrder];
 
     const la = imageProcessingPipeline.getModule<LocalAdjustmentsPipelineModule>('localadjustments');
     if (la) {
@@ -200,6 +232,10 @@ class EditPersistenceService {
     // Baseline = the post-restore state. Edits are persisted only once the state differs,
     // so unedited images and the load-triggered reprocess never write a spurious save.
     this.baseline = JSON.stringify(this.serialize());
+    // A fresh open has no active bake (the base is the freshly-decoded native pixels) — drop any
+    // post-bake redirect state carried over from a previous image so flush() takes the normal path.
+    this.bakedBaseState = null;
+    this.bakedEditsBaseline = '';
     return restored;
   }
 
@@ -260,20 +296,66 @@ class EditPersistenceService {
     if (this.saveTimer) { clearTimeout(this.saveTimer); this.saveTimer = null; }
     const img = imageService.getCurrentImage();
     if (!img?.filePath || !window.electronAPI?.storeSet) return;
-    // Suppress while EITHER bake is active. A baked upscale/deblur has reset the pipeline modules to
-    // neutral (their edits are baked into the new base); persisting that neutral state would clobber
-    // the user's PRE-bake saved edits. The pre-bake state is written explicitly at bake time
-    // (persistBakedUpscaleIntent for upscale; a plain flush before the deblur reset), and revert's
-    // persistNow re-writes the restored state marker-free once fully unwound.
-    if (imageService.isBakedUpscaleActive() || imageService.isBakedDeblurActive()) return;
+    // POST-BAKE REDIRECT (Z1). A baked upscale/deblur has reset the pipeline modules to neutral
+    // (their pre-bake edits are incorporated into the new base pixels). A normal flush of that
+    // neutral state would clobber the user's PRE-bake saved edits — so instead of SUPPRESSING the
+    // save (the pre-Z1 behavior), we REDIRECT it: the current post-bake module state is written into
+    // `editsOnBakedBase` on top of the FROZEN pre-bake top-level captured at bake time, leaving the
+    // pre-bake `modules` + intent markers untouched. On reopen + re-apply these edits replay on top
+    // of the re-derived baked base.
+    if (imageService.isBakedUpscaleActive() || imageService.isBakedDeblurActive()) {
+      // Safety: no captured pre-bake state (should not happen — the bake writers set it). Do NOT
+      // fall through to a normal flush, which would clobber the pre-bake modules with neutral state.
+      if (!this.bakedBaseState) return;
+      const edits = this.currentBakedEdits();
+      const editsJson = JSON.stringify(edits);
+      if (editsJson === this.bakedEditsBaseline) return; // post-bake state unchanged — nothing new
+      this.bakedEditsBaseline = editsJson;
+      const state: EditState = { ...this.bakedBaseState, editsOnBakedBase: edits };
+      this.baseline = JSON.stringify(state);
+      this.write(img.filePath, state);
+      return;
+    }
     const json = JSON.stringify(this.serialize());
     if (json === this.baseline) return; // unchanged since load — nothing to persist
     this.baseline = json;
+    this.write(img.filePath, JSON.parse(json));
+  }
+
+  /** Persist `state` under the current image's key, deep-cloned so no live reference leaks into the
+   *  store and any `undefined` fields are dropped. Single write path for flush/persist* callers. */
+  private write(filePath: string, state: EditState): void {
     try {
-      window.electronAPI.storeSet(this.keyForPath(img.filePath), JSON.parse(json));
+      window.electronAPI!.storeSet(this.keyForPath(filePath), JSON.parse(JSON.stringify(state)));
     } catch (e) {
-      logger.warn('flush save failed', e);
+      logger.warn('persist write failed', e);
     }
+  }
+
+  /** The current (post-bake) module + LA edits, in the `editsOnBakedBase` shape. */
+  private currentBakedEdits(): EditState['editsOnBakedBase'] {
+    const s = this.serialize();
+    return { modules: s.modules, localAdjustments: s.localAdjustments };
+  }
+
+  /** Freeze `diskState` (the just-written pre-bake top-level) as the redirect base, and snapshot the
+   *  current post-bake edits as the baseline so an UNTOUCHED post-bake flush writes nothing. */
+  private setBakedBaseline(diskState: EditState): void {
+    const { editsOnBakedBase: _omit, ...rest } = diskState;
+    void _omit;
+    this.bakedBaseState = rest;
+    this.bakedEditsBaseline = JSON.stringify(this.currentBakedEdits());
+    this.baseline = JSON.stringify(rest);
+  }
+
+  /**
+   * Apply a persisted `editsOnBakedBase` (post-bake module + LA edits) to the ALREADY-RE-BAKED
+   * pipeline during a reopen re-apply, so the user gets back exactly the post-bake edits they had
+   * last session. Routes through the same restore() path as a normal edit-state apply; does NOT
+   * itself persist — the caller triggers a reprocess and a flush (which the redirect path writes).
+   */
+  applyPostBakeEdits(edits: NonNullable<EditState['editsOnBakedBase']>, width: number, height: number): void {
+    this.restore({ version: STORE_VERSION, modules: edits.modules, localAdjustments: edits.localAdjustments }, width, height);
   }
 
   /**
@@ -288,14 +370,47 @@ class EditPersistenceService {
   persistBakedUpscaleIntent(baseState: EditState, scale: 2 | 4, mode: 'ai' | 'standard'): void {
     const img = imageService.getCurrentImage();
     if (!img?.filePath || !window.electronAPI?.storeSet) return;
-    const state: EditState = { ...baseState, bakedUpscale: { scale, mode } };
-    const json = JSON.stringify(state);
-    this.baseline = json;
-    try {
-      window.electronAPI.storeSet(this.keyForPath(img.filePath), JSON.parse(json));
-    } catch (e) {
-      logger.warn('persistBakedUpscaleIntent failed', e);
-    }
+    // Rebuild the marker set from the explicit args + the store (the single source of truth) rather
+    // than inheriting whatever serialize() froze into baseState — so a stale marker can't leak.
+    const state: EditState = this.withStackMarkers(baseState, { scale, mode });
+    // Freeze this as the post-bake redirect base so subsequent post-bake edits write into
+    // editsOnBakedBase rather than clobbering these pre-bake modules.
+    this.setBakedBaseline(state);
+    this.write(img.filePath, state);
+  }
+
+  /**
+   * Deblur mirror of persistBakedUpscaleIntent (Z1). Persists the PRE-deblur edit state plus the
+   * `bakedDeblur` presence marker for the current image: flush() redirects while a bake is live, so
+   * THIS is the single write that captures the durable deblur intent. `baseState` is the serialize()
+   * snapshot taken BEFORE the bake reset the modules, so a reopen restores the user's real pre-deblur
+   * edits (the deblurred pixels re-derive on re-apply). Folds in a stacked upscale marker + bakeOrder
+   * from the store, and freezes the post-bake redirect base (see setBakedBaseline).
+   */
+  persistBakedDeblurIntent(baseState: EditState): void {
+    const img = imageService.getCurrentImage();
+    if (!img?.filePath || !window.electronAPI?.storeSet) return;
+    const store = useAppStore.getState();
+    const upscale = store.upscaleIntent ? { scale: store.upscaleIntent.scale, mode: store.upscaleIntent.mode } : undefined;
+    const state: EditState = this.withStackMarkers(baseState, upscale, true);
+    this.setBakedBaseline(state);
+    this.write(img.filePath, state);
+  }
+
+  /**
+   * Build a persist state = baseState's pre-bake modules/LA/rawDecodeOptions + a clean bake-marker
+   * set (`bakedUpscale` from `upscale`, `bakedDeblur` from `deblur`, `bakeOrder` from the store when
+   * stacked). Strips any stale markers serialize() may have frozen into baseState.
+   */
+  private withStackMarkers(baseState: EditState, upscale?: BakedUpscaleIntent, deblur = false): EditState {
+    const out: EditState = { version: baseState.version ?? STORE_VERSION, modules: baseState.modules };
+    if (baseState.localAdjustments) out.localAdjustments = baseState.localAdjustments;
+    if (baseState.rawDecodeOptions) out.rawDecodeOptions = baseState.rawDecodeOptions;
+    if (upscale) out.bakedUpscale = { scale: upscale.scale, mode: upscale.mode };
+    if (deblur) out.bakedDeblur = {};
+    const order = useAppStore.getState().bakeOrder;
+    if (order.length > 1) out.bakeOrder = [...order];
+    return out;
   }
 
   /**
@@ -310,13 +425,20 @@ class EditPersistenceService {
   persistNow(): void {
     const img = imageService.getCurrentImage();
     if (!img?.filePath || !window.electronAPI?.storeSet) return;
-    const json = JSON.stringify(this.serialize());
-    this.baseline = json;
-    try {
-      window.electronAPI.storeSet(this.keyForPath(img.filePath), JSON.parse(json));
-    } catch (e) {
-      logger.warn('persistNow failed', e);
+    const cur = this.serialize();
+    if (imageService.isBakedUpscaleActive() || imageService.isBakedDeblurActive()) {
+      // PARTIAL unwind (Z1): a bake level remains. The just-restored state is the remaining level's
+      // pre-bake baseline; re-freeze it as the redirect base and DROP the popped level's
+      // editsOnBakedBase (cur carries none — serialize() never emits it), so post-unwind edits start
+      // a fresh editsOnBakedBase for the remaining level.
+      this.setBakedBaseline(cur);
+    } else {
+      // FULL unwind: no bake active — clear the redirect machinery so a normal flush resumes.
+      this.baseline = JSON.stringify(cur);
+      this.bakedBaseState = null;
+      this.bakedEditsBaseline = '';
     }
+    this.write(img.filePath, cur);
   }
 }
 

@@ -68,6 +68,12 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
   // own per-image count in the completion toast (the dialog can't pre-scan every selected path).
   const upscaleIntent = useAppStore((s) => s.upscaleIntent);
   const upscaleNotApplied = !((multiPaths?.length ?? 0) > 0) && !!upscaleIntent && !imageService.isBakedUpscaleActive();
+  // Z1: the same NO-silent-loss guard for an unapplied durable DEBLUR intent — a reopened image whose
+  // deblur has not been re-applied would export the pre-deblur base. Optional-chain isBakedDeblurActive
+  // so a test/mocked ImageService that omits it degrades gracefully (treated as not-baked).
+  const deblurIntent = useAppStore((s) => s.deblurIntent);
+  const deblurNotApplied = !((multiPaths?.length ?? 0) > 0) && deblurIntent && !imageService.isBakedDeblurActive?.();
+  const bakeNotApplied = upscaleNotApplied || deblurNotApplied;
   const [activeTab, setActiveTab] = useState<TabType>('format');
   const [selectedPreset, setSelectedPreset] = useState<string>('');
   const [exportOptions, setExportOptions] = useState<ExportOptions>(exportService.getDefaultOptions());
@@ -191,7 +197,7 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
         // Q7: NO silent loss — if any selected image carried an unapplied upscale intent it was
         // exported at native resolution; say so explicitly (open + re-apply to export upscaled).
         const upNote = skipped > 0
-          ? ` ${skipped} image${skipped !== 1 ? 's' : ''} had an unapplied upscale and exported at native resolution.`
+          ? ` ${skipped} image${skipped !== 1 ? 's' : ''} had an unapplied enhancement (upscale/deblur) and exported on the pre-bake image.`
           : '';
         if (ok > 0 && failed === 0 && skipped === 0) {
           notificationService.success('Export complete', `Exported ${ok} image${ok !== 1 ? 's' : ''}${tail} to ${dir}`);
@@ -606,8 +612,9 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
 
   const footer = (
     <div className="flex flex-col" style={{ gap: 12 }}>
-      {/* Q7: unapplied-upscale warning — export proceeds at native res, but NEVER silently. */}
-      {upscaleNotApplied && upscaleIntent && (
+      {/* Q7 upscale + Z1 deblur: unapplied-bake warning — export proceeds on the pre-bake base, but
+          NEVER silently. Both intents share one banner (either or both may be pending). */}
+      {bakeNotApplied && (
         <div
           data-testid="export-upscale-warning"
           style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 10, borderRadius: 10,
@@ -615,7 +622,13 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
         >
           <AlertTriangle size={14} style={{ color: '#eab308', flexShrink: 0 }} />
           <span>
-            Upscale ×{upscaleIntent.scale} ({upscaleIntent.mode === 'ai' ? 'AI' : 'Standard'}) is not applied — exporting now saves at native resolution. Open the photo and re-apply first to export upscaled.
+            {upscaleNotApplied && upscaleIntent && (
+              <>Upscale ×{upscaleIntent.scale} ({upscaleIntent.mode === 'ai' ? 'AI' : 'Standard'}) is not applied — exporting now saves at native resolution. </>
+            )}
+            {deblurNotApplied && (
+              <>AI motion deblur is not applied — exporting now saves the pre-deblur image. </>
+            )}
+            Open the photo and re-apply first to export the enhanced result.
           </span>
         </div>
       )}

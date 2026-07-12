@@ -7,6 +7,7 @@ import { EnhanceParams, DEFAULT_ENHANCE_PARAMS } from '../../utils/enhanceChain'
 import { enhanceService, getUpscaleFeasibility, UpscaleFeasibility } from '../../services/EnhanceService';
 import { aiDeblurClient } from '../../services/AiDeblurClient';
 import { imageService } from '../../services/ImageService';
+import { editPersistenceService } from '../../services/EditPersistenceService';
 import { imageProcessingPipeline } from '../../services/ImageProcessingPipeline';
 import { useAppStore } from '../../stores/appStore';
 import { useRegisterModuleCardActions, type RegisterModuleCardActions } from '../Controls/moduleCardActions';
@@ -39,6 +40,9 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
   // upscale (or a live bake). Drives the one-click re-apply notice below. `developing` gates the
   // button during the progressive-open window (applyUpscale itself is gated too — belt & braces).
   const upscaleIntent = useAppStore((s) => s.upscaleIntent);
+  // Durable deblur intent + stacked bake order (Z1) — drive the same reopen re-apply notice.
+  const deblurIntent = useAppStore((s) => s.deblurIntent);
+  const bakeOrder = useAppStore((s) => s.bakeOrder);
   const developing = useAppStore((s) => s.developing);
   // Re-render on bulk upstream param changes (Auto All / Paste Style / presets bump this) so the
   // staleness hint re-evaluates while the panel stays mounted. Normal per-module slider edits
@@ -113,16 +117,43 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
     }
   }, [nrEnabled, nrStrength, module, onParamsChange, onNoiseReductionChange]);
 
-  // Re-apply a persisted upscale intent on a reopened image (Q7): re-runs applyUpscale with the
-  // saved scale on top of the restored (native-dims) module params, re-deriving the SAME upscaled
-  // base the user had last session. One-click and explicit — never auto-run on open (a multi-second
-  // unrequested bake would be hostile). applyUpscale auto-routes AI/Standard by availability, so the
-  // saved mode is a preference the current environment may or may not honor (falls back gracefully).
-  const handleReapplyUpscale = useCallback(async () => {
-    if (!upscaleIntent) return;
+  // Re-apply a persisted bake intent on a reopened image (Q7 upscale + Z1 deblur/stacked): replays
+  // the saved bake sequence (upscale with the saved scale, and/or AI motion deblur) in order on top
+  // of the restored native-dims params, re-deriving the SAME baked base the user had last session,
+  // then replays any post-bake edits (editsOnBakedBase) on top. One-click and explicit — never
+  // auto-run on open (a multi-second unrequested bake would be hostile). applyUpscale auto-routes
+  // AI/Standard by availability, so the saved mode is a preference the environment may not honor.
+  const handleReapply = useCallback(async () => {
+    if (!upscaleIntent && !deblurIntent) return;
     setBusy(true); setError(null);
     try {
-      await enhanceService.applyUpscale({ ...module.getParams(), upscale: true, scale: upscaleIntent.scale });
+      // Read the saved post-bake edits BEFORE the bakes run — each bake's persist write overwrites
+      // the disk state without editsOnBakedBase, so reading afterwards would miss them.
+      const img = imageService.getCurrentImage();
+      const saved = img?.filePath ? await editPersistenceService.getSavedEditState(img.filePath) : null;
+      const postBakeEdits = saved?.editsOnBakedBase ?? null;
+      // Derive the replay order: an explicit stacked bakeOrder, else the single active intent.
+      const order = bakeOrder.length
+        ? bakeOrder
+        : upscaleIntent
+          ? (['upscale'] as const)
+          : (['deblur'] as const);
+      for (const kind of order) {
+        if (kind === 'upscale' && upscaleIntent) {
+          await enhanceService.applyUpscale({ ...module.getParams(), upscale: true, scale: upscaleIntent.scale });
+        } else if (kind === 'deblur') {
+          await enhanceService.applyMotionDeblur();
+        }
+      }
+      if (postBakeEdits) {
+        const baked = imageService.getCurrentImage();
+        if (baked) {
+          editPersistenceService.applyPostBakeEdits(postBakeEdits, baked.width, baked.height);
+          useAppStore.getState().notifyExternalParamsChange();
+          useAppStore.getState().triggerReprocessing();
+          editPersistenceService.flush(); // redirect-persist the replayed post-bake edits
+        }
+      }
       setRevertVersion((v) => v + 1);
       enhanceService.markEnhanceApplied();
     } catch (e) {
@@ -130,7 +161,7 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
     } finally {
       setBusy(false);
     }
-  }, [upscaleIntent, module]);
+  }, [upscaleIntent, deblurIntent, bakeOrder, module]);
 
   // Probe AI-deblur availability once (capability doesn't change at runtime; the client caches it).
   useEffect(() => {
@@ -139,7 +170,7 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
     return () => { alive = false; };
   }, []);
 
-  // Apply an AI motion deblur (opt-in, one-shot bake). Mirrors handleReapplyUpscale's busy/error seam.
+  // Apply an AI motion deblur (opt-in, one-shot bake). Mirrors handleReapply's busy/error seam.
   const handleMotionDeblur = useCallback(async () => {
     setBusy(true); setError(null);
     try {
@@ -153,9 +184,19 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
     }
   }, []);
 
-  // Show the reopen notice when a durable intent exists but the working base is NOT currently baked
-  // (i.e. reopened and not yet re-applied). Once re-applied, isBakedUpscaleActive() is true → hide.
-  const showReopenNotice = !!upscaleIntent && !imageService.isBakedUpscaleActive();
+  // Show the reopen notice when a durable intent exists (upscale and/or deblur) but the working base
+  // is NOT currently baked (reopened, not yet re-applied). Once re-applied, the base carries a bake
+  // marker → hide. Optional-chain isBakedDeblurActive so mocks that omit it degrade gracefully.
+  const showReopenNotice =
+    (!!upscaleIntent || deblurIntent) &&
+    !imageService.isBakedUpscaleActive() &&
+    !imageService.isBakedDeblurActive?.();
+  // Compose the notice label from whichever intents are pending (e.g. "Upscale ×2 (AI) + AI motion
+  // deblur"), so a single button restores the full stacked sequence.
+  const reapplyLabelParts: string[] = [];
+  if (upscaleIntent) reapplyLabelParts.push(`Upscale ×${upscaleIntent.scale} (${upscaleIntent.mode === 'ai' ? 'AI' : 'Standard'})`);
+  if (deblurIntent) reapplyLabelParts.push('AI motion deblur');
+  const reapplyLabel = reapplyLabelParts.join(' + ');
 
   const currentParams = paramsRef.current;
 
@@ -235,9 +276,11 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
   return (
     <div className="enhance-panel px-5 pt-4" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
-      {/* Reopen surfacing (Q7): a durable upscale intent was restored but not re-applied. Passive
-          notice + one-click re-apply (gated while developing, like Apply). No auto-bake on open. */}
-      {showReopenNotice && upscaleIntent && (
+      {/* Reopen surfacing (Q7 upscale + Z1 deblur/stacked): a durable bake intent was restored but
+          not re-applied. Passive notice + one-click re-apply (gated while developing, like Apply). No
+          auto-bake on open. Editing WITHOUT re-applying first invalidates any saved post-bake edits
+          (the two timelines must not merge) — surfaced in the button tooltip. */}
+      {showReopenNotice && (
         <div
           data-testid="upscale-reapply-notice"
           style={{
@@ -247,14 +290,16 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
           }}
         >
           <span style={{ flex: 1 }}>
-            Upscale ×{upscaleIntent.scale} ({upscaleIntent.mode === 'ai' ? 'AI' : 'Standard'}) was applied — re-apply to restore.
+            {reapplyLabel} was applied — re-apply to restore.
           </span>
           <button
             type="button"
             data-testid="upscale-reapply-btn"
             disabled={busy || developing}
-            title={developing ? 'Available when full quality finishes developing' : undefined}
-            onClick={handleReapplyUpscale}
+            title={developing
+              ? 'Available when full quality finishes developing'
+              : 'Re-derives the baked pixels and restores your post-bake edits. Editing before re-applying discards those saved post-bake edits.'}
+            onClick={handleReapply}
             style={{
               flexShrink: 0, padding: '6px 12px', borderRadius: 8,
               border: '1px solid var(--accent-ring)', background: 'var(--accent)', color: '#0b0b0c',

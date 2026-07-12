@@ -30,7 +30,8 @@ jest.mock('../services/EditPersistenceService', () => ({ editPersistenceService:
 } }));
 jest.mock('../stores/appStore', () => ({ useAppStore: { getState: () => ({
   setIsProcessing: jest.fn(), setUpscaleProgress: jest.fn(), setUpscaleMode: jest.fn(),
-  setUpscaleIntent: mockSetUpscaleIntent, notifyExternalParamsChange: jest.fn(), triggerReprocessing: jest.fn(),
+  setUpscaleIntent: mockSetUpscaleIntent, setDeblurIntent: jest.fn(), setBakeOrder: jest.fn(),
+  notifyExternalParamsChange: jest.fn(), triggerReprocessing: jest.fn(),
 }) } }));
 
 import { enhanceService } from '../services/EnhanceService';

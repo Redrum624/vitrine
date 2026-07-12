@@ -275,6 +275,9 @@ class EnhanceService {
       // so this explicit write — of the PRE-bake native-dims `editState` plus the {scale, mode}
       // marker — is what survives quit/reopen. Re-deriving on re-apply reproduces this exact result.
       store.setUpscaleIntent({ scale: params.scale, mode });
+      // Keep the durable bake order in sync with the restore stack (Z1) so a stacked reopen replays
+      // the bakes in the exact order applied. Set BEFORE the persist write / serialize marker emit.
+      store.setBakeOrder(this.restoreStack.map((rp) => rp.kind));
       editPersistenceService.persistBakedUpscaleIntent(editState, params.scale, mode);
       checkpointService.recordLabeled(`Enhanced ×${params.scale} (${mode === 'ai' ? 'AI' : 'Standard'})`, this.getRestoreDepth());
       store.notifyExternalParamsChange();
@@ -293,19 +296,19 @@ class EnhanceService {
    * Base-MUTATING (setOriginalImage + updateCurrentImageData) → gated by guardDeveloping HERE (the
    * single choke point) for the same reason as applyUpscale: during the progressive-open developing
    * window the working image is the embedded preview, and baking it then would be clobbered by the
-   * background full decode. Sets the `bakedDeblur` marker so EditPersistenceService.flush() is
-   * suppressed while the bake is live (its post-reset neutral module state would otherwise clobber
-   * the user's PRE-deblur saved edits) — the pre-deblur edits are written to disk explicitly here.
+   * background full decode. Sets the `bakedDeblur` marker so EditPersistenceService.flush() REDIRECTS
+   * while the bake is live (its post-reset neutral module state would otherwise clobber the user's
+   * PRE-deblur saved edits) — the pre-deblur edits + durable deblur intent are written to disk here.
    *
    * NEVER auto-routed and never a Deblur-slider replacement: the model only wins on MOTION blur; on
    * defocus it degrades (-4.3 dB, spike Gate 3). The deterministic RL Deblur sliders remain the
    * defocus path. Availability is DirectML-only (CPU-only ⇒ the panel hides this control), and the
    * 384px floor is enforced here (no IPC for a sub-floor image) AND in aiDeblur.cjs (the tile floor).
    *
-   * v1 scope: in-session bake + revert. The deblurred pixels are NOT persisted across sessions (no
-   * durable "deblur intent" re-apply, unlike upscale's Q7 machinery) — on reopen the image restores
-   * to its pre-deblur edits. This is the documented v1 bar; the upscale-intent pattern is the
-   * follow-up if cross-session deblur is wanted.
+   * CROSS-SESSION (Z1): like upscale's Q7 intent, the durable INTENT (not the ~pixels) is persisted —
+   * a `bakedDeblur` marker on the saved state. On reopen the panel offers a one-click re-apply (the
+   * deblurred pixels re-derive) and export warns rather than silently dropping it. Post-deblur edits
+   * persist via the flush redirect (editsOnBakedBase) and replay on re-apply.
    */
   async applyMotionDeblur(): Promise<void> {
     if (guardDeveloping(notificationService.info.bind(notificationService), 'AI Motion Deblur')) return;
@@ -360,11 +363,6 @@ class EnhanceService {
       );
       const base = uint8ToFloat32Rgba(ai.data); // clean model output (new editable base, same dims)
 
-      // Persist the PRE-deblur edits to disk NOW, while the modules still hold them and before the
-      // bake marker suppresses flush(). Guarantees a reopen restores the user's real edits rather
-      // than the post-bake neutral state (the deblur pixels themselves are in-session only — v1).
-      editPersistenceService.flush();
-
       this.restoreStack.push({ data: restoreData, width, height, kind: 'deblur', editState });
 
       imageProcessingPipeline.resetAllModules();
@@ -372,6 +370,13 @@ class EnhanceService {
       imageService.setOriginalImage(base, ai.width, ai.height);
       imageService.updateCurrentImageData(new Float32Array(base), ai.width, ai.height);
       imageService.setBakedDeblur?.();
+      // Durable DEBLUR INTENT (Z1, mirror of the upscale Q7 flow): record it in the store (drives the
+      // reopen re-apply notice + export warn + serialize round-trip) AND write it to disk now. flush()
+      // redirects while a bake is active, so this explicit write — of the PRE-deblur `editState` plus
+      // the bakedDeblur marker — is what survives quit/reopen; re-applying re-derives the same pixels.
+      store.setDeblurIntent(true);
+      store.setBakeOrder(this.restoreStack.map((rp) => rp.kind));
+      editPersistenceService.persistBakedDeblurIntent(editState);
       checkpointService.recordLabeled('Motion deblur (AI)', this.getRestoreDepth());
       store.notifyExternalParamsChange();
       store.triggerReprocessing();
@@ -394,27 +399,37 @@ class EnhanceService {
     editPersistenceService.restore(rp.editState, rp.width, rp.height);
 
     if (this.restoreStack.length === 0) {
-      // Fully unwound to the native base — clear BOTH bake markers and the durable upscale intent
-      // (store + disk) so a future reopen no longer offers a stale re-apply. persistNow writes the
-      // marker-free native state.
+      // Fully unwound to the native base — clear BOTH bake markers and the durable intents (store +
+      // disk) so a future reopen no longer offers a stale re-apply. persistNow writes the marker-free
+      // native state and clears the post-bake redirect (editsOnBakedBase) machinery.
       imageService.clearBakedUpscale();
       imageService.clearBakedDeblur?.();
-      useAppStore.getState().setUpscaleIntent(null);
+      const store = useAppStore.getState();
+      store.setUpscaleIntent(null);
+      store.setDeblurIntent(false);
+      store.setBakeOrder([]);
       editPersistenceService.persistNow();
     } else {
       // Re-assert the base marker for the now-current (remaining) top level. Each RestorePoint stores
       // the pre-bake dims/kind for the bake it captured, so the remaining top describes the active
       // baked level after this pop. Clear the sibling marker first so a mixed stack can't leave both set.
       const top = this.restoreStack[this.restoreStack.length - 1];
+      const store = useAppStore.getState();
+      // The popped TOP level owned any editsOnBakedBase — a partial unwind drops them; the remaining
+      // level's redirect base is re-seeded by persistNow below (mirror of the S1 partial-unwind).
+      store.setBakeOrder(this.restoreStack.map((rp) => rp.kind));
       if (top.kind === 'deblur') {
         imageService.clearBakedUpscale();
         imageService.setBakedDeblur?.();
-        useAppStore.getState().setUpscaleIntent(null);
+        store.setUpscaleIntent(null);
+        store.setDeblurIntent(true);
       } else {
         imageService.clearBakedDeblur?.();
         imageService.setBakedUpscale({ scale: top.scale!, nativeWidth: top.width, nativeHeight: top.height });
         // The remaining baked upscale level is still active — keep the store intent in sync with it.
-        useAppStore.getState().setUpscaleIntent({ scale: top.scale!, mode: top.mode! });
+        store.setUpscaleIntent({ scale: top.scale!, mode: top.mode! });
+        // A deblur remains ONLY if one is still somewhere in the remaining stack.
+        store.setDeblurIntent(this.restoreStack.some((rp) => rp.kind === 'deblur'));
       }
       // Persist the re-seeded state NOW. flush() would early-return here (a bake marker is still
       // active), so without this explicit write a quit right after a partial unwind leaves the disk
@@ -458,7 +473,12 @@ class EnhanceService {
     // upscaleIntent is per-image too: clear the previous image's durable upscale intent so its
     // reopen notice / export warning never bleed onto the next image. The open flow re-seeds it
     // from THIS image's saved state in the beforeNotify hook, which fires AFTER this switch hook.
-    useAppStore.getState().setUpscaleIntent(null);
+    const store = useAppStore.getState();
+    store.setUpscaleIntent(null);
+    // Deblur intent + bake order are per-image the same way (Z1) — cleared here, re-seeded by the
+    // open flow from THIS image's saved state.
+    store.setDeblurIntent(false);
+    store.setBakeOrder([]);
   }
 
   /**

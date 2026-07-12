@@ -21,6 +21,7 @@ jest.mock('../services/CheckpointService', () => ({ checkpointService: { record:
 jest.mock('../services/EditPersistenceService', () => ({ editPersistenceService: { serialize: jest.fn(() => ({})), restore: jest.fn() } }));
 jest.mock('../stores/appStore', () => ({ useAppStore: { getState: () => ({
   setIsProcessing: jest.fn(), setUpscaleProgress: jest.fn(), setUpscaleMode: jest.fn(), setUpscaleIntent: jest.fn(),
+  setDeblurIntent: jest.fn(), setBakeOrder: jest.fn(),
   notifyExternalParamsChange: jest.fn(), triggerReprocessing: jest.fn(),
 }) } }));
 

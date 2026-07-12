@@ -46,6 +46,17 @@ interface AppStore extends AppState {
   // silently exporting at native res. serialize() reads it so the marker round-trips through flush.
   upscaleIntent: BakedUpscaleIntent | null;
   setUpscaleIntent: (v: BakedUpscaleIntent | null) => void;
+  // Durable DEBLUR intent for the current image (Z1, mirror of upscaleIntent): true when a motion-
+  // deblur bake is active OR when a reopened image carries a persisted-but-not-yet-reapplied deblur.
+  // Deblur has no scale/mode payload (dimension-preserving, AI-only), so a boolean presence marker
+  // suffices. Drives the Enhance panel's re-apply notice and the Export unapplied-bake warning.
+  deblurIntent: boolean;
+  setDeblurIntent: (v: boolean) => void;
+  // Ordered list of the bakes in the current image's durable intent (Z1). Empty = none; ['upscale']
+  // or ['deblur'] for a single bake; ['upscale','deblur'] (etc.) when stacked. Kept in sync with
+  // EnhanceService's restore stack so a reopen's one-click re-apply replays the bakes in order.
+  bakeOrder: ('upscale' | 'deblur')[];
+  setBakeOrder: (v: ('upscale' | 'deblur')[]) => void;
   // AI motion deblur: determinate progress 0..1 while tiles run (null when idle). Deblur is
   // DirectML-only and AI-only (no Standard fallback), so there is no mode badge — just progress.
   deblurProgress: number | null;
@@ -173,6 +184,8 @@ export const useAppStore = create<AppStore>((set) => ({
   upscaleProgress: null,
   upscaleMode: null,
   upscaleIntent: null,
+  deblurIntent: false,
+  bakeOrder: [],
   deblurProgress: null,
   rawDecodeOptions: DEFAULT_RAW_DECODE_OPTIONS,
   reDecoding: false,
@@ -211,6 +224,8 @@ export const useAppStore = create<AppStore>((set) => ({
   setUpscaleProgress: (v) => set({ upscaleProgress: v }),
   setUpscaleMode: (v) => set({ upscaleMode: v }),
   setUpscaleIntent: (v) => set({ upscaleIntent: v }),
+  setDeblurIntent: (v) => set({ deblurIntent: v }),
+  setBakeOrder: (v) => set({ bakeOrder: v }),
   setDeblurProgress: (v) => set({ deblurProgress: v }),
   setRawDecodeOptions: (opts) => set({ rawDecodeOptions: opts }),
   setReDecoding: (v) => set({ reDecoding: v }),
