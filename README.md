@@ -1,8 +1,8 @@
 # Photo Editor Pro
 
-![Version](https://img.shields.io/badge/Version-1.19.0-blue)
+![Version](https://img.shields.io/badge/Version-1.20.0-blue)
 ![TypeScript](https://img.shields.io/badge/TypeScript-0_errors-blue)
-![Tests](https://img.shields.io/badge/Tests-1648_passing-brightgreen)
+![Tests](https://img.shields.io/badge/Tests-1717_passing-brightgreen)
 ![Lint](https://img.shields.io/badge/Lint-clean-brightgreen)
 ![GPU](https://img.shields.io/badge/GPU-WebGL2_accelerated-success)
 
@@ -67,7 +67,7 @@ electron-builder's full staging output (unpacked app, block maps) stays in `rele
 - **White Balance** — temperature and tint sliders with one-click median gray-world auto-neutralisation.
 - **Color Balance** — per-channel hue shifts in shadows, midtones, and highlights.
 - **Tone Curve** — master and per-channel RGB curves with auto-levels.
-- **Enhance** — Noise Reduction (GPU Non-Local-Means), Sharpening (FidelityFX CAS + Richardson–Lucy deblur with adjustable detail radius), edge-aware chroma noise reduction, and ×2/×4 upscale (AI super-resolution on GPU, else Lanczos) in a single panel; one **Apply Enhance** button drives them all, with a "re-apply to update" hint when upstream edits go stale.
+- **Enhance** — Noise Reduction (GPU Non-Local-Means), Sharpening (FidelityFX CAS + Richardson–Lucy deblur with adjustable detail radius), AI motion deblur (NAFNet on GPU, opt-in), edge-aware chroma noise reduction, and ×2/×4 upscale (AI super-resolution on GPU, else Lanczos) in a single panel — the whole deterministic chain runs as WebGL2 passes (~30× faster applies); one **Apply Enhance** button drives them all, with a "re-apply to update" hint when upstream edits go stale.
 - **Lens Corrections** — Distortion, Vignetting, Chromatic Aberration, creative Blur, and Film Grain in sectioned groups within one card.
 - **History** — per-image checkpoint timeline; click any checkpoint to restore that state; persists across sessions separately from Ctrl+Z undo.
 - **Histogram** — live RGB and luminosity tone-distribution display in its own floating card.
@@ -77,7 +77,7 @@ electron-builder's full staging output (unpacked app, block maps) stays in `rele
 ## Features
 
 - **RAW processing** — native LibRaw (`dcraw_emu`) Bayer demosaic in the Electron main process for 15+ formats (CR2/CR3, NEF, ARW, ORF, DNG, RW2, PEF, …), decoding with DCB demosaic + blended highlight reconstruction by default; `libraw-wasm` and embedded-JPEG fallbacks ensure every RAW opens.
-- **Per-image RAW decode control** — a "RAW Decode" panel (shown only for RAW files) lets you choose the demosaic algorithm (AHD/DCB) and highlight-recovery mode (Off/Blend/Reconstruct) per photo; changing either re-decodes from disk, and the choice is saved per image and applied on export.
+- **Per-image RAW decode control** — a "RAW Decode" panel (shown only for RAW files) lets you choose the demosaic algorithm (AHD/DCB) and highlight-recovery mode (Off/Blend/Reconstruct) per photo (changing either re-decodes from disk), plus a post-decode "Highlight recovery" slider that reconstructs single-channel-clipped highlights; all saved per image and applied on export.
 - **Instant RAW preview (progressive open)** — opening a RAW paints the camera's embedded preview in ~0.5 s with your saved edits applied, while the full 16-bit decode develops in the background and swaps in seamlessly ("Developing full quality…" shows in the footer); pixel-precise actions (Auto adjustments, transforms, upscale, print, copy style) wait for full quality automatically.
 - **Persistent RAW decode cache** — decoded full-quality bases are kept on disk (up to 2 GB, LRU) keyed by file, decode options, and file modification time, so reopening a RAW in a later session loads full quality in about a second instead of re-decoding; entries invalidate automatically when the source file or decode options change.
 - **GPU-accelerated preview** — resident-texture WebGL2 pipeline: image uploaded to the GPU once, all modules run as fragment-shader passes with zero GPU→CPU readback; CPU/Web-Worker fallback runs off the main thread when WebGL2 is unavailable.

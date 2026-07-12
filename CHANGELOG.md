@@ -4,6 +4,18 @@ All notable changes to **Photo Editor Pro** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.20.0] - 2026-07-11
+
+### Added
+- **AI motion deblur.** A new opt-in "Motion deblur (AI)" control in Enhance runs NAFNet (MIT-licensed, bundled) on your GPU via DirectML — dramatic, artifact-free recovery of motion-blurred shots where deconvolution does nothing. It ships alongside the deterministic Deblur sliders (which remain better for defocus blur — the model is trained on motion blur only, so it is never applied automatically), with revert support and the AI badge. Hidden on machines without GPU acceleration. Affects: `electron/aiDeblur.cjs` (new), `src/services/EnhanceService.ts`, `src/components/Modules/EnhanceModuleComponent.tsx`.
+- **Highlight reconstruction beyond LibRaw (M1).** A "Highlight recovery" slider on the RAW Decode panel reconstructs blown highlights where only one channel clipped (the common case — measured 100% of clipped pixels on the test RAW were red-only) by extrapolating from the surviving channels, with a smooth desaturation shoulder. Post-decode — no re-decode needed; default off; persists per image. Measured on a real blown-sun ORF: red-clipped pixels 12.95% → 0.52% with a natural render. Affects: `src/modules/HighlightRecoveryModule.ts` (new), `src/shaders/GpuPreviewPipeline.ts`, `src/components/Panels/RawDecodePanel.tsx`.
+
+### Changed
+- **Apply Enhance is ~30× faster.** The deterministic enhance chain (deconvolution, detail graft, sharpen, Lanczos upscale, chroma denoise) now runs as WebGL2 passes on the GPU: a 20 MP sharpen dropped from 42 s to 1.4 s, a 12→48 MP upscale from 65 s to 1.9 s — with bit-level agreement to the CPU chain (measured 7e-7) verified by startup self-tests that transparently fall back to the CPU path on any mismatch. Very large outputs (>96 MP) and >48 MP tiled processing stay on the CPU path unchanged. Affects: `src/shaders/GpuPreviewPipeline.ts`, `src/services/EnhanceService.ts`.
+
+### Fixed
+- Corrupt persisted upscale-intent data can no longer reach the Enhance panel (shape-validated like decode options); a partial revert of stacked upscales now persists the corrected intent immediately; the unsaved-changes close prompt now blocks global shortcuts like every other dialog and no longer leaks a listener that could swallow the next Escape press; ~800 lines of dead keyboard-workflow code removed.
+
 ## [1.19.0] - 2026-07-11
 
 ### Added
