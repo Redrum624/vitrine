@@ -173,4 +173,22 @@ const onWindows = path.sep === '\\';
     const evil = '\\\\.\\C:\\Windows\\System32\\evil.dll';
     expect(() => validateWritePath(evil, { deniedBases: bases() })).toThrow(REJECT_PREFIX);
   });
+
+  it('FAILS CLOSED on a Volume-GUID device root (aliases C: — no string fold possible)', () => {
+    // \\?\Volume{GUID}\ names the same volume as C: under a root the deny-list can't match;
+    // the fail-closed guard rejects the whole non-drive/non-UNC root class via the PURE validator.
+    const evil = '\\\\?\\Volume{0f0c1594-1111-2222-3333-444455556666}\\Windows\\System32\\evil.dll';
+    expect(() => validateWritePath(evil, { deniedBases: bases() })).toThrow(REJECT_PREFIX);
+  });
+
+  it('FAILS CLOSED on a GLOBALROOT device path', () => {
+    const evil = '\\\\?\\GLOBALROOT\\Device\\HarddiskVolume1\\Windows\\System32\\evil.dll';
+    expect(() => validateWritePath(evil, { deniedBases: bases() })).toThrow(REJECT_PREFIX);
+  });
+
+  it('still allows a plain UNC-share export target (\\\\server\\share)', () => {
+    const unc = '\\\\nas\\photos\\out.jpg';
+    // Not under any local deny-base and rooted at a real UNC share → allowed.
+    expect(validateWritePath(unc, { deniedBases: bases() })).toBe(path.resolve(unc));
+  });
 });

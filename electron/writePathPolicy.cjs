@@ -137,6 +137,20 @@ function validateWritePath(p, { deniedBases = [], requireAllowedExtension = fals
     ? path.resolve(realDir, path.basename(p))
     : path.resolve(p);
   const lower = canonicalizeForCompare(resolved);
+  // FAIL CLOSED on any non-ordinary root. After canonicalizeForCompare has stripped the
+  // \\?\ / \\.\ / UNC verbatim prefixes, a legitimate write target is ALWAYS rooted at a
+  // drive letter (`c:\…`) or a plain UNC share (`\\server\share\…`). Anything else is a
+  // Win32 DEVICE-NAMESPACE root — `\\?\Volume{GUID}\…`, `\\?\GLOBALROOT\Device\Harddisk…`,
+  // a doubled prefix — that aliases a real volume (e.g. C:) under a name no string transform
+  // can fold back, so a deny-list prefix compare would miss the sink it points at. The app
+  // never legitimately writes a raw device path, so we reject the whole class rather than
+  // enumerate it (the string-transform arms race this policy kept losing). Drive-letter and
+  // UNC-share writes — every real export target — pass.
+  const isDriveRoot = /^[a-z]:(\\|$)/.test(lower);
+  const isUncShare = /^\\\\[^\\?.]/.test(lower); // \\server… but not \\?\ / \\.\ (already stripped)
+  if (!isDriveRoot && !isUncShare) {
+    throw new Error(`${REJECT_PREFIX} (non-filesystem root): ${p}`);
+  }
   for (const base of deniedBases) {
     const canonBase = canonicalizeForCompare(base);
     if (lower === canonBase || lower.startsWith(canonBase + path.sep)) {
