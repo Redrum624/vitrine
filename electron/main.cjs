@@ -4,6 +4,11 @@ const fs = require('fs');
 const os = require('os');
 const { writeImageFile, writeImageMetadata } = require('./imageWriter.cjs');
 const { markSelfWrite, createFolderChangeDebouncer } = require('./selfWriteRegistry.cjs');
+const {
+  computeDeniedBases,
+  validateWritePath: enforceWritePolicy,
+  REJECT_PREFIX: WRITE_REJECT_PREFIX,
+} = require('./writePathPolicy.cjs');
 const aiUpscaler = require('./aiUpscaler.cjs');
 const aiDeblur = require('./aiDeblur.cjs');
 
@@ -165,6 +170,7 @@ function createWindow() {
 
   // Emitted when the window is closed
   mainWindow.on('closed', () => {
+    closeAllFolderWatchers(); // release all fs.watch handles + cancel pending debouncers
     mainWindow = null;
   });
 
@@ -525,6 +531,22 @@ ipcMain.handle('get-system-drives', async () => {
 // File watchers for detecting changes
 const folderWatchers = new Map();
 
+// Tear down every fs.watch handle on window close so no watcher (or its pending
+// debounce timer) outlives the window — otherwise a reload/close leaks native watch
+// handles and a debouncer could fire `webContents.send` on a destroyed window.
+// Declared here (hoisted) but referenced from mainWindow.on('closed') in createWindow.
+function closeAllFolderWatchers() {
+  for (const watcher of folderWatchers.values()) {
+    try {
+      if (watcher && watcher._debouncer) watcher._debouncer.cancel();
+      if (watcher) watcher.close();
+    } catch (error) {
+      console.warn('Failed to close folder watcher:', error && error.message);
+    }
+  }
+  folderWatchers.clear();
+}
+
 // Watch a folder for changes
 ipcMain.handle('watch-folder', async (event, folderPath) => {
   try {
@@ -769,39 +791,36 @@ function getMimeType(filePath) {
 // applyExifOrientation now lives in ./embeddedPreview.cjs (shared with rawDecoder.cjs's
 // progressive-preview path); the read-image-as-data-url handler requires it locally.
 
-// Path validation helper for write IPC handlers. Resolves to an absolute path
-// (which collapses any `..` traversal) and then denies writes into protected
-// system locations. We use a DENY-LIST of system dirs rather than an allow-list:
-// this app legitimately exports to user-chosen paths (Desktop, external/SD drives,
-// any folder picked via the native save dialog), so an allow-list (e.g. Pictures
-// only) would break real export flows. The deny-list blocks the realistic threat —
-// a compromised renderer calling a write IPC with a system path (no `..` needed).
-function validateWritePath(p) {
-  if (typeof p !== 'string' || !p.trim()) {
-    throw new Error('Invalid write path');
-  }
-  const resolved = path.resolve(p);
-  const denied = [
-    process.env.SystemRoot,
-    process.env.windir,
-    process.env.ProgramFiles,
-    process.env['ProgramFiles(x86)'],
-    process.env.ProgramW6432,
-    process.resourcesPath,            // the packaged app's bundled resources
-    path.dirname(app.getPath('exe')), // the install directory
-  ].filter(Boolean).map((d) => path.resolve(d).toLowerCase());
-  const lower = resolved.toLowerCase();
-  for (const base of denied) {
-    if (lower === base || lower.startsWith(base + path.sep)) {
-      throw new Error(`Path rejected (protected system location): ${p}`);
-    }
-  }
-  return resolved;
+// Path validation for the write IPC handlers. The policy itself (deny-list of protected
+// dirs + user autorun sinks, and the optional extension allow-list) lives in the pure,
+// unit-tested electron/writePathPolicy.cjs; this thin wrapper only gathers the Electron/
+// environment-derived deny-list bases and delegates. We use a DENY-LIST of dirs (not an
+// allow-list) because the app legitimately exports to any user-chosen path (Desktop, SD
+// cards, native save dialog); the deny-list blocks the realistic threats — a compromised
+// renderer writing into a system path OR into an autorun sink (Startup / PowerShell
+// profile / ~/.ssh) to escalate a file-write into persistent code execution.
+function currentDeniedWriteBases() {
+  let appDataDir;
+  let installDir;
+  try { appDataDir = app.getPath('appData'); } catch { appDataDir = undefined; }
+  try { installDir = path.dirname(app.getPath('exe')); } catch { installDir = undefined; }
+  return computeDeniedBases({
+    env: process.env,
+    homeDir: os.homedir(),
+    resourcesPath: process.resourcesPath,
+    installDir,
+    appDataDir,
+  });
+}
+
+// @param {{ requireAllowedExtension?: boolean }} [opts]
+function validateWritePath(p, opts = {}) {
+  return enforceWritePolicy(p, { deniedBases: currentDeniedWriteBases(), ...opts });
 }
 
 ipcMain.handle('write-file', async (event, filePath, data) => {
   try {
-    const safeFilePath = validateWritePath(filePath);
+    const safeFilePath = validateWritePath(filePath, { requireAllowedExtension: true });
     markSelfWrite(safeFilePath); // don't let the folder watcher react to our own write
     await fs.promises.writeFile(safeFilePath, data);
     return true;
@@ -813,7 +832,7 @@ ipcMain.handle('write-file', async (event, filePath, data) => {
 // Write image file (for exports)
 ipcMain.handle('write-image-file', async (event, filePath, imageData, format, options) => {
   try {
-    const safeFilePath = validateWritePath(filePath);
+    const safeFilePath = validateWritePath(filePath, { requireAllowedExtension: true });
     // Delegates to electron/imageWriter.cjs (unit-tested). Correctly handles
     // 8-bit and 16-bit raw RGBA buffers and embeds an sRGB ICC profile.
     markSelfWrite(safeFilePath); // exports into a watched folder must not retrigger it
@@ -921,9 +940,9 @@ ipcMain.handle('write-image-rating', async (event, filePath, rating) => {
     await writeImageMetadata(safeFilePath, { xmp: { rating } });
     return { ok: true, method: 'embedded' };
   } catch (error) {
-    // A rejected path (traversal guard) is a security condition, not a soft
-    // write failure — surface it to the caller instead of returning { ok:false }.
-    if (error instanceof Error && error.message.startsWith('Path traversal rejected')) {
+    // A rejected path (deny-list / traversal guard) is a security condition, not a
+    // soft write failure — surface it to the caller instead of returning { ok:false }.
+    if (error instanceof Error && error.message.startsWith(WRITE_REJECT_PREFIX)) {
       throw error;
     }
     console.warn('Failed to write image rating:', error.message);
