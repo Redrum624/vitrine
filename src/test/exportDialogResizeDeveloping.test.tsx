@@ -23,8 +23,12 @@ jest.mock('../services/ExportService', () => ({
   },
 }));
 
+let mockExportBaked = false;
 jest.mock('../services/ImageService', () => ({
-  imageService: { getProcessingPipeline: jest.fn(() => null) },
+  imageService: {
+    getProcessingPipeline: jest.fn(() => null),
+    isBakedUpscaleActive: jest.fn(() => mockExportBaked),
+  },
 }));
 
 jest.mock('../services/MultiExportService', () => ({
@@ -99,5 +103,55 @@ describe('ExportDialog — Resize toggle gating during the developing window', (
 
     act(() => { useAppStore.getState().setDeveloping(false); });
     expect(screen.getByRole('checkbox', { name: /resize image/i })).not.toBeDisabled();
+  });
+});
+
+describe('ExportDialog — unapplied upscale warning (Q7, NO silent loss)', () => {
+  beforeEach(() => {
+    mockExportBaked = false;
+    useAppStore.setState({ developing: false, upscaleIntent: null });
+  });
+  afterEach(() => {
+    cleanup();
+    mockExportBaked = false;
+    useAppStore.setState({ developing: false, upscaleIntent: null });
+  });
+
+  it('warns when a persisted upscale intent exists but the base is NOT baked (reopened, not re-applied)', () => {
+    useAppStore.setState({ upscaleIntent: { scale: 2, mode: 'ai' } });
+    renderDialog();
+    const warn = screen.getByTestId('export-upscale-warning');
+    expect(warn).toHaveTextContent(/×2/);
+    expect(warn).toHaveTextContent(/AI/);
+    expect(warn).toHaveTextContent(/native resolution/i);
+  });
+
+  it('does NOT warn when the upscale is currently baked (re-applied → export honors it)', () => {
+    mockExportBaked = true;
+    useAppStore.setState({ upscaleIntent: { scale: 4, mode: 'standard' } });
+    renderDialog();
+    expect(screen.queryByTestId('export-upscale-warning')).toBeNull();
+  });
+
+  it('does NOT warn when there is no upscale intent at all', () => {
+    renderDialog();
+    expect(screen.queryByTestId('export-upscale-warning')).toBeNull();
+  });
+
+  it('does NOT warn in multi-export mode (per-image counts surface in the completion toast instead)', () => {
+    useAppStore.setState({ upscaleIntent: { scale: 2, mode: 'ai' } });
+    render(
+      <ExportDialog
+        isOpen
+        onClose={jest.fn()}
+        imageData={new Float32Array(4 * 4 * 4)}
+        imageWidth={2048}
+        imageHeight={1365}
+        originalFilePath="/photo.orf"
+        onExportComplete={jest.fn()}
+        multiPaths={['/a.orf', '/b.orf']}
+      />,
+    );
+    expect(screen.queryByTestId('export-upscale-warning')).toBeNull();
   });
 });

@@ -39,6 +39,13 @@ interface AppStore extends AppState {
   setUpscaleProgress: (v: number | null) => void;
   upscaleMode: 'ai' | 'standard' | null;
   setUpscaleMode: (v: 'ai' | 'standard' | null) => void;
+  // Durable upscale INTENT for the current image (Q7): {scale, mode} when an upscale bake is
+  // active OR when a reopened image carries a persisted-but-not-yet-reapplied upscale, else null.
+  // Distinct from upscaleMode (the in-session AI/Standard badge): this survives the reopen window
+  // so the Enhance panel can offer a one-click re-apply and the Export dialog can warn instead of
+  // silently exporting at native res. serialize() reads it so the marker round-trips through flush.
+  upscaleIntent: { scale: number; mode: 'ai' | 'standard' } | null;
+  setUpscaleIntent: (v: { scale: number; mode: 'ai' | 'standard' } | null) => void;
   // RAW decode options applied to the CURRENT image's base pixels. Changed only via a
   // re-decode (RawImageService.reDecode) or restored from per-image persistence on open —
   // never a live edit, so it stays in lock-step with the actually-decoded base.
@@ -161,6 +168,7 @@ export const useAppStore = create<AppStore>((set) => ({
   isProcessing: false,
   upscaleProgress: null,
   upscaleMode: null,
+  upscaleIntent: null,
   rawDecodeOptions: DEFAULT_RAW_DECODE_OPTIONS,
   reDecoding: false,
   developing: false,
@@ -197,6 +205,7 @@ export const useAppStore = create<AppStore>((set) => ({
   setIsProcessing: (v) => set({ isProcessing: v }),
   setUpscaleProgress: (v) => set({ upscaleProgress: v }),
   setUpscaleMode: (v) => set({ upscaleMode: v }),
+  setUpscaleIntent: (v) => set({ upscaleIntent: v }),
   setRawDecodeOptions: (opts) => set({ rawDecodeOptions: opts }),
   setReDecoding: (v) => set({ reDecoding: v }),
   setDeveloping: (v) => set({ developing: v }),

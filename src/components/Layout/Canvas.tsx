@@ -794,6 +794,12 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
         image.path,
         (decoded) => {
           if (loadTokenRef.current !== loadToken) return;
+          // Seed the durable upscale intent (Q7) from THIS image's saved state BEFORE restoreState —
+          // so the baseline restoreState captures (serialize()) already includes the bakedUpscale
+          // marker and a later edit's flush can't destroy it. onImageSwitched cleared it at loadImage
+          // start; this reinstates the persisted intent so the Enhance panel offers a one-click
+          // re-apply and Export warns instead of silently exporting at native res. NOT auto-applied.
+          useAppStore.getState().setUpscaleIntent(savedState?.bakedUpscale ?? null);
           editPersistenceService.restoreState(savedState, decoded.width, decoded.height, image.path);
         },
         (fullWidth, fullHeight) => {

@@ -46,6 +46,14 @@ interface EditState {
   // the base image, not the module-edit timeline. Re-applying on a checkpoint restore (which does
   // NOT re-decode) would desync the displayed options from the actually-decoded pixels.
   rawDecodeOptions?: RawDecodeOptions;
+  // Durable upscale INTENT (Q7): present iff the image was baked to an ×scale upscale. Honest
+  // INTENT persistence — NOT the ~2GB upscaled pixels: the saved `modules` are the PRE-bake
+  // (native-dims) params, and this marker records "then upscale ×scale". On reopen the panel
+  // surfaces a one-click re-apply and the export path warns rather than silently dropping it.
+  // Optional + never version-bumped, so old saved states (no field) restore cleanly as "no intent".
+  // Written by persistBakedUpscaleIntent (on bake) and emitted by serialize() from the store's
+  // upscaleIntent, so it round-trips through flush (does not get destroyed by a later edit's save).
+  bakedUpscale?: { scale: number; mode: 'ai' | 'standard' };
 }
 
 /**
@@ -80,6 +88,14 @@ class EditPersistenceService {
       modules,
       rawDecodeOptions: useAppStore.getState().rawDecodeOptions,
     };
+
+    // Emit the durable upscale intent from the store's single source of truth. This is what makes
+    // the marker round-trip through flush: after a reopen, restoreState seeds the flush baseline
+    // from serialize() — which now includes bakedUpscale — so a later unrelated edit's flush writes
+    // a state that STILL carries the marker instead of silently destroying it (P2 progressive
+    // destruction). Null while no upscale is active/pending → the field is simply omitted.
+    const intent = useAppStore.getState().upscaleIntent;
+    if (intent) state.bakedUpscale = { scale: intent.scale, mode: intent.mode };
 
     const la = imageProcessingPipeline.getModule<LocalAdjustmentsPipelineModule>('localadjustments');
     if (la) {
@@ -225,6 +241,47 @@ class EditPersistenceService {
       window.electronAPI.storeSet(this.keyForPath(img.filePath), JSON.parse(json));
     } catch (e) {
       logger.warn('flush save failed', e);
+    }
+  }
+
+  /**
+   * Persist the PRE-bake edit state (native-dims module params) plus the upscale INTENT marker for
+   * the current image. Called by EnhanceService.applyUpscale right after a bake: flush() early-returns
+   * while a bake is active (it would otherwise persist the upscaled-dims params over the native saved
+   * state), so THIS is the single write that captures the intent. `baseState` is the serialize()
+   * snapshot taken BEFORE the bake reset the modules, so the persisted module params re-derive the
+   * SAME upscale when re-applied on reopen. The flush baseline is set to what we just wrote so a later
+   * revert's persistNow (marker-free) is correctly seen as a change.
+   */
+  persistBakedUpscaleIntent(baseState: EditState, scale: number, mode: 'ai' | 'standard'): void {
+    const img = imageService.getCurrentImage();
+    if (!img?.filePath || !window.electronAPI?.storeSet) return;
+    const state: EditState = { ...baseState, bakedUpscale: { scale, mode } };
+    const json = JSON.stringify(state);
+    this.baseline = json;
+    try {
+      window.electronAPI.storeSet(this.keyForPath(img.filePath), JSON.parse(json));
+    } catch (e) {
+      logger.warn('persistBakedUpscaleIntent failed', e);
+    }
+  }
+
+  /**
+   * Force-persist the current pipeline state for the current image NOW, bypassing the baseline-diff
+   * short-circuit (but re-seeding the baseline). Used by EnhanceService.revert once an upscale has
+   * been fully unwound to the native base: the store's upscaleIntent has been cleared, so serialize()
+   * emits NO bakedUpscale marker — this durably erases a previously-persisted intent so a future
+   * reopen no longer offers a stale re-apply. Safe here because the base is no longer baked.
+   */
+  persistNow(): void {
+    const img = imageService.getCurrentImage();
+    if (!img?.filePath || !window.electronAPI?.storeSet) return;
+    const json = JSON.stringify(this.serialize());
+    this.baseline = json;
+    try {
+      window.electronAPI.storeSet(this.keyForPath(img.filePath), JSON.parse(json));
+    } catch (e) {
+      logger.warn('persistNow failed', e);
     }
   }
 }

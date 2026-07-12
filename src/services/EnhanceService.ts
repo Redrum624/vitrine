@@ -71,6 +71,9 @@ interface RestorePoint {
   width: number;
   height: number;
   scale: number;
+  // Route the bake used ('ai' | 'standard') — kept so a partial revert of a multi-level upscale can
+  // restore the remaining level's durable intent ({scale, mode}) accurately, not just its scale.
+  mode: 'ai' | 'standard';
   editState: ReturnType<typeof editPersistenceService.serialize>;
 }
 
@@ -239,7 +242,7 @@ class EnhanceService {
 
       // Result obtained — now safe to push the restore point and mutate.
       store.setUpscaleMode(mode);
-      this.restoreStack.push({ data: restoreData, width, height, scale: params.scale, editState });
+      this.restoreStack.push({ data: restoreData, width, height, scale: params.scale, mode, editState });
 
       imageProcessingPipeline.resetAllModules();
       // setOriginalImage BEFORE updateCurrentImageData: the base cache is a fully-materialized
@@ -249,6 +252,12 @@ class EnhanceService {
       imageService.setOriginalImage(base, outWidth, outHeight);
       imageService.updateCurrentImageData(enhanced, outWidth, outHeight);
       imageService.setBakedUpscale({ scale: params.scale, nativeWidth: procW, nativeHeight: procH });
+      // Durable INTENT (Q7): record it in the store (drives the reopen notice + export warn +
+      // serialize round-trip) AND write it to disk now. flush() early-returns while a bake is active,
+      // so this explicit write — of the PRE-bake native-dims `editState` plus the {scale, mode}
+      // marker — is what survives quit/reopen. Re-deriving on re-apply reproduces this exact result.
+      store.setUpscaleIntent({ scale: params.scale, mode });
+      editPersistenceService.persistBakedUpscaleIntent(editState, params.scale, mode);
       checkpointService.recordLabeled(`Enhanced ×${params.scale} (${mode === 'ai' ? 'AI' : 'Standard'})`, this.getRestoreDepth());
       store.notifyExternalParamsChange();
       store.triggerReprocessing();
@@ -272,12 +281,19 @@ class EnhanceService {
 
     if (this.restoreStack.length === 0) {
       imageService.clearBakedUpscale();
+      // Fully unwound to the native base — clear the durable intent (store + disk) so a future
+      // reopen no longer offers a stale re-apply. persistNow writes the marker-free native state.
+      useAppStore.getState().setUpscaleIntent(null);
+      editPersistenceService.persistNow();
     } else {
       // Update the baked marker to reflect the now-current (remaining) top level.
       // Each RestorePoint stores the pre-bake dims and scale for the upscale it captured,
       // so the remaining top describes the active baked level after this pop.
       const top = this.restoreStack[this.restoreStack.length - 1];
       imageService.setBakedUpscale({ scale: top.scale, nativeWidth: top.width, nativeHeight: top.height });
+      // The remaining baked level is still active — keep the store intent in sync with it (a still
+      // baked image is exported via resolveExportSource, so its persisted state is left as-is).
+      useAppStore.getState().setUpscaleIntent({ scale: top.scale, mode: top.mode });
     }
     return true;
   }
@@ -312,6 +328,10 @@ class EnhanceService {
     // upscaleMode is per-bake state (drives the AI/Standard badge and the AI-route disclosure
     // hint) — a never-upscaled image must not inherit the previous image's route label (Q2 review).
     useAppStore.getState().setUpscaleMode(null);
+    // upscaleIntent is per-image too: clear the previous image's durable upscale intent so its
+    // reopen notice / export warning never bleed onto the next image. The open flow re-seeds it
+    // from THIS image's saved state in the beforeNotify hook, which fires AFTER this switch hook.
+    useAppStore.getState().setUpscaleIntent(null);
   }
 
   /**

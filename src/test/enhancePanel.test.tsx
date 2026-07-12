@@ -3,10 +3,12 @@
 // loaded → feasibility unknown → every scale stays enabled).
 let mockOriginalDims: { width: number; height: number } | null = null;
 import { render, screen, fireEvent, act } from '@testing-library/react';
+let mockBaked = false;
 jest.mock('../services/ImageService', () => ({ imageService: {
   getOriginalImage: jest.fn(() => (mockOriginalDims ? { data: new Float32Array(4), ...mockOriginalDims } : null)),
   getOriginalImageDimensions: jest.fn(() => mockOriginalDims),
   getCurrentImage: jest.fn(() => null),
+  isBakedUpscaleActive: jest.fn(() => mockBaked),
 } }));
 jest.mock('../services/EnhanceService', () => ({
   // getUpscaleFeasibility is a PURE helper — use the real implementation so the
@@ -297,5 +299,55 @@ describe('EnhanceModuleComponent — Chroma noise + Detail radius sliders (P10 R
     render(<EnhanceModuleComponent module={enhanceModule} noiseReductionModule={makeNrModule()} />);
     fireEvent.change(screen.getByLabelText('Detail radius'), { target: { value: '2' } });
     expect(setParamsSpy).toHaveBeenCalledWith({ hpSigma: 2 });
+  });
+});
+
+describe('EnhanceModuleComponent — reopen upscale re-apply notice (Q7)', () => {
+  beforeEach(() => {
+    enhanceModule.resetParams();
+    mockBaked = false;
+    mockOriginalDims = { width: 2000, height: 1500 };
+    useAppStore.setState({ upscaleProgress: null, upscaleMode: null, upscaleIntent: null, developing: false });
+    (enhanceService.applyUpscale as jest.Mock).mockClear();
+    (enhanceService.applyUpscale as jest.Mock).mockResolvedValue(undefined);
+  });
+  afterEach(() => {
+    mockBaked = false;
+    useAppStore.setState({ upscaleIntent: null, developing: false });
+  });
+
+  it('shows the notice with scale + mode when a persisted intent exists and the base is NOT baked', () => {
+    useAppStore.setState({ upscaleIntent: { scale: 2, mode: 'ai' } });
+    render(<EnhanceModuleComponent module={enhanceModule} noiseReductionModule={makeNrModule()} />);
+    const notice = screen.getByTestId('upscale-reapply-notice');
+    expect(notice).toHaveTextContent(/×2/);
+    expect(notice).toHaveTextContent(/AI/);
+    expect(screen.getByTestId('upscale-reapply-btn')).toBeEnabled();
+  });
+
+  it('hides the notice once the upscale is baked (re-applied in-session)', () => {
+    mockBaked = true;
+    useAppStore.setState({ upscaleIntent: { scale: 2, mode: 'ai' } });
+    render(<EnhanceModuleComponent module={enhanceModule} noiseReductionModule={makeNrModule()} />);
+    expect(screen.queryByTestId('upscale-reapply-notice')).toBeNull();
+  });
+
+  it('re-apply re-runs applyUpscale with the saved scale (upscale:true) and marks applied', async () => {
+    useAppStore.setState({ upscaleIntent: { scale: 4, mode: 'standard' } });
+    render(<EnhanceModuleComponent module={enhanceModule} noiseReductionModule={makeNrModule()} />);
+    await act(async () => { fireEvent.click(screen.getByTestId('upscale-reapply-btn')); });
+    expect(enhanceService.applyUpscale).toHaveBeenCalledWith(expect.objectContaining({ upscale: true, scale: 4 }));
+    expect(enhanceService.markEnhanceApplied).toHaveBeenCalled();
+  });
+
+  it('disables the re-apply button while developing (full quality still landing)', () => {
+    useAppStore.setState({ upscaleIntent: { scale: 2, mode: 'ai' }, developing: true });
+    render(<EnhanceModuleComponent module={enhanceModule} noiseReductionModule={makeNrModule()} />);
+    expect(screen.getByTestId('upscale-reapply-btn')).toBeDisabled();
+  });
+
+  it('shows no notice when there is no persisted intent', () => {
+    render(<EnhanceModuleComponent module={enhanceModule} noiseReductionModule={makeNrModule()} />);
+    expect(screen.queryByTestId('upscale-reapply-notice')).toBeNull();
   });
 });

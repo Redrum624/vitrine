@@ -9,6 +9,13 @@ export interface MultiExportSummary {
   exported: string[];
   /** Images that failed, with the error message. */
   failed: { path: string; error: string }[];
+  /**
+   * Base names of images whose saved state carried an unapplied upscale intent (Q7). Batch export
+   * re-derives edits per image but does NOT re-run the (multi-second, per-image) upscale bake — so
+   * these exported at native resolution. Surfaced in the completion toast so the loss is never
+   * silent; the user opens each and re-applies to export upscaled.
+   */
+  upscaleSkipped: string[];
 }
 
 export interface MultiExportControls {
@@ -39,7 +46,7 @@ class MultiExportService {
     controls: MultiExportControls,
   ): Promise<MultiExportSummary> {
     const { outputDirectory, onProgress, isCancelled } = controls;
-    const summary: MultiExportSummary = { exported: [], failed: [] };
+    const summary: MultiExportSummary = { exported: [], failed: [], upscaleSkipped: [] };
     const emitted = new Set<string>(); // lowercased names already chosen this run
     const ext = extForFormat(options.format);
 
@@ -60,8 +67,12 @@ class MultiExportService {
 
           // Apply THIS image's saved edits. Reset first so an image with no saved
           // edits exports cleanly instead of inheriting the previous image's edits.
+          // Fetch the state explicitly (instead of restoreForPath) so we can detect an unapplied
+          // upscale intent from the SAME read used to restore — no extra IPC (Q7).
+          const savedState = await editPersistenceService.getSavedEditState(path);
           pipeline?.resetAllModules();
-          await editPersistenceService.restoreForPath(path, img.width, img.height);
+          editPersistenceService.restoreState(savedState, img.width, img.height, path);
+          if (savedState?.bakedUpscale) summary.upscaleSkipped.push(baseNameOf(path));
 
           // Process at full resolution on the main thread (matches ExportDialog).
           // cacheResults=false keeps full-res module results out of the pipeline cache.

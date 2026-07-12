@@ -19,9 +19,9 @@ jest.mock('../services/EnhanceWorkerClient', () => ({ enhanceWorkerClient: {
 } }));
 jest.mock('../services/AiUpscaleClient', () => ({ aiUpscaleClient: { isAvailable: mockAiIsAvailable, run: mockAiRun } }));
 jest.mock('../services/CheckpointService', () => ({ checkpointService: { record: jest.fn(), recordLabeled: jest.fn(), setBakeBridge: jest.fn() } }));
-jest.mock('../services/EditPersistenceService', () => ({ editPersistenceService: { serialize: jest.fn(() => ({})), restore: jest.fn() } }));
+jest.mock('../services/EditPersistenceService', () => ({ editPersistenceService: { serialize: jest.fn(() => ({})), restore: jest.fn(), persistBakedUpscaleIntent: jest.fn(), persistNow: jest.fn() } }));
 jest.mock('../stores/appStore', () => ({ useAppStore: { getState: () => ({
-  setIsProcessing: jest.fn(), setUpscaleProgress: mockSetUpscaleProgress, setUpscaleMode: mockSetUpscaleMode,
+  setIsProcessing: jest.fn(), setUpscaleProgress: mockSetUpscaleProgress, setUpscaleMode: mockSetUpscaleMode, setUpscaleIntent: jest.fn(),
   notifyExternalParamsChange: jest.fn(), triggerReprocessing: jest.fn(),
 }) } }));
 

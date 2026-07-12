@@ -30,6 +30,11 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
   const [busy, setBusy] = useState(false);
   const upscaleProgress = useAppStore((s) => s.upscaleProgress);
   const upscaleMode = useAppStore((s) => s.upscaleMode);
+  // Durable upscale intent (Q7): set when a reopened image carries a persisted-but-not-reapplied
+  // upscale (or a live bake). Drives the one-click re-apply notice below. `developing` gates the
+  // button during the progressive-open window (applyUpscale itself is gated too — belt & braces).
+  const upscaleIntent = useAppStore((s) => s.upscaleIntent);
+  const developing = useAppStore((s) => s.developing);
   // Re-render on bulk upstream param changes (Auto All / Paste Style / presets bump this) so the
   // staleness hint re-evaluates while the panel stays mounted. Normal per-module slider edits
   // happen while THIS panel is unmounted (single module panel visible at a time), so navigating
@@ -103,6 +108,29 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
     }
   }, [nrEnabled, nrStrength, module, onParamsChange, onNoiseReductionChange]);
 
+  // Re-apply a persisted upscale intent on a reopened image (Q7): re-runs applyUpscale with the
+  // saved scale on top of the restored (native-dims) module params, re-deriving the SAME upscaled
+  // base the user had last session. One-click and explicit — never auto-run on open (a multi-second
+  // unrequested bake would be hostile). applyUpscale auto-routes AI/Standard by availability, so the
+  // saved mode is a preference the current environment may or may not honor (falls back gracefully).
+  const handleReapplyUpscale = useCallback(async () => {
+    if (!upscaleIntent) return;
+    setBusy(true); setError(null);
+    try {
+      await enhanceService.applyUpscale({ ...module.getParams(), upscale: true, scale: upscaleIntent.scale as 2 | 4 });
+      setRevertVersion((v) => v + 1);
+      enhanceService.markEnhanceApplied();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }, [upscaleIntent, module]);
+
+  // Show the reopen notice when a durable intent exists but the working base is NOT currently baked
+  // (i.e. reopened and not yet re-applied). Once re-applied, isBakedUpscaleActive() is true → hide.
+  const showReopenNotice = !!upscaleIntent && !imageService.isBakedUpscaleActive();
+
   const currentParams = paramsRef.current;
 
   // Staleness affordance: an Apply Enhance result goes stale once an upstream (non-enhance)
@@ -164,6 +192,39 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
 
   return (
     <div className="enhance-panel px-5 pt-4" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+      {/* Reopen surfacing (Q7): a durable upscale intent was restored but not re-applied. Passive
+          notice + one-click re-apply (gated while developing, like Apply). No auto-bake on open. */}
+      {showReopenNotice && upscaleIntent && (
+        <div
+          data-testid="upscale-reapply-notice"
+          style={{
+            display: 'flex', alignItems: 'center', gap: 10, padding: '9px 11px', borderRadius: 9,
+            border: '1px solid var(--accent-ring)', background: 'var(--accent-soft)',
+            fontSize: 11, color: 'var(--glass-text-label)', lineHeight: 1.45,
+          }}
+        >
+          <span style={{ flex: 1 }}>
+            Upscale ×{upscaleIntent.scale} ({upscaleIntent.mode === 'ai' ? 'AI' : 'Standard'}) was applied — re-apply to restore.
+          </span>
+          <button
+            type="button"
+            data-testid="upscale-reapply-btn"
+            disabled={busy || developing}
+            title={developing ? 'Available when full quality finishes developing' : undefined}
+            onClick={handleReapplyUpscale}
+            style={{
+              flexShrink: 0, padding: '6px 12px', borderRadius: 8,
+              border: '1px solid var(--accent-ring)', background: 'var(--accent)', color: '#0b0b0c',
+              fontSize: 11, fontWeight: 700,
+              cursor: busy || developing ? 'not-allowed' : 'pointer',
+              opacity: busy || developing ? 0.6 : 1,
+            }}
+          >
+            {busy ? 'Re-applying…' : 'Re-apply'}
+          </button>
+        </div>
+      )}
 
       {/* Three mode toggles */}
       <div style={{ display: 'flex', gap: 8 }}>
@@ -392,7 +453,7 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
           display: 'flex', gap: 7,
         }}>
           <span style={{ color: 'var(--accent)', flexShrink: 0 }}>ⓘ</span>
-          <span>Upscale applies in this session; reopening the image returns the original.</span>
+          <span>Upscale bakes a new base. The intent is saved — reopen the photo and re-apply to restore it (the pixels re-derive).</span>
         </div>
       )}
     </div>

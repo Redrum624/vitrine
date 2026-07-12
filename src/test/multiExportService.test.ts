@@ -24,10 +24,11 @@ jest.mock('../services/ImageService', () => ({
 const flush = jest.fn();
 const serialize = jest.fn(() => ({ snapshot: 'CURRENT' }));
 const restore = jest.fn();
-const restoreForPath = jest.fn();
+const getSavedEditState = jest.fn();
+const restoreState = jest.fn();
 
 jest.mock('../services/EditPersistenceService', () => ({
-  editPersistenceService: { flush, serialize, restore, restoreForPath },
+  editPersistenceService: { flush, serialize, restore, getSavedEditState, restoreState },
 }));
 
 const exportImage = jest.fn();
@@ -54,16 +55,20 @@ beforeEach(() => {
   loadImageForExport.mockImplementation(async () => ({ width: 100, height: 50, data: new Float32Array(100 * 50 * 4) }));
   getCurrentImage.mockReturnValue({ width: 200, height: 120 });
   processImage.mockImplementation(async (d: Float32Array) => d);
-  restoreForPath.mockResolvedValue(true);
+  getSavedEditState.mockResolvedValue(null);
+  restoreState.mockReturnValue(true);
   exportImage.mockResolvedValue({ success: true, outputPath: 'out' });
 });
 
 describe('exportMany — per-image edits', () => {
   it('resets then restores each image\'s saved edits before processing', async () => {
     await multiExportService.exportMany(['/i/a.jpg', '/i/b.png'], okOptions, controls());
-    expect(restoreForPath).toHaveBeenCalledTimes(2);
-    expect(restoreForPath).toHaveBeenCalledWith('/i/a.jpg', 100, 50);
-    expect(restoreForPath).toHaveBeenCalledWith('/i/b.png', 100, 50);
+    // Fetches each image's state once, then restores it (behaviour-identical to the old
+    // restoreForPath, but the single read also lets us detect an unapplied upscale intent).
+    expect(getSavedEditState).toHaveBeenCalledWith('/i/a.jpg');
+    expect(getSavedEditState).toHaveBeenCalledWith('/i/b.png');
+    expect(restoreState).toHaveBeenCalledWith(null, 100, 50, '/i/a.jpg');
+    expect(restoreState).toHaveBeenCalledWith(null, 100, 50, '/i/b.png');
     // resetAllModules runs per image (2) plus once in the finally restore = 3.
     expect(resetAllModules).toHaveBeenCalledTimes(3);
   });
@@ -73,6 +78,23 @@ describe('exportMany — per-image edits', () => {
     expect(exportImage).toHaveBeenCalledTimes(2);
     expect(exportImage.mock.calls[0][3]).toMatchObject({ outputDirectory: 'C:\\out', filename: 'a_PEP.jpg' });
     expect(exportImage.mock.calls[1][3]).toMatchObject({ filename: 'b_PEP.jpg' });
+  });
+});
+
+describe('exportMany — unapplied upscale intent (Q7, NO silent loss)', () => {
+  it('records images whose saved state carries a bakedUpscale intent in summary.upscaleSkipped', async () => {
+    getSavedEditState.mockImplementation(async (path: string) =>
+      path === '/i/a.jpg' ? { version: 1, modules: {}, bakedUpscale: { scale: 2, mode: 'ai' } } : null,
+    );
+    const summary = await multiExportService.exportMany(['/i/a.jpg', '/i/b.png'], okOptions, controls());
+    // Both still export (at native resolution) — the intent is surfaced, never silently dropped.
+    expect(summary.exported).toEqual(['a_PEP.jpg', 'b_PEP.jpg']);
+    expect(summary.upscaleSkipped).toEqual(['a']);
+  });
+
+  it('leaves upscaleSkipped empty when no selected image carries an intent', async () => {
+    const summary = await multiExportService.exportMany(['/i/a.jpg', '/i/b.png'], okOptions, controls());
+    expect(summary.upscaleSkipped).toEqual([]);
   });
 });
 

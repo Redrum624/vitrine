@@ -31,7 +31,7 @@ jest.mock('../services/CheckpointService', () => ({ checkpointService: {
   record: jest.fn(), recordLabeled: jest.fn(), setBakeBridge: jest.fn(),
 } }));
 jest.mock('../services/EditPersistenceService', () => ({ editPersistenceService: {
-  serialize: jest.fn(() => ({})), restore: jest.fn(),
+  serialize: jest.fn(() => ({})), restore: jest.fn(), persistBakedUpscaleIntent: jest.fn(), persistNow: jest.fn(),
 } }));
 
 import { enhanceService } from '../services/EnhanceService';

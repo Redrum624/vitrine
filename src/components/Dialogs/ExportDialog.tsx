@@ -60,6 +60,14 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
   // but the Resize toggle below seeds width/height from these dims, which would silently downscale
   // a full-res export to preview size. Disable just the toggle until the swap lands.
   const developing = useAppStore((s) => s.developing);
+  // Q7: a reopened image can carry a durable upscale intent that has NOT been re-applied — the
+  // working base is native-res, so resolveExportSource would export at native res and SILENTLY drop
+  // the upscale. We never do that silently: when an intent exists but the base is not currently baked
+  // we warn here (the export still proceeds at native res). Once re-applied, the base is baked →
+  // resolveExportSource returns the upscaled pixels and no warning shows. Multi-export surfaces its
+  // own per-image count in the completion toast (the dialog can't pre-scan every selected path).
+  const upscaleIntent = useAppStore((s) => s.upscaleIntent);
+  const upscaleNotApplied = !((multiPaths?.length ?? 0) > 0) && !!upscaleIntent && !imageService.isBakedUpscaleActive();
   const [activeTab, setActiveTab] = useState<TabType>('format');
   const [selectedPreset, setSelectedPreset] = useState<string>('');
   const [exportOptions, setExportOptions] = useState<ExportOptions>(exportService.getDefaultOptions());
@@ -178,11 +186,19 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
         const cancelled = !!useAppStore.getState().exportProgress?.cancelRequested;
         const ok = summary.exported.length;
         const failed = summary.failed.length;
+        const skipped = summary.upscaleSkipped.length;
         const tail = cancelled ? ' (cancelled early)' : '';
-        if (ok > 0 && failed === 0) {
+        // Q7: NO silent loss — if any selected image carried an unapplied upscale intent it was
+        // exported at native resolution; say so explicitly (open + re-apply to export upscaled).
+        const upNote = skipped > 0
+          ? ` ${skipped} image${skipped !== 1 ? 's' : ''} had an unapplied upscale and exported at native resolution.`
+          : '';
+        if (ok > 0 && failed === 0 && skipped === 0) {
           notificationService.success('Export complete', `Exported ${ok} image${ok !== 1 ? 's' : ''}${tail} to ${dir}`);
+        } else if (ok > 0 && failed === 0) {
+          notificationService.warning('Export complete', `Exported ${ok} image${ok !== 1 ? 's' : ''}${tail} to ${dir}.${upNote}`);
         } else if (ok > 0) {
-          notificationService.warning('Export finished with errors', `${ok} exported, ${failed} failed${tail}`);
+          notificationService.warning('Export finished with errors', `${ok} exported, ${failed} failed${tail}.${upNote}`);
         } else {
           notificationService.error('Export failed', failed > 0 ? `All ${failed} image${failed !== 1 ? 's' : ''} failed` : 'No images were exported');
         }
@@ -590,6 +606,20 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
 
   const footer = (
     <div className="flex flex-col" style={{ gap: 12 }}>
+      {/* Q7: unapplied-upscale warning — export proceeds at native res, but NEVER silently. */}
+      {upscaleNotApplied && upscaleIntent && (
+        <div
+          data-testid="export-upscale-warning"
+          style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 10, borderRadius: 10,
+            background: 'rgba(234,179,8,.10)', border: '1px solid rgba(234,179,8,.35)', fontSize: 11.5, color: 'var(--glass-text-label)' }}
+        >
+          <AlertTriangle size={14} style={{ color: '#eab308', flexShrink: 0 }} />
+          <span>
+            Upscale ×{upscaleIntent.scale} ({upscaleIntent.mode === 'ai' ? 'AI' : 'Standard'}) is not applied — exporting now saves at native resolution. Open the photo and re-apply first to export upscaled.
+          </span>
+        </div>
+      )}
+
       {/* Output folder row */}
       <div className="flex items-center gap-2">
         <span style={{ fontSize: 11.5, color: 'var(--glass-text-muted)' }}>Output:</span>
