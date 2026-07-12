@@ -4,6 +4,20 @@ All notable changes to **Photo Editor Pro** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.21.0] - 2026-07-12
+
+### Added
+- **Edits made after an upscale or deblur now survive restarts.** Previously, adjustments made after baking an enhance result silently never saved (quitting lost them) — a deliberate v1 trade-off that protected your pre-bake edits. Now they persist alongside the bake intent: reopening the photo restores your pre-bake edits and the one-click Re-apply replays the bake *and* the edits you made on top, restoring exactly what you saw. Editing without re-applying starts a fresh timeline (the stale post-bake edits are discarded — the two histories never merge silently). AI deblur gains the same cross-session re-apply notice upscale already had. A second bake stacked on top of a first stays session-only (disclosed in the tooltip) — the disk record of your first bake and its edits is inviolate. Affects: `src/services/EditPersistenceService.ts`, `src/services/EnhanceService.ts`, `src/components/Modules/EnhanceModuleComponent.tsx`.
+
+### Fixed
+- **Crop, Exposure, Tone Curve, Color Balance, and Lens Corrections edits no longer vanish on reopen.** Cause: the per-image restore path could only apply params to modules exposing one specific setter name — five core modules were saved to disk but silently skipped on restore, so reopening rendered without those edits and the next save durably erased them (the same progressive-destruction class fixed for Local Adjustments in v1.18.0). Fix: the restore tries each module's real setter, and the three adapters that had no setter at all gained one; every module now has a round-trip regression test. This also repaired History undo/redo, batch export, and the enhance re-apply flow on cropped images. Affects: `src/services/EditPersistenceService.ts`, `src/modules/*PipelineModule.ts`.
+- **Presets now capture Tone Curve, Color Balance, Shadows/Highlights, and Lens Corrections.** Cause: a type mismatch made preset capture silently throw and drop every module exposing its enabled state as a plain field — four modules never made it into any saved preset. Fix: the capture reads the field correctly; presets also capture the new Highlight Recovery strength. Old presets apply exactly as before (absent blocks leave your settings untouched); a follow-up review fix also made Lens Corrections presets genuinely apply (the first attempt threw into a swallowed error). Affects: `src/services/PresetService.ts`.
+- **A fresh-clone build can no longer ship without the AI models.** The build now fails loudly listing any missing model file (with an explicit `ALLOW_MISSING_MODELS=1` escape hatch for deliberate CPU-only builds); previously both AI features would silently vanish from the installer. Affects: `scripts/preflight-models.cjs` (new), `resources/models/models.manifest.json` (new).
+- AI motion deblur declines images over 160 MP with a clear notice instead of risking an out-of-memory failure; the multi-export "upscale not applied" notice names the affected photos; RAW metadata reads only the file header instead of the whole 25 MB file; sub-second shutter speeds between 0.5 s and 1 s display as decimals instead of "1/1 s".
+
+### Changed
+- The tiled-pipeline edge-mask normalization question (approximate under exposure shifts) was investigated to a written conclusion: the current bound is uniform, clamped, and within ~1.55× of exact at a worst-case +2 EV — the refinement would swap it for an equally approximate estimate at twice the cost. Documented in the code as deliberately closed.
+
 ## [1.20.0] - 2026-07-11
 
 ### Added

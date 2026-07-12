@@ -1,8 +1,8 @@
 # Photo Editor Pro
 
-![Version](https://img.shields.io/badge/Version-1.20.0-blue)
+![Version](https://img.shields.io/badge/Version-1.21.0-blue)
 ![TypeScript](https://img.shields.io/badge/TypeScript-0_errors-blue)
-![Tests](https://img.shields.io/badge/Tests-1717_passing-brightgreen)
+![Tests](https://img.shields.io/badge/Tests-1798_passing-brightgreen)
 ![Lint](https://img.shields.io/badge/Lint-clean-brightgreen)
 ![GPU](https://img.shields.io/badge/GPU-WebGL2_accelerated-success)
 
@@ -93,7 +93,7 @@ electron-builder's full staging output (unpacked app, block maps) stays in `rele
 - **Star ratings + filtering** — press 1–5 to rate the open image (0 clears); rating written to the file as `xmp:Rating`; a shared rating filter (footer + Gallery) hides lower-rated photos everywhere at once.
 - **Filmstrip dock** — a floating, scrollable thumbnail dock aligned under the photo; multi-select with Ctrl/Shift+click; mouse-wheel horizontal scroll; prev/next chevrons and a Gallery shortcut.
 - **Glass workspace UI** — full-bleed canvas with floating glass chrome: toolbar pill with responsive overflow menu, icon rail, histogram + module cards, filename chip, and entrance animations that honor reduced-motion preferences.
-- **Presets** — save and apply named adjustment snapshots across images, including Local Adjustments mask layers.
+- **Presets** — save and apply named adjustment snapshots across images, including Local Adjustments mask layers, tone curves, color balance, and highlight recovery.
 - **Watermarking** — add text or image watermarks baked into exports.
 - **Web-gallery generation** — export a self-contained browsable HTML gallery from selected photos.
 - **Print soft-proofing** — simulate paper-and-ink colour output before printing.
