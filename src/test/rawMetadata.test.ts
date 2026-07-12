@@ -13,17 +13,19 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 // Imported via require so ts-jest treats the .cjs as CommonJS.
-const { parseRawExif } = require('../../electron/rawMetadata.cjs') as {
-  parseRawExif: (buf: Buffer) => {
-    make?: string;
-    model?: string;
-    iso?: number;
-    exposureTime?: number;
-    aperture?: number;
-    focalLength?: number;
-    dateTime?: string;
-    lens?: string;
-  };
+type RawExif = {
+  make?: string;
+  model?: string;
+  iso?: number;
+  exposureTime?: number;
+  aperture?: number;
+  focalLength?: number;
+  dateTime?: string;
+  lens?: string;
+};
+const { parseRawExif, readRawMetadataFile } = require('../../electron/rawMetadata.cjs') as {
+  parseRawExif: (buf: Buffer) => RawExif;
+  readRawMetadataFile: (filePath: string, prefixBytes?: number) => Promise<RawExif>;
 };
 
 const ORF_FIXTURE = path.resolve(__dirname, '../../test/P2060833.ORF');
@@ -117,3 +119,49 @@ function buildTinyTiff(littleEndian: boolean): Buffer {
 
   return Buffer.concat([header, ifd, makeVal, modelVal]);
 }
+
+/**
+ * readRawMetadataFile (Q6 LOW): the read-raw-metadata IPC used to read the WHOLE RAW file
+ * (~20-25MB) just to parse a header-local TIFF/EXIF IFD. It now reads a bounded prefix first
+ * and falls back to the whole file only if the prefix yields nothing.
+ */
+describe('readRawMetadataFile — bounded prefix read', () => {
+  test('the default 1MB prefix alone (no fallback needed) covers the real ORF header', () => {
+    // Proves the PREFIX itself — not the fallback — is what satisfies the common case: parsing
+    // just the first 1MB (no fallback whole-file read) already yields every field.
+    const full = fs.readFileSync(ORF_FIXTURE);
+    const prefixOnly = parseRawExif(full.subarray(0, 1024 * 1024));
+    expect(prefixOnly.make).toBe('OLYMPUS CORPORATION');
+    expect(prefixOnly.model).toBe('PEN-F');
+    expect(prefixOnly.lens).toBe('OLYMPUS M.17mm F1.8');
+  });
+
+  test('reads the real ORF fixture end to end and extracts full camera EXIF', async () => {
+    const md = await readRawMetadataFile(ORF_FIXTURE);
+    expect(md.make).toBe('OLYMPUS CORPORATION');
+    expect(md.model).toBe('PEN-F');
+    expect(md.iso).toBe(1600);
+    expect(md.exposureTime).toBeCloseTo(0.002, 5);
+    expect(md.aperture).toBeCloseTo(1.8, 5);
+    expect(md.focalLength).toBe(17);
+    expect(md.dateTime).toBe('2025:02:06 20:27:48');
+    expect(md.lens).toBe('OLYMPUS M.17mm F1.8');
+  });
+
+  test('a too-small prefix alone finds nothing, but the whole-file fallback recovers it', async () => {
+    // A 16-byte prefix cannot possibly reach IFD0's entries (bounds-checked -> {}) — this
+    // isolates the synthetic fallback path: readRawMetadataFile must retry against the whole
+    // file rather than returning the prefix's empty result.
+    const full = fs.readFileSync(ORF_FIXTURE);
+    expect(parseRawExif(full.subarray(0, 16))).toEqual({});
+
+    const md = await readRawMetadataFile(ORF_FIXTURE, 16);
+    expect(md.make).toBe('OLYMPUS CORPORATION');
+    expect(md.model).toBe('PEN-F');
+    expect(md.lens).toBe('OLYMPUS M.17mm F1.8');
+  });
+
+  test('returns {} (no throw) for a non-existent file', async () => {
+    await expect(readRawMetadataFile(path.resolve(__dirname, 'does-not-exist.orf'))).rejects.toThrow();
+  });
+});

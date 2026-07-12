@@ -18,8 +18,16 @@
 // round-trip — so it is available identically on a fresh decode, an L1 hit, or
 // an L2 disk hit, with nothing new persisted.
 
+const fs = require('fs');
+
 // TIFF field-type -> element byte size (types 1-12; 0/unknown default to 1).
 const TYPE_SIZE = { 1: 1, 2: 1, 3: 2, 4: 4, 5: 8, 6: 1, 7: 1, 8: 2, 9: 4, 10: 8, 11: 4, 12: 8 };
+
+// Bounded-read size for readRawMetadataFile (Q6 LOW): every field parseRawExif looks for lives in
+// IFD0 + the EXIF sub-IFD, which real-world RAW containers place near the start of the file —
+// 1 MB comfortably covers those on every format this app supports (verified against the real
+// Olympus ORF fixture in src/test/rawMetadata.test.ts) without reading the ~20-25MB pixel payload.
+const PREFIX_BYTES = 1024 * 1024;
 
 // EXIF/TIFF tag ids we care about.
 const TAG = {
@@ -144,4 +152,34 @@ function parseRawExif(buf) {
   return result;
 }
 
-module.exports = { parseRawExif };
+/**
+ * Read camera EXIF from a RAW file WITHOUT loading the whole (~20-25MB) file into memory (Q6 LOW).
+ * Reads a bounded `prefixBytes`-byte prefix first — parseRawExif is fully bounds-checked (every
+ * offset/length is validated against the buffer it's given, see readValue/readIFD above), so a
+ * value whose offset lands beyond the prefix is simply dropped, never a crash.
+ *
+ * If the bounded read finds NOTHING (an unusual IFD layout placing every tag beyond the prefix),
+ * retry once against the whole file rather than silently returning no metadata — the common case
+ * (prefix suffices) never pays for the fallback.
+ *
+ * @param {string} filePath
+ * @param {number} [prefixBytes] override for tests; defaults to PREFIX_BYTES (1 MB)
+ */
+async function readRawMetadataFile(filePath, prefixBytes = PREFIX_BYTES) {
+  let handle;
+  try {
+    handle = await fs.promises.open(filePath, 'r');
+    const stat = await handle.stat();
+    const len = Math.min(prefixBytes, stat.size);
+    const buf = Buffer.alloc(len);
+    if (len > 0) await handle.read(buf, 0, len, 0);
+    const prefixResult = parseRawExif(buf);
+    if (Object.keys(prefixResult).length > 0) return prefixResult;
+  } finally {
+    if (handle) await handle.close();
+  }
+  const whole = await fs.promises.readFile(filePath);
+  return parseRawExif(whole);
+}
+
+module.exports = { parseRawExif, readRawMetadataFile };

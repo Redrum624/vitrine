@@ -68,6 +68,34 @@ export function getUpscaleFeasibility(width: number, height: number, scale: numb
   };
 }
 
+export interface DeblurFeasibility {
+  feasible: boolean;
+  inputPixels: number;
+  maxPixels: number;
+}
+
+/**
+ * Pure feasibility check for AI motion deblur (round-8 review LOW: applyMotionDeblur had no
+ * feasibility guard at all). Deblur is DIMENSION-PRESERVING (output == input size), so the cap
+ * applies directly to INPUT pixels rather than to a scaled output.
+ *
+ * aiDeblur.cjs's own per-pixel peak allocation (electron/aiDeblur.cjs::deblur): the Float32 RGB
+ * accumulation buffer `accum` (12 B/px) + the Float32 weight buffer `wsum` (4 B/px) + the Uint8
+ * RGBA output `data` (4 B/px) + the Uint8 RGBA input already passed in (4 B/px) = 24 bytes/pixel
+ * (the 768×768 tile buffers are FIXED-size — they don't scale with image size). At the shared
+ * MAX_OUTPUT_PIXELS cap (160 MP) that is ~3.8 GB peak, comfortably inside upscale's own ~9 GB
+ * budget at the same cap (56 B/px) — so reusing MAX_OUTPUT_PIXELS here stays conservative rather
+ * than inventing a second, harder-to-justify constant.
+ */
+export function getDeblurFeasibility(width: number, height: number): DeblurFeasibility {
+  const inputPixels = width * height;
+  return {
+    feasible: inputPixels <= MAX_OUTPUT_PIXELS,
+    inputPixels,
+    maxPixels: MAX_OUTPUT_PIXELS,
+  };
+}
+
 interface RestorePoint {
   data: Float32Array;
   width: number;
@@ -346,6 +374,18 @@ class EnhanceService {
       );
     }
 
+    // Feasibility cap (round-8 review LOW): decline a pathologically large image up front — no IPC
+    // call, clear notice — rather than OOM-ing mid-run. See getDeblurFeasibility's doc for the
+    // memory math (24 bytes/input-pixel in aiDeblur.cjs's own buffers).
+    const feasibility = getDeblurFeasibility(procW, procH);
+    if (!feasibility.feasible) {
+      const inMP = (feasibility.inputPixels / 1e6).toFixed(0);
+      const maxMP = (feasibility.maxPixels / 1e6).toFixed(0);
+      throw new Error(
+        `AI motion deblur on a ${procW}×${procH} image (${inMP} MP) is above the ${maxMP} MP memory limit.`,
+      );
+    }
+
     // AI-only: no deterministic fallback exists for motion blur, so an unavailable backend is a hard
     // stop (the panel already hides the control on CPU-only; this is defense in depth).
     if (!(await aiDeblurClient.isAvailable())) {
@@ -381,7 +421,7 @@ class EnhanceService {
       // setOriginalImage BEFORE updateCurrentImageData — see applyUpscale's comment.
       imageService.setOriginalImage(base, ai.width, ai.height);
       imageService.updateCurrentImageData(new Float32Array(base), ai.width, ai.height);
-      imageService.setBakedDeblur?.();
+      imageService.setBakedDeblur();
       // Durable DEBLUR INTENT (Z1, mirror of the upscale Q7 flow): record it in the store (drives the
       // reopen re-apply notice + export warn + serialize round-trip) AND write it to disk now. flush()
       // redirects while a bake is active, so this explicit write — of the PRE-deblur `editState` plus
@@ -424,7 +464,7 @@ class EnhanceService {
       // disk) so a future reopen no longer offers a stale re-apply. persistNow writes the marker-free
       // native state and clears the post-bake redirect (editsOnBakedBase) machinery.
       imageService.clearBakedUpscale();
-      imageService.clearBakedDeblur?.();
+      imageService.clearBakedDeblur();
       const store = useAppStore.getState();
       store.setUpscaleIntent(null);
       store.setDeblurIntent(false);
@@ -433,17 +473,22 @@ class EnhanceService {
     } else {
       // Re-assert the base marker for the now-current (remaining) top level. Each RestorePoint stores
       // the pre-bake dims/kind for the bake it captured, so the remaining top describes the active
-      // baked level after this pop. Clear the sibling marker first so a mixed stack can't leave both set.
+      // baked level after this pop. Clear the sibling marker first so the IN-SESSION imageService
+      // markers (this session's live working-image state) can't leave both set. This governs the
+      // in-memory markers + store intents only — the ON-DISK state can legitimately still offer an
+      // unconsumed marker for the OTHER kind after this pop (by design: stacked levels never persist,
+      // so disk keeps whatever the FIRST bake wrote; see resumeRedirectAfterStackedUnwind's
+      // DISK-MARKER NOTE in EditPersistenceService for the documented split).
       const top = this.restoreStack[this.restoreStack.length - 1];
       const store = useAppStore.getState();
       store.setBakeOrder(this.restoreStack.map((rp) => rp.kind));
       if (top.kind === 'deblur') {
         imageService.clearBakedUpscale();
-        imageService.setBakedDeblur?.();
+        imageService.setBakedDeblur();
         store.setUpscaleIntent(null);
         store.setDeblurIntent(true);
       } else {
-        imageService.clearBakedDeblur?.();
+        imageService.clearBakedDeblur();
         imageService.setBakedUpscale({ scale: top.scale!, nativeWidth: top.width, nativeHeight: top.height });
         // The remaining baked upscale level is still active — keep the store intent in sync with it.
         store.setUpscaleIntent({ scale: top.scale!, mode: top.mode! });

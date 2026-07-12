@@ -50,6 +50,15 @@ export function hrSmoothstep(edge0: number, edge1: number, x: number): number {
  * Reconstruct blown highlights IN PLACE. Pure & pointwise — the single source of truth that
  * both the CPU pipeline module and the GPU self-test compare against.
  *
+ * KNOWN LIMITATION (documented, not fixed — round-8 review LOW): the `gate` below distinguishes a
+ * blown NEUTRAL highlight (all 3 channels bright, 1 clipped) from a genuinely saturated PRIMARY
+ * (only 1 channel bright) via a "2nd bright channel" requirement — but it cannot distinguish that
+ * neutral case from a genuinely saturated highlight with exactly TWO bright channels (e.g. a
+ * strong yellow/cyan/magenta). A two-primary highlight also passes the 2nd-bright-channel gate
+ * and gets pulled toward the survivor-weighted guide at high strength, trimming some of its real
+ * saturation. Accepted as-is: two-bright-channel blown highlights are rare relative to the
+ * neutral-white-blowout case this module targets, and the effect is bounded by `strength`.
+ *
  * @param data     packed float pixels in [0,1], stride = `channels`
  * @param width    px
  * @param height   px

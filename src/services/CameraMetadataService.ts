@@ -209,14 +209,20 @@ export class CameraMetadataService {
   }
 
   /**
-   * Format an exposure time (in seconds) into a display string: sub-second
-   * exposures as "1/500 s", one second and longer as "2 s" (trimmed). Returns
-   * undefined for a missing/invalid value.
+   * Format an exposure time (in seconds) into a display string: exposures at or above 0.5s as
+   * decimal ("0.8 s", "2 s"), faster exposures as a fraction ("1/500 s"). Returns undefined for a
+   * missing/invalid value.
+   *
+   * Round-9 Q6 LOW fix: the decimal branch used to gate at `seconds >= 1`, so the 0.5-1.0s band
+   * fell into the fraction branch and rounded to a MISLEADING "1/1 s" (e.g. 0.77s -> 1/round(1.3)
+   * -> "1/1 s", which reads as a 1-second exposure's reciprocal, not "just under a second"). The
+   * fraction branch's own denominator rounding is only sensible once 1/seconds is comfortably >
+   * 1, i.e. below the 0.5s half-stop.
    */
   private formatShutter(seconds: number | undefined): string | undefined {
     if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds <= 0) return undefined;
-    if (seconds >= 1) {
-      // Trim trailing ".0" from whole seconds while keeping e.g. "1.3 s".
+    if (seconds >= 0.5) {
+      // Trim trailing ".0" from whole seconds while keeping e.g. "1.3 s" / "0.8 s".
       const rounded = Math.round(seconds * 10) / 10;
       return `${Number.isInteger(rounded) ? rounded : rounded.toFixed(1)} s`;
     }

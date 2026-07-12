@@ -191,6 +191,32 @@ describe('CameraMetadataService.getCameraInfo — RAW routing', () => {
     expect(info!.shutter).toBe('2 s');
   });
 
+  // Round-9 Q6 LOW: the 0.5-1.0s band used to fall through to the fraction branch and render
+  // as a misleading "1/1 s" instead of a decimal.
+  test('formats a 0.5-1.0s exposure (0.77s) as a decimal "0.8 s", not "1/1 s"', async () => {
+    setApi({ readRawMetadata: jest.fn().mockResolvedValue({ make: 'FUJIFILM', exposureTime: 0.77 }) });
+    const info = await service.getCameraInfo(makeImage('C:/pics/dusk.raf'));
+    expect(info!.shutter).toBe('0.8 s');
+  });
+
+  test('formats exactly 0.5s as the decimal "0.5 s" (band boundary)', async () => {
+    setApi({ readRawMetadata: jest.fn().mockResolvedValue({ make: 'FUJIFILM', exposureTime: 0.5 }) });
+    const info = await service.getCameraInfo(makeImage('C:/pics/boundary.raf'));
+    expect(info!.shutter).toBe('0.5 s');
+  });
+
+  test('a fast fraction shutter (1/500s) is unchanged by the decimal-band fix', async () => {
+    setApi({ readRawMetadata: jest.fn().mockResolvedValue({ make: 'FUJIFILM', exposureTime: 1 / 500 }) });
+    const info = await service.getCameraInfo(makeImage('C:/pics/fast.raf'));
+    expect(info!.shutter).toBe('1/500 s');
+  });
+
+  test('just below the band (0.49s) still renders as a fraction', async () => {
+    setApi({ readRawMetadata: jest.fn().mockResolvedValue({ make: 'FUJIFILM', exposureTime: 0.49 }) });
+    const info = await service.getCameraInfo(makeImage('C:/pics/below-band.raf'));
+    expect(info!.shutter).toBe('1/2 s');
+  });
+
   test('returns null when the readRawMetadata bridge is unavailable', async () => {
     setApi({ readImageMetadata: jest.fn() });
     const info = await service.getCameraInfo(makeImage('C:/pics/x.nef'));

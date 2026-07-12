@@ -91,6 +91,22 @@ describe('EnhanceService.applyMotionDeblur — 384px floor', () => {
   });
 });
 
+describe('EnhanceService.applyMotionDeblur — feasibility cap', () => {
+  it('declines a pathologically large image (>160 MP) with a clear notice and NO IPC call', async () => {
+    // Reported dims exceed the cap; the underlying `data` array is intentionally tiny — the
+    // cap check runs on width×height BEFORE the buffer is ever copied, so a real ~2.5 GB
+    // allocation is neither needed nor safe in a test process. See getDeblurFeasibility's
+    // own boundary-math unit tests (enhanceService.test.ts) for the exact pixel-count edges.
+    curOrig = { data: new Float32Array(4), width: 16000, height: 10001 }; // 160,016,000 px
+    curDims = { width: 16000, height: 10001 };
+    await expect(enhanceService.applyMotionDeblur()).rejects.toThrow(/MP/);
+    expect(mockAiIsAvailable).not.toHaveBeenCalled();
+    expect(mockAiRun).not.toHaveBeenCalled();
+    expect(imageService.updateCurrentImageData).not.toHaveBeenCalled();
+    expect(enhanceService.canRevert()).toBe(false);
+  });
+});
+
 describe('EnhanceService.applyMotionDeblur — guardDeveloping', () => {
   it('no-ops (no IPC, no bake) while the image is developing, showing an info notice', async () => {
     okRun();

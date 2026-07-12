@@ -10,6 +10,7 @@ jest.mock('../services/ImageService', () => ({ imageService: {
   updateCurrentImageData: jest.fn(),
   setOriginalImage: jest.fn((data, width, height) => { curOrig = { data, width, height }; }),
   setBakedUpscale: jest.fn(), clearBakedUpscale: jest.fn(),
+  setBakedDeblur: jest.fn(), clearBakedDeblur: jest.fn(),
 } }));
 jest.mock('../services/ImageProcessingPipeline', () => ({ imageProcessingPipeline: {
   processImage: jest.fn(async (d: Float32Array) => d), resetAllModules: jest.fn(), getModule: jest.fn(() => undefined),

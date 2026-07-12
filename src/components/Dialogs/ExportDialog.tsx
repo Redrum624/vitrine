@@ -18,6 +18,7 @@ import { ExportOptions, ExportPreset, exportService } from '../../services/Expor
 import { estimateExportSizeBytes } from '../../utils/exportSizeEstimate';
 import { imageService } from '../../services/ImageService';
 import { resolveExportSource } from './resolveExportSource';
+import { formatSkippedNames } from './formatSkippedNames';
 import { multiExportService } from '../../services/MultiExportService';
 import { useAppStore } from '../../stores/appStore';
 import { notificationService } from '../../services/NotificationService';
@@ -196,8 +197,10 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
         const tail = cancelled ? ' (cancelled early)' : '';
         // Q7: NO silent loss — if any selected image carried an unapplied upscale intent it was
         // exported at native resolution; say so explicitly (open + re-apply to export upscaled).
+        // Name up to 3 of the skipped images (Q7 LOW: the toast used to show only a count even
+        // though summary.upscaleSkipped already carries the base names) — "and N more" beyond that.
         const upNote = skipped > 0
-          ? ` ${skipped} image${skipped !== 1 ? 's' : ''} had an unapplied enhancement (upscale/deblur) and exported on the pre-bake image.`
+          ? ` ${skipped} image${skipped !== 1 ? 's' : ''} (${formatSkippedNames(summary.upscaleSkipped)}) had an unapplied enhancement (upscale/deblur) and exported on the pre-bake image.`
           : '';
         if (ok > 0 && failed === 0 && skipped === 0) {
           notificationService.success('Export complete', `Exported ${ok} image${ok !== 1 ? 's' : ''}${tail} to ${dir}`);

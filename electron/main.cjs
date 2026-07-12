@@ -875,9 +875,11 @@ ipcMain.handle('read-image-metadata', async (event, filePath) => {
 // or null when nothing usable is found (never throws).
 ipcMain.handle('read-raw-metadata', async (event, filePath) => {
   try {
-    const { parseRawExif } = require('./rawMetadata.cjs');
-    const data = await fs.promises.readFile(filePath);
-    const md = parseRawExif(data);
+    const { readRawMetadataFile } = require('./rawMetadata.cjs');
+    // Bounded prefix read (Q6 LOW) — the header-local TIFF/EXIF parse doesn't need the whole
+    // ~20-25MB RAW file; readRawMetadataFile reads a 1MB prefix and falls back to the whole file
+    // only if that prefix yields nothing. See rawMetadata.cjs for the bounds-checking rationale.
+    const md = await readRawMetadataFile(filePath);
     return Object.keys(md).length ? md : null;
   } catch (error) {
     console.warn('Failed to read RAW metadata:', error.message);

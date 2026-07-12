@@ -3,6 +3,7 @@ jest.mock('../services/ImageService', () => ({ imageService: {
   getOriginalImage: jest.fn(() => curOrig),
   updateCurrentImageData: jest.fn(), setOriginalImage: jest.fn((data, width, height) => { curOrig = { data, width, height }; }),
   setBakedUpscale: jest.fn(), clearBakedUpscale: jest.fn(),
+  setBakedDeblur: jest.fn(), clearBakedDeblur: jest.fn(),
 } }));
 jest.mock('../services/ImageProcessingPipeline', () => ({ imageProcessingPipeline: {
   processImage: jest.fn(async (d: Float32Array) => d), resetAllModules: jest.fn(),
@@ -20,7 +21,7 @@ jest.mock('../services/CheckpointService', () => ({ checkpointService: { record:
 jest.mock('../services/EditPersistenceService', () => ({ editPersistenceService: { serialize: jest.fn(() => ({})), restore: jest.fn(), persistBakedUpscaleIntent: jest.fn(), persistNow: jest.fn(), suspendRedirectForStackedBake: jest.fn(), resumeRedirectAfterStackedUnwind: jest.fn() } }));
 jest.mock('../stores/appStore', () => ({ useAppStore: { getState: () => ({ setIsProcessing: jest.fn(), setUpscaleProgress: jest.fn(), setUpscaleMode: jest.fn(), setUpscaleIntent: jest.fn(), setDeblurIntent: jest.fn(), setBakeOrder: jest.fn(), notifyExternalParamsChange: jest.fn(), triggerReprocessing: jest.fn() }) } }));
 
-import { enhanceService, getUpscaleFeasibility } from '../services/EnhanceService';
+import { enhanceService, getUpscaleFeasibility, getDeblurFeasibility } from '../services/EnhanceService';
 import { imageService } from '../services/ImageService';
 import { imageProcessingPipeline } from '../services/ImageProcessingPipeline';
 import { enhanceWorkerClient } from '../services/EnhanceWorkerClient';
@@ -91,6 +92,29 @@ describe('getUpscaleFeasibility', () => {
     const f = getUpscaleFeasibility(30000, 30000, 2);
     expect(f.feasible).toBe(false);
     expect(f.maxFeasibleScale).toBeNull();
+  });
+});
+
+describe('getDeblurFeasibility', () => {
+  it('a 20 MP image (5200×3904) is well under the 160 MP cap — feasible', () => {
+    const f = getDeblurFeasibility(5200, 3904);
+    expect(f.inputPixels).toBe(20_300_800);
+    expect(f.maxPixels).toBe(160_000_000);
+    expect(f.feasible).toBe(true);
+  });
+
+  it('reports infeasible for a pathological >160 MP image (13000×13000)', () => {
+    const f = getDeblurFeasibility(13000, 13000);
+    expect(f.inputPixels).toBe(169_000_000);
+    expect(f.feasible).toBe(false);
+  });
+
+  it('is exactly at the cap boundary — feasible at ==, infeasible one pixel over', () => {
+    const atCap = getDeblurFeasibility(16000, 10000); // 160,000,000 exactly
+    expect(atCap.inputPixels).toBe(160_000_000);
+    expect(atCap.feasible).toBe(true);
+    const overCap = getDeblurFeasibility(16000, 10001);
+    expect(overCap.feasible).toBe(false);
   });
 });
 
