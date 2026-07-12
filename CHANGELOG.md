@@ -4,6 +4,20 @@ All notable changes to **Photo Editor Pro** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.22.0] - 2026-07-12
+
+### Security
+- **The file-write IPC is hardened against path-based escalation.** A three-pass adversarial review closed every Windows path-canonicalization bypass in the write-path policy: it now denies writes into user autorun sinks (Startup folder, PowerShell profile, `~/.ssh`) on top of system directories, enforces an extension allow-list on the raster/generic write handlers, and — the durable fix — *fails closed*, admitting only ordinary drive-letter and UNC-share roots and rejecting raw device-namespace paths that alias a normal volume under an unfoldable root, along with 8.3/short-name and symlinked parents. The accepted residuals are documented in `docs/pre-ship-audit-v1.21.0.html`. Affects: `electron/writePathPolicy.cjs` (new), `electron/main.cjs`.
+
+### Fixed
+- **A folder-browser listener leak.** Expanding/collapsing folders in the File Explorer registered a new IPC listener each time without removing it, causing redundant reloads over a long session; the listener is now registered once. Affects: `src/components/Layout/FileBrowser.tsx`.
+- **Imported presets are validated at the trust boundary.** A hand-crafted or corrupt `.preset` file with a partial block could throw during apply; malformed blocks are now dropped (with a named notice) and unsalvageable presets skipped, rather than crashing the apply. Affects: `src/services/presetShapeValidation.ts` (new), `src/services/PresetService.ts`.
+- Minor hardening: the unsaved-changes dialog escapes its message; a hung RAW wasm-fallback worker is now terminated on timeout; folder watchers are closed when the window closes; the sub-second shutter and preset validators from v1.21 were tightened.
+
+### Changed
+- **Dependencies pinned for reproducible builds.** The pnpm lockfile is now committed and the native binary dependencies (`sharp`, `onnxruntime-node`) are pinned to exact versions, so a fresh clone builds the same installer; the deprecated `@types/electron` stub was removed. A build now fails loudly if a bundled AI model is missing (from v1.21). Affects: `package.json`, `.gitignore`, `pnpm-lock.yaml`.
+- Full pre-ship audit (dependency hygiene, security, memory) run and recorded — nine dimensions verified correctly bounded; report at `docs/pre-ship-audit-v1.21.0.html`. A planned Electron major upgrade (39 is end-of-life) is tracked for a dedicated release.
+
 ## [1.21.0] - 2026-07-12
 
 ### Added
