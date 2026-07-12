@@ -1,6 +1,6 @@
-# Photo Editor Pro - User Guide
+# Vitrine — User Guide
 
-Welcome to Photo Editor Pro! This guide will help you get started with professional photo editing.
+Welcome to Vitrine — the darkroom, behind glass. This guide will help you get started.
 
 ---
 
@@ -21,7 +21,7 @@ Welcome to Photo Editor Pro! This guide will help you get started with professio
 
 ### First Launch
 
-When you first open Photo Editor Pro:
+When you first open Vitrine:
 
 1. **Welcome Screen** - Shows quick start tips
 2. **Interface** - Main editing workspace with panels
@@ -643,7 +643,7 @@ Access via:
 
 **Version:** 1.0.0
 **Last Updated:** 2025-10-05
-**Application:** Photo Editor Pro
+**Application:** Vitrine
 
 For the latest documentation, check the application's Help menu or visit the project repository.
 
