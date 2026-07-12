@@ -33,7 +33,11 @@ import {
   FRAG_LAYER_BLEND,
 } from './sources';
 import type { PassDescriptor, PassRuntime, SubPassTexture, MaskUpload } from './passDescriptors';
-import { buildPassList, buildLocalAdjustmentsPass } from './passDescriptors';
+import { buildPassList, buildLocalAdjustmentsPass, getGpuUnsafeModuleIds } from './passDescriptors';
+import { ENHANCE_PROGRAM_SOURCES } from './enhance.frag';
+import { enhanceImage, DEFAULT_ENHANCE_PARAMS } from '../utils/enhanceChain';
+import type { EnhanceParams, EnhanceResult } from '../utils/enhanceChain';
+import { computeGlobalEdgeMax } from '../utils/enhanceOps';
 import { basicAdjUniforms, exposureUniforms, shadowsHighlightsUniforms, gainsUniforms, colorBalanceUniforms, vignetteUniforms } from './uniforms';
 import type { ShadowsHighlightsUniformParams } from './uniforms';
 import type { DehazeState } from '../services/WebGLImageProcessor';
@@ -79,6 +83,31 @@ const TONECURVE_LUT_NAMES = ['u_master', 'u_red', 'u_green', 'u_blue'] as const;
 
 /** Maximum number of mask textures kept in maskCache before LRU eviction. */
 const MAX_MASK_TEXTURES = 32;
+
+/**
+ * Cap (output pixels) on the GPU deterministic enhance chain. Above this the CPU worker
+ * path — which tiles >48MP with the apron — handles it: the GPU chain holds several
+ * RGBA32F buffers at output resolution, so an unbounded output would exhaust VRAM.
+ * runEnhanceChain also fails gracefully (returns null → CPU) if any FBO alloc is incomplete.
+ */
+const MAX_GPU_ENHANCE_OUTPUT_PIXELS = 96_000_000;
+/** Max Gaussian radius the enh_gauss shader's constant loop (MAXR) supports. */
+const ENH_GAUSS_MAXR = 16;
+/** Max joint-bilateral chroma-denoise radius the enh_denoise_chroma shader supports. */
+const ENH_DENOISE_MAXR = 5;
+
+/**
+ * Self-test epsilons for the GPU enhance chain vs the CPU enhanceImage reference. Despite
+ * 12 RL iterations (×2 separable Gaussians) and, for upscale, a linear-light Lanczos-4
+ * resample (float32 sin/pow), the measured GPU-vs-CPU divergence is ~8e-7 (dev probe:
+ * sharpen 7.45e-7, upscale 7.75e-7) — pure float32 rounding order, well inside the tightest
+ * established per-pixel class (basicadj/exposure use 1e-4). A structural mismatch would show
+ * ~0.1–1.0, so 1e-4 catches real bugs with ~120× margin over the measured floor while
+ * leaving headroom for GPU/driver variance. A FAIL routes enhance to the CPU worker
+ * transparently. Do NOT loosen to mask a bug (P5 doctrine).
+ */
+const ENH_SHARPEN_EPS = 1e-4;
+const ENH_UPSCALE_EPS = 1e-4;
 
 /** Exact signature of WebGL2RenderingContext.getUniformLocation, for a faithful wrap. */
 export type GetUniformLocationFn = (program: WebGLProgram, name: string) => WebGLUniformLocation | null;
@@ -126,6 +155,13 @@ export class GpuPreviewPipeline {
   private vao: WebGLVertexArrayObject | null = null;
   private quadBuffer: WebGLBuffer | null = null;
   private programs = new Map<string, WebGLProgram>();
+
+  // Dedicated program set for the deterministic enhance chain (runEnhanceChain). Kept
+  // separate from `programs` (the per-pixel preview passes) because the enhance passes are
+  // an apply/bake step at a possibly-different resolution — never part of buildPassList.
+  private enhancePrograms = new Map<string, WebGLProgram>();
+  // GL_MAX_TEXTURE_SIZE, cached at attach(). runEnhanceChain declines (→ CPU) above it.
+  private maxTextureSize = 0;
 
   // Separate program + dynamic vertex buffer for the present pass.
   // We can't share the fullscreen VAO because the present quad covers an arbitrary
@@ -215,6 +251,8 @@ export class GpuPreviewPipeline {
 
       this.gl = gl;
       this.compilePrograms(gl);
+      this.compileEnhancePrograms(gl);
+      this.maxTextureSize = (gl.getParameter(gl.MAX_TEXTURE_SIZE) as number) || 16384;
 
       // Compile the present program (VERT_PRESENT + FRAG_PRESENT).
       this.presentProgram = this.buildProgram(gl, VERT_PRESENT, FRAG_PRESENT);
@@ -295,6 +333,18 @@ export class GpuPreviewPipeline {
         this.programs.set(key, prog);
       } else {
         logger.warn(`[GPU-PIPELINE] program '${key}' failed to compile — passes using it will be skipped`);
+      }
+    }
+  }
+
+  /** Compile one WebGLProgram per enhance programKey (VERT_SRC + enhance frag). */
+  private compileEnhancePrograms(gl: WebGL2RenderingContext): void {
+    for (const [key, frag] of Object.entries(ENHANCE_PROGRAM_SOURCES)) {
+      const prog = this.buildProgram(gl, VERT_SRC, frag);
+      if (prog) {
+        this.enhancePrograms.set(key, prog);
+      } else {
+        logger.warn(`[GPU-PIPELINE] enhance program '${key}' failed to compile — GPU enhance disabled`);
       }
     }
   }
@@ -753,6 +803,7 @@ export class GpuPreviewPipeline {
     const gl = this.gl;
     if (gl) {
       for (const prog of this.programs.values()) gl.deleteProgram(prog);
+      for (const prog of this.enhancePrograms.values()) gl.deleteProgram(prog);
       if (this.presentProgram) gl.deleteProgram(this.presentProgram);
       for (const pp of this.ping) {
         if (pp) {
@@ -774,6 +825,8 @@ export class GpuPreviewPipeline {
       if (this.vao) gl.deleteVertexArray(this.vao);
     }
     this.programs.clear();
+    this.enhancePrograms.clear();
+    this.maxTextureSize = 0;
     this.presentProgram = null;
     this.presentQuadBuffer = null;
     this.presentUniforms = null;
@@ -966,6 +1019,293 @@ export class GpuPreviewPipeline {
       );
     }
     this.presentFrames++;
+  }
+
+  /**
+   * GPU deterministic enhance chain (Task S2) — a whole-frame port of enhanceImage
+   * (src/utils/enhanceChain.ts) run as WebGL2 fragment passes, in the EXACT same order:
+   *
+   *   native res : rgb→YCrCb → joint-bilateral chroma denoise → Richardson-Lucy deconv
+   *                (12 iters × 2 separable Gaussians) → edge-masked luma graft → YCrCb→rgb
+   *   resample   : Lanczos-4 ×scale in linear light (enhanced from `cur`, base from source)
+   *   final res  : CAS luma sharpen + chroma clean → YCrCb→rgb
+   *
+   * Returns { enhanced, base } read back to Float32 RGBA, mirroring enhanceImage's return,
+   * or NULL when the GPU can't/shouldn't run it — the caller then uses the CPU worker:
+   *   - GL unavailable, or the enhance self-test flagged 'enhance'/'enhance-upscale' unsafe;
+   *   - output exceeds the texture-size or {@link MAX_GPU_ENHANCE_OUTPUT_PIXELS} caps
+   *     (the >48MP tiled worker path owns those — this method is whole-frame, no tiles, so
+   *     tiledPipeline / moduleApron are NOT involved);
+   *   - a kernel radius exceeds a shader's constant loop bound, or any FBO alloc fails.
+   *
+   * Runs on the SAME WebGL2 context as the preview but uses ONLY private scratch FBOs — it
+   * never touches srcTexture / the ping-pong pair / resultTexture, so the live preview state
+   * is intact (and the post-apply reprocess re-establishes it regardless).
+   *
+   * Precision: every buffer is RGBA32F (the pipeline's format), so the RL division
+   * y0/max(conv,eps) and the 12-iteration accumulation carry full float32 — matching the CPU
+   * Float32Array reference to within the self-test epsilon (per-tap rounding order only).
+   */
+  runEnhanceChain(rgba: Float32Array, width: number, height: number, params: EnhanceParams): EnhanceResult | null {
+    const gl = this.gl;
+    if (!gl) return null;
+
+    const unsafeIds = getGpuUnsafeModuleIds();
+    if (unsafeIds.has('enhance')) return null;
+    const upscale = params.upscale === true && params.scale > 1;
+    if (upscale && unsafeIds.has('enhance-upscale')) return null;
+
+    // Every enhance program must have compiled, else the chain can't run.
+    for (const key of Object.keys(ENHANCE_PROGRAM_SOURCES)) {
+      if (!this.enhancePrograms.get(key)) return null;
+    }
+
+    const w = width, h = height;
+    if (w <= 0 || h <= 0 || w * h * 4 !== rgba.length) return null;
+    const dw = upscale ? Math.round(w * params.scale) : w;
+    const dh = upscale ? Math.round(h * params.scale) : h;
+
+    const maxDim = this.maxTextureSize || 16384;
+    if (w > maxDim || h > maxDim || dw > maxDim || dh > maxDim) return null;
+    if (dw * dh > MAX_GPU_ENHANCE_OUTPUT_PIXELS) return null;
+
+    // Kernel-radius guards: the shaders have constant loop bounds, so a radius past them
+    // would silently under-sample vs the CPU — decline instead (CPU handles it exactly).
+    const runRL = params.rlIters > 0 && params.psfSigma > 0;
+    const psfRadius = runRL ? Math.max(1, Math.ceil(params.psfSigma * 3)) : 0;
+    const hpRadius = Math.max(1, Math.ceil(params.hpSigma * 3));
+    const chromaRadius = Math.max(1, Math.ceil(1.2 * 3));   // cleanChroma sigma 1.2
+    const edgeBlurRadius = Math.max(1, Math.ceil(2.0 * 3)); // edgeMask blur sigma 2.0
+    if (Math.max(psfRadius, hpRadius, chromaRadius, edgeBlurRadius) > ENH_GAUSS_MAXR) return null;
+    const runDenoise = params.denoiseStrength > 0;
+    const denRadius = runDenoise ? Math.max(1, Math.ceil((0.4 + 0.12 * params.denoiseStrength) * 3)) : 0;
+    if (denRadius > ENH_DENOISE_MAXR) return null;
+
+    interface Res { fb: WebGLFramebuffer | null; tex: WebGLTexture; freed: boolean }
+    const resources: Res[] = [];
+    const allocTex = (ww: number, hh: number, data: Float32Array | null): Res => {
+      const tex = this.makeTexture(gl, ww, hh, data);
+      const r: Res = { fb: null, tex, freed: false };
+      resources.push(r);
+      return r;
+    };
+    const allocFbo = (ww: number, hh: number): Res => {
+      const r = allocTex(ww, hh, null);
+      const fb = gl.createFramebuffer()!;
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, r.tex, 0);
+      if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
+        throw new Error(`enhance framebuffer incomplete at ${ww}x${hh}`);
+      }
+      r.fb = fb;
+      return r;
+    };
+    const freeRes = (r: Res): void => {
+      if (r.freed) return;
+      if (r.fb) gl.deleteFramebuffer(r.fb);
+      gl.deleteTexture(r.tex);
+      r.freed = true;
+    };
+    const loc = (prog: WebGLProgram, n: string) => gl.getUniformLocation(prog, n);
+    const draw = (
+      key: string, dst: Res, dstW: number, dstH: number,
+      inputs: { tex: WebGLTexture; sampler: string }[],
+      setU?: (prog: WebGLProgram) => void,
+    ): void => {
+      const prog = this.enhancePrograms.get(key)!;
+      gl.bindFramebuffer(gl.FRAMEBUFFER, dst.fb);
+      gl.viewport(0, 0, dstW, dstH);
+      gl.useProgram(prog);
+      for (let u = 0; u < inputs.length; u++) {
+        gl.activeTexture(gl.TEXTURE0 + u);
+        gl.bindTexture(gl.TEXTURE_2D, inputs[u].tex);
+        gl.uniform1i(loc(prog, inputs[u].sampler), u);
+      }
+      if (setU) setU(prog);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    };
+    const readbackRes = (r: Res, ww: number, hh: number): Float32Array => {
+      const out = new Float32Array(ww * hh * 4);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, r.fb);
+      gl.readPixels(0, 0, ww, hh, gl.RGBA, gl.FLOAT, out);
+      return out;
+    };
+    const gauss = (dst: Res, ww: number, hh: number, src: WebGLTexture, horizontal: boolean, radius: number, twoSigma2: number): void => {
+      draw('enh_gauss', dst, ww, hh, [{ tex: src, sampler: 'u_image' }], (prog) => {
+        gl.uniform2f(loc(prog, 'u_dir'), horizontal ? 1 / ww : 0, horizontal ? 0 : 1 / hh);
+        gl.uniform1i(loc(prog, 'u_radius'), radius);
+        gl.uniform1f(loc(prog, 'u_twoSigma2'), twoSigma2);
+      });
+    };
+
+    try {
+      gl.bindVertexArray(this.vao);
+      const srcTex = allocTex(w, h, rgba);
+
+      // ── Phase 1: native-res luma/chroma work ──────────────────────────────────
+      let running = allocFbo(w, h);
+      draw('enh_rgb2ycc', running, w, h, [{ tex: srcTex.tex, sampler: 'u_image' }]);
+
+      if (runDenoise) {
+        const sSigma = 0.4 + 0.12 * params.denoiseStrength;
+        const den = allocFbo(w, h);
+        draw('enh_denoise_chroma', den, w, h, [{ tex: running.tex, sampler: 'u_image' }], (prog) => {
+          gl.uniform2f(loc(prog, 'u_texel'), 1 / w, 1 / h);
+          gl.uniform1i(loc(prog, 'u_radius'), denRadius);
+          gl.uniform1f(loc(prog, 'u_s2'), 2 * sSigma * sSigma);
+          gl.uniform1f(loc(prog, 'u_r2'), 2 * 0.10 * 0.10);
+        });
+        freeRes(running);
+        running = den;
+      }
+      // Y here == origY (denoise leaves .r untouched) — the RL y0 and graft origY source.
+      const yccTex = running.tex;
+
+      if (runRL) {
+        const twoPsf2 = 2 * params.psfSigma * params.psfSigma;
+        const estA = allocFbo(w, h), estB = allocFbo(w, h);
+        const b1 = allocFbo(w, h), b2 = allocFbo(w, h);
+        let curEst = yccTex; // iter-0 estimate = original luma (.r)
+        for (let k = 0; k < params.rlIters; k++) {
+          gauss(b1, w, h, curEst, true, psfRadius, twoPsf2);          // conv = H then V
+          gauss(b2, w, h, b1.tex, false, psfRadius, twoPsf2);
+          draw('enh_rl_ratio', b1, w, h, [{ tex: yccTex, sampler: 'u_y0' }, { tex: b2.tex, sampler: 'u_conv' }]);
+          gauss(b2, w, h, b1.tex, true, psfRadius, twoPsf2);          // corr = H then V
+          gauss(b1, w, h, b2.tex, false, psfRadius, twoPsf2);
+          const estNext = (k % 2 === 0) ? estA : estB;
+          draw('enh_rl_update', estNext, w, h, [{ tex: curEst, sampler: 'u_est' }, { tex: b1.tex, sampler: 'u_corr' }]);
+          curEst = estNext.tex;
+        }
+        const finalEst = ((params.rlIters - 1) % 2 === 0) ? estA : estB;
+        freeRes(finalEst === estA ? estB : estA);
+        freeRes(b1); freeRes(b2);
+
+        // edgeMask(origY): Sobel/mmax → pow → blur(sigma 2.0). mmax is the whole-image max
+        // gradient, computed once on the CPU (byte-identical to edgeMask's buffer max).
+        const mmax = computeGlobalEdgeMax(rgba, w, h);
+        const em1 = allocFbo(w, h);
+        draw('enh_sobel', em1, w, h, [{ tex: yccTex, sampler: 'u_image' }], (prog) => {
+          gl.uniform2f(loc(prog, 'u_texel'), 1 / w, 1 / h);
+          gl.uniform1f(loc(prog, 'u_invMmax'), 1 / mmax);
+          gl.uniform1f(loc(prog, 'u_gamma'), 0.75);
+        });
+        const em2 = allocFbo(w, h);
+        gauss(em2, w, h, em1.tex, true, edgeBlurRadius, 2 * 2.0 * 2.0);
+        freeRes(em1);
+        const em3 = allocFbo(w, h);
+        gauss(em3, w, h, em2.tex, false, edgeBlurRadius, 2 * 2.0 * 2.0);
+        freeRes(em2);
+
+        // highpass(restored, hpSigma): lowpass = gauss(restored)
+        const twoHp2 = 2 * params.hpSigma * params.hpSigma;
+        const hp1 = allocFbo(w, h);
+        gauss(hp1, w, h, curEst, true, hpRadius, twoHp2);
+        const hp2 = allocFbo(w, h);
+        gauss(hp2, w, h, hp1.tex, false, hpRadius, twoHp2);
+        freeRes(hp1);
+
+        const grafted = allocFbo(w, h);
+        draw('enh_graft', grafted, w, h, [
+          { tex: yccTex, sampler: 'u_running' },
+          { tex: em3.tex, sampler: 'u_mask' },
+          { tex: curEst, sampler: 'u_detail' },
+          { tex: hp2.tex, sampler: 'u_lowpass' },
+        ], (prog) => {
+          gl.uniform1f(loc(prog, 'u_alpha'), params.alpha);
+        });
+        freeRes(em3); freeRes(hp2); freeRes(finalEst);
+        freeRes(running); // old YCC replaced by grafted
+        running = grafted;
+      }
+
+      const cur = allocFbo(w, h);
+      draw('enh_ycc2rgb', cur, w, h, [
+        { tex: running.tex, sampler: 'u_luma' },
+        { tex: running.tex, sampler: 'u_chroma' },
+      ]);
+      freeRes(running);
+
+      // ── Phase 2: Lanczos-4 resample in linear light ───────────────────────────
+      const lanczos = (srcRes: Res, sw: number, sh: number, tw: number, th: number): Res => {
+        const lin = allocFbo(sw, sh);
+        draw('enh_srgb2lin', lin, sw, sh, [{ tex: srcRes.tex, sampler: 'u_image' }]);
+        const hres = allocFbo(tw, sh);
+        draw('enh_lanczos', hres, tw, sh, [{ tex: lin.tex, sampler: 'u_image' }], (prog) => {
+          gl.uniform1i(loc(prog, 'u_srcSize'), sw);
+          gl.uniform1i(loc(prog, 'u_dstSize'), tw);
+          gl.uniform1i(loc(prog, 'u_axis'), 0);
+          gl.uniform1f(loc(prog, 'u_a'), 4.0);
+        });
+        freeRes(lin);
+        const vres = allocFbo(tw, th);
+        draw('enh_lanczos', vres, tw, th, [{ tex: hres.tex, sampler: 'u_image' }], (prog) => {
+          gl.uniform1i(loc(prog, 'u_srcSize'), sh);
+          gl.uniform1i(loc(prog, 'u_dstSize'), th);
+          gl.uniform1i(loc(prog, 'u_axis'), 1);
+          gl.uniform1f(loc(prog, 'u_a'), 4.0);
+        });
+        freeRes(hres);
+        const out = allocFbo(tw, th);
+        draw('enh_lin2srgb', out, tw, th, [{ tex: vres.tex, sampler: 'u_image' }]);
+        freeRes(vres);
+        return out;
+      };
+
+      let curFinal: Res;
+      let base: Float32Array;
+      if (upscale) {
+        curFinal = lanczos(cur, w, h, dw, dh);
+        freeRes(cur);
+        const baseRes = lanczos(srcTex, w, h, dw, dh);
+        base = readbackRes(baseRes, dw, dh);
+        freeRes(baseRes);
+      } else {
+        curFinal = cur;
+        base = readbackRes(cur, w, h); // base = cur.slice()
+      }
+      freeRes(srcTex);
+
+      // ── Phase 3: finish at final res (CAS luma + chroma clean) ─────────────────
+      const F = allocFbo(dw, dh);
+      draw('enh_rgb2ycc', F, dw, dh, [{ tex: curFinal.tex, sampler: 'u_image' }]);
+      freeRes(curFinal);
+
+      const peak = -(0.125 + 0.075 * Math.max(0, Math.min(1, params.sharpness)));
+      const Fcas = allocFbo(dw, dh);
+      draw('enh_cas', Fcas, dw, dh, [{ tex: F.tex, sampler: 'u_image' }], (prog) => {
+        gl.uniform2f(loc(prog, 'u_texel'), 1 / dw, 1 / dh);
+        gl.uniform1f(loc(prog, 'u_peak'), peak);
+      });
+
+      // chroma clean blurs Cr/Cb only; the finish takes Y from Fcas, chroma from here.
+      let chromaTex = F.tex;
+      if (params.chromaClean) {
+        const twoChroma2 = 2 * 1.2 * 1.2;
+        const c1 = allocFbo(dw, dh);
+        gauss(c1, dw, dh, F.tex, true, chromaRadius, twoChroma2);
+        const c2 = allocFbo(dw, dh);
+        gauss(c2, dw, dh, c1.tex, false, chromaRadius, twoChroma2);
+        freeRes(c1);
+        chromaTex = c2.tex;
+      }
+
+      const enhFbo = allocFbo(dw, dh);
+      draw('enh_ycc2rgb', enhFbo, dw, dh, [
+        { tex: Fcas.tex, sampler: 'u_luma' },
+        { tex: chromaTex, sampler: 'u_chroma' },
+      ]);
+      const enhanced = readbackRes(enhFbo, dw, dh);
+
+      return { enhanced, base, width: dw, height: dh };
+    } catch (e) {
+      logger.warn('[GPU-PIPELINE] runEnhanceChain failed — CPU fallback:', e instanceof Error ? e.message : String(e));
+      return null;
+    } finally {
+      for (const r of resources) freeRes(r);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.bindVertexArray(null);
+      gl.activeTexture(gl.TEXTURE0);
+    }
   }
 
   /**
@@ -1314,8 +1654,66 @@ export class GpuPreviewPipeline {
       const vigOk = vigMaxDiff < 1e-3;
       logger.info(`[GPU-PIPELINE] vignette self-test maxDiff=${vigMaxDiff.toExponential(2)} ${vigOk ? 'PASS' : 'FAIL'}`);
 
-      const ok = basicAdjOk && exposureOk && shOk && laOk && wbOk && tcOk && cbOk && vigOk;
-      const maxDiff = Math.max(basicAdjMaxDiff, exposureMaxDiff, shMaxDiff, laMaxDiff, wbMaxDiff, tcMaxDiff, cbMaxDiff, vigMaxDiff);
+      // ── 10 + 11. enhance-chain sub-tests (GPU runEnhanceChain vs CPU enhanceImage) ──
+      // A 40x32 fixture with a hard vertical edge + gradients + a small checker so RL
+      // deconvolution, the Sobel edge mask, CAS sharpen and (for upscale) Lanczos are all
+      // exercised. Both `enhanced` and `base` are compared. A FAIL marks 'enhance' (and/or
+      // 'enhance-upscale') unsafe → EnhanceService uses the CPU worker for that route.
+      const enhW = 40, enhH = 32;
+      const enhData = new Float32Array(enhW * enhH * 4);
+      const cl01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v);
+      for (let yy = 0; yy < enhH; yy++) {
+        for (let xx = 0; xx < enhW; xx++) {
+          const i = (yy * enhW + xx) * 4;
+          const edge = xx < enhW / 2 ? 0.2 : 0.8;      // hard luminance edge (RL/CAS/Sobel)
+          const grad = yy / enhH;                       // smooth vertical ramp
+          const checker = (((xx >> 2) + (yy >> 2)) & 1) ? 0.08 : -0.08; // high-freq detail
+          enhData[i]     = cl01(edge * 0.6 + grad * 0.4 + checker);
+          enhData[i + 1] = cl01(grad * 0.7 + (1 - edge) * 0.3);
+          enhData[i + 2] = cl01(edge * 0.5 + (1 - grad) * 0.5 - checker);
+          enhData[i + 3] = 1;
+        }
+      }
+      const enhBaseParams: EnhanceParams = {
+        ...DEFAULT_ENHANCE_PARAMS,
+        enabled: true, sharpen: true, upscale: false, scale: 2,
+        denoiseStrength: 3, psfSigma: 1.0, rlIters: 12,
+        alpha: 0.8, hpSigma: 1.2, sharpness: 0.4, chromaClean: true,
+      };
+      const enhDiff = (gpu: EnhanceResult, ref: EnhanceResult): number => {
+        let m = 0;
+        for (let i = 0; i < ref.enhanced.length; i++) m = Math.max(m, Math.abs(gpu.enhanced[i] - ref.enhanced[i]));
+        for (let i = 0; i < ref.base.length; i++) m = Math.max(m, Math.abs(gpu.base[i] - ref.base[i]));
+        return m;
+      };
+
+      // 10. sharpen-only (native resolution)
+      let enhSharpenMaxDiff = Infinity, enhSharpenOk = false;
+      const gpuEnhS = this.runEnhanceChain(enhData, enhW, enhH, enhBaseParams);
+      if (gpuEnhS) {
+        const refS = enhanceImage(new Float32Array(enhData), enhW, enhH, enhBaseParams);
+        enhSharpenMaxDiff = enhDiff(gpuEnhS, refS);
+        enhSharpenOk = enhSharpenMaxDiff < ENH_SHARPEN_EPS;
+      } else {
+        logger.warn('[GPU-PIPELINE] enhance-sharpen self-test: runEnhanceChain returned null (gated)');
+      }
+      logger.info(`[GPU-PIPELINE] enhance-sharpen self-test maxDiff=${enhSharpenMaxDiff.toExponential(2)} ${enhSharpenOk ? 'PASS' : 'FAIL'}`);
+
+      // 11. upscale x2 (Lanczos resample + finish)
+      const enhUpParams: EnhanceParams = { ...enhBaseParams, upscale: true, scale: 2 };
+      let enhUpMaxDiff = Infinity, enhUpOk = false;
+      const gpuEnhU = this.runEnhanceChain(enhData, enhW, enhH, enhUpParams);
+      if (gpuEnhU) {
+        const refU = enhanceImage(new Float32Array(enhData), enhW, enhH, enhUpParams);
+        enhUpMaxDiff = enhDiff(gpuEnhU, refU);
+        enhUpOk = enhUpMaxDiff < ENH_UPSCALE_EPS;
+      } else {
+        logger.warn('[GPU-PIPELINE] enhance-upscale self-test: runEnhanceChain returned null (gated)');
+      }
+      logger.info(`[GPU-PIPELINE] enhance-upscale self-test maxDiff=${enhUpMaxDiff.toExponential(2)} ${enhUpOk ? 'PASS' : 'FAIL'}`);
+
+      const ok = basicAdjOk && exposureOk && shOk && laOk && wbOk && tcOk && cbOk && vigOk && enhSharpenOk && enhUpOk;
+      const maxDiff = Math.max(basicAdjMaxDiff, exposureMaxDiff, shMaxDiff, laMaxDiff, wbMaxDiff, tcMaxDiff, cbMaxDiff, vigMaxDiff, enhSharpenMaxDiff, enhUpMaxDiff);
 
       // Map each failed sub-test to the MODULE ID buildPassList uses, so a broken GPU shader
       // is routed to the CPU bridge (proven path) instead of corrupting the image (e.g. the
@@ -1330,6 +1728,12 @@ export class GpuPreviewPipeline {
       if (!tcOk) unsafe.push('tonecurve');
       if (!cbOk) unsafe.push('colorbalance');
       if (!vigOk) unsafe.push('lenscorrections');
+      // Enhance is NOT a buildPassList module (it's an apply/bake step); these ids gate
+      // GpuPreviewPipeline.runEnhanceChain via getGpuUnsafeModuleIds(), consumed by
+      // EnhanceService. 'enhance' fails → whole GPU chain to CPU; 'enhance-upscale' fails →
+      // only the Lanczos-upscale route to CPU (sharpen-only can still run on GPU).
+      if (!enhSharpenOk) unsafe.push('enhance');
+      if (!enhUpOk) unsafe.push('enhance-upscale');
 
       return { ok, maxDiff, unsafe };
     } catch (e) {
@@ -1339,7 +1743,7 @@ export class GpuPreviewPipeline {
       return {
         ok: false,
         maxDiff: Infinity,
-        unsafe: ['basicadj', 'exposure', 'shadowshighlights', 'localadjustments', 'temperature', 'tonecurve', 'colorbalance', 'lenscorrections'],
+        unsafe: ['basicadj', 'exposure', 'shadowshighlights', 'localadjustments', 'temperature', 'tonecurve', 'colorbalance', 'lenscorrections', 'enhance', 'enhance-upscale'],
       };
     }
   }

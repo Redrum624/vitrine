@@ -7,6 +7,7 @@ import { editPersistenceService } from './EditPersistenceService';
 import { notificationService } from './NotificationService';
 import { useAppStore } from '../stores/appStore';
 import { EnhanceParams, enhanceAiUpscaled } from '../utils/enhanceChain';
+import { gpuPreviewPipeline } from '../shaders/GpuPreviewPipeline';
 import { guardDeveloping } from '../utils/developingGuard';
 
 /** Float32 RGBA 0..1 (pipeline domain) → Uint8 RGBA 0..255 (AI IPC domain). */
@@ -227,16 +228,28 @@ class EnhanceService {
       }
       if (!usedAi) {
         store.setUpscaleProgress(null);
-        const r = await enhanceWorkerClient.run(
-          new Float32Array(edited),
-          procW,
-          procH,
-          { ...params, sharpen: true, upscale: true },
-        );
-        enhanced = r.enhanced;
-        base = r.base;
-        outWidth = r.width;
-        outHeight = r.height;
+        const enhParams = { ...params, sharpen: true, upscale: true };
+        // Deterministic route: try the GPU enhance chain (same WebGL2 pipeline as the
+        // preview, main thread) — big win on the RL deconvolution (12 iters × 2 blurs).
+        // runEnhanceChain returns null when GL is unavailable, the self-test gated it, or
+        // the output exceeds the GPU texture/memory caps → we fall back to the CPU worker
+        // (which also tiles >48MP). No behavior change when gated; the result is byte-parity
+        // within the enhance self-test epsilon.
+        const gpu = gpuPreviewPipeline.isAvailable()
+          ? gpuPreviewPipeline.runEnhanceChain(edited, procW, procH, enhParams)
+          : null;
+        if (gpu) {
+          enhanced = gpu.enhanced;
+          base = gpu.base;
+          outWidth = gpu.width;
+          outHeight = gpu.height;
+        } else {
+          const r = await enhanceWorkerClient.run(new Float32Array(edited), procW, procH, enhParams);
+          enhanced = r.enhanced;
+          base = r.base;
+          outWidth = r.width;
+          outHeight = r.height;
+        }
         mode = 'standard';
       }
 
