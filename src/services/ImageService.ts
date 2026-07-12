@@ -642,6 +642,11 @@ export class ImageService {
   private deferOriginalSnapshot(source: { data: Float32Array; width: number; height: number }): void {
     this.originalImageData = null; // a fresh image invalidates any previously materialized snapshot
     this.pendingOriginalSource = { data: source.data, width: source.width, height: source.height };
+    // Signal the Before/After pane that a NEW original is available for the current
+    // image. Fresh opens don't bump baseImageVersion (only the in-place swap path
+    // does), so without this the Before pane would keep rendering the PREVIOUS
+    // image's original after an ordinary switch (plain/JPEG/cache open).
+    useAppStore.getState().bumpOriginalSnapshotVersion();
   }
 
   /**
@@ -673,6 +678,7 @@ export class ImageService {
   setOriginalImage(data: Float32Array, width: number, height: number): void {
     this.originalImageData = { data, width, height };
     this.pendingOriginalSource = null;
+    useAppStore.getState().bumpOriginalSnapshotVersion(); // Before pane re-reads the new base
   }
 
   /**

@@ -2,7 +2,6 @@ import React, { useRef, useState, useEffect, useCallback } from 'react';
 import { MaskGeometry } from '../../modules/LocalAdjustmentsModule';
 
 interface Props {
-  canvasRef: React.RefObject<HTMLCanvasElement | null>;
   viewport: { zoom: number; panX: number; panY: number };
   // Content (fit-rect) base the image scales by (viewport-canvas model, Task R5):
   // content = contentWidth × zoom, centered in the canvas element (viewport) box.
@@ -25,11 +24,16 @@ type LinearMode = 'create' | 'move' | 'rotate';
  * edge ring to resize, the top handle to rotate. Linear (graduated filter): a line
  * through the centre with the effect on one side — drag the line to move, the blue
  * handle/arrow to rotate. Coordinate mapping mirrors the crop overlay (image drawn
- * inside the canvas at offsetWidth*zoom, centred + panned).
+ * inside the overlay box at box*zoom, centred + panned).
  */
 export function LocalAdjustmentMaskOverlay({
-  canvasRef, viewport, contentWidth, contentHeight, layerType, geometry, onGeometryChange, onDragStart, onDragEnd, onDeselect,
+  viewport, contentWidth, contentHeight, layerType, geometry, onGeometryChange, onDragStart, onDragEnd, onDeselect,
 }: Props) {
+  // Box + pointer origin come from THIS overlay's own root element, not the 2D
+  // <canvas>: in GPU render mode that canvas is display:none (offsetWidth/rect = 0),
+  // which collapsed every mask to the top-left corner. The root is `absolute inset-0`
+  // of the wrapper sized exactly to the viewport box, so it's correct in both modes.
+  const rootRef = useRef<HTMLDivElement>(null);
   const draggingRef = useRef(false);
   const [liveGeom, setLiveGeom] = useState<MaskGeometry>(geometry);
   const [cursor, setCursor] = useState<string>('crosshair');
@@ -42,12 +46,12 @@ export function LocalAdjustmentMaskOverlay({
   useEffect(() => { liveGeomRef.current = liveGeom; }, [liveGeom]);
 
   const metrics = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return null;
-    // Box = the canvas element (viewport). Content scales by the fit-rect (contentWidth),
+    const root = rootRef.current;
+    if (!root) return null;
+    // Box = the overlay/viewport element. Content scales by the fit-rect (contentWidth),
     // centered in the box + pan — matching the CPU/GPU draw (viewport-canvas model, R5).
-    const boxW = canvas.offsetWidth;
-    const boxH = canvas.offsetHeight;
+    const boxW = root.offsetWidth;
+    const boxH = root.offsetHeight;
     const scaledW = (contentWidth ?? boxW) * viewport.zoom;
     const scaledH = (contentHeight ?? boxH) * viewport.zoom;
     const imgX = (boxW - scaledW) / 2 + viewport.panX;
@@ -57,9 +61,9 @@ export function LocalAdjustmentMaskOverlay({
 
   // overlay-local pixel position of a client point
   const toLocal = (clientX: number, clientY: number) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return null;
-    const r = canvas.getBoundingClientRect();
+    const root = rootRef.current;
+    if (!root) return null;
+    const r = root.getBoundingClientRect();
     return { px: clientX - r.left, py: clientY - r.top };
   };
   const toNorm = (clientX: number, clientY: number) => {
@@ -244,7 +248,7 @@ export function LocalAdjustmentMaskOverlay({
   }
 
   return (
-    <div className="absolute inset-0" style={{ cursor, zIndex: 20 }} onMouseDown={handleDown} onMouseMove={handleHover}>
+    <div ref={rootRef} className="absolute inset-0" style={{ cursor, zIndex: 20 }} onMouseDown={handleDown} onMouseMove={handleHover}>
       <svg className="absolute inset-0 w-full h-full" style={{ pointerEvents: 'none' }}>
         {outline}
       </svg>
