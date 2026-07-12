@@ -22,7 +22,7 @@ If applicable, add screenshots. App logs live in `%USERPROFILE%\Vitrine\logs` (o
 older `Photo Editor Pro\logs`).
 
 **Environment**
-- Vitrine version: [e.g. 1.24.0]
+- Vitrine version: [e.g. 1.24.1]
 - Windows version: [e.g. Windows 11 23H2]
 - File format involved (if relevant): [e.g. Olympus ORF, Canon CR3, JPEG]
 

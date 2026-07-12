@@ -4,6 +4,12 @@ All notable changes to **Vitrine** (formerly Photo Editor Pro) are documented in
 this file. The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.24.1] - 2026-07-12
+
+### Fixed
+- **Local Adjustments masks (circle and gradient) jumped to the top-left corner when adjusted.** Cause: the mask overlay derived its on-screen box and pointer origin from the 2D `<canvas>`, but that canvas is `display:none` in GPU render mode (the WebGL canvas presents instead), so `offsetWidth`/`getBoundingClientRect` were `0` — collapsing a mask's normalized centre `0.5` to screen `(0,0)`. Both mask types share the helper, so both were affected. Fix: read the box and rect from the overlay's own always-visible root element (correct in both CPU and GPU modes). Affects: `src/components/Canvas/LocalAdjustmentMaskOverlay.tsx`, `src/components/Layout/Canvas.tsx`.
+- **Before/After sometimes showed a different photo (the previously-opened image's original).** Cause: the Before pane rebuilt its snapshot only when `baseImageVersion` bumped, but an ordinary open (JPEG/cache/plain) records the new original via `deferOriginalSnapshot()` without bumping it — only the in-place RAW full-decode swap does — so the pane kept the prior image's original. Fix: a dedicated `originalSnapshotVersion`, bumped whenever a new original is recorded (`deferOriginalSnapshot`/`setOriginalImage`) and folded into the pane's rebuild dependencies. Affects: `src/App.tsx`, `src/services/ImageService.ts`, `src/stores/appStore.ts`.
+
 ## [1.24.0] - 2026-07-12
 
 ### Changed

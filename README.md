@@ -3,7 +3,7 @@
 [![Downloads](https://img.shields.io/github/downloads/Redrum624/Vitrine/total?style=for-the-badge&label=downloads&color=1f6feb)](https://github.com/Redrum624/Vitrine/releases)
 [![Latest release](https://img.shields.io/github/v/release/Redrum624/Vitrine?style=for-the-badge&label=latest&color=8957e5)](https://github.com/Redrum624/Vitrine/releases/latest)
 
-![Tests](https://img.shields.io/badge/Tests-1834_passing-brightgreen)
+![Tests](https://img.shields.io/badge/Tests-1838_passing-brightgreen)
 ![Lint](https://img.shields.io/badge/Lint-clean-brightgreen)
 ![GPU](https://img.shields.io/badge/GPU-WebGL2_accelerated-success)
 
@@ -63,7 +63,7 @@ Build a distributable Windows installer:
 
 ```bash
 npm run build:win       # clean -> tsc + vite build -> NSIS installer -> collect into installer/
-# Output: installer/Vitrine Setup 1.24.0.exe (+ README.txt, LICENSE, THIRD-PARTY-LICENSES.md)
+# Output: installer/Vitrine Setup 1.24.1.exe (+ README.txt, LICENSE, THIRD-PARTY-LICENSES.md)
 npm run build:win:dir   # fast unpacked build (no installer, quick iteration)
 ```
 
