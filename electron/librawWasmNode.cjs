@@ -41,6 +41,12 @@ const WASM_HIGHLIGHT = { off: 0, blend: 2, reconstruct: 5 };
 // (potentially thousands of identical lines across a batch). Surface it once per process.
 let warnedUnknownHighlight = false;
 
+// Per-call watchdog. A hung wasm worker (never posts a response) would leave the pending
+// promise unresolved forever, so decodeRawWithWasm's `finally { worker.terminate() }` would
+// never run and the worker thread would leak. Bounding each request/response with a reject
+// -on-timeout guarantees the finally always fires. 60s is generous vs the ~10s typical decode.
+const DEFAULT_CALL_TIMEOUT_MS = 60000;
+
 /**
  * Build the libraw-wasm options object from structured decode options.
  * Pure mapping — no I/O.
@@ -81,7 +87,7 @@ function buildWasmOptions(options, log) {
   return opts;
 }
 
-async function decodeRawWithWasm(filePath, log = console, options) {
+async function decodeRawWithWasm(filePath, log = console, options, callTimeoutMs = DEFAULT_CALL_TIMEOUT_MS) {
   const workerJs = resolveWorkerJs();
   if (!workerJs) throw new Error('libraw-wasm worker.js not found');
 
@@ -106,7 +112,17 @@ async function decodeRawWithWasm(filePath, log = console, options) {
   worker.on('exit', (code) => reject(new Error(`libraw-wasm worker exited (code ${code})`)));
 
   const call = (fn, ...args) => new Promise((resolve, rej) => {
-    pending = { resolve, reject: rej };
+    // Watchdog: if the worker never answers, reject so the finally{} below terminates it.
+    const timer = setTimeout(() => {
+      pending = null;
+      rej(new Error(`libraw-wasm call "${fn}" timed out after ${callTimeoutMs}ms`));
+    }, callTimeoutMs);
+    // Wrap so settling (either via the worker 'message'/'error'/'exit' handlers above or
+    // the timeout itself) always clears the timer — no dangling timers across calls.
+    pending = {
+      resolve: (v) => { clearTimeout(timer); resolve(v); },
+      reject: (e) => { clearTimeout(timer); rej(e); },
+    };
     const transfer = args
       .map((a) => (ArrayBuffer.isView(a) ? a.buffer : a instanceof ArrayBuffer ? a : null))
       .filter(Boolean);

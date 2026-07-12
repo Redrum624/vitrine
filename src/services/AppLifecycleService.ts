@@ -8,6 +8,19 @@ interface UnsavedChangesChecker {
   getDescription(): string;
 }
 
+// Escape a string for safe interpolation into innerHTML. The unsaved-changes message is
+// assembled from registry-derived checker descriptions (app-controlled today), but escaping
+// is cheap defense-in-depth so a future checker that surfaces a filename/path containing
+// `<`/`&`/quotes can never inject markup into the modal.
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 class AppLifecycleService {
   private unsavedChangesCheckers: UnsavedChangesChecker[] = [];
   private cleanupTasks: (() => Promise<void> | void)[] = [];
@@ -115,7 +128,7 @@ class AppLifecycleService {
         </div>
 
         <div class="mb-6">
-          <p class="text-dark-300 whitespace-pre-line">${message}</p>
+          <p class="text-dark-300 whitespace-pre-line">${escapeHtml(message)}</p>
         </div>
 
         <div class="flex justify-end space-x-3">
