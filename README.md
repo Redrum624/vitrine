@@ -1,6 +1,6 @@
 # Vitrine
 
-![Version](https://img.shields.io/badge/Version-1.22.0-blue)
+![Version](https://img.shields.io/badge/Version-1.23.0-blue)
 ![TypeScript](https://img.shields.io/badge/TypeScript-0_errors-blue)
 ![Tests](https://img.shields.io/badge/Tests-1834_passing-brightgreen)
 ![Lint](https://img.shields.io/badge/Lint-clean-brightgreen)

@@ -4,6 +4,11 @@ All notable changes to **Photo Editor Pro** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.23.0] - 2026-07-12
+
+### Changed
+- **The app is now named Vitrine.** "Photo Editor Pro" is retired in favor of *Vitrine* — French for a glass display case, and a nod to both a lens's glass and the app's glass UI. Tagline: *Develop. Display.* The rename covers the window title, splash, About dialog, installer (`Vitrine Setup X.Y.Z.exe`), Start Menu shortcut, README, and docs. **Your saved work is untouched:** the app's on-disk identity (the `photo_app` userData folder holding every image's edits, presets, and RAW cache) is deliberately pinned across the rename, and installs upgrade in place. Affects: `package.json` (productName/installer), `electron/main.cjs` (identity pin), and all user-facing brand strings.
+
 ## [1.22.0] - 2026-07-12
 
 ### Security
