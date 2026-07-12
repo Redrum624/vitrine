@@ -4,6 +4,20 @@ All notable changes to **Photo Editor Pro** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.19.0] - 2026-07-11
+
+### Added
+- **Camera EXIF for RAW files.** Click the filename chip to open an Info popover showing camera make/model, lens, ISO, shutter, aperture, focal length, and capture date — for every format. RAW containers (ORF, CR2, NEF, ARW, DNG, …) are read by a new dependency-free TIFF/EXIF parser in the main process (exifreader can't parse them); JPG/PNG/TIFF keep the existing path. Affects: `electron/rawMetadata.cjs` (new), `src/components/Layout/InfoPopover.tsx` (new), `src/services/CameraMetadataService.ts`.
+- **Gallery tile context menu.** Right-click a tile for Open, Remove… (routes to the same confirmed dialog as Del — still the single destructive gate), and Show in Explorer. Right-clicking an unselected tile selects it; a selected tile keeps the multi-selection. Affects: `src/components/Gallery/GalleryTileContextMenu.tsx` (new), `electron/main.cjs`.
+- **Upscale survives restarts (as intent).** Baked upscales now persist their intent (scale + AI/Standard) with the image's edits: reopening shows "Upscale ×N was applied — Re-apply to restore" with a one-click re-apply, and exporting a reopened-but-not-reapplied image warns explicitly instead of silently exporting at native resolution (the previous behavior — a silent-loss bug). Affects: `src/services/EnhanceService.ts`, `src/services/EditPersistenceService.ts`, `src/components/Dialogs/ExportDialog.tsx`.
+- **Chroma noise and Detail radius sliders now work on AI upscales.** The AI route previously returned the model output verbatim, silently ignoring the enhance sliders; it now runs the same finishing stages as the standard route (deblur excluded by evidence — AI output is already sharp and deconvolution only rings), with a note in the panel. Affects: `src/utils/enhanceChain.ts`, `src/services/EnhanceService.ts`.
+
+### Fixed
+- **Dialogs now block every global shortcut.** Cause: only two of six document-level key listeners checked for open dialogs, so typing in a dialog field could rate files on disk, switch photos, or delete masks (this exact class was patched piecemeal three times before). Fix: one shared guard (`keyboardEventBlocked`) routed through all six listeners; the filmstrip's arrow/Esc listener also gained the input-field check it never had. Affects: `src/utils/keyboardScope.ts` (new), 6 listener sites.
+- **Batch processing uses each image's own RAW decode options.** Cause: batch decoded every file with whatever options the open image had, and also swapped the open editor image per file as a side effect. Fix: batch routes through the per-image export decoder (per-image persisted options, no editor side effects, no cache churn). Affects: `src/services/BatchProcessingService.ts`.
+- **Uniform sharpening across tiles in very large images.** Cause: the sharpen edge mask normalized per tile in the >48 MP path, producing a subtle per-tile intensity variation. Fix: a global edge maximum is computed once and threaded to all tiles (verified bit-exact against untiled processing). Also: a redundant processing pass eliminated on the sharpen Apply path. Affects: `src/utils/tiledPipeline.ts`, `src/utils/enhanceOps.ts`, `src/workers/pipeline.worker.ts`.
+- A failed RAW re-decode now recovers instantly from the in-memory cache instead of a ~1 s disk read; corrupt persisted decode options can no longer reach the decoder from the canvas path; the AI/Standard badge and route hint reset when switching images.
+
 ## [1.18.0] - 2026-07-11
 
 ### Added

@@ -1,8 +1,8 @@
 # Photo Editor Pro
 
-![Version](https://img.shields.io/badge/Version-1.18.0-blue)
+![Version](https://img.shields.io/badge/Version-1.19.0-blue)
 ![TypeScript](https://img.shields.io/badge/TypeScript-0_errors-blue)
-![Tests](https://img.shields.io/badge/Tests-1559_passing-brightgreen)
+![Tests](https://img.shields.io/badge/Tests-1648_passing-brightgreen)
 ![Lint](https://img.shields.io/badge/Lint-clean-brightgreen)
 ![GPU](https://img.shields.io/badge/GPU-WebGL2_accelerated-success)
 
@@ -71,7 +71,7 @@ electron-builder's full staging output (unpacked app, block maps) stays in `rele
 - **Lens Corrections** — Distortion, Vignetting, Chromatic Aberration, creative Blur, and Film Grain in sectioned groups within one card.
 - **History** — per-image checkpoint timeline; click any checkpoint to restore that state; persists across sessions separately from Ctrl+Z undo.
 - **Histogram** — live RGB and luminosity tone-distribution display in its own floating card.
-- **Gallery** — a library grid view of the open folder with selection, per-tile ratings, rating filter, double-click-to-edit, and Del-to-remove (drop from the session or move to the Recycle Bin, always confirmed); opened from the filmstrip dock.
+- **Gallery** — a library grid view of the open folder with selection, per-tile ratings, rating filter, double-click-to-edit, Del-to-remove (drop from the session or move to the Recycle Bin, always confirmed), and a right-click context menu (Open, Remove…, Show in Explorer); opened from the filmstrip dock.
 - **Settings** — application preferences, theme, and workspace configuration.
 
 ## Features
@@ -89,6 +89,7 @@ electron-builder's full staging output (unpacked app, block maps) stays in `rele
 - **Auto adjustments** — one-click *Auto All* (tone, white balance, colour) driven by a learned user-style profile; individual Auto buttons per panel.
 - **Before/After compare** — toggle the unedited original against the current edit with synced zoom and pan.
 - **Reference image compare** — pin a second photo alongside the current image for side-by-side grading reference.
+- **Camera EXIF info** — click the filename chip for a popover with camera make/model, lens, ISO, shutter, aperture, focal length, and capture date; works for RAW files (read natively from the container) and standard formats alike.
 - **Star ratings + filtering** — press 1–5 to rate the open image (0 clears); rating written to the file as `xmp:Rating`; a shared rating filter (footer + Gallery) hides lower-rated photos everywhere at once.
 - **Filmstrip dock** — a floating, scrollable thumbnail dock aligned under the photo; multi-select with Ctrl/Shift+click; mouse-wheel horizontal scroll; prev/next chevrons and a Gallery shortcut.
 - **Glass workspace UI** — full-bleed canvas with floating glass chrome: toolbar pill with responsive overflow menu, icon rail, histogram + module cards, filename chip, and entrance animations that honor reduced-motion preferences.
