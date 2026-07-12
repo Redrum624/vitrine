@@ -210,28 +210,28 @@ describe('EditPersistenceService — edits after a bake persist + deblur intent 
       expect(w.bakedDeblur).toBeUndefined();
     });
 
-    it('PARTIAL unwind pops the top level editsOnBakedBase; the remaining level re-seeds a fresh redirect', () => {
-      // Two stacked upscales, a post-bake edit made on the ×4 level.
+    it('a 2→1 landing (resumeRedirectAfterStackedUnwind) KEEPS editsOnBakedBase and writes NOTHING (re-review MEDIUM)', () => {
+      // First bake persists; a between-bakes edit redirect-writes editsOnBakedBase for THAT level.
       mockImageService.isBakedUpscaleActive.mockReturnValue(true);
-      useAppStore.getState().setUpscaleIntent({ scale: 4, mode: 'standard' });
-      editPersistenceService.persistBakedUpscaleIntent({ version: 1, modules: {} }, 4, 'standard');
-      basicadj().setParams({ exposure: 0.6 });
-      editPersistenceService.flush(); // ×4-level editsOnBakedBase written
-
-      // Partial unwind → remaining ×2 level; bake still active. persistNow re-seeds + drops the pop.
       useAppStore.getState().setUpscaleIntent({ scale: 2, mode: 'standard' });
-      imageProcessingPipeline.resetAllModules(); // _popAndRestore restores the remaining level's params
-      storeSetMock.mockClear();
-      editPersistenceService.persistNow();
-      const popped = lastWrite();
-      expect(popped.editsOnBakedBase).toBeUndefined(); // the ×4 level's edits were popped
-      expect(popped.bakedUpscale).toEqual({ scale: 2, mode: 'standard' });
+      editPersistenceService.persistBakedUpscaleIntent({ version: 1, modules: { basicadj: { exposure: 0.4 } } }, 2, 'standard');
+      basicadj().setParams({ contrast: 0.3 });
+      editPersistenceService.flush(); // editsOnBakedBase = {contrast 0.3} on the frozen pre-bake top
 
-      // A further post-bake edit redirects into a FRESH editsOnBakedBase for the remaining level.
-      basicadj().setParams({ exposure: 0.9 });
+      // Second bake stacks → suspension; unwinding back to the single level re-arms WITHOUT writing
+      // (the S1-era persistNow here clobbered disk.modules with the popped level's params and
+      // dropped editsOnBakedBase — the reviewer-reproduced regression).
+      editPersistenceService.suspendRedirectForStackedBake();
       storeSetMock.mockClear();
+      editPersistenceService.resumeRedirectAfterStackedUnwind();
+      expect(storeSetMock).not.toHaveBeenCalled(); // disk untouched: pre-bake modules + editsOnBakedBase intact
+
+      // A further post-bake edit redirects on top of the STILL-FROZEN first-bake state.
+      basicadj().setParams({ exposure: 0.9 });
       editPersistenceService.flush();
-      expect(lastWrite().editsOnBakedBase.modules.basicadj).toEqual(expect.objectContaining({ exposure: 0.9 }));
+      const w = lastWrite();
+      expect(w.modules).toEqual({ basicadj: { exposure: 0.4 } }); // pre-first-bake grading intact
+      expect(w.editsOnBakedBase.modules.basicadj).toEqual(expect.objectContaining({ exposure: 0.9 }));
     });
   });
 
@@ -267,15 +267,16 @@ describe('EditPersistenceService — edits after a bake persist + deblur intent 
       expect(storeSetMock).not.toHaveBeenCalled(); // editsOnBakedBase NOT written post-second-bake
     });
 
-    it('a partial unwind landing on the single remaining level resumes the redirect (persistNow)', () => {
+    it('a partial unwind landing on the single remaining level resumes the redirect WITHOUT a write', () => {
       editPersistenceService.suspendRedirectForStackedBake();
-      // Unwind 2→1: _popAndRestore restores the first level's params then calls persistNow.
+      // Unwind 2→1: _popAndRestore restores the first level's params then re-arms the redirect.
       mockImageService.isBakedDeblurActive.mockReturnValue(false);
       imageProcessingPipeline.resetAllModules();
-      editPersistenceService.persistNow();
+      storeSetMock.mockClear();
+      editPersistenceService.resumeRedirectAfterStackedUnwind();
+      expect(storeSetMock).not.toHaveBeenCalled(); // no disk write at the landing (re-review MEDIUM)
       // The redirect works again: a post-bake edit writes a fresh editsOnBakedBase.
       basicadj().setParams({ exposure: 0.9 });
-      storeSetMock.mockClear();
       editPersistenceService.flush();
       expect(storeSetMock).toHaveBeenCalledTimes(1);
       expect(lastWrite().editsOnBakedBase.modules.basicadj).toEqual(expect.objectContaining({ exposure: 0.9 }));

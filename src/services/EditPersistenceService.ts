@@ -105,9 +105,10 @@ class EditPersistenceService {
   private baseline = ''; // serialized post-load state — edits are saved only once it changes
   // POST-BAKE REDIRECT state (Z1). While a bake marker is live, flush() writes the current
   // post-bake edits into `editsOnBakedBase` on top of this FROZEN pre-bake top-level, instead of
-  // clobbering the pre-bake `modules`. Set by the persist writers at bake time (and re-synced by
-  // persistNow after a partial unwind); cleared on a full unwind. `bakedEditsBaseline` tracks the
-  // LAST-written post-bake edits so an untouched post-bake state writes nothing.
+  // clobbering the pre-bake `modules`. Set by the persist writers at bake time; survives a stacked
+  // window untouched (the first bake's snapshot stays authoritative); cleared on a full unwind
+  // (persistNow) or a fresh open (restoreState). `bakedEditsBaseline` tracks the LAST-written
+  // post-bake edits so an untouched post-bake state writes nothing.
   private bakedBaseState: EditState | null = null;
   private bakedEditsBaseline = '';
   // THE STACKED CORNER (Z1 review MEDIUM). There is ONE `modules` slot on disk, but a stacked bake
@@ -121,8 +122,9 @@ class EditPersistenceService {
   // flag): post-second-bake edits are edits on a DOUBLY-baked base — replaying them after
   // re-applying only the FIRST bake would be wrong — so they are in-session only as well, and any
   // editsOnBakedBase already on disk stays FROZEN at its pre-second-bake content (it belongs to
-  // the first bake level and replays correctly there). Cleared when the stack unwinds back to a
-  // single level / native base (persistNow) or a new image opens (restoreState).
+  // the first bake level and replays correctly there). Cleared WITHOUT any disk write when the
+  // stack unwinds back to a single level (resumeRedirectAfterStackedUnwind), on a full unwind
+  // (persistNow), or when a new image opens (restoreState).
   private stackedBakeActive = false;
 
   private keyForPath(path: string): string {
@@ -385,10 +387,35 @@ class EditPersistenceService {
    * MEDIUM — see the stackedBakeActive field doc for the full corner). Called by EnhanceService
    * INSTEAD of a persist writer for the second (and any deeper) bake level: nothing is written,
    * disk keeps the FIRST bake's pre-bake modules + intent + frozen editsOnBakedBase, and subsequent
-   * flushes write nothing until the stack unwinds back to a single level (persistNow re-enables).
+   * flushes write nothing until the stack unwinds back to a single level
+   * (resumeRedirectAfterStackedUnwind re-enables).
    */
   suspendRedirectForStackedBake(): void {
     this.stackedBakeActive = true;
+  }
+
+  /**
+   * A partial unwind has landed on the SINGLE remaining (first) bake level: resume the flush
+   * redirect WITHOUT writing anything (Z1 re-review MEDIUM). Stacked levels never persisted, so the
+   * disk ALREADY holds exactly this level's correct state — the frozen pre-bake top-level, its
+   * intent marker(s), and any editsOnBakedBase made between the bakes (they belong to THIS level
+   * and stay valid). The S1-era persistNow write here was not just unnecessary but HARMFUL:
+   * serialize() reflects the just-restored POPPED level's edit state (the post-first-bake params,
+   * or pure neutral), so writing it clobbered the pre-first-bake modules and dropped
+   * editsOnBakedBase — durably losing the user's grading (reviewer repro: edit → upscale → edit →
+   * deblur → revert once). bakedBaseState/bakedEditsBaseline still hold the first bake's frozen
+   * snapshot, so clearing the suspension re-arms the redirect correctly. Bonus self-heal: if a
+   * between-bakes edit never reached disk (its 800ms debounced flush lost the race to the second
+   * bake's suspension), the next flush redirect-writes the restored params as editsOnBakedBase.
+   *
+   * DISK-MARKER NOTE (documented micro-decision): skipping the write also means a remaining-top-
+   * DEBLUR pop keeps any UNAPPLIED upscale marker on disk (the in-session store clears
+   * upscaleIntent, but the disk state — written by persistBakedDeblurIntent's fold — still offers
+   * the unapplied upscale on reopen). That is the better outcome: the unapplied intent was never
+   * consumed by this session, so erasing it would have lost a still-valid re-apply offer.
+   */
+  resumeRedirectAfterStackedUnwind(): void {
+    this.stackedBakeActive = false;
   }
 
   /**
@@ -479,33 +506,26 @@ class EditPersistenceService {
 
   /**
    * Force-persist the current pipeline state for the current image NOW, bypassing the baseline-diff
-   * short-circuit (but re-seeding the baseline). Two callers in EnhanceService._popAndRestore:
-   * (a) FULL unwind to the native base — the store's upscaleIntent has been cleared, so serialize()
-   * emits NO bakedUpscale marker, durably erasing a previously-persisted intent; (b) PARTIAL unwind
-   * of stacked bakes — the store carries the remaining level's re-seeded {scale, mode}, so the disk
-   * marker is corrected to match (a quit right after the partial revert must not offer the popped
-   * level's stale re-apply). Safe in both: the persisted marker mirrors the live store exactly.
+   * short-circuit (but re-seeding the baseline). SINGLE production caller: EnhanceService's
+   * _popAndRestore FULL unwind to the native base — the bake markers and store intents are already
+   * cleared, so serialize() emits a marker-free state, durably erasing a previously-persisted
+   * intent, and the post-bake redirect machinery is reset so a normal flush resumes.
+   *
+   * The S1-era PARTIAL-unwind write was REMOVED (Z1 re-review MEDIUM): stacked levels never
+   * persist, so at any partial landing the disk already holds the FIRST bake's correct state —
+   * writing serialize() (the just-restored popped-level params) there clobbered the pre-first-bake
+   * modules and dropped editsOnBakedBase. Partial landings now go through
+   * resumeRedirectAfterStackedUnwind (no write) instead. Do NOT call this while a bake marker is
+   * live — it would persist the post-bake (neutral) module state over the pre-bake saved edits.
    */
   persistNow(): void {
     const img = imageService.getCurrentImage();
     if (!img?.filePath || !window.electronAPI?.storeSet) return;
     const cur = this.serialize();
-    // Called only when the stack has unwound to a SINGLE remaining level or the native base
-    // (EnhanceService skips persistNow while the remaining depth is still >1 — disk already holds
-    // the FIRST bake's state), so any stacked-bake redirect suspension ends here.
+    this.baseline = JSON.stringify(cur);
+    this.bakedBaseState = null;
+    this.bakedEditsBaseline = '';
     this.stackedBakeActive = false;
-    if (imageService.isBakedUpscaleActive() || imageService.isBakedDeblurActive()) {
-      // PARTIAL unwind (Z1): a bake level remains. The just-restored state is the remaining level's
-      // pre-bake baseline; re-freeze it as the redirect base and DROP the popped level's
-      // editsOnBakedBase (cur carries none — serialize() never emits it), so post-unwind edits start
-      // a fresh editsOnBakedBase for the remaining level.
-      this.setBakedBaseline(cur);
-    } else {
-      // FULL unwind: no bake active — clear the redirect machinery so a normal flush resumes.
-      this.baseline = JSON.stringify(cur);
-      this.bakedBaseState = null;
-      this.bakedEditsBaseline = '';
-    }
     this.write(img.filePath, cur);
   }
 }

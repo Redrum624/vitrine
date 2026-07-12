@@ -29,7 +29,7 @@ jest.mock('../services/ImageProcessingPipeline', () => ({ imageProcessingPipelin
 jest.mock('../services/EditPersistenceService', () => ({ editPersistenceService: {
   serialize: jest.fn(() => ({ version: 1, modules: {} })), restore: jest.fn(), flush: jest.fn(),
   persistNow: jest.fn(), persistBakedUpscaleIntent: jest.fn(), persistBakedDeblurIntent: jest.fn(),
-  suspendRedirectForStackedBake: jest.fn(),
+  suspendRedirectForStackedBake: jest.fn(), resumeRedirectAfterStackedUnwind: jest.fn(),
 } }));
 jest.mock('../services/EnhanceWorkerClient', () => ({ enhanceWorkerClient: {
   run: jest.fn(async () => ({ enhanced: new Float32Array(768 * 768 * 4), base: new Float32Array(768 * 768 * 4), width: 768, height: 768 })),
@@ -119,19 +119,26 @@ describe('EnhanceService — a STACKED bake is in-session only (review MEDIUM fi
     expect(editPersistenceService.suspendRedirectForStackedBake).toHaveBeenCalledTimes(1);
   });
 
-  it('partial unwind persists ONLY when landing on a single remaining level (3→2 skips, 2→1 writes)', async () => {
+  it('partial unwinds NEVER write; the 2→1 landing resumes the redirect; only the full unwind persists', async () => {
     await enhanceService.applyUpscale({ ...DEFAULT_ENHANCE_PARAMS, upscale: true, scale: 2 });
     await enhanceService.applyMotionDeblur();
     await enhanceService.applyMotionDeblur(); // depth 3
     expect(enhanceService.getRestoreDepth()).toBe(3);
     (editPersistenceService.persistNow as jest.Mock).mockClear();
 
-    enhanceService.revert(); // 3 → 2: still stacked — disk already holds the FIRST bake's state
+    enhanceService.revert(); // 3 → 2: still stacked — suspension stays, no write
     expect(enhanceService.getRestoreDepth()).toBe(2);
     expect(editPersistenceService.persistNow).not.toHaveBeenCalled();
+    expect(editPersistenceService.resumeRedirectAfterStackedUnwind).not.toHaveBeenCalled();
 
-    enhanceService.revert(); // 2 → 1: single level remains — re-seed the disk (S1 semantics)
+    enhanceService.revert(); // 2 → 1: re-arm the redirect WITHOUT writing (re-review MEDIUM fix —
+    // the S1-era persistNow here clobbered the pre-first-bake modules with the popped level's)
     expect(enhanceService.getRestoreDepth()).toBe(1);
+    expect(editPersistenceService.persistNow).not.toHaveBeenCalled();
+    expect(editPersistenceService.resumeRedirectAfterStackedUnwind).toHaveBeenCalledTimes(1);
+
+    enhanceService.revert(); // 1 → 0: full unwind — the ONLY unwind write (marker-free erase)
+    expect(enhanceService.getRestoreDepth()).toBe(0);
     expect(editPersistenceService.persistNow).toHaveBeenCalledTimes(1);
   });
 });

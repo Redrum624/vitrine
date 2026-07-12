@@ -307,7 +307,7 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
             disabled={busy || developing}
             title={developing
               ? 'Available when full quality finishes developing'
-              : 'Re-derives the baked pixels and restores your post-bake edits. Editing before re-applying discards those saved post-bake edits.'}
+              : 'Re-derives the baked pixels and restores your post-bake edits. Editing before re-applying discards those saved post-bake edits. A second enhance stacked on top of another is session-only and is not restored here.'}
             onClick={handleReapply}
             style={{
               flexShrink: 0, padding: '6px 12px', borderRadius: 8,

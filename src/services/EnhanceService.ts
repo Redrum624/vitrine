@@ -436,8 +436,6 @@ class EnhanceService {
       // baked level after this pop. Clear the sibling marker first so a mixed stack can't leave both set.
       const top = this.restoreStack[this.restoreStack.length - 1];
       const store = useAppStore.getState();
-      // The popped TOP level owned any editsOnBakedBase — a partial unwind drops them; the remaining
-      // level's redirect base is re-seeded by persistNow below (mirror of the S1 partial-unwind).
       store.setBakeOrder(this.restoreStack.map((rp) => rp.kind));
       if (top.kind === 'deblur') {
         imageService.clearBakedUpscale();
@@ -452,16 +450,18 @@ class EnhanceService {
         // A deblur remains ONLY if one is still somewhere in the remaining stack.
         store.setDeblurIntent(this.restoreStack.some((rp) => rp.kind === 'deblur'));
       }
-      // Persist the re-seeded state NOW — but only when the unwind lands on a SINGLE remaining
-      // level. flush() would early-return here (a bake marker is still active), so without this
-      // explicit write a quit right after the partial unwind leaves the disk holding the JUST-POPPED
-      // (now-wrong) level. persistNow bypasses that early-return, writes serialize()'s current
-      // snapshot (restored module params + the just-updated store intent), and re-enables the flush
-      // redirect. While the REMAINING depth is still >1 (unwinding a deeper stack), the disk already
-      // holds the FIRST bake's correct state and the stacked levels are in-session only (review
-      // MEDIUM fix) — writing here would clobber it, so skip and keep the redirect suspended.
+      // NO disk write at ANY partial landing (re-review MEDIUM fix). Stacked levels never persist,
+      // so the disk ALREADY holds the FIRST bake's correct state — pre-bake modules + intent + any
+      // between-bakes editsOnBakedBase. The S1-era persistNow here wrote serialize()'s just-restored
+      // POPPED-level params over it, durably clobbering the pre-first-bake grading and dropping
+      // editsOnBakedBase (reviewer repro: edit → upscale → edit → deblur → revert once; also
+      // reachable via a History restore through unwindToDepth). Landing on the SINGLE remaining
+      // level just re-arms the flush redirect against the first bake's still-frozen snapshot;
+      // deeper landings stay suspended. Side effect taken deliberately: a remaining-top-deblur pop
+      // now KEEPS an unapplied upscale marker on disk (see resumeRedirectAfterStackedUnwind's
+      // DISK-MARKER NOTE — the better outcome; the in-session store still clears upscaleIntent).
       if (this.restoreStack.length === 1) {
-        editPersistenceService.persistNow();
+        editPersistenceService.resumeRedirectAfterStackedUnwind();
       }
     }
     return true;
