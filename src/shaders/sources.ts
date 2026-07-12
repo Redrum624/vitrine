@@ -568,6 +568,39 @@ void main() {
   outColor = vec4(rgb, src.a);
 }`;
 
+// ── Highlight reconstruction (M1) ────────────────────────────────────────────
+// Pointwise per-channel highlight recovery — reconstruct a clipped channel from the
+// surviving ones, then desaturate blown whites cleanly. EXACT twin of the CPU
+// recoverHighlights() (src/modules/HighlightRecoveryModule.ts); GLSL smoothstep is the
+// same Hermite as hrSmoothstep, so the GPU self-test matches the CPU within float eps.
+// u_strength is 0..100; 0 → identity.
+export const FRAG_HIGHLIGHTRECOVERY = `#version 300 es
+precision highp float;
+uniform sampler2D u_image;
+uniform float u_strength;          // 0..100 (0 = off)
+in vec2 v_uv;
+out vec4 outColor;
+const float KNEE = 0.75;
+const float CLIP_LO = 0.9;
+const float CLIP_HI = 1.0;
+void main() {
+  vec4 src = texture(u_image, v_uv);
+  vec3 c = src.rgb;
+  float s01 = u_strength / 100.0;
+  float hi = max(max(c.r, c.g), c.b);
+  if (s01 <= 0.0 || hi <= KNEE) { outColor = src; return; }
+  float lo = min(min(c.r, c.g), c.b);
+  float mid = c.r + c.g + c.b - hi - lo;                 // the median channel
+  float t = smoothstep(KNEE, 1.0, hi);                  // depth into highlights
+  float gate = smoothstep(KNEE, 1.0, mid);              // require a 2nd bright channel
+  float a = t * gate * s01;
+  vec3 w = 1.0 - smoothstep(vec3(CLIP_LO), vec3(CLIP_HI), c); // per-channel reliability
+  float wsum = w.r + w.g + w.b;
+  float guide = wsum > 1e-4 ? dot(w, c) / wsum : hi;    // survivor mean; all-clipped → white
+  vec3 outc = c - max(c - vec3(guide), 0.0) * a;        // pull the over-guide cast toward survivors
+  outColor = vec4(clamp(outc, 0.0, 1.0), src.a);
+}`;
+
 // Faithful GLSL port of BasicAdjustmentsModule.process (see that file for intent).
 export const FRAG_BASICADJ = `#version 300 es
 precision highp float;

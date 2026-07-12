@@ -400,6 +400,52 @@ test('disabled shadowshighlights goes to cpuBridges, not passes', () => {
   expect(cpuBridges).toContain('shadowshighlights');
 });
 
+// ---------------------------------------------------------------------------
+// HighlightRecovery pass descriptor tests (M1) — pointwise, always GPU-representable
+// ---------------------------------------------------------------------------
+
+test('GPU_MODULE_IDS contains highlightrecovery', () => {
+  expect(GPU_MODULE_IDS).toContain('highlightrecovery');
+});
+
+test('enabled highlightrecovery yields a single GPU pass (no CPU bridge)', () => {
+  const modules = [fakeModule('highlightrecovery', true, { enabled: true, strength: 60 })];
+  const { passes, cpuBridges } = buildPassList(modules);
+  expect(passes).toHaveLength(1);
+  expect(passes[0].id).toBe('highlightrecovery');
+  expect(passes[0].programKey).toBe('highlightrecovery');
+  expect(cpuBridges).not.toContain('highlightrecovery');
+  // setUniforms has arity 3 and must not throw with the no-op GL mock
+  expect(() => passes[0].setUniforms(makeGl(), DUMMY_PROG, DEFAULT_RT)).not.toThrow();
+});
+
+test('highlightrecovery still builds a pass at strength 0 (shader computes identity)', () => {
+  const modules = [fakeModule('highlightrecovery', true, { enabled: true, strength: 0 })];
+  const { passes, cpuBridges } = buildPassList(modules);
+  expect(passes).toHaveLength(1);
+  expect(passes[0].programKey).toBe('highlightrecovery');
+  expect(cpuBridges).not.toContain('highlightrecovery');
+});
+
+test('disabled highlightrecovery goes to cpuBridges, not passes', () => {
+  const modules = [fakeModule('highlightrecovery', false, { enabled: false, strength: 60 })];
+  const { passes, cpuBridges } = buildPassList(modules);
+  expect(passes).toHaveLength(0);
+  expect(cpuBridges).toContain('highlightrecovery');
+});
+
+test('a self-test-unsafe highlightrecovery routes to the CPU bridge', () => {
+  setGpuUnsafeModuleIds(['highlightrecovery']);
+  try {
+    const modules = [fakeModule('highlightrecovery', true, { enabled: true, strength: 60 })];
+    const { passes, cpuBridges } = buildPassList(modules);
+    expect(passes).toHaveLength(0);
+    expect(cpuBridges).toContain('highlightrecovery');
+  } finally {
+    setGpuUnsafeModuleIds([]);
+  }
+});
+
 // Pure-math correctness: replicate the FRAG_SHADOWSHIGHLIGHTS analytic math in JS and
 // compare to the real ShadowsHighlightsModule.process() at maskBlur:0. No GL needed —
 // this catches formula drift between the shader and the CPU at the unit-test level (the

@@ -1,11 +1,25 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { ChevronDown, ChevronRight, Aperture } from 'lucide-react';
 import { useAppStore } from '../../stores/appStore';
 import { rawImageService } from '../../services/RawImageService';
 import { notificationService } from '../../services/NotificationService';
+import { imageProcessingPipeline } from '../../services/ImageProcessingPipeline';
 import type { ImageFileInfo } from '../../services/FileSystemService';
 import type { DemosaicAlgo, HighlightMode, RawDecodeOptions } from '../../types/electron';
+
+const HR_MODULE_ID = 'highlightrecovery';
+const HR_TOOLTIP =
+  'Reconstructs blown highlight channels from the surviving ones after decode. ' +
+  'Post-decode module — does NOT re-decode the file. 0 = off.';
+
+/** Read the live highlight-recovery strength (0..100) off the registered pipeline module. */
+function readHrStrength(): number {
+  const m = imageProcessingPipeline.getModule(HR_MODULE_ID) as
+    | { getParams?: () => { strength?: number } }
+    | undefined;
+  return m?.getParams?.().strength ?? 0;
+}
 
 const DEMOSAIC_OPTIONS: { value: DemosaicAlgo; label: string }[] = [
   { value: 'ahd', label: 'AHD' },
@@ -66,6 +80,25 @@ export function RawDecodePanel({ currentImage }: RawDecodePanelProps) {
   const rawDecodeOptions = useAppStore((s) => s.rawDecodeOptions);
   const reDecoding = useAppStore((s) => s.reDecoding);
   const [open, setOpen] = useState(false);
+  // Highlight-recovery strength lives on the pipeline module (persisted per-image by
+  // EditPersistenceService like every other module param — NOT a decode option, so no
+  // re-decode on change). Mirror it into local state for the slider, re-syncing when the
+  // open image changes (per-image params are restored on load).
+  const [hrStrength, setHrStrength] = useState<number>(readHrStrength);
+
+  useEffect(() => {
+    setHrStrength(readHrStrength());
+  }, [currentImage?.id]);
+
+  const applyHrStrength = (strength: number) => {
+    setHrStrength(strength);
+    const m = imageProcessingPipeline.getModule(HR_MODULE_ID) as
+      | { setParams?: (p: { strength: number }) => void }
+      | undefined;
+    m?.setParams?.({ strength });
+    imageProcessingPipeline.invalidateModuleCache(HR_MODULE_ID);
+    useAppStore.getState().triggerReprocessing(); // no re-decode — just re-runs the pipeline
+  };
 
   const isRaw = currentImage ? rawImageService.isRawFile(currentImage.path) : false;
   if (!isRaw) return null;
@@ -143,6 +176,32 @@ export function RawDecodePanel({ currentImage }: RawDecodePanelProps) {
                 <option key={o.value} value={o.value}>{o.label}</option>
               ))}
             </select>
+          </div>
+          <div className="flex flex-col" style={{ gap: 6 }}>
+            <div className="flex items-center justify-between">
+              <label htmlFor="raw-highlight-recovery" style={{ fontSize: 11, fontWeight: 500, color: 'var(--glass-text-label)' }}>
+                Highlight recovery
+              </label>
+              <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: 10.5, color: 'var(--glass-text-muted)' }}>
+                {hrStrength.toFixed(0)}
+              </span>
+            </div>
+            <input
+              id="raw-highlight-recovery"
+              type="range"
+              min={0}
+              max={100}
+              step={1}
+              value={hrStrength}
+              title={HR_TOOLTIP}
+              onChange={(e) => applyHrStrength(parseFloat(e.target.value))}
+              onDoubleClick={() => applyHrStrength(0)}
+              className="slider"
+              style={{ width: '100%' }}
+            />
+            <div style={{ fontSize: 10.5, color: 'var(--glass-text-muted)' }}>
+              {HR_TOOLTIP}
+            </div>
           </div>
           {reDecoding && (
             <div role="status" style={{ fontSize: 11, color: 'var(--glass-text-secondary)' }}>

@@ -7,6 +7,7 @@ import { WhiteBalanceModule } from '../modules/WhiteBalanceModule';
 import { ToneCurvePipelineModule } from '../modules/ToneCurvePipelineModule';
 import { ColorBalancePipelineModule } from '../modules/ColorBalancePipelineModule';
 import { ShadowsHighlightsPipelineModule } from '../modules/ShadowsHighlightsPipelineModule';
+import { HighlightRecoveryPipelineModule } from '../modules/HighlightRecoveryModule';
 import { LocalAdjustmentsPipelineModule } from '../modules/LocalAdjustmentsPipelineModule';
 import { LensCorrectionsPipelineModule } from '../modules/LensCorrectionsPipelineModule';
 import { NoiseReductionModule } from '../modules/NoiseReductionModule';
@@ -121,6 +122,7 @@ export class ImageProcessingPipeline {
     const cropModule = new CropPipelineModule();
     const lensCorrectionsModule = new LensCorrectionsPipelineModule();
     const exposureModule = new ExposureModule();
+    const highlightRecoveryModule = new HighlightRecoveryPipelineModule();
     const whiteBalanceModule = new WhiteBalanceModule();
     const basicAdjModule = new BasicAdjustmentsModule();
     const toneCurveModule = new ToneCurvePipelineModule();
@@ -133,16 +135,17 @@ export class ImageProcessingPipeline {
     this.addModule(cropModule, 0); // First - crop/transform (unified)
     this.addModule(lensCorrectionsModule, 1); // Second - lens corrections (geometric)
     this.addModule(exposureModule, 2); // Third - exposure correction
-    this.addModule(whiteBalanceModule, 3); // Fourth - white balance
-    this.addModule(basicAdjModule, 4); // Fifth - basic adjustments
-    this.addModule(toneCurveModule, 5); // Sixth - tone curve
-    this.addModule(colorBalanceModule, 6); // Seventh - color balance
-    this.addModule(noiseReductionModule, 7); // Eighth - noise reduction (before enhance so it isn't amplified)
-    this.addModule(enhanceModule, 8); // Ninth - enhance (sharpen/deblur, after denoise)
-    this.addModule(shadowsHighlightsModule, 9); // Tenth - shadows/highlights recovery
-    this.addModule(localAdjustmentsModule, 10); // Eleventh - local adjustments
+    this.addModule(highlightRecoveryModule, 3); // Fourth - highlight reconstruction (M1, near-decode, before tone)
+    this.addModule(whiteBalanceModule, 4); // Fifth - white balance
+    this.addModule(basicAdjModule, 5); // Sixth - basic adjustments
+    this.addModule(toneCurveModule, 6); // Seventh - tone curve
+    this.addModule(colorBalanceModule, 7); // Eighth - color balance
+    this.addModule(noiseReductionModule, 8); // Ninth - noise reduction (before enhance so it isn't amplified)
+    this.addModule(enhanceModule, 9); // Tenth - enhance (sharpen/deblur, after denoise)
+    this.addModule(shadowsHighlightsModule, 10); // Eleventh - shadows/highlights recovery
+    this.addModule(localAdjustmentsModule, 11); // Twelfth - local adjustments
 
-    logger.info('Image processing pipeline initialized with 11 modules:', this.processingOrder);
+    logger.info('Image processing pipeline initialized with 12 modules:', this.processingOrder);
   }
 
   addModule(module: PipelineModule, position?: number): void {
@@ -361,6 +364,15 @@ export class ImageProcessingPipeline {
           // blurring a zero-effect mask still yields zero net change.
           const shPipeline = module as ShadowsHighlightsPipelineModule;
           return shPipeline.isNoOp();
+        }
+
+        case 'highlightrecovery': {
+          // Highlight reconstruction is opt-in (default strength 0). Delegate to isNoOp()
+          // so strength 0 / disabled short-circuits to a byte-identical passthrough. The
+          // generic default check would ALSO work (strength is the only numeric), but the
+          // explicit case single-sources the neutral condition with the module.
+          const hrModule = module as unknown as { isNoOp(): boolean };
+          return hrModule.isNoOp();
         }
 
         case 'noise-reduction': {

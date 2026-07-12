@@ -5,7 +5,13 @@ import { useAppStore } from '../stores/appStore';
 import { rawImageService } from '../services/RawImageService';
 import { notificationService } from '../services/NotificationService';
 import { DEFAULT_RAW_DECODE_OPTIONS } from '../types/electron';
+import { imageProcessingPipeline } from '../services/ImageProcessingPipeline';
 import type { ImageFileInfo } from '../services/FileSystemService';
+
+const hrModule = () =>
+  imageProcessingPipeline.getModule(
+    'highlightrecovery',
+  ) as unknown as { getParams: () => { strength: number }; setParams: (p: { strength: number }) => void };
 
 jest.mock('../services/RawImageService', () => ({
   rawImageService: {
@@ -37,6 +43,7 @@ describe('RawDecodePanel', () => {
     (rawImageService.reDecode as jest.Mock).mockClear();
     (rawImageService.reDecode as jest.Mock).mockResolvedValue(undefined);
     (notificationService.error as jest.Mock).mockClear();
+    hrModule().setParams({ strength: 0 }); // reset the shared pipeline module between tests
   });
 
   it('renders nothing when there is no current image', () => {
@@ -101,6 +108,31 @@ describe('RawDecodePanel', () => {
     expect(screen.getByLabelText('Demosaic')).toBeDisabled();
     expect(screen.getByLabelText('Highlights')).toBeDisabled();
     expect(screen.getByText(/re-decoding/i)).toBeInTheDocument();
+  });
+
+  it('shows the highlight recovery slider (default 0) once expanded', () => {
+    render(<RawDecodePanel currentImage={RAW_IMAGE} />);
+    fireEvent.click(screen.getByText('RAW Decode'));
+    const slider = screen.getByLabelText('Highlight recovery') as HTMLInputElement;
+    expect(slider).toHaveValue('0');
+  });
+
+  it('moving the highlight recovery slider updates the module strength WITHOUT a re-decode', () => {
+    render(<RawDecodePanel currentImage={RAW_IMAGE} />);
+    fireEvent.click(screen.getByText('RAW Decode'));
+    fireEvent.change(screen.getByLabelText('Highlight recovery'), { target: { value: '65' } });
+    expect(hrModule().getParams().strength).toBe(65);
+    // It is a POST-decode module param, so it must NOT trigger a RAW re-decode.
+    expect(rawImageService.reDecode).not.toHaveBeenCalled();
+  });
+
+  it('the highlight recovery control makes clear it does NOT re-decode', () => {
+    render(<RawDecodePanel currentImage={RAW_IMAGE} />);
+    fireEvent.click(screen.getByText('RAW Decode'));
+    expect(screen.getByLabelText('Highlight recovery')).toHaveAttribute(
+      'title',
+      expect.stringMatching(/does NOT re-decode/i),
+    );
   });
 
   it('exposes a tooltip noting that changing options re-decodes the file', () => {

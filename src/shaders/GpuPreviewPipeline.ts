@@ -30,6 +30,7 @@ import {
   FRAG_VIGNETTE,
   FRAG_PRESENT,
   FRAG_SHADOWSHIGHLIGHTS,
+  FRAG_HIGHLIGHTRECOVERY,
   FRAG_LAYER_BLEND,
 } from './sources';
 import type { PassDescriptor, PassRuntime, SubPassTexture, MaskUpload } from './passDescriptors';
@@ -38,8 +39,9 @@ import { ENHANCE_PROGRAM_SOURCES } from './enhance.frag';
 import { enhanceImage, DEFAULT_ENHANCE_PARAMS } from '../utils/enhanceChain';
 import type { EnhanceParams, EnhanceResult } from '../utils/enhanceChain';
 import { computeGlobalEdgeMax } from '../utils/enhanceOps';
-import { basicAdjUniforms, exposureUniforms, shadowsHighlightsUniforms, gainsUniforms, colorBalanceUniforms, vignetteUniforms } from './uniforms';
+import { basicAdjUniforms, exposureUniforms, shadowsHighlightsUniforms, highlightRecoveryUniforms, gainsUniforms, colorBalanceUniforms, vignetteUniforms } from './uniforms';
 import type { ShadowsHighlightsUniformParams } from './uniforms';
+import { recoverHighlights } from '../modules/HighlightRecoveryModule';
 import type { DehazeState } from '../services/WebGLImageProcessor';
 import { webGLImageProcessor } from '../services/WebGLImageProcessor';
 import { ExposureModule } from '../modules/ExposureModule';
@@ -75,6 +77,7 @@ const PROGRAM_SOURCES: Record<string, string> = {
   lateralca: FRAG_LATERALCA,
   vignette: FRAG_VIGNETTE,
   shadowshighlights: FRAG_SHADOWSHIGHLIGHTS,
+  highlightrecovery: FRAG_HIGHLIGHTRECOVERY,
   layerblend: FRAG_LAYER_BLEND,
 };
 
@@ -1425,6 +1428,29 @@ export class GpuPreviewPipeline {
       const shOk = shMaxDiff < 0.02;
       logger.info(`[GPU-PIPELINE] s/h self-test maxDiff=${shMaxDiff.toExponential(2)} ${shOk ? 'PASS' : 'FAIL'}`);
 
+      // ── 3b. highlight-recovery sub-test (M1) ────────────────────────────────
+      // Pointwise per-channel reconstruction. The 16x16 gradient reaches the highlight
+      // zone at its bright corner, so recovery engages. Compare the GPU pass to the pure
+      // CPU recoverHighlights() (the single source of truth for both paths).
+      const hrStrength = 80;
+      const hrPass: PassDescriptor = {
+        id: 'highlightrecovery',
+        programKey: 'highlightrecovery',
+        setUniforms: (gl, prog, _rt) => highlightRecoveryUniforms({ strength: hrStrength })(gl, prog),
+      };
+      this.setSource(data, w, h);
+      this.render([hrPass]);
+      const gpuHR = this.readback();
+      const refHR = new Float32Array(data);
+      recoverHighlights(refHR, w, h, 4, hrStrength);
+      let hrMaxDiff = 0;
+      for (let i = 0; i < refHR.length; i++) {
+        hrMaxDiff = Math.max(hrMaxDiff, Math.abs(gpuHR[i] - refHR[i]));
+      }
+      // Pointwise smoothstep + one divide — float-precision only.
+      const hrOk = hrMaxDiff < 1e-3;
+      logger.info(`[GPU-PIPELINE] highlight-recovery self-test maxDiff=${hrMaxDiff.toExponential(2)} ${hrOk ? 'PASS' : 'FAIL'}`);
+
       // ── 4. local-adjustments sub-test (masks + sequential blend) ────────────
       // The hard one: build a real LA module with TWO enabled radial-mask layers, each
       // with a non-trivial basicAdj, then render through the multi-pass LA descriptor
@@ -1712,8 +1738,8 @@ export class GpuPreviewPipeline {
       }
       logger.info(`[GPU-PIPELINE] enhance-upscale self-test maxDiff=${enhUpMaxDiff.toExponential(2)} ${enhUpOk ? 'PASS' : 'FAIL'}`);
 
-      const ok = basicAdjOk && exposureOk && shOk && laOk && wbOk && tcOk && cbOk && vigOk && enhSharpenOk && enhUpOk;
-      const maxDiff = Math.max(basicAdjMaxDiff, exposureMaxDiff, shMaxDiff, laMaxDiff, wbMaxDiff, tcMaxDiff, cbMaxDiff, vigMaxDiff, enhSharpenMaxDiff, enhUpMaxDiff);
+      const ok = basicAdjOk && exposureOk && shOk && hrOk && laOk && wbOk && tcOk && cbOk && vigOk && enhSharpenOk && enhUpOk;
+      const maxDiff = Math.max(basicAdjMaxDiff, exposureMaxDiff, shMaxDiff, hrMaxDiff, laMaxDiff, wbMaxDiff, tcMaxDiff, cbMaxDiff, vigMaxDiff, enhSharpenMaxDiff, enhUpMaxDiff);
 
       // Map each failed sub-test to the MODULE ID buildPassList uses, so a broken GPU shader
       // is routed to the CPU bridge (proven path) instead of corrupting the image (e.g. the
@@ -1723,6 +1749,7 @@ export class GpuPreviewPipeline {
       if (!basicAdjOk) unsafe.push('basicadj');
       if (!exposureOk) unsafe.push('exposure');
       if (!shOk) unsafe.push('shadowshighlights');
+      if (!hrOk) unsafe.push('highlightrecovery');
       if (!laOk) unsafe.push('localadjustments');
       if (!wbOk) unsafe.push('temperature');
       if (!tcOk) unsafe.push('tonecurve');
@@ -1743,7 +1770,7 @@ export class GpuPreviewPipeline {
       return {
         ok: false,
         maxDiff: Infinity,
-        unsafe: ['basicadj', 'exposure', 'shadowshighlights', 'localadjustments', 'temperature', 'tonecurve', 'colorbalance', 'lenscorrections', 'enhance', 'enhance-upscale'],
+        unsafe: ['basicadj', 'exposure', 'shadowshighlights', 'highlightrecovery', 'localadjustments', 'temperature', 'tonecurve', 'colorbalance', 'lenscorrections', 'enhance', 'enhance-upscale'],
       };
     }
   }

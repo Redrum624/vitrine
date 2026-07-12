@@ -26,6 +26,7 @@ import {
   lateralCAUniforms,
   vignetteUniforms,
   shadowsHighlightsUniforms,
+  highlightRecoveryUniforms,
   layerBlendUniforms,
 } from './uniforms';
 import type { ShadowsHighlightsUniformParams } from './uniforms';
@@ -55,6 +56,7 @@ export const GPU_MODULE_IDS: readonly string[] = [
   'colorbalance',
   'lenscorrections',
   'shadowshighlights',
+  'highlightrecovery',
 ];
 
 /**
@@ -404,6 +406,22 @@ function buildShadowsHighlightsPass(params: Record<string, unknown>): PassDescri
 }
 
 /**
+ * HighlightRecovery (M1) is a pure pointwise pass — always GPU-representable (no cross-pixel
+ * gather, no dimension/dehaze). At strength 0 the shader computes identity, matching the CPU
+ * module's no-op, so we build the pass unconditionally (mirrors exposure/basicadj).
+ */
+function buildHighlightRecoveryPass(params: Record<string, unknown>): PassDescriptor {
+  const strength = typeof params.strength === 'number' && Number.isFinite(params.strength)
+    ? params.strength
+    : 0;
+  return {
+    id: 'highlightrecovery',
+    programKey: 'highlightrecovery',
+    setUniforms: (gl, prog, _rt) => highlightRecoveryUniforms({ strength })(gl, prog),
+  };
+}
+
+/**
  * LensCorrections maps to up to three sub-passes (distortion, lateralCA, vignette).
  * Each setUniforms reads width/height from rt — no baked-in 0,0 placeholders.
  * Returns an empty array when all sub-effects are identity/disabled.
@@ -725,6 +743,9 @@ export function buildPassList(modules: MinimalModule[], opts?: BuildPassOpts): P
         else cpuBridges.push(id);
         break;
       }
+      case 'highlightrecovery':
+        passes.push(buildHighlightRecoveryPass(params));
+        break;
       default:
         // Future GPU modules in GPU_MODULE_IDS without a dedicated builder yet.
         cpuBridges.push(id);

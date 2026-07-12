@@ -210,6 +210,19 @@ export function shadowsHighlightsUniforms(p: ShadowsHighlightsUniformParams): Un
   };
 }
 
+// ── Highlight reconstruction pass (M1) ───────────────────────────────────────
+
+/** Params for the highlight-recovery GPU pass. Field name matches HighlightRecoveryModule. */
+export interface HighlightRecoveryUniformParams {
+  strength: number; // 0..100
+}
+
+export function highlightRecoveryUniforms(p: HighlightRecoveryUniformParams): UniformSetter {
+  return (gl, prog) => {
+    gl.uniform1f(gl.getUniformLocation(prog, 'u_strength'), p.strength);
+  };
+}
+
 // ── Local-adjustment layer blend pass (Task 10) ──────────────────────────────
 
 /**
