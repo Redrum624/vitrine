@@ -275,10 +275,20 @@ class EnhanceService {
       // so this explicit write — of the PRE-bake native-dims `editState` plus the {scale, mode}
       // marker — is what survives quit/reopen. Re-deriving on re-apply reproduces this exact result.
       store.setUpscaleIntent({ scale: params.scale, mode });
-      // Keep the durable bake order in sync with the restore stack (Z1) so a stacked reopen replays
-      // the bakes in the exact order applied. Set BEFORE the persist write / serialize marker emit.
+      // Keep the IN-SESSION bake order in sync with the restore stack (drives _popAndRestore's
+      // re-seeding and the panel's stacked notice). Set BEFORE the persist / serialize marker emit.
       store.setBakeOrder(this.restoreStack.map((rp) => rp.kind));
-      editPersistenceService.persistBakedUpscaleIntent(editState, params.scale, mode);
+      if (this.restoreStack.length > 1) {
+        // STACKED bake (review MEDIUM fix): this upscale baked onto an already-live bake. There is
+        // one `modules` slot on disk — persisting THIS bake's pre-bake state (the post-first-bake
+        // params) would permanently drop the user's pre-FIRST-bake edits. So a stacked bake is
+        // IN-SESSION ONLY: skip the persist (disk keeps the FIRST bake's state + intent) and
+        // suspend the flush redirect (post-stack edits are in-session only too). See the
+        // stackedBakeActive doc in EditPersistenceService for the full corner.
+        editPersistenceService.suspendRedirectForStackedBake();
+      } else {
+        editPersistenceService.persistBakedUpscaleIntent(editState, params.scale, mode);
+      }
       checkpointService.recordLabeled(`Enhanced ×${params.scale} (${mode === 'ai' ? 'AI' : 'Standard'})`, this.getRestoreDepth());
       store.notifyExternalParamsChange();
       store.triggerReprocessing();
@@ -308,7 +318,9 @@ class EnhanceService {
    * CROSS-SESSION (Z1): like upscale's Q7 intent, the durable INTENT (not the ~pixels) is persisted —
    * a `bakedDeblur` marker on the saved state. On reopen the panel offers a one-click re-apply (the
    * deblurred pixels re-derive) and export warns rather than silently dropping it. Post-deblur edits
-   * persist via the flush redirect (editsOnBakedBase) and replay on re-apply.
+   * persist via the flush redirect (editsOnBakedBase) and replay on re-apply. EXCEPTION: a deblur
+   * that STACKS onto an already-live bake is in-session only (its persist would clobber the first
+   * bake's pre-bake edits — see the stacked corner in EditPersistenceService).
    */
   async applyMotionDeblur(): Promise<void> {
     if (guardDeveloping(notificationService.info.bind(notificationService), 'AI Motion Deblur')) return;
@@ -376,7 +388,16 @@ class EnhanceService {
       // the bakedDeblur marker — is what survives quit/reopen; re-applying re-derives the same pixels.
       store.setDeblurIntent(true);
       store.setBakeOrder(this.restoreStack.map((rp) => rp.kind));
-      editPersistenceService.persistBakedDeblurIntent(editState);
+      if (this.restoreStack.length > 1) {
+        // STACKED bake (review MEDIUM fix): this deblur baked onto an already-live bake (e.g. an
+        // upscale). Persisting its intent would overwrite disk.modules with the POST-upscale state,
+        // permanently dropping the pre-upscale grading. Stacked bakes are IN-SESSION ONLY — skip the
+        // persist (disk keeps the FIRST bake's state) and suspend the flush redirect. See the
+        // stackedBakeActive doc in EditPersistenceService for the full corner.
+        editPersistenceService.suspendRedirectForStackedBake();
+      } else {
+        editPersistenceService.persistBakedDeblurIntent(editState);
+      }
       checkpointService.recordLabeled('Motion deblur (AI)', this.getRestoreDepth());
       store.notifyExternalParamsChange();
       store.triggerReprocessing();
@@ -431,11 +452,17 @@ class EnhanceService {
         // A deblur remains ONLY if one is still somewhere in the remaining stack.
         store.setDeblurIntent(this.restoreStack.some((rp) => rp.kind === 'deblur'));
       }
-      // Persist the re-seeded state NOW. flush() would early-return here (a bake marker is still
-      // active), so without this explicit write a quit right after a partial unwind leaves the disk
-      // holding the JUST-POPPED (now-wrong) level. persistNow bypasses that early-return and writes
-      // serialize()'s current snapshot (restored module params + the just-updated store intent).
-      editPersistenceService.persistNow();
+      // Persist the re-seeded state NOW — but only when the unwind lands on a SINGLE remaining
+      // level. flush() would early-return here (a bake marker is still active), so without this
+      // explicit write a quit right after the partial unwind leaves the disk holding the JUST-POPPED
+      // (now-wrong) level. persistNow bypasses that early-return, writes serialize()'s current
+      // snapshot (restored module params + the just-updated store intent), and re-enables the flush
+      // redirect. While the REMAINING depth is still >1 (unwinding a deeper stack), the disk already
+      // holds the FIRST bake's correct state and the stacked levels are in-session only (review
+      // MEDIUM fix) — writing here would clobber it, so skip and keep the redirect suspended.
+      if (this.restoreStack.length === 1) {
+        editPersistenceService.persistNow();
+      }
     }
     return true;
   }

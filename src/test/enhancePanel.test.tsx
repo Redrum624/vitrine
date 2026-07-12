@@ -25,6 +25,8 @@ jest.mock('../services/EnhanceService', () => ({
 import EnhanceModuleComponent from '../components/Modules/EnhanceModuleComponent';
 import { enhanceModule } from '../modules/EnhanceModule';
 import { enhanceService } from '../services/EnhanceService';
+import { imageService } from '../services/ImageService';
+import { editPersistenceService } from '../services/EditPersistenceService';
 import { NoiseReductionModule } from '../modules/NoiseReductionModule';
 import { useAppStore } from '../stores/appStore';
 
@@ -403,5 +405,52 @@ describe('EnhanceModuleComponent — reopen re-apply notice for deblur + stacked
     useAppStore.setState({ deblurIntent: true });
     render(<EnhanceModuleComponent module={enhanceModule} noiseReductionModule={makeNrModule()} />);
     expect(screen.queryByTestId('upscale-reapply-notice')).toBeNull();
+  });
+});
+
+describe('EnhanceModuleComponent — re-apply replays post-bake edits; mid-replay failure re-attaches (Z1 LOW)', () => {
+  const savedEdits = { modules: { basicadj: { exposure: 0.7 } } };
+
+  beforeEach(() => {
+    enhanceModule.resetParams();
+    mockBaked = false;
+    mockDeblurBaked = false;
+    mockOriginalDims = { width: 2000, height: 1500 };
+    useAppStore.setState({ upscaleProgress: null, upscaleMode: null, upscaleIntent: null, deblurIntent: false, bakeOrder: [], developing: false });
+    (enhanceService.applyUpscale as jest.Mock).mockClear();
+    (enhanceService.applyUpscale as jest.Mock).mockResolvedValue(undefined);
+    (enhanceService.applyMotionDeblur as jest.Mock).mockClear();
+    (enhanceService.applyMotionDeblur as jest.Mock).mockResolvedValue(undefined);
+    // handleReapply reads the saved state through the CURRENT image's path.
+    (imageService.getCurrentImage as jest.Mock).mockReturnValue({ filePath: '/test/shot.orf', width: 100, height: 100 });
+    jest.spyOn(editPersistenceService, 'getSavedEditState')
+      .mockResolvedValue({ version: 1, modules: {}, editsOnBakedBase: savedEdits });
+    jest.spyOn(editPersistenceService, 'applyPostBakeEdits').mockImplementation(() => {});
+    jest.spyOn(editPersistenceService, 'persistPostBakeEdits').mockImplementation(() => {});
+  });
+  afterEach(() => {
+    jest.restoreAllMocks();
+    (imageService.getCurrentImage as jest.Mock).mockReturnValue(null);
+    useAppStore.setState({ upscaleIntent: null, deblurIntent: false, bakeOrder: [], developing: false });
+  });
+
+  it('SUCCESS: applies the saved post-bake edits and durably re-attaches them (persistPostBakeEdits, not flush)', async () => {
+    useAppStore.setState({ upscaleIntent: { scale: 2, mode: 'ai' } });
+    render(<EnhanceModuleComponent module={enhanceModule} noiseReductionModule={makeNrModule()} />);
+    await act(async () => { fireEvent.click(screen.getByTestId('upscale-reapply-btn')); });
+    expect(editPersistenceService.applyPostBakeEdits).toHaveBeenCalledWith(savedEdits, 100, 100);
+    expect(editPersistenceService.persistPostBakeEdits).toHaveBeenCalledWith(savedEdits);
+  });
+
+  it('MID-REPLAY FAILURE: re-attaches the already-read edits to disk instead of dropping them', async () => {
+    // Stacked replay: upscale succeeds (its persist consumed editsOnBakedBase), deblur throws.
+    useAppStore.setState({ upscaleIntent: { scale: 2, mode: 'ai' }, deblurIntent: true, bakeOrder: ['upscale', 'deblur'] });
+    (enhanceService.applyMotionDeblur as jest.Mock).mockRejectedValue(new Error('deblur backend gone'));
+    render(<EnhanceModuleComponent module={enhanceModule} noiseReductionModule={makeNrModule()} />);
+    await act(async () => { fireEvent.click(screen.getByTestId('upscale-reapply-btn')); });
+    // The edits were never applied (replay aborted) but ARE re-attached for a retry / next reopen.
+    expect(editPersistenceService.applyPostBakeEdits).not.toHaveBeenCalled();
+    expect(editPersistenceService.persistPostBakeEdits).toHaveBeenCalledWith(savedEdits);
+    expect(screen.getByRole('alert')).toHaveTextContent('deblur backend gone');
   });
 });

@@ -126,12 +126,15 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
   const handleReapply = useCallback(async () => {
     if (!upscaleIntent && !deblurIntent) return;
     setBusy(true); setError(null);
+    // Hoisted so the catch can re-attach the read edits after a mid-replay failure (review LOW fix).
+    let postBakeEditsRead: NonNullable<Awaited<ReturnType<typeof editPersistenceService.getSavedEditState>>>['editsOnBakedBase'] | null = null;
     try {
       // Read the saved post-bake edits BEFORE the bakes run — each bake's persist write overwrites
       // the disk state without editsOnBakedBase, so reading afterwards would miss them.
       const img = imageService.getCurrentImage();
       const saved = img?.filePath ? await editPersistenceService.getSavedEditState(img.filePath) : null;
       const postBakeEdits = saved?.editsOnBakedBase ?? null;
+      postBakeEditsRead = postBakeEdits;
       // Derive the replay order: an explicit stacked bakeOrder, else the single active intent.
       const order = bakeOrder.length
         ? bakeOrder
@@ -151,12 +154,18 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
           editPersistenceService.applyPostBakeEdits(postBakeEdits, baked.width, baked.height);
           useAppStore.getState().notifyExternalParamsChange();
           useAppStore.getState().triggerReprocessing();
-          editPersistenceService.flush(); // redirect-persist the replayed post-bake edits
+          // Deterministically re-attach the replayed edits to disk. NOT a plain flush(): the redirect
+          // is suspended when the replay stacked >1 bake, and flush would then silently drop them.
+          editPersistenceService.persistPostBakeEdits(postBakeEdits);
         }
       }
       setRevertVersion((v) => v + 1);
       enhanceService.markEnhanceApplied();
     } catch (e) {
+      // Mid-replay failure (review LOW fix): an earlier bake's persist write already consumed
+      // editsOnBakedBase from disk before a later bake threw. Re-attach the already-read edits so a
+      // retry / the next reopen can still replay them (no-ops if no bake persisted — disk untouched).
+      if (postBakeEditsRead) editPersistenceService.persistPostBakeEdits(postBakeEditsRead);
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);

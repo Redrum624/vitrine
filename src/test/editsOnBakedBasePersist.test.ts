@@ -241,4 +241,71 @@ describe('EditPersistenceService — edits after a bake persist + deblur intent 
       expect(basicadj().getParams().exposure).toBeCloseTo(0.7);
     });
   });
+
+  describe('STACKED bake — second bake is in-session only (review MEDIUM fix)', () => {
+    beforeEach(() => {
+      // First bake persists the pre-FIRST-bake modules + intent (the only durable write).
+      mockImageService.isBakedUpscaleActive.mockReturnValue(true);
+      useAppStore.getState().setUpscaleIntent({ scale: 2, mode: 'ai' });
+      editPersistenceService.persistBakedUpscaleIntent({ version: 1, modules: { basicadj: { exposure: 0.4 } } }, 2, 'ai');
+    });
+
+    it('the first bake write keeps the pre-first-bake modules and carries NO second-bake marker', () => {
+      const w = lastWrite();
+      expect(w.modules).toEqual({ basicadj: { exposure: 0.4 } });
+      expect(w.bakedUpscale).toEqual({ scale: 2, mode: 'ai' });
+      expect(w.bakedDeblur).toBeUndefined();
+    });
+
+    it('after suspendRedirectForStackedBake, post-second-bake edits write NOTHING (disk stays frozen)', () => {
+      // Second bake stacks (deblur on the live upscale): EnhanceService suspends instead of persisting.
+      mockImageService.isBakedDeblurActive.mockReturnValue(true);
+      editPersistenceService.suspendRedirectForStackedBake();
+      storeSetMock.mockClear();
+      basicadj().setParams({ contrast: 0.5 });
+      editPersistenceService.flush();
+      expect(storeSetMock).not.toHaveBeenCalled(); // editsOnBakedBase NOT written post-second-bake
+    });
+
+    it('a partial unwind landing on the single remaining level resumes the redirect (persistNow)', () => {
+      editPersistenceService.suspendRedirectForStackedBake();
+      // Unwind 2→1: _popAndRestore restores the first level's params then calls persistNow.
+      mockImageService.isBakedDeblurActive.mockReturnValue(false);
+      imageProcessingPipeline.resetAllModules();
+      editPersistenceService.persistNow();
+      // The redirect works again: a post-bake edit writes a fresh editsOnBakedBase.
+      basicadj().setParams({ exposure: 0.9 });
+      storeSetMock.mockClear();
+      editPersistenceService.flush();
+      expect(storeSetMock).toHaveBeenCalledTimes(1);
+      expect(lastWrite().editsOnBakedBase.modules.basicadj).toEqual(expect.objectContaining({ exposure: 0.9 }));
+    });
+  });
+
+  describe('persistPostBakeEdits — mid-replay failure re-attach (review LOW fix)', () => {
+    it('re-writes the frozen pre-bake top-level + the given editsOnBakedBase', () => {
+      mockImageService.isBakedUpscaleActive.mockReturnValue(true);
+      useAppStore.getState().setUpscaleIntent({ scale: 2, mode: 'ai' });
+      // The first replayed bake's persist consumed editsOnBakedBase from disk …
+      editPersistenceService.persistBakedUpscaleIntent({ version: 1, modules: { basicadj: { exposure: 0.4 } } }, 2, 'ai');
+      storeSetMock.mockClear();
+      // … a later bake failed; the already-read edits are re-attached.
+      editPersistenceService.persistPostBakeEdits({ modules: { basicadj: { contrast: 0.3 } } });
+      expect(storeSetMock).toHaveBeenCalledTimes(1);
+      const w = lastWrite();
+      expect(w.modules).toEqual({ basicadj: { exposure: 0.4 } }); // pre-bake top-level intact
+      expect(w.bakedUpscale).toEqual({ scale: 2, mode: 'ai' });
+      expect(w.editsOnBakedBase).toEqual({ modules: { basicadj: { contrast: 0.3 } } });
+      // Baselines re-seeded: an unchanged follow-up flush writes nothing more.
+      storeSetMock.mockClear();
+      editPersistenceService.flush();
+      expect(storeSetMock).not.toHaveBeenCalled();
+    });
+
+    it('no-ops when NO bake persisted this session (disk untouched — the edits are still there)', () => {
+      // Fresh restore → bakedBaseState is null.
+      editPersistenceService.persistPostBakeEdits({ modules: { basicadj: { contrast: 0.3 } } });
+      expect(storeSetMock).not.toHaveBeenCalled();
+    });
+  });
 });

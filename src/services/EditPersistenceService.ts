@@ -75,10 +75,14 @@ interface EditState {
   // record). Written by persistBakedDeblurIntent (on bake) and emitted by serialize() from the
   // store's deblurIntent. Optional + never version-bumped → old states restore as "no deblur".
   bakedDeblur?: Record<string, never>;
-  // Ordered replay list when MULTIPLE bakes are stacked (Z1): e.g. ['upscale','deblur']. Present
-  // only when >1 bake is in the durable intent — a single bake is fully described by bakedUpscale
-  // / bakedDeblur alone. Emitted by serialize() from the store's bakeOrder; consumed by the reopen
-  // re-apply so the bakes replay in the exact order they were originally applied.
+  // Ordered replay list when MULTIPLE bakes are in the durable intent: e.g. ['upscale','deblur'].
+  // NOTE (review MEDIUM fix): a live STACKED bake is in-session only (its intent never persists —
+  // see stackedBakeActive below), so this field is no longer produced by the bake persist writers.
+  // Both markers can still coexist on disk via the UNAPPLIED-intent corner (a reopened, not-yet-
+  // re-applied intent folded into a fresh single bake's persist) — the reopen re-apply then derives
+  // the order from the markers (Canvas seeds ['upscale','deblur']). Kept optional + tolerated on
+  // read for forward/backward compatibility; emitted by serialize() only from an in-session store
+  // bakeOrder >1 (reaches checkpoints, never the edits store).
   bakeOrder?: ('upscale' | 'deblur')[];
   // Edits made AFTER a bake (Z1 — the standing MEDIUM). A bake resets the pipeline modules to
   // NEUTRAL (the pre-bake edits are incorporated into the new base pixels), so a normal flush of the
@@ -106,6 +110,20 @@ class EditPersistenceService {
   // LAST-written post-bake edits so an untouched post-bake state writes nothing.
   private bakedBaseState: EditState | null = null;
   private bakedEditsBaseline = '';
+  // THE STACKED CORNER (Z1 review MEDIUM). There is ONE `modules` slot on disk, but a stacked bake
+  // has TWO distinct pre-bake states (the pre-first-bake grading vs the post-first-bake state the
+  // second bake baked from). Persisting the SECOND bake's intent would overwrite disk.modules with
+  // the POST-first-bake state — permanently dropping the user's original pre-first-bake edits
+  // (a regression: pre-Z1 the second bake simply didn't persist, so disk kept the correct state).
+  // So a bake that STACKS onto an already-live bake is IN-SESSION ONLY: its intent is never
+  // persisted, disk keeps the FIRST bake's pre-bake modules + intent, and the reopen notice offers
+  // re-apply of the FIRST bake only. While stacked, the flush REDIRECT is suspended too (this
+  // flag): post-second-bake edits are edits on a DOUBLY-baked base — replaying them after
+  // re-applying only the FIRST bake would be wrong — so they are in-session only as well, and any
+  // editsOnBakedBase already on disk stays FROZEN at its pre-second-bake content (it belongs to
+  // the first bake level and replays correctly there). Cleared when the stack unwinds back to a
+  // single level / native base (persistNow) or a new image opens (restoreState).
+  private stackedBakeActive = false;
 
   private keyForPath(path: string): string {
     return `edits:${path}`;
@@ -236,6 +254,7 @@ class EditPersistenceService {
     // post-bake redirect state carried over from a previous image so flush() takes the normal path.
     this.bakedBaseState = null;
     this.bakedEditsBaseline = '';
+    this.stackedBakeActive = false;
     return restored;
   }
 
@@ -307,6 +326,9 @@ class EditPersistenceService {
       // Safety: no captured pre-bake state (should not happen — the bake writers set it). Do NOT
       // fall through to a normal flush, which would clobber the pre-bake modules with neutral state.
       if (!this.bakedBaseState) return;
+      // STACKED bake live → the redirect is suspended (see the stackedBakeActive doc): post-second-
+      // bake edits are in-session only, and disk stays frozen at the FIRST bake's state.
+      if (this.stackedBakeActive) return;
       const edits = this.currentBakedEdits();
       const editsJson = JSON.stringify(edits);
       if (editsJson === this.bakedEditsBaseline) return; // post-bake state unchanged — nothing new
@@ -359,6 +381,44 @@ class EditPersistenceService {
   }
 
   /**
+   * Suspend the flush REDIRECT because a bake just STACKED onto an already-live bake (Z1 review
+   * MEDIUM — see the stackedBakeActive field doc for the full corner). Called by EnhanceService
+   * INSTEAD of a persist writer for the second (and any deeper) bake level: nothing is written,
+   * disk keeps the FIRST bake's pre-bake modules + intent + frozen editsOnBakedBase, and subsequent
+   * flushes write nothing until the stack unwinds back to a single level (persistNow re-enables).
+   */
+  suspendRedirectForStackedBake(): void {
+    this.stackedBakeActive = true;
+  }
+
+  /**
+   * Durably re-attach post-bake edits to the persisted state (Z1 review LOW + replay write).
+   * Two callers in the reopen re-apply flow (EnhanceModuleComponent.handleReapply):
+   *  (a) SUCCESS — after the bakes replayed and applyPostBakeEdits restored the edits, this writes
+   *      them back to disk deterministically (each bake's persist write had consumed the field);
+   *  (b) MID-REPLAY FAILURE — a later bake threw AFTER an earlier bake's persist already consumed
+   *      editsOnBakedBase from disk; re-attaching the already-read edits keeps them recoverable by
+   *      a retry or the next reopen instead of silently dropping them.
+   * Writes {frozen pre-bake top-level, editsOnBakedBase} and re-seeds the baselines (so an
+   * unchanged follow-up flush writes nothing). No-ops when NO bake persisted this session
+   * (bakedBaseState null — the disk was never touched, so the edits are still there).
+   */
+  persistPostBakeEdits(edits: NonNullable<EditState['editsOnBakedBase']>): void {
+    const img = imageService.getCurrentImage();
+    if (!img?.filePath || !window.electronAPI?.storeSet) return;
+    if (!this.bakedBaseState) return;
+    const state: EditState = { ...this.bakedBaseState, editsOnBakedBase: edits };
+    // Seed the redirect baseline from the LIVE pipeline (not from `edits`): "nothing new to redirect
+    // since this write". Critical for the failure path — the read edits were NOT applied to the
+    // pipeline there, so seeding from `edits` would make the app-close flush see the (neutral)
+    // post-bake pipeline as a change and overwrite the just-re-attached edits. A REAL later edit
+    // still overwrites them — the correct two-timelines invalidation.
+    this.bakedEditsBaseline = JSON.stringify(this.currentBakedEdits());
+    this.baseline = JSON.stringify(state);
+    this.write(img.filePath, state);
+  }
+
+  /**
    * Persist the PRE-bake edit state (native-dims module params) plus the upscale INTENT marker for
    * the current image. Called by EnhanceService.applyUpscale right after a bake: flush() early-returns
    * while a bake is active (it would otherwise persist the upscaled-dims params over the native saved
@@ -372,7 +432,10 @@ class EditPersistenceService {
     if (!img?.filePath || !window.electronAPI?.storeSet) return;
     // Rebuild the marker set from the explicit args + the store (the single source of truth) rather
     // than inheriting whatever serialize() froze into baseState — so a stale marker can't leak.
-    const state: EditState = this.withStackMarkers(baseState, { scale, mode });
+    // Folding the store's deblurIntent preserves an UNAPPLIED (reopened, not-yet-re-applied) deblur
+    // intent instead of erasing it — this writer never runs while a deblur bake is LIVE (a stacked
+    // bake skips persistence entirely; see suspendRedirectForStackedBake).
+    const state: EditState = this.withStackMarkers(baseState, { scale, mode }, useAppStore.getState().deblurIntent);
     // Freeze this as the post-bake redirect base so subsequent post-bake edits write into
     // editsOnBakedBase rather than clobbering these pre-bake modules.
     this.setBakedBaseline(state);
@@ -384,8 +447,9 @@ class EditPersistenceService {
    * `bakedDeblur` presence marker for the current image: flush() redirects while a bake is live, so
    * THIS is the single write that captures the durable deblur intent. `baseState` is the serialize()
    * snapshot taken BEFORE the bake reset the modules, so a reopen restores the user's real pre-deblur
-   * edits (the deblurred pixels re-derive on re-apply). Folds in a stacked upscale marker + bakeOrder
-   * from the store, and freezes the post-bake redirect base (see setBakedBaseline).
+   * edits (the deblurred pixels re-derive on re-apply). Folds in an UNAPPLIED upscale intent from the
+   * store (this writer never runs while an upscale bake is LIVE — a stacked bake skips persistence;
+   * see suspendRedirectForStackedBake), and freezes the post-bake redirect base (setBakedBaseline).
    */
   persistBakedDeblurIntent(baseState: EditState): void {
     const img = imageService.getCurrentImage();
@@ -426,6 +490,10 @@ class EditPersistenceService {
     const img = imageService.getCurrentImage();
     if (!img?.filePath || !window.electronAPI?.storeSet) return;
     const cur = this.serialize();
+    // Called only when the stack has unwound to a SINGLE remaining level or the native base
+    // (EnhanceService skips persistNow while the remaining depth is still >1 — disk already holds
+    // the FIRST bake's state), so any stacked-bake redirect suspension ends here.
+    this.stackedBakeActive = false;
     if (imageService.isBakedUpscaleActive() || imageService.isBakedDeblurActive()) {
       // PARTIAL unwind (Z1): a bake level remains. The just-restored state is the remaining level's
       // pre-bake baseline; re-freeze it as the redirect base and DROP the popped level's

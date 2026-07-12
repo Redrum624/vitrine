@@ -25,10 +25,11 @@ jest.mock('../services/ImageProcessingPipeline', () => ({ imageProcessingPipelin
   invalidateModuleCache: jest.fn(),
 } }));
 // EditPersistenceService is mocked — the disk-write coverage lives in editsOnBakedBasePersist.test.ts;
-// here we assert the STORE markers EnhanceService maintains.
+// here we assert the STORE markers + the persist/suspend CALL PATTERN EnhanceService maintains.
 jest.mock('../services/EditPersistenceService', () => ({ editPersistenceService: {
   serialize: jest.fn(() => ({ version: 1, modules: {} })), restore: jest.fn(), flush: jest.fn(),
   persistNow: jest.fn(), persistBakedUpscaleIntent: jest.fn(), persistBakedDeblurIntent: jest.fn(),
+  suspendRedirectForStackedBake: jest.fn(),
 } }));
 jest.mock('../services/EnhanceWorkerClient', () => ({ enhanceWorkerClient: {
   run: jest.fn(async () => ({ enhanced: new Float32Array(768 * 768 * 4), base: new Float32Array(768 * 768 * 4), width: 768, height: 768 })),
@@ -41,6 +42,7 @@ jest.mock('../services/AiDeblurClient', () => ({ aiDeblurClient: {
 jest.mock('../services/CheckpointService', () => ({ checkpointService: { record: jest.fn(), recordLabeled: jest.fn(), setBakeBridge: jest.fn() } }));
 
 import { enhanceService } from '../services/EnhanceService';
+import { editPersistenceService } from '../services/EditPersistenceService';
 import { useAppStore } from '../stores/appStore';
 import { DEFAULT_ENHANCE_PARAMS } from '../utils/enhanceChain';
 
@@ -93,5 +95,43 @@ describe('EnhanceService — stacked upscale + deblur bake order', () => {
     expect(useAppStore.getState().bakeOrder).toEqual([]);
     expect(useAppStore.getState().deblurIntent).toBe(false);
     expect(useAppStore.getState().upscaleIntent).toBeNull();
+  });
+});
+
+describe('EnhanceService — a STACKED bake is in-session only (review MEDIUM fix)', () => {
+  it('the second (stacked) bake does NOT persist its intent — it suspends the redirect instead', async () => {
+    await enhanceService.applyUpscale({ ...DEFAULT_ENHANCE_PARAMS, upscale: true, scale: 2 });
+    expect(editPersistenceService.persistBakedUpscaleIntent).toHaveBeenCalledTimes(1);
+    expect(editPersistenceService.suspendRedirectForStackedBake).not.toHaveBeenCalled();
+
+    await enhanceService.applyMotionDeblur(); // stacks onto the live upscale
+    // Disk must keep the FIRST bake's pre-bake modules + intent — no second persist write.
+    expect(editPersistenceService.persistBakedDeblurIntent).not.toHaveBeenCalled();
+    expect(editPersistenceService.suspendRedirectForStackedBake).toHaveBeenCalledTimes(1);
+  });
+
+  it('a stacked second UPSCALE also skips its persist (kind-agnostic)', async () => {
+    await enhanceService.applyMotionDeblur();
+    expect(editPersistenceService.persistBakedDeblurIntent).toHaveBeenCalledTimes(1);
+
+    await enhanceService.applyUpscale({ ...DEFAULT_ENHANCE_PARAMS, upscale: true, scale: 2 });
+    expect(editPersistenceService.persistBakedUpscaleIntent).not.toHaveBeenCalled();
+    expect(editPersistenceService.suspendRedirectForStackedBake).toHaveBeenCalledTimes(1);
+  });
+
+  it('partial unwind persists ONLY when landing on a single remaining level (3→2 skips, 2→1 writes)', async () => {
+    await enhanceService.applyUpscale({ ...DEFAULT_ENHANCE_PARAMS, upscale: true, scale: 2 });
+    await enhanceService.applyMotionDeblur();
+    await enhanceService.applyMotionDeblur(); // depth 3
+    expect(enhanceService.getRestoreDepth()).toBe(3);
+    (editPersistenceService.persistNow as jest.Mock).mockClear();
+
+    enhanceService.revert(); // 3 → 2: still stacked — disk already holds the FIRST bake's state
+    expect(enhanceService.getRestoreDepth()).toBe(2);
+    expect(editPersistenceService.persistNow).not.toHaveBeenCalled();
+
+    enhanceService.revert(); // 2 → 1: single level remains — re-seed the disk (S1 semantics)
+    expect(enhanceService.getRestoreDepth()).toBe(1);
+    expect(editPersistenceService.persistNow).toHaveBeenCalledTimes(1);
   });
 });
