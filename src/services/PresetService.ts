@@ -22,7 +22,14 @@ export interface PresetLocalAdjustmentLayer {
 }
 
 interface ModuleInterface {
-  isEnabled?(): boolean;
+  // Every real PipelineModule (see ImageProcessingPipeline.ts) exposes `isEnabled` as a
+  // property (a public field or getter) — never a callable. `isEnabled?: boolean` was
+  // previously typed as a method (`isEnabled?(): boolean`), so `moduleInterface.isEnabled?.()`
+  // only "worked" for modules with NO isEnabled field at all (exposure/temperature/basicadj,
+  // where the optional call short-circuited); modules that DO carry the field as a boolean
+  // (tonecurve/colorbalance/shadowshighlights/highlightrecovery) threw "is not a function",
+  // silently dropping their capture (caught by the per-module try/catch below). Fixed here.
+  isEnabled?: boolean;
   getParameters?(): Record<string, unknown>;
   getParams?(): Record<string, unknown>;
   setParameters?(params: Record<string, unknown>): void;
@@ -151,6 +158,16 @@ export interface PresetSettings {
     enabled: boolean;
     layerCount?: number;
     layers?: PresetLocalAdjustmentLayer[];
+  };
+
+  // Highlight Recovery (M1 pointwise highlight reconstruction — round-8 review LOW, adjudicated
+  // INCLUDE for round 9: it is a look-defining param, not bake-coupled, and harmless on non-RAW
+  // (default strength 0 = provable identity; a non-zero strength just runs the pointwise pass).
+  // Absent on a legacy preset → apply leaves the target's current HR untouched, like every other
+  // module here. Enhance/NR stay excluded (established, bake-coupled — not captured/applied).
+  highlightRecovery?: {
+    enabled: boolean;
+    strength: number;
   };
 
   // Index signature for Record compatibility
@@ -748,45 +765,51 @@ export class PresetService {
             switch (moduleId) {
               case 'lenscorrections':
                 settings.lensCorrections = {
-                  enabled: moduleInterface.isEnabled?.() || false,
+                  enabled: moduleInterface.isEnabled ?? false,
                   ...((moduleSettings as Record<string, unknown>).lensCorrectionsParams as Record<string, unknown> || {})
                 } as typeof settings.lensCorrections;
                 break;
               case 'exposure':
                 settings.exposure = {
-                  enabled: moduleInterface.isEnabled?.() || true,
+                  enabled: moduleInterface.isEnabled ?? true,
                   ...moduleSettings
                 } as typeof settings.exposure;
                 break;
               case 'temperature':
                 settings.whiteBalance = {
-                  enabled: moduleInterface.isEnabled?.() || true,
+                  enabled: moduleInterface.isEnabled ?? true,
                   ...moduleSettings
                 } as typeof settings.whiteBalance;
                 break;
               case 'basicadj':
                 settings.basicAdjustments = {
-                  enabled: moduleInterface.isEnabled?.() || true,
+                  enabled: moduleInterface.isEnabled ?? true,
                   ...moduleSettings
                 } as typeof settings.basicAdjustments;
                 break;
               case 'tonecurve':
                 settings.toneCurve = {
-                  enabled: moduleInterface.isEnabled?.() || true,
+                  enabled: moduleInterface.isEnabled ?? true,
                   ...moduleSettings
                 } as typeof settings.toneCurve;
                 break;
               case 'colorbalance':
                 settings.colorBalance = {
-                  enabled: moduleInterface.isEnabled?.() || true,
+                  enabled: moduleInterface.isEnabled ?? true,
                   ...moduleSettings
                 } as typeof settings.colorBalance;
                 break;
               case 'shadowshighlights':
                 settings.shadowsHighlights = {
-                  enabled: moduleInterface.isEnabled?.() || true,
+                  enabled: moduleInterface.isEnabled ?? true,
                   ...moduleSettings
                 } as typeof settings.shadowsHighlights;
+                break;
+              case 'highlightrecovery':
+                settings.highlightRecovery = {
+                  enabled: moduleInterface.isEnabled ?? true,
+                  ...moduleSettings
+                } as typeof settings.highlightRecovery;
                 break;
               case 'localadjustments': {
                 const la = module as unknown as LocalAdjustmentsPipelineModule;
@@ -851,6 +874,9 @@ export class PresetService {
             break;
           case 'colorbalance':
             moduleSettings = settings.colorBalance as Record<string, unknown> | null;
+            break;
+          case 'highlightrecovery':
+            moduleSettings = settings.highlightRecovery as Record<string, unknown> | null;
             break;
           case 'shadowshighlights':
             moduleSettings = settings.shadowsHighlights as Record<string, unknown> | null;
