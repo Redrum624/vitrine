@@ -20,7 +20,7 @@ const {
   REJECT_PREFIX,
 } = require('../../electron/writePathPolicy.cjs') as {
   computeDeniedBases: (o: Record<string, unknown>) => string[];
-  validateWritePath: (p: unknown, opts?: { deniedBases?: string[]; requireAllowedExtension?: boolean }) => string;
+  validateWritePath: (p: unknown, opts?: { deniedBases?: string[]; requireAllowedExtension?: boolean; realDir?: string }) => string;
   isAllowedWriteExtension: (p: string) => boolean;
   ALLOWED_WRITE_EXTENSIONS: Set<string>;
   REJECT_PREFIX: string;
@@ -129,5 +129,36 @@ describe('writePathPolicy — extension allow-list', () => {
   it('allows a normal export when requireAllowedExtension is set', () => {
     const jpg = path.join(homeDir, 'Pictures', 'out.jpg');
     expect(validateWritePath(jpg, { deniedBases: bases(), requireAllowedExtension: true })).toBe(path.resolve(jpg));
+  });
+});
+
+// These only bite on a real Windows filesystem's segment semantics; path.sep differs on
+// POSIX CI so the deny-list separators won't line up. The repo ships/tests on Windows.
+const onWindows = path.sep === '\\';
+(onWindows ? describe : describe.skip)('writePathPolicy — canonicalization hardening (round-10 review)', () => {
+  it('denies a TRAILING-DOT segment bypass into an autorun sink (OS strips the dot)', () => {
+    // `...\Startup.\evil.lnk` reaches the real Startup dir but a raw string-prefix on the
+    // resolved path would miss it — canonicalizeForCompare folds the trailing dot.
+    const evil = path.join(env.APPDATA, 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup.', 'evil.lnk');
+    expect(() => validateWritePath(evil, { deniedBases: bases() })).toThrow(REJECT_PREFIX);
+  });
+
+  it('denies a TRAILING-SPACE segment bypass into a system dir', () => {
+    const evil = 'C:\\Windows \\System32\\x.dll';
+    expect(() => validateWritePath(evil, { deniedBases: bases() })).toThrow(REJECT_PREFIX);
+  });
+
+  it('honors a realDir (realpath of the parent) so an 8.3 / symlinked parent still resolves to the sink', () => {
+    // Simulate main.cjs having realpath-resolved the parent (PROGRA~1 → Program Files):
+    // the leaf is written under the install dir, which is denied.
+    const realDir = installDir; // the true, long-form parent
+    const viaShort = 'C:\\PROGRA~1\\Photo Editor Pro\\evil.exe';
+    expect(() => validateWritePath(viaShort, { deniedBases: bases(), realDir })).toThrow(REJECT_PREFIX);
+  });
+
+  it('a realDir pointing at an ordinary folder still allows the write', () => {
+    const realDir = path.join(homeDir, 'Pictures');
+    const ok = path.join(homeDir, 'Pictures', 'out.jpg');
+    expect(validateWritePath(ok, { deniedBases: bases(), realDir })).toBe(path.resolve(realDir, 'out.jpg'));
   });
 });

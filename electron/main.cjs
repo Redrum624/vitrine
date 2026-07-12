@@ -813,9 +813,27 @@ function currentDeniedWriteBases() {
   });
 }
 
+// Resolve the write target's DIRECT parent dir to its REAL path, so the deny-list compare
+// sees through 8.3 short names (PROGRA~1) and symlinks/junctions a string prefix would miss.
+// Every protected sink (Startup / PowerShell profile / ~/.ssh / system dirs) already exists,
+// so a write INTO one has an existing direct parent that realpath resolves; a write whose
+// parent does NOT exist can't be a sink, so returning undefined (pure path.resolve fallback,
+// which still covers traversal + trailing dot/space) is safe. Best-effort — never throws.
+function realParentDir(p) {
+  try {
+    return fs.realpathSync.native(path.dirname(path.resolve(p)));
+  } catch {
+    return undefined;
+  }
+}
+
 // @param {{ requireAllowedExtension?: boolean }} [opts]
 function validateWritePath(p, opts = {}) {
-  return enforceWritePolicy(p, { deniedBases: currentDeniedWriteBases(), ...opts });
+  return enforceWritePolicy(p, {
+    deniedBases: currentDeniedWriteBases(),
+    realDir: realParentDir(p),
+    ...opts,
+  });
 }
 
 ipcMain.handle('write-file', async (event, filePath, data) => {

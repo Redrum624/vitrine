@@ -86,6 +86,27 @@ function isAllowedWriteExtension(p) {
 }
 
 /**
+ * Canonicalize a resolved Windows path for prefix comparison against the deny-list.
+ * `path.resolve` + lowercase alone is fragile to Windows filesystem quirks that a
+ * string-prefix compare misses (a renderer could dodge the deny-list, then a
+ * non-executable write there is still a reversible DoS): the OS silently strips
+ * TRAILING DOTS and SPACES from each path segment (so `Startup.\x` and `Startup \x`
+ * both reach the real Startup dir). We fold those here so the compare sees what the
+ * filesystem sees. The two remaining quirks — 8.3 SHORT NAMES (`PROGRA~1`) and
+ * SYMLINK/JUNCTION redirection — need filesystem I/O to resolve, so the call site
+ * (main.cjs) passes `realDir = fs.realpathSync(parent)` into validateWritePath and this
+ * pure module compares against that canonical resolution.
+ */
+function canonicalizeForCompare(resolved) {
+  return resolved
+    .toLowerCase()
+    .split(path.sep)
+    // Strip trailing dots/spaces the OS ignores; leave a bare drive root (`c:`) intact.
+    .map((seg) => (/^[a-z]:$/.test(seg) ? seg : seg.replace(/[. ]+$/, '')))
+    .join(path.sep);
+}
+
+/**
  * Resolve `p` (which collapses any `..` traversal) and enforce the deny-list and, when
  * requested, the extension allow-list. Returns the resolved absolute path, or throws an
  * Error whose message starts with REJECT_PREFIX for any security rejection.
@@ -94,15 +115,25 @@ function isAllowedWriteExtension(p) {
  * @param {object} [opts]
  * @param {string[]} [opts.deniedBases]            from computeDeniedBases()
  * @param {boolean}  [opts.requireAllowedExtension] enforce ALLOWED_WRITE_EXTENSIONS
+ * @param {string}   [opts.realDir]                fs.realpathSync of p's existing parent
+ *                                                  dir (expands 8.3 names + symlinks); the
+ *                                                  call site resolves it, this stays pure.
  */
-function validateWritePath(p, { deniedBases = [], requireAllowedExtension = false } = {}) {
+function validateWritePath(p, { deniedBases = [], requireAllowedExtension = false, realDir } = {}) {
   if (typeof p !== 'string' || !p.trim()) {
     throw new Error('Invalid write path');
   }
-  const resolved = path.resolve(p);
-  const lower = resolved.toLowerCase();
+  // The caller (main.cjs) passes realDir = fs.realpathSync(existing parent) when it can:
+  // realpath expands 8.3 SHORT NAMES (PROGRA~1 → Program Files) and resolves SYMLINKS/
+  // JUNCTIONS to their true target, closing the two quirks canonicalizeForCompare can't
+  // (they need filesystem I/O). We compare the realpath-anchored resolution when given.
+  const resolved = realDir
+    ? path.resolve(realDir, path.basename(p))
+    : path.resolve(p);
+  const lower = canonicalizeForCompare(resolved);
   for (const base of deniedBases) {
-    if (lower === base || lower.startsWith(base + path.sep)) {
+    const canonBase = canonicalizeForCompare(base);
+    if (lower === canonBase || lower.startsWith(canonBase + path.sep)) {
       throw new Error(`${REJECT_PREFIX} (protected location): ${p}`);
     }
   }
