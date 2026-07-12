@@ -17,6 +17,7 @@
  * Produces docs/screenshot.png (hero) + docs/shots/*.png. Run `npm run build` and a
  * packaged build (release/win-unpacked/Vitrine.exe) first.
  */
+/* global window, document, CustomEvent */ // referenced only inside win.evaluate() browser callbacks
 const { _electron: electron } = require('@playwright/test');
 const path = require('path');
 const fs = require('fs');
