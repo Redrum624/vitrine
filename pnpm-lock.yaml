@@ -21,7 +21,7 @@ importers:
         specifier: ^0.562.0
         version: 0.562.0(react@19.2.6)
       onnxruntime-node:
-        specifier: ^1.27.0
+        specifier: 1.27.0
         version: 1.27.0
       react:
         specifier: ^19.1.1
@@ -30,7 +30,7 @@ importers:
         specifier: ^19.1.1
         version: 19.2.6(react@19.2.6)
       sharp:
-        specifier: ^0.34.5
+        specifier: 0.34.5
         version: 0.34.5
       zustand:
         specifier: ^5.0.8
@@ -51,9 +51,6 @@ importers:
       '@testing-library/react':
         specifier: ^16.3.1
         version: 16.3.2(@testing-library/dom@10.4.1)(@types/react-dom@19.2.3(@types/react@19.2.15))(@types/react@19.2.15)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
-      '@types/electron':
-        specifier: ^1.4.38
-        version: 1.6.12
       '@types/jest':
         specifier: ^30.0.0
         version: 30.0.0
@@ -1250,10 +1247,6 @@ packages:
 
   '@types/debug@4.1.13':
     resolution: {integrity: sha512-KSVgmQmzMwPlmtljOomayoR89W4FynCAi3E8PPs7vmDVPe84hT+vGPKkJfThkmXs0x0jAaa9U8uW8bbfyS2fWw==}
-
-  '@types/electron@1.6.12':
-    resolution: {integrity: sha512-NIJokDkGv9h+MStCL1IuiL1FOHYVkszoWeNxJtSI5dcEKRGbX83JcVYNAgk019qOQgJkHtz9WdP0CDXvrArrGg==}
-    deprecated: This is a stub types definition. electron provides its own type definitions, so you do not need this installed.
 
   '@types/estree@1.0.8':
     resolution: {integrity: sha512-dWHzHa2WqEXI/O1E9OjrocMTKJl2mSrEolh1Iomrv6U+JuNwaHXsXx9bLu5gG7BUWFIN0skIQJQ/L1rIex4X6w==}
@@ -4874,12 +4867,6 @@ snapshots:
     dependencies:
       '@types/ms': 2.1.0
 
-  '@types/electron@1.6.12':
-    dependencies:
-      electron: 39.8.10
-    transitivePeerDependencies:
-      - supports-color
-
   '@types/estree@1.0.8': {}
 
   '@types/estree@1.0.9': {}
@@ -6854,14 +6841,14 @@ snapshots:
 
   node-abi@4.31.0:
     dependencies:
-      semver: 7.7.4
+      semver: 7.8.1
 
   node-addon-api@1.7.2:
     optional: true
 
   node-api-version@0.2.1:
     dependencies:
-      semver: 7.7.4
+      semver: 7.8.1
 
   node-gyp@12.3.0:
     dependencies:
@@ -6870,7 +6857,7 @@ snapshots:
       graceful-fs: 4.2.11
       nopt: 9.0.0
       proc-log: 6.1.0
-      semver: 7.7.4
+      semver: 7.8.1
       tar: 7.5.15
       tinyglobby: 0.2.16
       undici: 6.25.0
