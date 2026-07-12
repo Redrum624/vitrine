@@ -32,14 +32,14 @@ non-destructive local adjustments.
 ### Option A — Prebuilt installer (Windows)
 
 Download the latest `Vitrine Setup X.Y.Z.exe` from the
-[Releases](https://github.com/Redrum624/photo_app/releases) page and run it.
+[Releases](https://github.com/Redrum624/vitrine/releases) page and run it.
 The installer creates a desktop shortcut and Start Menu entry; no extra
 dependencies are needed.
 
 ### Option B — Install & run from source (development)
 
 ```bash
-git clone https://github.com/Redrum624/photo_app.git
+git clone https://github.com/Redrum624/vitrine.git
 cd photo_app
 pnpm install            # or: npm install
 pnpm run electron-dev   # Vite dev server + Electron

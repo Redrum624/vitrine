@@ -3,7 +3,7 @@ import { MenuBar } from '../components/Layout/MenuBar';
 
 const APP_INFO = {
   name: 'Vitrine', version: '1.11.0', description: 'Professional photo editor',
-  author: 'Redrum624', license: 'PolyForm-Noncommercial-1.0.0', repository: 'https://github.com/Redrum624/photo_app',
+  author: 'Redrum624', license: 'PolyForm-Noncommercial-1.0.0', repository: 'https://github.com/Redrum624/vitrine',
   electron: '39.8.10', chrome: '142.0', node: '22.22.1', v8: '13.0', platform: 'win32', arch: 'x64',
 };
 
@@ -31,7 +31,7 @@ describe('MenuBar — Help ("?") menu / About', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Help' }));
     fireEvent.click(screen.getByText('About Vitrine'));
     await screen.findByRole('dialog', { name: 'About Vitrine' });
-    fireEvent.click(await screen.findByText('github.com/Redrum624/photo_app'));
-    expect(window.electronAPI!.openExternalUrl).toHaveBeenCalledWith('https://github.com/Redrum624/photo_app');
+    fireEvent.click(await screen.findByText('github.com/Redrum624/vitrine'));
+    expect(window.electronAPI!.openExternalUrl).toHaveBeenCalledWith('https://github.com/Redrum624/vitrine');
   });
 });
