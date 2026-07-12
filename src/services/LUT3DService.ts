@@ -492,7 +492,7 @@ class LUT3DServiceImpl {
    */
   exportToCube(lut: LUT3D): string {
     const lines: string[] = [
-      `# Created by Photo Editor Pro`,
+      `# Created by Vitrine`,
       `TITLE "${lut.title}"`,
       `LUT_3D_SIZE ${lut.size}`,
       `DOMAIN_MIN ${lut.domainMin.join(' ')}`,

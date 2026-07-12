@@ -1,4 +1,4 @@
-# Photo Editor Pro
+# Vitrine
 
 ![Version](https://img.shields.io/badge/Version-1.22.0-blue)
 ![TypeScript](https://img.shields.io/badge/TypeScript-0_errors-blue)
@@ -13,7 +13,9 @@
 ![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS_4-06B6D4?logo=tailwindcss&logoColor=white)
 ![WebGL2](https://img.shields.io/badge/WebGL2-GPU_pipeline-990000)
 
-![Photo Editor Pro](docs/screenshot.png)
+![Vitrine](docs/screenshot.png)
+
+**Vitrine** — the darkroom, behind glass.
 
 A **desktop RAW photo editor** built with Electron + React, featuring a WebGL2/CPU
 processing pipeline, native LibRaw demosaicing, colour-managed export, and
@@ -29,7 +31,7 @@ non-destructive local adjustments.
 
 ### Option A — Prebuilt installer (Windows)
 
-Download the latest `Photo Editor Pro Setup X.Y.Z.exe` from the
+Download the latest `Vitrine Setup X.Y.Z.exe` from the
 [Releases](https://github.com/Redrum624/photo_app/releases) page and run it.
 The installer creates a desktop shortcut and Start Menu entry; no extra
 dependencies are needed.
@@ -49,7 +51,7 @@ The app opens automatically once the Vite dev server is ready (port 3005).
 
 ```bash
 npm run build:win       # clean -> tsc + vite build -> NSIS installer -> collect into installer/
-# Output: installer/Photo Editor Pro Setup 1.11.0.exe (+ README.txt, LICENSE, THIRD-PARTY-LICENSES.md)
+# Output: installer/Vitrine Setup 1.11.0.exe (+ README.txt, LICENSE, THIRD-PARTY-LICENSES.md)
 npm run build:win:dir   # fast unpacked build (no installer, quick iteration)
 npm run dist            # electron-builder for the current platform
 ```
@@ -152,7 +154,7 @@ npm run test:e2e     # Playwright end-to-end tests
 
 ## License
 
-**Source-available, non-commercial.** Photo Editor Pro is licensed under the
+**Source-available, non-commercial.** Vitrine is licensed under the
 [PolyForm Noncommercial License 1.0.0](LICENSE) — free to use, modify, and share for
 non-commercial purposes. Commercial use of this project or its derivatives is not permitted.
 This is **not** an OSI-approved open-source license.
@@ -168,4 +170,4 @@ for the full attribution list and per-license obligations.
 
 ---
 
-**Photo Editor Pro** — a free RAW photo editor for Windows.
+**Vitrine** — a free RAW photo editor for Windows.

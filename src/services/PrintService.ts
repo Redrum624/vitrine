@@ -676,7 +676,7 @@ export class PrintService {
     const orientation = options?.orientation ||
       (width > height ? 'landscape' : 'portrait');
     const margins = options?.margins || { top: 10, right: 10, bottom: 10, left: 10 };
-    const title = options?.title || 'Photo Editor Pro — Print';
+    const title = options?.title || 'Vitrine — Print';
 
     // ── Apply colour adjustments if provided ──────────────────────────
     let data = imageData;

@@ -6,7 +6,7 @@ import App from './App.tsx'
 import { logger } from './utils/Logger' // Initialize logger
 
 // Initialize logger
-logger.info('Photo Editor Pro starting up');
+logger.info('Vitrine starting up');
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

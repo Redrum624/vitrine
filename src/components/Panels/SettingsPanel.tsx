@@ -148,7 +148,7 @@ export function SettingsPanel() {
               About
             </h3>
             <div className="space-y-1 text-xs" style={{ color: 'var(--gray-400)' }}>
-              <p>Photo Editor Pro</p>
+              <p>Vitrine</p>
               <p>Version {appVersion ?? '—'}</p>
               <p>© {new Date().getFullYear()} All rights reserved</p>
             </div>

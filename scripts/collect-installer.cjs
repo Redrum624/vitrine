@@ -3,8 +3,8 @@
  * collect-installer.cjs
  *
  * Copies just the user-facing distributables into a clean `installer/` folder at the repo root:
- *   - Photo Editor Pro Setup <version>.exe   (the NSIS installer)
- *   - Photo Editor Pro <version> README.txt  (plain-text readme)
+ *   - Vitrine Setup <version>.exe   (the NSIS installer)
+ *   - Vitrine <version> README.txt  (plain-text readme)
  *   - LICENSE                                 (project license)
  *   - THIRD-PARTY-LICENSES.md                 (required: BSD/LGPL attribution must accompany the build)
  *
@@ -22,8 +22,8 @@ const INSTALLER = path.join(ROOT, 'installer');
 const VERSION = require(path.join(ROOT, 'package.json')).version;
 
 const WANTED = [
-  `Photo Editor Pro Setup ${VERSION}.exe`,
-  `Photo Editor Pro ${VERSION} README.txt`,
+  `Vitrine Setup ${VERSION}.exe`,
+  `Vitrine ${VERSION} README.txt`,
   'LICENSE',
   'THIRD-PARTY-LICENSES.md',
 ];

@@ -51,8 +51,8 @@ console.log(`[gh-release] Targeting release ${TAG}`);
 // 2. Locate artifacts
 // ---------------------------------------------------------------------------
 const CANDIDATES = [
-  `Photo Editor Pro Setup ${VERSION}.exe`,
-  `Photo Editor Pro ${VERSION} README.txt`,
+  `Vitrine Setup ${VERSION}.exe`,
+  `Vitrine ${VERSION} README.txt`,
   'LICENSE',
   'THIRD-PARTY-LICENSES.md',
 ];
@@ -130,7 +130,7 @@ if (releaseExists()) {
     try { releaseUrl = JSON.parse(view.stdout).url; } catch { /* ignore */ }
   }
 } else {
-  const title = `Photo Editor Pro ${TAG}`;
+  const title = `Vitrine ${TAG}`;
   const create = gh(
     'release', 'create', TAG,
     ...existing,

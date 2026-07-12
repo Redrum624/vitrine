@@ -265,7 +265,7 @@ export class CameraProfileService {
       metadata: {
         version: '1.0',
         created: new Date().toISOString(),
-        author: 'Photo Editor Pro',
+        author: 'Vitrine',
         description: `Camera profile for ${make} ${model}`
       }
     };
@@ -295,7 +295,7 @@ export class CameraProfileService {
       metadata: {
         version: '1.0',
         created: new Date().toISOString(),
-        author: 'Photo Editor Pro',
+        author: 'Vitrine',
         description: `Camera profile for ${make} ${model}`
       }
     };
@@ -325,7 +325,7 @@ export class CameraProfileService {
       metadata: {
         version: '1.0',
         created: new Date().toISOString(),
-        author: 'Photo Editor Pro',
+        author: 'Vitrine',
         description: `Camera profile for ${make} ${model}`
       }
     };
@@ -355,7 +355,7 @@ export class CameraProfileService {
       metadata: {
         version: '1.0',
         created: new Date().toISOString(),
-        author: 'Photo Editor Pro',
+        author: 'Vitrine',
         description: `Camera profile for ${make} ${model}`
       }
     };

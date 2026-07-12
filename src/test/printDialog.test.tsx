@@ -107,7 +107,7 @@ describe('PrintDialog', () => {
         orientation: 'portrait',
         margins: { top: 10, right: 10, bottom: 10, left: 10 },
         resolution: 300,
-        title: 'Photo Editor Pro — sunset.jpg',
+        title: 'Vitrine — sunset.jpg',
         colorAdjustments: { brightness: 0, contrast: 0, saturation: 0, shadows: 0, highlights: 0 },
       })
     );

@@ -33,8 +33,8 @@ const env = {
   APPDATA: 'C:\\Users\\Tester\\AppData\\Roaming',
 };
 const homeDir = 'C:\\Users\\Tester';
-const resourcesPath = 'C:\\Program Files\\Photo Editor Pro\\resources';
-const installDir = 'C:\\Program Files\\Photo Editor Pro';
+const resourcesPath = 'C:\\Program Files\\Vitrine\\resources';
+const installDir = 'C:\\Program Files\\Vitrine';
 
 const R = (p: string) => path.resolve(p).toLowerCase();
 const bases = () => computeDeniedBases({ env, homeDir, resourcesPath, installDir });
@@ -152,7 +152,7 @@ const onWindows = path.sep === '\\';
     // Simulate main.cjs having realpath-resolved the parent (PROGRA~1 → Program Files):
     // the leaf is written under the install dir, which is denied.
     const realDir = installDir; // the true, long-form parent
-    const viaShort = 'C:\\PROGRA~1\\Photo Editor Pro\\evil.exe';
+    const viaShort = 'C:\\PROGRA~1\\Vitrine\\evil.exe';
     expect(() => validateWritePath(viaShort, { deniedBases: bases(), realDir })).toThrow(REJECT_PREFIX);
   });
 

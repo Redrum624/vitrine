@@ -342,12 +342,12 @@ function createMenu() {
       label: 'Help',
       submenu: [
         {
-          label: 'About Photo Editor Pro',
+          label: 'About Vitrine',
           click: () => {
             dialog.showMessageBox(mainWindow, {
               type: 'info',
-              title: 'About Photo Editor Pro',
-              message: 'Photo Editor Pro',
+              title: 'About Vitrine',
+              message: 'Vitrine',
               detail: 'Professional photo editing powered by darktable\nVersion 1.0.0'
             });
           }
@@ -408,7 +408,7 @@ ipcMain.handle('get-app-info', () => {
   // pkg.build.productName is only available in dev. Fall back to the literal product name
   // (never pkg.name, which is the npm id "photo_app").
   return {
-    name: (pkg.build && pkg.build.productName) || 'Photo Editor Pro',
+    name: (pkg.build && pkg.build.productName) || 'Vitrine',
     version: pkg.version,
     description: pkg.description || '',
     author: typeof pkg.author === 'string' ? pkg.author : (pkg.author && pkg.author.name) || '',

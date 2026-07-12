@@ -247,7 +247,7 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
 
     ctx.fillStyle = '#555555';
     ctx.font = '600 32px Inter, system-ui';
-    ctx.fillText('Photo Editor Pro', centerX, centerY - 30);
+    ctx.fillText('Vitrine', centerX, centerY - 30);
 
     ctx.fillStyle = '#3a3a3a';
     ctx.font = '400 15px Inter, system-ui';

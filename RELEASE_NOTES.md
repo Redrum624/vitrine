@@ -1,4 +1,4 @@
-# Photo Editor Pro - Release Notes
+# Vitrine - Release Notes
 
 ## Version 1.5.0 (2026-06-09)
 
@@ -42,7 +42,7 @@
 
 **First Production Release**
 
-Photo Editor Pro is a professional-grade RAW photo editing application built with modern web technologies. This release includes complete image processing capabilities, professional color science, and GPU-accelerated performance.
+Vitrine is a professional-grade RAW photo editing application built with modern web technologies. This release includes complete image processing capabilities, professional color science, and GPU-accelerated performance.
 
 ---
 
@@ -145,7 +145,7 @@ Photo Editor Pro is a professional-grade RAW photo editing application built wit
 ### Installation
 
 #### Windows
-1. Download `Photo Editor Pro Setup.exe` from releases
+1. Download `Vitrine Setup.exe` from releases
 2. Run installer and follow prompts
 3. Launch from Start Menu or Desktop shortcut
 
@@ -198,4 +198,4 @@ GPL-3.0 License - See LICENSE file for details.
 
 ---
 
-**Photo Editor Pro v1.0.0** - Professional photo editing for everyone.
+**Vitrine v1.0.0** - Professional photo editing for everyone.

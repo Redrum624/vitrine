@@ -2,7 +2,7 @@
 
 ## 🎯 **Professional RAW Processing Capabilities**
 
-Photo Editor Pro provides professional-grade RAW processing that rivals desktop applications like Lightroom and Capture One, with intelligent auto-adjustments and camera-specific optimization.
+Vitrine provides professional-grade RAW processing that rivals desktop applications like Lightroom and Capture One, with intelligent auto-adjustments and camera-specific optimization.
 
 ## 📸 **Supported RAW Formats**
 

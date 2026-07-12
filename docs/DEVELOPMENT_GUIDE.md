@@ -2,7 +2,7 @@
 
 ## 🚀 **Getting Started**
 
-This guide will help you set up, develop, and contribute to Photo Editor Pro.
+This guide will help you set up, develop, and contribute to Vitrine.
 
 ## 🛠️ **Prerequisites**
 
@@ -513,7 +513,7 @@ test(modules): add exposure module tests
 
 ## 🎉 **Welcome to the Team!**
 
-Thank you for contributing to Photo Editor Pro! This project aims to create the best professional photo editing experience on the web, and your contributions help make that vision a reality.
+Thank you for contributing to Vitrine! This project aims to create the best professional photo editing experience on the web, and your contributions help make that vision a reality.
 
 For questions or support, feel free to:
 - Open an issue on GitHub

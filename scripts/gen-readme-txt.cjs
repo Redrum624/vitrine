@@ -3,7 +3,7 @@
  * gen-readme-txt.cjs
  * Converts README.md to a readable plain-text README.txt for distribution.
  * Usage: node scripts/gen-readme-txt.cjs [output-path]
- * Default output: release/Photo Editor Pro <version> README.txt
+ * Default output: release/Vitrine <version> README.txt
  */
 
 'use strict';
@@ -17,7 +17,7 @@ const ROOT = path.join(__dirname, '..');
 let outPath = process.argv[2];
 if (!outPath) {
   const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
-  outPath = path.join(ROOT, 'release', `Photo Editor Pro ${pkg.version} README.txt`);
+  outPath = path.join(ROOT, 'release', `Vitrine ${pkg.version} README.txt`);
 }
 
 const src = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8');

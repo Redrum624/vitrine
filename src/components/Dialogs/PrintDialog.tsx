@@ -140,7 +140,7 @@ export const PrintDialog: React.FC<PrintDialogProps> = ({
         orientation,
         margins,
         resolution,
-        title: `Photo Editor Pro — ${fileName || 'Print'}`,
+        title: `Vitrine — ${fileName || 'Print'}`,
         colorAdjustments: colorAdj,
       });
       onClose();

@@ -1,4 +1,4 @@
-# Photo Editor Pro - Development Roadmap
+# Vitrine - Development Roadmap
 
 **Last Updated:** 2025-12-18
 **Current Version:** 1.0.0
@@ -8,7 +8,7 @@
 
 ## Executive Summary
 
-Photo Editor Pro is a professional-grade RAW photo editing application built with modern web technologies. The application leverages React, TypeScript, Electron, and a WebGL2 GPU pipeline to deliver desktop-quality performance in a modern interface.
+Vitrine is a professional-grade RAW photo editing application built with modern web technologies. The application leverages React, TypeScript, Electron, and a WebGL2 GPU pipeline to deliver desktop-quality performance in a modern interface.
 
 ### Current State
 - **Core Functionality:** Complete (10 processing modules + hue curves)

@@ -199,7 +199,7 @@ export function MenuBar({
           </g>
           <circle cx="128" cy="128" r="25" fill="#0a0a0a"/>
         </svg>
-        <span className="font-semibold text-white tracking-wide uppercase" style={{fontSize: '12px', fontWeight: 600, letterSpacing: '0.5px'}}>Photo Editor Pro</span>
+        <span className="font-semibold text-white tracking-wide uppercase" style={{fontSize: '12px', fontWeight: 600, letterSpacing: '0.5px'}}>Vitrine</span>
       </div>
 
       {/* Menu items container - not draggable */}
@@ -531,7 +531,7 @@ export function MenuBar({
               className="w-full text-left px-4 py-1.5 text-xs text-dark-200 hover:bg-dark-700 bg-transparent border-0 cursor-pointer"
               onClick={openAbout}
             >
-              About Photo Editor Pro
+              About Vitrine
             </button>
           </div>
         )}
@@ -579,7 +579,7 @@ export function MenuBar({
       onClose={() => setAboutOpen(false)}
       closeOnOverlayClick
       icon={<Info size={15} />}
-      title="About Photo Editor Pro"
+      title="About Vitrine"
       cardStyle={{ width: 460, maxWidth: '92vw' }}
     >
       <div style={{ padding: '18px 20px' }}>
@@ -608,7 +608,7 @@ export function MenuBar({
           </svg>
           <div>
             <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--glass-text-title)', letterSpacing: '0.3px' }}>
-              {appInfo?.name || 'Photo Editor Pro'}
+              {appInfo?.name || 'Vitrine'}
             </div>
             <div style={{ fontSize: 12, color: 'var(--glass-text-muted)', marginTop: 2 }}>
               Version {appInfo?.version || '…'}

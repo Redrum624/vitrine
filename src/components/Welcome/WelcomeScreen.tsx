@@ -84,7 +84,7 @@ export function WelcomeScreen({
     >
       <div
         role="dialog"
-        aria-label="Welcome to Photo Editor Pro"
+        aria-label="Welcome to Vitrine"
         className="glass-card dc-rise flex flex-col max-w-2xl w-full"
         style={{ background: 'rgba(15,15,19,.92)', maxHeight: '90vh', overflow: 'hidden' }}
       >
@@ -100,8 +100,8 @@ export function WelcomeScreen({
             <Camera size={15} />
           </div>
           <div className="flex-1 min-w-0">
-            <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--glass-text-title)' }}>Welcome to Photo Editor Pro</div>
-            <div style={{ fontSize: 10.5, color: 'var(--glass-text-muted)' }}>Professional photo editing made simple</div>
+            <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--glass-text-title)' }}>Welcome to Vitrine</div>
+            <div style={{ fontSize: 10.5, color: 'var(--glass-text-muted)' }}>Develop. Display.</div>
           </div>
           <button
             type="button"

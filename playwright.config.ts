@@ -1,5 +1,5 @@
 /**
- * Playwright Configuration for Photo Editor Pro E2E Tests
+ * Playwright Configuration for Vitrine E2E Tests
  *
  * Configured to test the Electron application with Chromium.
  * Uses the built application for testing.

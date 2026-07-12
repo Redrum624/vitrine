@@ -1,6 +1,6 @@
 # Keyboard Shortcuts Reference
 
-Quick reference guide for all keyboard shortcuts in Photo Editor Pro.
+Quick reference guide for all keyboard shortcuts in Vitrine.
 
 ---
 
@@ -177,6 +177,6 @@ To print this reference card:
 
 **Version:** 1.4.1
 **Last Updated:** 2026-06-08
-**Application:** Photo Editor Pro
+**Application:** Vitrine
 
 For more help, press `F1` in the application or visit the documentation.

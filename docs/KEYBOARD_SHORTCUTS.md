@@ -2,7 +2,7 @@
 
 ## ⌨️ **Professional Photo Editing Shortcuts**
 
-Photo Editor Pro provides comprehensive keyboard shortcuts for efficient photo editing workflows. Master these shortcuts to dramatically speed up your editing process.
+Vitrine provides comprehensive keyboard shortcuts for efficient photo editing workflows. Master these shortcuts to dramatically speed up your editing process.
 
 ## 📁 **File Operations**
 
@@ -13,7 +13,7 @@ Photo Editor Pro provides comprehensive keyboard shortcuts for efficient photo e
 | `Ctrl+Shift+S` | Export As | Export with different settings |
 | `Ctrl+N` | New Project | Start a new editing session |
 | `Ctrl+W` | Close Image | Close current image |
-| `Ctrl+Q` | Quit Application | Exit Photo Editor Pro |
+| `Ctrl+Q` | Quit Application | Exit Vitrine |
 
 ## ↩️ **History & Undo**
 

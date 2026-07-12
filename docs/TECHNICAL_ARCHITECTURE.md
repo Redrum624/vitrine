@@ -2,7 +2,7 @@
 
 ## 🏗️ **System Overview**
 
-Photo Editor Pro is a professional-grade photo editing application built on modern web technologies with a focus on performance, extensibility, and professional-quality results.
+Vitrine is a professional-grade photo editing application built on modern web technologies with a focus on performance, extensibility, and professional-quality results.
 
 ## 📐 **Architecture Principles**
 
