@@ -893,8 +893,16 @@ export class PresetService {
           }
 
           // Apply parameters
-          const params = { ...moduleSettings };
+          let params: Record<string, unknown> = { ...moduleSettings };
           delete params.enabled; // Remove enabled flag from params
+
+          // lenscorrections captures its sub-effects (vignetting/distortion/…) spread at the TOP
+          // level, but its setParameters expects them nested under `lensCorrectionsParams`. Re-nest
+          // so the apply actually round-trips (without this the setter sees no lensCorrectionsParams
+          // key and never calls the inner module — params captured but silently never applied).
+          if (moduleId === 'lenscorrections') {
+            params = { lensCorrectionsParams: params };
+          }
 
           const moduleInterface = module as ModuleInterface;
           if ('setParameters' in module && typeof moduleInterface.setParameters === 'function') {

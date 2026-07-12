@@ -265,7 +265,18 @@ export class ImageProcessingPipeline {
   setModuleEnabled(moduleId: string, enabled: boolean): void {
     const module = this.modules.get(moduleId);
     if (module) {
-      module.isEnabled = enabled;
+      // setEnabled-first ladder with a guarded assignment fallback (mirrors applyWorkerConfig).
+      // lenscorrections/localadjustments expose `isEnabled` as a GETTER-ONLY accessor (derived
+      // from their params) — a bare `module.isEnabled = enabled` throws a TypeError in strict mode,
+      // which callers like PresetService swallow, aborting the whole module apply BEFORE its
+      // params are set. The try/catch keeps enablement side-effect-free for those modules (their
+      // setParams/setParameters restores the real derived-enabled state).
+      const withEnable = module as PipelineModule & { setEnabled?(b: boolean): void };
+      if (typeof withEnable.setEnabled === 'function') {
+        withEnable.setEnabled(enabled);
+      } else {
+        try { module.isEnabled = enabled; } catch { /* getter-only isEnabled */ }
+      }
       // Clear cache for this module and all subsequent modules
       this.invalidateCacheFromModule(moduleId);
       logger.debug(`Module ${moduleId} ${enabled ? 'enabled' : 'disabled'} - cache invalidated`);
