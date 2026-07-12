@@ -804,6 +804,14 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
           // store/Enhance panel as a fabricated intent.
           useAppStore.getState().setUpscaleIntent(editPersistenceService.validateBakedUpscaleIntent(savedState?.bakedUpscale));
           editPersistenceService.restoreState(savedState, decoded.width, decoded.height, image.path);
+          // Panels that MIRROR module params into local state (RawDecodePanel's Highlight
+          // recovery slider, LA layer lists, …) may have already read their module before
+          // this restore landed — their image-change effects fire on currentImage, which
+          // updates before the async decode resolves. Bump the shared re-read signal so
+          // every mirror re-syncs to the restored params (same signal preset-apply and
+          // undo use; without it a reopened image renders with its saved edits while the
+          // panel displays defaults — v1.20.0 smoke H2 caught exactly this).
+          useAppStore.getState().notifyExternalParamsChange();
         },
         (fullWidth, fullHeight) => {
           if (loadTokenRef.current !== loadToken) return;

@@ -79,16 +79,20 @@ interface RawDecodePanelProps {
 export function RawDecodePanel({ currentImage }: RawDecodePanelProps) {
   const rawDecodeOptions = useAppStore((s) => s.rawDecodeOptions);
   const reDecoding = useAppStore((s) => s.reDecoding);
+  const externalParamsVersion = useAppStore((s) => s.externalParamsVersion);
   const [open, setOpen] = useState(false);
   // Highlight-recovery strength lives on the pipeline module (persisted per-image by
   // EditPersistenceService like every other module param — NOT a decode option, so no
   // re-decode on change). Mirror it into local state for the slider, re-syncing when the
-  // open image changes (per-image params are restored on load).
+  // open image changes AND on externalParamsVersion: the per-image restore lands AFTER
+  // the image-change effect fires (async decode), and Canvas bumps the signal once
+  // restoreState completes — without it a reopened image renders with its saved strength
+  // while the slider displays 0 (v1.20.0 smoke H2 caught this live).
   const [hrStrength, setHrStrength] = useState<number>(readHrStrength);
 
   useEffect(() => {
     setHrStrength(readHrStrength());
-  }, [currentImage?.id]);
+  }, [currentImage?.id, externalParamsVersion]);
 
   const applyHrStrength = (strength: number) => {
     setHrStrength(strength);
