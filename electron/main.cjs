@@ -1,4 +1,15 @@
 const { app, BrowserWindow, Menu, dialog, ipcMain, shell } = require('electron');
+
+// IDENTITY PIN (load-bearing — do not remove): the runtime app name determines the userData
+// path (%APPDATA%\<name>\) where every user's persisted edits, presets, and RAW disk cache
+// live. It has always resolved to "photo_app" (the npm `name`, because electron-builder strips
+// the `build` field from the packaged package.json). The v1.23 rebrand changes the DISPLAY name
+// to "Vitrine" (build.productName / installer / About), but the IDENTITY must stay "photo_app"
+// or every existing install orphans its saved work. Pinning it here — before app 'ready' and
+// before any getPath('userData') — makes that guarantee independent of how electron-builder
+// injects productName into the packaged manifest.
+app.setName('photo_app');
+
 const path = require('path');
 const fs = require('fs');
 const os = require('os');

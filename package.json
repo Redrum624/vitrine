@@ -1,7 +1,7 @@
 {
   "name": "photo_app",
   "version": "1.22.0",
-  "description": "Professional photo editor",
+  "description": "Vitrine — a free, non-destructive RAW photo editor for Windows",
   "main": "electron/main.cjs",
   "scripts": {
     "start": "npm run build && electron .",
@@ -84,7 +84,7 @@
   },
   "build": {
     "appId": "com.photoeditorpro.app",
-    "productName": "Photo Editor Pro",
+    "productName": "Vitrine",
     "directories": {
       "output": "release"
     },
@@ -103,14 +103,15 @@
         }
       ],
       "icon": "assets/icon.ico",
-      "verifyUpdateCodeSignature": false
+      "verifyUpdateCodeSignature": false,
+      "artifactName": "${productName} Setup ${version}.${ext}"
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Photo Editor Pro"
+      "shortcutName": "Vitrine"
     },
     "extraResources": [
       {
