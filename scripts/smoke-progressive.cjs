@@ -33,11 +33,12 @@
 /* global window, document, CustomEvent */ // referenced only inside win.evaluate() browser callbacks
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 
 const ROOT = path.resolve(__dirname, '..');
 const { _electron: electron } = require(path.join(ROOT, 'node_modules', '@playwright', 'test'));
 const EXE = process.env.SMOKE_EXE || path.join(ROOT, 'release', 'win-unpacked', 'Vitrine.exe');
-const ORF = process.env.SMOKE_ORF || 'C:/Users/<user>/Pictures/2024/2024-09-19/P9190024.ORF';
+const ORF = process.env.SMOKE_ORF || path.join(os.homedir(), 'Pictures', '2024', '2024-09-19', 'P9190024.ORF');
 const OUT_DIR = path.join(ROOT, 'release', 'smoke-progressive-shots');
 fs.mkdirSync(OUT_DIR, { recursive: true });
 

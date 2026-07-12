@@ -26,7 +26,8 @@
  * Usage:
  *   node scripts/reset-smoke-fixtures.cjs [folder] [--force|--yes] [--dry-run]
  *
- *   folder      Defaults to C:\Users\<user>\Pictures\2024\2024-09-19
+ *   folder      Defaults to <home>/Pictures/2024/2024-09-19 (override with the
+ *               arg or the SMOKE_FIXTURES_DIR env var)
  *   --force,
  *   --yes       Required to actually delete anything. WITHOUT one of these flags
  *               the script always runs as a dry run (prints what it WOULD delete
@@ -54,7 +55,7 @@ const IMAGE_EXTENSIONS = new Set([
   '.orf', '.cr2', '.cr3', '.nef', '.arw', '.dng', '.raf', '.rw2', '.pef',
 ]);
 
-const DEFAULT_FOLDER = 'C:\\Users\\<user>\\Pictures\\2024\\2024-09-19';
+const DEFAULT_FOLDER = process.env.SMOKE_FIXTURES_DIR || path.join(os.homedir(), 'Pictures', '2024', '2024-09-19');
 // Matches package.json's top-level "name" — the unpackaged app's userData folder name.
 const APP_NAME = 'photo_app';
 

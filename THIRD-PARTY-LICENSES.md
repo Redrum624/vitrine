@@ -1,6 +1,6 @@
-# Third-Party Licenses — Photo Editor Pro
+# Third-Party Licenses — Vitrine
 
-Photo Editor Pro bundles the third-party components below. Each is licensed under its own terms
+Vitrine bundles the third-party components below. Each is licensed under its own terms
 (NOT the project's PolyForm Noncommercial license); their rights are unaffected by the project license.
 
 ---
@@ -248,5 +248,5 @@ with a compatible build. Source for libvips is available at https://github.com/l
 
 ---
 
-*Generated for Photo Editor Pro v1.9.0 — 2026-06-30*
+*Generated for Vitrine v1.24.0 — 2026-07-12*
 *Source: `pnpm licenses list --prod --json` (full transitive production closure, build tools excluded)*
