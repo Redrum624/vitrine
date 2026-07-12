@@ -100,7 +100,7 @@ export function OriginalPane() {
   // only do the expensive conversion once per image (not on every pan/zoom).
   const offscreenRef = useRef<HTMLCanvasElement | null>(null);
 
-  const { viewport, mainCanvasFit, baseImageVersion } = useAppStore();
+  const { viewport, mainCanvasFit, baseImageVersion, originalSnapshotVersion } = useAppStore();
 
   // Build the offscreen canvas when this component mounts AND whenever the base image is
   // swapped in place (baseImageVersion bumps on every ImageService.updateCurrentImageData call —
@@ -130,7 +130,10 @@ export function OriginalPane() {
     }
     offCtx.putImageData(imgData, 0, 0);
     offscreenRef.current = offscreen;
-  }, [baseImageVersion]);
+    // baseImageVersion: in-place base swap (RAW full-decode / re-decode / bake).
+    // originalSnapshotVersion: a fresh open recorded a new original (ordinary image
+    // switch) — without it the Before pane kept the previous photo's original.
+  }, [baseImageVersion, originalSnapshotVersion]);
 
   // Re-fit + redraw the Before pane from its cached offscreen snapshot. Extracted into a
   // stable callback so BOTH the viewport/fit effect and a dedicated ResizeObserver (below)

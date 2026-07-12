@@ -248,5 +248,5 @@ with a compatible build. Source for libvips is available at https://github.com/l
 
 ---
 
-*Generated for Vitrine v1.24.0 — 2026-07-12*
+*Generated for Vitrine v1.24.1 — 2026-07-12*
 *Source: `pnpm licenses list --prod --json` (full transitive production closure, build tools excluded)*

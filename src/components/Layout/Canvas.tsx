@@ -1384,7 +1384,6 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
               }
               return (
                 <LocalAdjustmentMaskOverlay
-                  canvasRef={canvasRef}
                   viewport={viewport}
                   contentWidth={contentDimensions.width}
                   contentHeight={contentDimensions.height}

@@ -48,4 +48,30 @@ describe('OriginalPane — rebuilds the offscreen snapshot when the base image s
     // (expensive) float32→uint8 rebuild.
     expect(getOriginal).toHaveBeenCalledTimes(1);
   });
+
+  // Bug: in Before/After the "before" sometimes showed a DIFFERENT photo from the same folder.
+  // Cause: a fresh open (plain/JPEG/cache) records the new original via deferOriginalSnapshot but
+  // does NOT bump baseImageVersion (only the in-place RAW swap does), so the pane never re-read
+  // and kept the previous image's original. Fix: bump a dedicated originalSnapshotVersion whenever
+  // a new original is recorded, and fold it into the pane's rebuild deps.
+  it('re-reads getOriginalImage() when originalSnapshotVersion bumps (fresh open of another image)', () => {
+    const getOriginal = jest
+      .spyOn(imageService, 'getOriginalImage')
+      .mockReturnValue({ data: new Float32Array([0.5, 0.5, 0.5, 1]), width: 1, height: 1 });
+
+    render(<OriginalPane />);
+    expect(getOriginal).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      useAppStore.getState().bumpOriginalSnapshotVersion();
+    });
+
+    expect(getOriginal).toHaveBeenCalledTimes(2);
+  });
+
+  it('imageService.setOriginalImage bumps originalSnapshotVersion so the Before pane refreshes', () => {
+    const before = useAppStore.getState().originalSnapshotVersion;
+    imageService.setOriginalImage(new Float32Array([0, 0, 0, 1]), 1, 1);
+    expect(useAppStore.getState().originalSnapshotVersion).toBe(before + 1);
+  });
 });

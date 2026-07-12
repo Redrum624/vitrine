@@ -92,6 +92,14 @@ interface AppStore extends AppState {
   // pixels changed and re-upload.
   baseImageVersion: number;
   bumpBaseImageVersion: () => void;
+  // Bumped whenever ImageService records a NEW before/after "original" snapshot —
+  // deferOriginalSnapshot() on every fresh open (plain/JPEG/cache/RAW) and
+  // setOriginalImage() on a base-mutating bake. Unlike baseImageVersion (only the
+  // in-place swap path bumps it), this fires on ordinary image switches, so the
+  // Before pane re-reads getOriginalImage() for the NEW photo instead of showing
+  // the previous image's original.
+  originalSnapshotVersion: number;
+  bumpOriginalSnapshotVersion: () => void;
   // Alignment axis: horizontal center (workspace-relative px) of the LIVE photo
   // region. The floating toolbar pill centers on it now; the filmstrip dock and
   // footer rating cluster will consume it in Task 6. null until first measured.
@@ -193,6 +201,7 @@ export const useAppStore = create<AppStore>((set) => ({
   renderMode: 'cpu',
   gpuResultVersion: 0,
   baseImageVersion: 0,
+  originalSnapshotVersion: 0,
   alignmentAxisX: null,
   lastProcessingTimeMs: 0,
   modulesActive: 0,
@@ -238,6 +247,8 @@ export const useAppStore = create<AppStore>((set) => ({
   bumpGpuResult: () => set((state) => ({ gpuResultVersion: state.gpuResultVersion + 1 })),
 
   bumpBaseImageVersion: () => set((state) => ({ baseImageVersion: state.baseImageVersion + 1 })),
+
+  bumpOriginalSnapshotVersion: () => set((state) => ({ originalSnapshotVersion: state.originalSnapshotVersion + 1 })),
 
   setIsAdjustingRotation: (adjusting) => set({ isAdjustingRotation: adjusting }),
 
