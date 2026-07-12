@@ -98,7 +98,13 @@ function isAllowedWriteExtension(p) {
  * pure module compares against that canonical resolution.
  */
 function canonicalizeForCompare(resolved) {
-  return resolved
+  // Neutralize the Win32 verbatim / device namespace prefixes the OS honors but path.resolve
+  // PRESERVES: `\\?\C:\…` and `\\.\C:\…` both address the same file as `C:\…`, and
+  // `\\?\UNC\server\share` == `\\server\share`. Without this, a `\\?\`-prefixed candidate
+  // never string-prefix-matches a drive-letter deny-base and slips through. (This makes the
+  // pure validator self-sufficient instead of relying on the call site's realpath to strip it.)
+  const stripped = resolved.replace(/^\\\\[?.]\\(UNC\\)?/i, (_m, unc) => (unc ? '\\\\' : ''));
+  return stripped
     .toLowerCase()
     .split(path.sep)
     // Strip trailing dots/spaces the OS ignores; leave a bare drive root (`c:`) intact.

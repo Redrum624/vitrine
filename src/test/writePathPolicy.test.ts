@@ -161,4 +161,16 @@ const onWindows = path.sep === '\\';
     const ok = path.join(homeDir, 'Pictures', 'out.jpg');
     expect(validateWritePath(ok, { deniedBases: bases(), realDir })).toBe(path.resolve(realDir, 'out.jpg'));
   });
+
+  it('denies a Win32 verbatim-namespace prefix (\\\\?\\) bypass into a sink — pure validator, no realDir', () => {
+    // path.resolve PRESERVES \\?\, so without prefix-neutralization this string-prefix-misses
+    // the drive-letter deny-base. The pure validator must reject it on its own.
+    const evil = '\\\\?\\' + path.join(homeDir, '.ssh', 'authorized_keys');
+    expect(() => validateWritePath(evil, { deniedBases: bases() })).toThrow(REJECT_PREFIX);
+  });
+
+  it('denies a Win32 device-namespace prefix (\\\\.\\) bypass into a system dir', () => {
+    const evil = '\\\\.\\C:\\Windows\\System32\\evil.dll';
+    expect(() => validateWritePath(evil, { deniedBases: bases() })).toThrow(REJECT_PREFIX);
+  });
 });
