@@ -66,6 +66,12 @@ export class ColorBalancePipelineModule implements PipelineModule {
     return this.colorBalanceModule.getParams();
   }
 
+  // Set parameters (required by EditPersistenceService.restore / applyWorkerConfig).
+  // Delegates to the inner ColorBalanceModule (getParams' inverse) so persisted grades restore.
+  setParams(params: Record<string, unknown>): void {
+    this.colorBalanceModule.setParams(params);
+  }
+
   // Reset module to defaults
   reset(): void {
     this.colorBalanceModule.resetParams();

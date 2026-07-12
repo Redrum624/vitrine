@@ -68,6 +68,12 @@ export class ToneCurvePipelineModule implements PipelineModule {
     return this.toneCurveModule.getParams();
   }
 
+  // Set parameters (required by EditPersistenceService.restore / applyWorkerConfig).
+  // Delegates to the inner ToneCurveModule (getParams' inverse) so persisted curves restore.
+  setParams(params: Record<string, unknown>): void {
+    this.toneCurveModule.setParams(params);
+  }
+
   /**
    * Returns the current built LUT arrays from the underlying ToneCurveModule.
    * These are the same Float32Array instances used in process() / applyToneCurve().

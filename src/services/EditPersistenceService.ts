@@ -187,9 +187,25 @@ class EditPersistenceService {
     if (!state || state.version !== STORE_VERSION) return false;
 
     for (const [id, params] of Object.entries(state.modules || {})) {
-      const module = imageProcessingPipeline.getModule(id) as { setParams?: (p: unknown) => void } | undefined;
-      if (module && typeof module.setParams === 'function') {
-        try { module.setParams(params); } catch (e) { logger.warn(`restore: setParams failed for ${id}`, e); }
+      // Setter ladder mirroring applyWorkerConfig / the getParams getter shapes: most modules
+      // expose setParams, but exposure uses setCurrentParams and lenscorrections uses
+      // setParameters — before this ladder restore() only tried setParams, so crop / exposure /
+      // tonecurve / colorbalance / lenscorrections were serialized but SILENTLY dropped on reopen
+      // (the P2 progressive-destruction class). getParams captured them, so accepting exactly
+      // those shapes back is a pure round-trip (no schema change; old persisted states restore).
+      const module = imageProcessingPipeline.getModule(id) as {
+        setParams?: (p: unknown) => void;
+        setParameters?: (p: unknown) => void;
+        setCurrentParams?: (p: unknown) => void;
+      } | undefined;
+      if (!module) continue;
+      try {
+        if (typeof module.setParams === 'function') module.setParams(params);
+        else if (typeof module.setParameters === 'function') module.setParameters(params);
+        else if (typeof module.setCurrentParams === 'function') module.setCurrentParams(params);
+        else logger.warn(`restore: no param setter for ${id}`);
+      } catch (e) {
+        logger.warn(`restore: setParams failed for ${id}`, e);
       }
     }
 
@@ -301,6 +317,19 @@ class EditPersistenceService {
    */
   validateBakedUpscaleIntent(saved: unknown): BakedUpscaleIntent | null {
     return isValidBakedUpscaleIntent(saved) ? saved : null;
+  }
+
+  /**
+   * Shape-validate a persisted `bakeOrder` array (mirrors validateBakedUpscaleIntent's spirit).
+   * The store JSON is durable and survives app updates, so an old/buggy build or a tampered store
+   * could carry entries outside the current enum. Keep only the known 'upscale' | 'deblur' tokens
+   * (in their persisted order); a non-array or an all-junk array yields undefined so the caller
+   * falls back to the marker-derived default order.
+   */
+  validateBakeOrder(saved: unknown): ('upscale' | 'deblur')[] | undefined {
+    if (!Array.isArray(saved)) return undefined;
+    const filtered = saved.filter((e): e is 'upscale' | 'deblur' => e === 'upscale' || e === 'deblur');
+    return filtered.length > 0 ? filtered : undefined;
   }
 
   /** Debounced save of the current image's edits — call after any edit. */

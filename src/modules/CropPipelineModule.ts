@@ -74,6 +74,18 @@ export class CropPipelineModule implements PipelineModule {
     return this.cropModule.getParams();
   }
 
+  // Set parameters (required by EditPersistenceService.restore / applyWorkerConfig).
+  // Delegates to the inner CropModule, then MIRRORS the restored `enabled` flag onto the
+  // adapter-level `isEnabled` — process() gates on BOTH (`!this.isEnabled || !inner.enabled`),
+  // and restore() runs on a reset pipeline where the adapter isEnabled was cleared to false, so
+  // without this sync a persisted crop would round-trip its rect but render as a no-op.
+  setParams(params: Record<string, unknown>): void {
+    this.cropModule.setParams(params as Partial<CropParams>);
+    if (typeof (params as { enabled?: unknown }).enabled === 'boolean') {
+      this.isEnabled = (params as { enabled: boolean }).enabled;
+    }
+  }
+
   // Reset module to defaults
   reset(): void {
     this.cropModule.resetParams();
