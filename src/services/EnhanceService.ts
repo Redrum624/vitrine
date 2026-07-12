@@ -2,6 +2,7 @@ import { imageService } from './ImageService';
 import { imageProcessingPipeline } from './ImageProcessingPipeline';
 import { enhanceWorkerClient } from './EnhanceWorkerClient';
 import { aiUpscaleClient } from './AiUpscaleClient';
+import { aiDeblurClient } from './AiDeblurClient';
 import { checkpointService } from './CheckpointService';
 import { editPersistenceService } from './EditPersistenceService';
 import { notificationService } from './NotificationService';
@@ -71,10 +72,14 @@ interface RestorePoint {
   data: Float32Array;
   width: number;
   height: number;
-  scale: 2 | 4;
+  // Which bake produced this restore point. Governs which base marker _popAndRestore re-asserts for
+  // the remaining top level after a partial revert (upscale ⇒ setBakedUpscale + intent; deblur ⇒
+  // setBakedDeblur). Deblur and upscale share ONE stack so a history restore can unwind across both.
+  kind: 'upscale' | 'deblur';
+  scale?: 2 | 4; // upscale only
   // Route the bake used ('ai' | 'standard') — kept so a partial revert of a multi-level upscale can
   // restore the remaining level's durable intent ({scale, mode}) accurately, not just its scale.
-  mode: 'ai' | 'standard';
+  mode?: 'ai' | 'standard'; // upscale only
   editState: ReturnType<typeof editPersistenceService.serialize>;
 }
 
@@ -255,7 +260,7 @@ class EnhanceService {
 
       // Result obtained — now safe to push the restore point and mutate.
       store.setUpscaleMode(mode);
-      this.restoreStack.push({ data: restoreData, width, height, scale: params.scale, mode, editState });
+      this.restoreStack.push({ data: restoreData, width, height, kind: 'upscale', scale: params.scale, mode, editState });
 
       imageProcessingPipeline.resetAllModules();
       // setOriginalImage BEFORE updateCurrentImageData: the base cache is a fully-materialized
@@ -281,6 +286,102 @@ class EnhanceService {
     }
   }
 
+  /**
+   * Bake an AI motion-deblur of the current developed image into a NEW working base — same
+   * transactional apply/revert seam as applyUpscale, but WHOLE-FRAME and DIMENSION-PRESERVING.
+   *
+   * Base-MUTATING (setOriginalImage + updateCurrentImageData) → gated by guardDeveloping HERE (the
+   * single choke point) for the same reason as applyUpscale: during the progressive-open developing
+   * window the working image is the embedded preview, and baking it then would be clobbered by the
+   * background full decode. Sets the `bakedDeblur` marker so EditPersistenceService.flush() is
+   * suppressed while the bake is live (its post-reset neutral module state would otherwise clobber
+   * the user's PRE-deblur saved edits) — the pre-deblur edits are written to disk explicitly here.
+   *
+   * NEVER auto-routed and never a Deblur-slider replacement: the model only wins on MOTION blur; on
+   * defocus it degrades (-4.3 dB, spike Gate 3). The deterministic RL Deblur sliders remain the
+   * defocus path. Availability is DirectML-only (CPU-only ⇒ the panel hides this control), and the
+   * 384px floor is enforced here (no IPC for a sub-floor image) AND in aiDeblur.cjs (the tile floor).
+   *
+   * v1 scope: in-session bake + revert. The deblurred pixels are NOT persisted across sessions (no
+   * durable "deblur intent" re-apply, unlike upscale's Q7 machinery) — on reopen the image restores
+   * to its pre-deblur edits. This is the documented v1 bar; the upscale-intent pattern is the
+   * follow-up if cross-session deblur is wanted.
+   */
+  async applyMotionDeblur(): Promise<void> {
+    if (guardDeveloping(notificationService.info.bind(notificationService), 'AI Motion Deblur')) return;
+    if (this.inFlight) return;
+
+    const original = imageService.getOriginalImage();
+    if (!original) throw new Error('No image loaded');
+    const { width, height } = original;
+
+    // Crop-adjusted processed dims (mirrors applyUpscale) — deblur runs on the developed output.
+    const cropMod = imageProcessingPipeline.getModule?.('crop') as
+      | { getOutputDimensions(w: number, h: number): { width: number; height: number } }
+      | undefined;
+    const procDims = cropMod ? cropMod.getOutputDimensions(width, height) : { width, height };
+    const procW = procDims.width;
+    const procH = procDims.height;
+
+    // HARD 384px floor (spike Gate 2): decline sub-floor images up front — no IPC call, clear notice.
+    // Below 384 on either axis NAFNet's TLC window is invalid (DML silently returns garbage).
+    if (procW < 384 || procH < 384) {
+      throw new Error(
+        `AI motion deblur needs at least 384px on each side (this image is ${procW}×${procH}).`,
+      );
+    }
+
+    // AI-only: no deterministic fallback exists for motion blur, so an unavailable backend is a hard
+    // stop (the panel already hides the control on CPU-only; this is defense in depth).
+    if (!(await aiDeblurClient.isAvailable())) {
+      throw new Error('AI motion deblur is unavailable (requires a DirectML-capable GPU).');
+    }
+
+    const store = useAppStore.getState();
+    this.inFlight = true;
+    store.setIsProcessing(true);
+    store.setDeblurProgress(0);
+    try {
+      const edited = await imageProcessingPipeline.processImage(
+        new Float32Array(original.data),
+        { width, height, channels: 4 },
+        { useWebWorkers: true },
+      );
+
+      // Snapshot the NATIVE (pre-crop) base + edit state for revert BEFORE the AI call.
+      const restoreData = new Float32Array(original.data);
+      const editState = editPersistenceService.serialize();
+
+      const ai = await aiDeblurClient.run(
+        float32ToUint8Rgba(edited),
+        procW,
+        procH,
+        (p) => { if (p.total > 0) store.setDeblurProgress(p.done / p.total); },
+      );
+      const base = uint8ToFloat32Rgba(ai.data); // clean model output (new editable base, same dims)
+
+      // Persist the PRE-deblur edits to disk NOW, while the modules still hold them and before the
+      // bake marker suppresses flush(). Guarantees a reopen restores the user's real edits rather
+      // than the post-bake neutral state (the deblur pixels themselves are in-session only — v1).
+      editPersistenceService.flush();
+
+      this.restoreStack.push({ data: restoreData, width, height, kind: 'deblur', editState });
+
+      imageProcessingPipeline.resetAllModules();
+      // setOriginalImage BEFORE updateCurrentImageData — see applyUpscale's comment.
+      imageService.setOriginalImage(base, ai.width, ai.height);
+      imageService.updateCurrentImageData(new Float32Array(base), ai.width, ai.height);
+      imageService.setBakedDeblur?.();
+      checkpointService.recordLabeled('Motion deblur (AI)', this.getRestoreDepth());
+      store.notifyExternalParamsChange();
+      store.triggerReprocessing();
+    } finally {
+      this.inFlight = false;
+      store.setIsProcessing(false);
+      store.setDeblurProgress(null);
+    }
+  }
+
   /** Pop the top restore point and apply it. Returns false if the stack was empty. */
   private _popAndRestore(): boolean {
     const rp = this.restoreStack.pop();
@@ -293,25 +394,32 @@ class EnhanceService {
     editPersistenceService.restore(rp.editState, rp.width, rp.height);
 
     if (this.restoreStack.length === 0) {
+      // Fully unwound to the native base — clear BOTH bake markers and the durable upscale intent
+      // (store + disk) so a future reopen no longer offers a stale re-apply. persistNow writes the
+      // marker-free native state.
       imageService.clearBakedUpscale();
-      // Fully unwound to the native base — clear the durable intent (store + disk) so a future
-      // reopen no longer offers a stale re-apply. persistNow writes the marker-free native state.
+      imageService.clearBakedDeblur?.();
       useAppStore.getState().setUpscaleIntent(null);
       editPersistenceService.persistNow();
     } else {
-      // Update the baked marker to reflect the now-current (remaining) top level.
-      // Each RestorePoint stores the pre-bake dims and scale for the upscale it captured,
-      // so the remaining top describes the active baked level after this pop.
+      // Re-assert the base marker for the now-current (remaining) top level. Each RestorePoint stores
+      // the pre-bake dims/kind for the bake it captured, so the remaining top describes the active
+      // baked level after this pop. Clear the sibling marker first so a mixed stack can't leave both set.
       const top = this.restoreStack[this.restoreStack.length - 1];
-      imageService.setBakedUpscale({ scale: top.scale, nativeWidth: top.width, nativeHeight: top.height });
-      // The remaining baked level is still active — keep the store intent in sync with it.
-      useAppStore.getState().setUpscaleIntent({ scale: top.scale, mode: top.mode });
-      // Persist the re-seeded intent NOW. flush() would early-return here (isBakedUpscaleActive is
-      // still true — a level remains), so without this explicit write a quit right after a partial
-      // unwind leaves the disk holding the JUST-POPPED (now-wrong) level's {scale,mode} — a stale
-      // intent a future reopen would offer to re-apply. persistNow bypasses that early-return and
-      // writes serialize()'s current snapshot, which already reflects the restored (remaining-level)
-      // module params and the just-updated store intent above (serialize() reads it fresh).
+      if (top.kind === 'deblur') {
+        imageService.clearBakedUpscale();
+        imageService.setBakedDeblur?.();
+        useAppStore.getState().setUpscaleIntent(null);
+      } else {
+        imageService.clearBakedDeblur?.();
+        imageService.setBakedUpscale({ scale: top.scale!, nativeWidth: top.width, nativeHeight: top.height });
+        // The remaining baked upscale level is still active — keep the store intent in sync with it.
+        useAppStore.getState().setUpscaleIntent({ scale: top.scale!, mode: top.mode! });
+      }
+      // Persist the re-seeded state NOW. flush() would early-return here (a bake marker is still
+      // active), so without this explicit write a quit right after a partial unwind leaves the disk
+      // holding the JUST-POPPED (now-wrong) level. persistNow bypasses that early-return and writes
+      // serialize()'s current snapshot (restored module params + the just-updated store intent).
       editPersistenceService.persistNow();
     }
     return true;

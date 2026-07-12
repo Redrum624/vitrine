@@ -328,5 +328,12 @@ describe('developing-guard tripwire — base-pixel actions must gate during prog
       (s) => s.base === 'EnhanceService.ts' && s.line.includes('updateCurrentImageData(enhanced'),
     );
     expect(upscale?.guarded).toBe(true);
+    // Task S4: applyMotionDeblur is a NEW base-writer (bakes the deblurred image). Its
+    // updateCurrentImageData must be detected as gated (guardDeveloping at the function top) —
+    // registering the new entry point on this tripwire as the KNOWN BOUNDARY doc requires.
+    const deblur = WRITE_SITES.find(
+      (s) => s.base === 'EnhanceService.ts' && s.line.includes('updateCurrentImageData(new Float32Array(base)'),
+    );
+    expect(deblur?.guarded).toBe(true);
   });
 });

@@ -14,6 +14,20 @@ external weights file is ~64 MB, which is too large for the repository.
 Both files must sit side-by-side here (the `.onnx` references the `.data` external-weights file by
 relative name).
 
+## Files expected here (for a build that includes AI motion deblur)
+
+| File | Size | SHA-256 |
+|------|------|---------|
+| `NAFNet-GoPro-width32.onnx` | ~66.5 MB | `32a602cf7e553a79be57059ccbbdd500345a4b90df305a55724be9d22f6dd115` |
+
+Single self-contained file (weights inline; no `.data` sidecar). Dynamic H×W input; opset 11.
+
+**Source:** ailia-models ONNX export of megvii's NAFNet-GoPro-width32 checkpoint —
+`https://storage.googleapis.com/ailia-models/nafnet/NAFNet-GoPro-width32.onnx`.
+**License:** MIT (© 2022 megvii-model), with the BasicSR components under Apache-2.0. See
+`THIRD-PARTY-LICENSES.md`. Used by the Enhance module's **Motion deblur (AI)** control (run via
+onnxruntime-node + DirectML). DirectML-gated: on a CPU-only machine the control is hidden.
+
 ## Source & license
 
 - **Model:** Real-ESRGAN x4plus — ONNX export from the Qualcomm AI Hub model

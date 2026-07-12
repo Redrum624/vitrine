@@ -2,12 +2,14 @@ import { resolveExportSource } from '../components/Dialogs/resolveExportSource';
 
 // ---- mock imageService ----
 const mockIsBakedUpscaleActive = jest.fn<boolean, []>();
+const mockIsBakedDeblurActive = jest.fn<boolean, []>();
 const mockGetCurrentImage = jest.fn();
 const mockLoadImageForExport = jest.fn();
 
 jest.mock('../services/ImageService', () => ({
   imageService: {
     isBakedUpscaleActive: (...args: unknown[]) => mockIsBakedUpscaleActive(...(args as [])),
+    isBakedDeblurActive: (...args: unknown[]) => mockIsBakedDeblurActive(...(args as [])),
     getCurrentImage: (...args: unknown[]) => mockGetCurrentImage(...args),
     loadImageForExport: (...args: unknown[]) => mockLoadImageForExport(...args),
   },
@@ -16,6 +18,7 @@ jest.mock('../services/ImageService', () => ({
 describe('resolveExportSource', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockIsBakedDeblurActive.mockReturnValue(false);
   });
 
   it('returns the baked buffer and dims when upscale is active — does NOT call loadImageForExport', async () => {
@@ -34,6 +37,19 @@ describe('resolveExportSource', () => {
     expect(result.data).toBe(bakedData);
     expect(result.width).toBe(400);
     expect(result.height).toBe(200);
+    expect(mockLoadImageForExport).not.toHaveBeenCalled();
+  });
+
+  it('returns the baked buffer (native dims) when motion-deblur is active — does NOT re-decode', async () => {
+    const bakedData = new Float32Array([1, 2, 3, 4]);
+    mockIsBakedUpscaleActive.mockReturnValue(false);
+    mockIsBakedDeblurActive.mockReturnValue(true);
+    mockGetCurrentImage.mockReturnValue({ data: bakedData, width: 400, height: 200, filePath: '/shots/shot.orf' });
+
+    const result = await resolveExportSource('/shots/shot.orf');
+
+    expect(result.data).toBe(bakedData);
+    expect(result.width).toBe(400);
     expect(mockLoadImageForExport).not.toHaveBeenCalled();
   });
 

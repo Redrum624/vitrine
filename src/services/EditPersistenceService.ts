@@ -260,7 +260,12 @@ class EditPersistenceService {
     if (this.saveTimer) { clearTimeout(this.saveTimer); this.saveTimer = null; }
     const img = imageService.getCurrentImage();
     if (!img?.filePath || !window.electronAPI?.storeSet) return;
-    if (imageService.isBakedUpscaleActive()) return;
+    // Suppress while EITHER bake is active. A baked upscale/deblur has reset the pipeline modules to
+    // neutral (their edits are baked into the new base); persisting that neutral state would clobber
+    // the user's PRE-bake saved edits. The pre-bake state is written explicitly at bake time
+    // (persistBakedUpscaleIntent for upscale; a plain flush before the deblur reset), and revert's
+    // persistNow re-writes the restored state marker-free once fully unwound.
+    if (imageService.isBakedUpscaleActive() || imageService.isBakedDeblurActive()) return;
     const json = JSON.stringify(this.serialize());
     if (json === this.baseline) return; // unchanged since load — nothing to persist
     this.baseline = json;

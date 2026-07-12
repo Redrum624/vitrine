@@ -75,6 +75,32 @@ with a compatible build. Source for libvips is available at https://github.com/l
   > THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DAMAGES ARISING IN ANY WAY OUT OF THE
   > USE OF THIS SOFTWARE.
 
+### NAFNet-GoPro AI motion-deblur model (`resources/models/NAFNet-GoPro-width32.onnx`)
+
+- **Use:** AI motion deblur ("Motion deblur (AI)") in the Enhance module (run via onnxruntime-node +
+  DirectML). A single self-contained ONNX (weights inline), opset 11, dynamic input size.
+- **License:** **MIT — Copyright (c) 2022 megvii-model** (the NAFNet project). Portions derived from
+  **BasicSR are Apache-2.0 — Copyright (c) 2020 BasicSR authors / XPixelGroup**.
+- **Source:** https://github.com/megvii-research/NAFNet (upstream, MIT). ONNX export distributed by
+  ailia-models (`https://storage.googleapis.com/ailia-models/nafnet/NAFNet-GoPro-width32.onnx`); the
+  ailia `image_restoration/nafnet/LICENSE` reproduces the megvii MIT text.
+- **Obligation (MIT):** This binary redistribution reproduces the copyright notice and permission
+  notice (below).
+- **Obligation (Apache-2.0, BasicSR parts):** Retain the copyright notice and the NOTICE (if any);
+  no trademark grant.
+
+  > **MIT License — Copyright (c) 2022 megvii-model.** Permission is hereby granted, free of charge,
+  > to any person obtaining a copy of this software and associated documentation files (the
+  > "Software"), to deal in the Software without restriction, including without limitation the rights
+  > to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software,
+  > and to permit persons to whom the Software is furnished to do so, subject to the above copyright
+  > notice and this permission notice being included in all copies or substantial portions of the
+  > Software. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+  > INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE
+  > AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+  > DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+  > OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
 ### LibRaw (`vendor/libraw/dcraw_emu.exe`, `vendor/libraw/libraw.dll`)
 
 - **License:** LGPL-2.1 OR CDDL-1.0 (dual-licensed; this project invokes dcraw_emu as a

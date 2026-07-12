@@ -38,6 +38,12 @@ export class ImageService {
   private processingPipeline: ImageProcessingPipeline | null = null;
   private loadGeneration = 0;
   private bakedUpscale: BakedUpscaleInfo | null = null;
+  // Marks the working base as a baked AI motion-deblur result. Like `bakedUpscale`, it suppresses
+  // EditPersistenceService.flush() (so the post-bake reset-to-neutral module state never clobbers
+  // the user's PRE-deblur saved edits) and steers export to the baked pixels. Boolean (not an
+  // {scale,dims} info) because deblur does not change dimensions. Scoped per-image alongside
+  // `bakedUpscale`: cleared on every fresh load / clearImage, and by EnhanceService's revert.
+  private bakedDeblur = false;
   // Single hook fired when the WORKING IMAGE IS SWITCHED (fresh loadImage / clearImage) — see
   // setImageSwitchHook. Used to drop per-image transient state that lives outside ImageService
   // (currently EnhanceService's revert stack), scoped alongside the `bakedUpscale` marker.
@@ -101,7 +107,8 @@ export class ImageService {
     interactive: boolean = true,
   ): Promise<ImageData> {
     const thisGeneration = ++this.loadGeneration;
-    this.bakedUpscale = null; // Clear baked marker on any fresh image load
+    this.bakedUpscale = null; // Clear baked markers on any fresh image load
+    this.bakedDeblur = false;
     this.notifyImageSwitched(); // drop per-image transient state scoped to the previous image (EnhanceService's revert stack)
     // Reset the "Developing full quality…" affordance for EVERY new load — synchronously, before
     // any cache lookup or decode. Without this, switching away from a still-developing RAW (e.g.
@@ -850,6 +857,7 @@ export class ImageService {
   clearImage(): void {
     this.currentImage = null;
     this.bakedUpscale = null;
+    this.bakedDeblur = false;
     this.notifyImageSwitched(); // same per-image reset as a fresh load (drop EnhanceService's revert stack)
     // Release the original-snapshot references too (deferred or materialized) —
     // otherwise the previous image's ~310MB base stays reachable after a clear.
@@ -911,6 +919,21 @@ export class ImageService {
    */
   getBakedUpscale(): BakedUpscaleInfo | null {
     return this.bakedUpscale;
+  }
+
+  /** Mark the current working image as a baked AI motion-deblur result (same-dimension bake). */
+  setBakedDeblur(): void {
+    this.bakedDeblur = true;
+  }
+
+  /** Clear the baked motion-deblur marker (on revert to the pre-deblur base). */
+  clearBakedDeblur(): void {
+    this.bakedDeblur = false;
+  }
+
+  /** Check if the current working image is a baked motion-deblur result. */
+  isBakedDeblurActive(): boolean {
+    return this.bakedDeblur;
   }
 }
 

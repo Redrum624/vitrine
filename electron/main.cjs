@@ -5,6 +5,7 @@ const os = require('os');
 const { writeImageFile, writeImageMetadata } = require('./imageWriter.cjs');
 const { markSelfWrite, createFolderChangeDebouncer } = require('./selfWriteRegistry.cjs');
 const aiUpscaler = require('./aiUpscaler.cjs');
+const aiDeblur = require('./aiDeblur.cjs');
 
 // Canonical RAW extension superset recognized by this app — duplicated (dot-prefixed) from
 // `src/utils/rawExtensions.ts`'s `RAW_EXTENSIONS_DOTTED` (see that file's doc comment for why
@@ -429,6 +430,17 @@ ipcMain.handle('ai-upscale', async (event, { rgba, width, height, scale }) => {
   const onProgress = (p) => { try { event.sender.send('ai-upscale-progress', p); } catch { /* window gone */ } };
   const r = await aiUpscaler.upscale(new Uint8Array(rgba), width, height, scale, onProgress);
   return { data: r.data, width: r.width, height: r.height, backend: aiUpscaler.getBackend() };
+});
+
+// AI motion deblur (NAFNet-GoPro via onnxruntime-node, main-process native). Availability is
+// DirectML-gated (see aiDeblur.cjs) so a CPU-only machine reports unavailable and the control hides.
+ipcMain.handle('ai-deblur-available', async () => {
+  try { return await aiDeblur.isAvailable(); } catch { return false; }
+});
+ipcMain.handle('ai-deblur', async (event, { rgba, width, height }) => {
+  const onProgress = (p) => { try { event.sender.send('ai-deblur-progress', p); } catch { /* window gone */ } };
+  const r = await aiDeblur.deblur(new Uint8Array(rgba), width, height, onProgress);
+  return { data: r.data, width: r.width, height: r.height, backend: aiDeblur.getBackend() };
 });
 
 ipcMain.handle('show-open-dialog', async (event, options) => {

@@ -285,6 +285,15 @@ export interface ElectronAPI {
   ) => Promise<{ data: Uint8Array; width: number; height: number; backend: string | null }>;
   onAiUpscaleProgress: (callback: (p: { done: number; total: number }) => void) => () => void;
 
+  // AI motion deblur (NAFNet; DirectML-gated — resolves false on a CPU-only backend)
+  aiDeblurAvailable: () => Promise<boolean>;
+  aiDeblur: (
+    rgba: Uint8Array,
+    width: number,
+    height: number,
+  ) => Promise<{ data: Uint8Array; width: number; height: number; backend: string | null }>;
+  onAiDeblurProgress: (callback: (p: { done: number; total: number }) => void) => () => void;
+
   // Cleanup
   removeAllListeners: (channel: string) => void;
 }

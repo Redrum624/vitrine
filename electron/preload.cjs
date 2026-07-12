@@ -98,6 +98,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('ai-upscale-progress', listener);
   },
 
+  // AI motion deblur (NAFNet via onnxruntime-node; DirectML-gated availability)
+  aiDeblurAvailable: () => ipcRenderer.invoke('ai-deblur-available'),
+  aiDeblur: (rgba, width, height) => ipcRenderer.invoke('ai-deblur', { rgba, width, height }),
+  onAiDeblurProgress: (callback) => {
+    const listener = (event, data) => callback(data);
+    ipcRenderer.on('ai-deblur-progress', listener);
+    return () => ipcRenderer.removeListener('ai-deblur-progress', listener);
+  },
+
   // Logging
   getLogFile: () => ipcRenderer.invoke('get-log-file'),
 

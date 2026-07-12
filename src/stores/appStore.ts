@@ -46,6 +46,10 @@ interface AppStore extends AppState {
   // silently exporting at native res. serialize() reads it so the marker round-trips through flush.
   upscaleIntent: BakedUpscaleIntent | null;
   setUpscaleIntent: (v: BakedUpscaleIntent | null) => void;
+  // AI motion deblur: determinate progress 0..1 while tiles run (null when idle). Deblur is
+  // DirectML-only and AI-only (no Standard fallback), so there is no mode badge — just progress.
+  deblurProgress: number | null;
+  setDeblurProgress: (v: number | null) => void;
   // RAW decode options applied to the CURRENT image's base pixels. Changed only via a
   // re-decode (RawImageService.reDecode) or restored from per-image persistence on open —
   // never a live edit, so it stays in lock-step with the actually-decoded base.
@@ -169,6 +173,7 @@ export const useAppStore = create<AppStore>((set) => ({
   upscaleProgress: null,
   upscaleMode: null,
   upscaleIntent: null,
+  deblurProgress: null,
   rawDecodeOptions: DEFAULT_RAW_DECODE_OPTIONS,
   reDecoding: false,
   developing: false,
@@ -206,6 +211,7 @@ export const useAppStore = create<AppStore>((set) => ({
   setUpscaleProgress: (v) => set({ upscaleProgress: v }),
   setUpscaleMode: (v) => set({ upscaleMode: v }),
   setUpscaleIntent: (v) => set({ upscaleIntent: v }),
+  setDeblurProgress: (v) => set({ deblurProgress: v }),
   setRawDecodeOptions: (opts) => set({ rawDecodeOptions: opts }),
   setReDecoding: (v) => set({ reDecoding: v }),
   setDeveloping: (v) => set({ developing: v }),

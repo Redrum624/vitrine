@@ -1,10 +1,11 @@
 // src/components/Modules/EnhanceModuleComponent.tsx
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { EnhanceModule } from '../../modules/EnhanceModule';
 import { NoiseReductionModule, NoiseReductionParams } from '../../modules/NoiseReductionModule';
 import { EnhanceParams, DEFAULT_ENHANCE_PARAMS } from '../../utils/enhanceChain';
 import { enhanceService, getUpscaleFeasibility, UpscaleFeasibility } from '../../services/EnhanceService';
+import { aiDeblurClient } from '../../services/AiDeblurClient';
 import { imageService } from '../../services/ImageService';
 import { imageProcessingPipeline } from '../../services/ImageProcessingPipeline';
 import { useAppStore } from '../../stores/appStore';
@@ -30,6 +31,10 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
   const [busy, setBusy] = useState(false);
   const upscaleProgress = useAppStore((s) => s.upscaleProgress);
   const upscaleMode = useAppStore((s) => s.upscaleMode);
+  const deblurProgress = useAppStore((s) => s.deblurProgress);
+  // AI motion deblur is DirectML-only with no deterministic fallback, so the control is HIDDEN (not
+  // disabled) when the backend is unavailable (spike policy). Probe once on mount; null = unknown.
+  const [deblurAvailable, setDeblurAvailable] = useState<boolean | null>(null);
   // Durable upscale intent (Q7): set when a reopened image carries a persisted-but-not-reapplied
   // upscale (or a live bake). Drives the one-click re-apply notice below. `developing` gates the
   // button during the progressive-open window (applyUpscale itself is gated too — belt & braces).
@@ -127,6 +132,27 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
     }
   }, [upscaleIntent, module]);
 
+  // Probe AI-deblur availability once (capability doesn't change at runtime; the client caches it).
+  useEffect(() => {
+    let alive = true;
+    aiDeblurClient.isAvailable().then((v) => { if (alive) setDeblurAvailable(v); });
+    return () => { alive = false; };
+  }, []);
+
+  // Apply an AI motion deblur (opt-in, one-shot bake). Mirrors handleReapplyUpscale's busy/error seam.
+  const handleMotionDeblur = useCallback(async () => {
+    setBusy(true); setError(null);
+    try {
+      await enhanceService.applyMotionDeblur();
+      setRevertVersion((v) => v + 1);
+      enhanceService.markEnhanceApplied();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
   // Show the reopen notice when a durable intent exists but the working base is NOT currently baked
   // (i.e. reopened and not yet re-applied). Once re-applied, isBakedUpscaleActive() is true → hide.
   const showReopenNotice = !!upscaleIntent && !imageService.isBakedUpscaleActive();
@@ -170,6 +196,22 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
 
   const selectedScaleInfeasible =
     params.upscale && feasibility[params.scale as 2 | 4]?.feasible === false;
+
+  // AI motion deblur is offered only when the DirectML backend is present AND the (crop-adjusted)
+  // image is >= 384px on both axes (the hard model floor — smaller inputs corrupt on DML). Unknown
+  // dims (no image) ⇒ treat as too small so the control stays hidden until an image is loaded.
+  const deblurMinOk = (() => {
+    const original = imageService.getOriginalImageDimensions();
+    if (!original) return false;
+    const cropMod = imageProcessingPipeline.getModule?.('crop') as
+      | { getOutputDimensions(w: number, h: number): { width: number; height: number } }
+      | undefined;
+    const dims = cropMod
+      ? cropMod.getOutputDimensions(original.width, original.height)
+      : { width: original.width, height: original.height };
+    return dims.width >= 384 && dims.height >= 384;
+  })();
+  const showMotionDeblur = deblurAvailable === true && deblurMinOk;
 
   // Mode tile look: idle vs active (accent-soft/ring/text), shared across the
   // three toggles — same tokens ChipButton uses, just a taller stacked layout
@@ -354,6 +396,54 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
           step={1}
           onChange={(v) => update({ rlIters: v })}
         />
+
+        {/* AI motion deblur (opt-in, GPU-only). HIDDEN when no DirectML backend or the image is
+            below the 384px model floor — never auto-routed, and never a replacement for the RL
+            Deblur sliders above (those target defocus; this targets camera-shake / motion blur). */}
+        {showMotionDeblur && (
+          <div
+            data-testid="motion-deblur-control"
+            style={{
+              display: 'flex', flexDirection: 'column', gap: 6, padding: '10px 11px', borderRadius: 9,
+              border: '1px solid rgba(255,255,255,.1)', background: 'rgba(255,255,255,.03)',
+            }}
+          >
+            <div className="flex items-center" style={{ gap: 8 }}>
+              <span style={{ fontSize: 11.5, fontWeight: 500, color: 'var(--glass-text-label)' }}>Motion deblur</span>
+              <span
+                data-testid="motion-deblur-ai-badge"
+                title="Runs a neural network on your GPU (DirectML). Aim it at camera-shake / motion blur, not soft focus."
+                style={{
+                  fontSize: 9.5, fontWeight: 700, letterSpacing: '.04em', padding: '2px 7px',
+                  borderRadius: 999, textTransform: 'uppercase',
+                  background: 'var(--accent-soft)', color: 'var(--accent)',
+                  border: '1px solid var(--accent-ring)',
+                }}
+              >
+                AI
+              </span>
+              <button
+                type="button"
+                data-testid="motion-deblur-apply"
+                disabled={busy || developing}
+                title={developing ? 'Available when full quality finishes developing' : undefined}
+                onClick={handleMotionDeblur}
+                style={{
+                  marginLeft: 'auto', flexShrink: 0, padding: '6px 12px', borderRadius: 8,
+                  border: '1px solid var(--accent-ring)', background: 'var(--accent)', color: '#0b0b0c',
+                  fontSize: 11, fontWeight: 700,
+                  cursor: busy || developing ? 'not-allowed' : 'pointer',
+                  opacity: busy || developing ? 0.6 : 1,
+                }}
+              >
+                {busy && deblurProgress != null ? `Deblurring… ${Math.round(deblurProgress * 100)}%` : 'Apply'}
+              </button>
+            </div>
+            <div style={{ fontSize: 10.5, color: 'var(--glass-text-muted)', lineHeight: 1.5 }}>
+              Removes camera-shake / motion blur with AI (GPU). Bakes a new base; Revert Enhance undoes it.
+            </div>
+          </div>
+        )}
 
         <SliderRow
           label="Chroma noise"
