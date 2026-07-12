@@ -1,7 +1,14 @@
-allowBuilds:
-  electron: set this to true or false
-  electron-winstaller: set this to true or false
-  esbuild: set this to true or false
-  exifreader: set this to true or false
-  sharp: set this to true or false
-  unrs-resolver: set this to true or false
+# pnpm settings (pnpm 10.13+ moved these out of package.json's "pnpm" field).
+# Allow build/postinstall scripts ONLY for these known, trusted native/tooling
+# dependencies. pnpm blocks dependency scripts by default and fails the install
+# in CI (ERR_PNPM_IGNORED_BUILDS) unless every package with a build script is
+# explicitly acknowledged here. These packages legitimately need their install
+# scripts to set up native binaries or platform bindings.
+onlyBuiltDependencies:
+  - electron
+  - electron-winstaller
+  - esbuild
+  - exifreader
+  - onnxruntime-node
+  - sharp
+  - unrs-resolver
