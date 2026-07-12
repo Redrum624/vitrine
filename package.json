@@ -43,10 +43,10 @@
     "exifreader": "^4.23.5",
     "libraw-wasm": "^1.1.2",
     "lucide-react": "^0.562.0",
-    "onnxruntime-node": "^1.27.0",
+    "onnxruntime-node": "1.27.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
-    "sharp": "^0.34.5",
+    "sharp": "0.34.5",
     "zustand": "^5.0.8"
   },
   "devDependencies": {
@@ -55,7 +55,6 @@
     "@tailwindcss/postcss": "^4.1.13",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.1",
-    "@types/electron": "^1.4.38",
     "@types/jest": "^30.0.0",
     "@types/node": "^25.0.3",
     "@types/react": "^19.1.13",

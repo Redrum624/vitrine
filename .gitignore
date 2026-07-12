@@ -234,9 +234,9 @@ docs/dist/
 *.bak
 *.orig
 
-# Lock files (keep package-lock.json but ignore others)
+# Lock files — commit pnpm-lock.yaml (this project installs with pnpm) for reproducible,
+# audited installs; ignore the other package managers' lockfiles.
 yarn.lock
-pnpm-lock.yaml
 
 # Auto-generated files
 src/generated/
