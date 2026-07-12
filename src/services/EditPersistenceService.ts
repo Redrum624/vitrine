@@ -295,10 +295,12 @@ class EditPersistenceService {
 
   /**
    * Force-persist the current pipeline state for the current image NOW, bypassing the baseline-diff
-   * short-circuit (but re-seeding the baseline). Used by EnhanceService.revert once an upscale has
-   * been fully unwound to the native base: the store's upscaleIntent has been cleared, so serialize()
-   * emits NO bakedUpscale marker — this durably erases a previously-persisted intent so a future
-   * reopen no longer offers a stale re-apply. Safe here because the base is no longer baked.
+   * short-circuit (but re-seeding the baseline). Two callers in EnhanceService._popAndRestore:
+   * (a) FULL unwind to the native base — the store's upscaleIntent has been cleared, so serialize()
+   * emits NO bakedUpscale marker, durably erasing a previously-persisted intent; (b) PARTIAL unwind
+   * of stacked bakes — the store carries the remaining level's re-seeded {scale, mode}, so the disk
+   * marker is corrected to match (a quit right after the partial revert must not offer the popped
+   * level's stale re-apply). Safe in both: the persisted marker mirrors the live store exactly.
    */
   persistNow(): void {
     const img = imageService.getCurrentImage();

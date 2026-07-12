@@ -137,9 +137,16 @@ class AppLifecycleService {
     const saveAndCloseBtn = modal.querySelector('#save-and-close');
     const closeWithoutSavingBtn = modal.querySelector('#close-without-saving');
 
-    cancelBtn?.addEventListener('click', () => callback(false));
+    // EVERY dismissal path must remove the capture-phase Esc listener below — a leaked
+    // capture listener would silently swallow the app's NEXT Escape press anywhere
+    // (stopImmediatePropagation) before self-removing. Button paths dismiss the dialog
+    // without pressing Esc, so they clean up explicitly here.
+    const removeEscListener = () => document.removeEventListener('keydown', handleKeyDown, true);
+
+    cancelBtn?.addEventListener('click', () => { removeEscListener(); callback(false); });
 
     saveAndCloseBtn?.addEventListener('click', async () => {
+      removeEscListener();
       // Attempt to save all changes
       try {
         await this.saveAllChanges();
@@ -152,7 +159,7 @@ class AppLifecycleService {
       }
     });
 
-    closeWithoutSavingBtn?.addEventListener('click', () => callback(true));
+    closeWithoutSavingBtn?.addEventListener('click', () => { removeEscListener(); callback(true); });
 
     // Close on escape key. Capture phase + stopImmediatePropagation (the Q5/Q6 popover
     // convention — InfoPopover / GalleryTileContextMenu): this dialog is created imperatively
