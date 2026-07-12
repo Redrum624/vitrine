@@ -219,6 +219,94 @@ describe('PresetService — import shape validation (trust boundary)', () => {
   });
 });
 
+describe('PresetService — toneCurve/colorBalance validators match the REAL getParams shape (H2 #9)', () => {
+  let warnSpy: jest.SpyInstance;
+
+  beforeEach(() => {
+    warnSpy = jest.spyOn(notificationService, 'warning').mockImplementation(() => 'id');
+    jest.spyOn(notificationService, 'error').mockImplementation(() => 'id');
+  });
+  afterEach(() => jest.restoreAllMocks());
+
+  // The shape ToneCurveModule.getParams() actually emits (baseCurve/rgbCurve/…), NOT the
+  // stale `curves.{master,…}` the old validator checked.
+  function realToneCurve() {
+    const line = [{ x: 0, y: 0 }, { x: 1, y: 1 }];
+    return {
+      enabled: true,
+      baseCurve: line, baseCurveNodes: 2, baseCurveType: 1,
+      rgbCurve: { red: line, green: line, blue: line },
+      rgbCurveNodes: { red: 2, green: 2, blue: 2 },
+      exposureFusion: 0, exposureStops: 1, preserveColors: 1,
+      autoLevels: false, autoContrast: false,
+    };
+  }
+  // The shape ColorBalanceModule.getParams() actually emits (cmy ranges + 8-color HSL).
+  function realColorBalance() {
+    return {
+      enabled: true,
+      shadows: { cyan_red: 0, magenta_green: 0, yellow_blue: 0 },
+      midtones: { cyan_red: 0, magenta_green: 0, yellow_blue: 0 },
+      highlights: { cyan_red: 0, magenta_green: 0, yellow_blue: 0 },
+      red_saturation: 0, red_luminance: 0, red_hue: 0,
+      blue_saturation: 10, blue_luminance: -5, blue_hue: 180,
+    };
+  }
+
+  test('a real-shape toneCurve/colorBalance block imports intact with no warning', () => {
+    const p = makePreset('h2_real', 'Real Shape', {
+      toneCurve: realToneCurve(),
+      colorBalance: realColorBalance(),
+    });
+    const res = presetService.importPresets(wrap([p]));
+    expect(res.imported).toBe(1);
+    expect(res.warnings).toHaveLength(0);
+    const stored = presetService.getPreset('h2_real')!;
+    expect(stored.settings.toneCurve).toBeDefined();
+    expect(stored.settings.colorBalance).toBeDefined();
+    presetService.deletePreset('h2_real');
+  });
+
+  test('non-vacuity: a broken baseCurve is now DROPPED (old validator ignored it, checking phantom `curves`)', () => {
+    const bad = realToneCurve() as unknown as Record<string, unknown>;
+    bad.baseCurve = [{ x: 'nope', y: 0 }]; // x not numeric → curvePoints fails
+    const p = makePreset('h2_bad_tc', 'Bad ToneCurve', { toneCurve: bad });
+
+    const res = presetService.importPresets(wrap([p]));
+    expect(res.imported).toBe(1);
+    expect(res.warnings).toHaveLength(1);
+    expect(res.warnings[0]).toContain('toneCurve');
+    expect(presetService.getPreset('h2_bad_tc')!.settings.toneCurve).toBeUndefined();
+    expect(warnSpy).toHaveBeenCalled();
+    presetService.deletePreset('h2_bad_tc');
+  });
+
+  test('non-vacuity: a non-numeric 8-color HSL field is now DROPPED on colorBalance', () => {
+    const bad = realColorBalance() as unknown as Record<string, unknown>;
+    bad.red_saturation = 'lots'; // was an unknown/tolerated key under the old validator
+    const p = makePreset('h2_bad_cb', 'Bad ColorBalance', { colorBalance: bad });
+
+    const res = presetService.importPresets(wrap([p]));
+    expect(res.imported).toBe(1);
+    expect(res.warnings).toHaveLength(1);
+    expect(res.warnings[0]).toContain('colorBalance');
+    expect(presetService.getPreset('h2_bad_cb')!.settings.colorBalance).toBeUndefined();
+    presetService.deletePreset('h2_bad_cb');
+  });
+
+  test('a malformed rgbCurve channel (broken nested points) is dropped', () => {
+    const bad = realToneCurve() as unknown as Record<string, unknown>;
+    bad.rgbCurve = { red: [{ x: 0, y: 0 }], green: 'no', blue: [] };
+    const p = makePreset('h2_bad_rgb', 'Bad RGB', { toneCurve: bad });
+
+    const res = presetService.importPresets(wrap([p]));
+    expect(res.imported).toBe(1);
+    expect(res.warnings[0]).toContain('toneCurve');
+    expect(presetService.getPreset('h2_bad_rgb')!.settings.toneCurve).toBeUndefined();
+    presetService.deletePreset('h2_bad_rgb');
+  });
+});
+
 describe('LensCorrectionsPipelineModule — null-safe isEnabled (belt-and-suspenders)', () => {
   function partialParams(vignettingEnabled: boolean) {
     return {

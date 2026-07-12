@@ -43,6 +43,27 @@ const curvePoints: Check = (v) =>
 const cmySection: Check = (v) =>
   isObj(v) && num(v.cyan_red) && num(v.magenta_green) && num(v.yellow_blue);
 
+// The tonecurve/colorbalance blocks are captured by spreading the module's getParams()
+// output (ToneCurveModule.getParams → ToneCurveParams, ColorBalanceModule.getParams →
+// ColorBalanceParams), NOT the stale `curves`/`preserveLuminosity` shape declared on
+// PresetSettings. Validate the REAL captured keys so these validators aren't vacuous on
+// actual exported presets (round-10 H2 finding #9).
+const rgbCurveObj: Check = (v) =>
+  typedIfPresent(v, { red: curvePoints, green: curvePoints, blue: curvePoints });
+
+const rgbNodesObj: Check = (v) =>
+  typedIfPresent(v, { red: num, green: num, blue: num });
+
+// 8-color HSL controls ColorBalanceModule captures: <color>_saturation/_luminance/_hue.
+const HSL_COLORS = ['red', 'orange', 'yellow', 'green', 'cyan', 'blue', 'purple', 'magenta'] as const;
+const colorBalanceHslFields: Record<string, Check> = Object.fromEntries(
+  HSL_COLORS.flatMap((c) => [
+    [`${c}_saturation`, num],
+    [`${c}_luminance`, num],
+    [`${c}_hue`, num],
+  ])
+);
+
 /**
  * The one block that must be COMPLETE: LensCorrectionsPipelineModule.setParameters
  * replaces `lensCorrectionsParams` wholesale and the derived isEnabled getter reads
@@ -92,12 +113,14 @@ const KNOWN_BLOCK_VALIDATORS: Record<string, Check> = {
   }),
   toneCurve: (b) => typedIfPresent(b, {
     enabled: bool,
-    curves: (v) => typedIfPresent(v, { master: curvePoints, red: curvePoints, green: curvePoints, blue: curvePoints }),
-    exposureFusion: num, exposureStops: num, colorPreservation: num
+    baseCurve: curvePoints, baseCurveNodes: num, baseCurveType: num,
+    rgbCurve: rgbCurveObj, rgbCurveNodes: rgbNodesObj,
+    exposureFusion: num, exposureStops: num, preserveColors: num,
+    autoLevels: bool, autoContrast: bool
   }),
   colorBalance: (b) => typedIfPresent(b, {
     enabled: bool, shadows: cmySection, midtones: cmySection, highlights: cmySection,
-    preserveLuminosity: bool, globalSaturation: num, globalVibrance: num, contrastBoost: num
+    ...colorBalanceHslFields
   }),
   shadowsHighlights: (b) => typedIfPresent(b, {
     enabled: bool, shadows: num, highlights: num, shadowsRadius: num, highlightsRadius: num,
