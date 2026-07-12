@@ -18,8 +18,20 @@ export function FileBrowser({ onImageSelected, onFolderSelected }: FileBrowserPr
   const [loading, setLoading] = useState<string | null>(null);
   const watchedFolders = useRef<Map<string, string>>(new Map()); // Maps folderId to folderPath
   const folderIdToPath = useRef<Map<string, string>>(new Map()); // Maps folderId to folderPath for lookups
+  // Latest-value refs so the MOUNT-ONCE folder-changed listener below reads current state
+  // without being re-registered on every change (see the leak note on that effect).
+  const expandedFoldersRef = useRef(expandedFolders);
+  const loadFolderContentsRef = useRef<(folderPath: string, folderId: string, shallow?: boolean) => void>(() => {});
 
-  // Set up folder change listener
+  // Keep the refs pointed at the latest render's values. Cheap post-commit syncs; they do
+  // NOT re-register the IPC listener (that effect has an empty dep array on purpose).
+  useEffect(() => { expandedFoldersRef.current = expandedFolders; }, [expandedFolders]);
+
+  // Set up folder change listener — MOUNT ONCE. Registering this per-`expandedFolders`
+  // (the previous behaviour) added a fresh ipcRenderer.on('folder-changed') listener on
+  // every expand/collapse and never removed it: listeners accumulated, each firing an
+  // independent reload (N-fold redundant loads) until MaxListenersExceeded. An empty dep
+  // array + latest-value refs registers exactly one listener for the component's lifetime.
   useEffect(() => {
     if (!isElectron() || !window.electronAPI) return;
 
@@ -34,12 +46,12 @@ export function FileBrowser({ onImageSelected, onFolderSelected }: FileBrowserPr
         }
       });
 
-      if (changedFolderId && expandedFolders.has(changedFolderId)) {
+      if (changedFolderId && expandedFoldersRef.current.has(changedFolderId)) {
         // Reload the folder contents
         const folderPath = watchedFolders.current.get(changedFolderId);
         if (folderPath) {
           logger.info(`Reloading folder due to changes: ${folderPath}`);
-          loadFolderContents(folderPath, changedFolderId, true);
+          loadFolderContentsRef.current(folderPath, changedFolderId, true);
         }
       }
     };
@@ -47,13 +59,16 @@ export function FileBrowser({ onImageSelected, onFolderSelected }: FileBrowserPr
     window.electronAPI.onFolderChanged(handleFolderChanged);
 
     return () => {
-      // Clean up watchers on unmount
+      // Drop the single 'folder-changed' listener (onFolderChanged wraps the callback in a
+      // fresh closure each call, so removeAllListeners on the channel is the correct remover)
+      // and release every folder watcher held open by this component.
+      window.electronAPI?.removeAllListeners?.('folder-changed');
       watchedFolders.current.forEach((path) => {
         window.electronAPI?.unwatchFolder(path);
       });
       watchedFolders.current.clear();
     };
-  }, [expandedFolders]);
+  }, []);
 
   // Load system drives on component mount
   useEffect(() => {
@@ -159,6 +174,9 @@ export function FileBrowser({ onImageSelected, onFolderSelected }: FileBrowserPr
       setLoading(null);
     }
   }, [onFolderSelected, onImageSelected, selectedFolder]);
+
+  // Point the mount-once listener's ref at the latest loadFolderContents identity.
+  useEffect(() => { loadFolderContentsRef.current = loadFolderContents; }, [loadFolderContents]);
 
 
   // Handler for expanding/collapsing and showing image files (without loading them into gallery/preview)
