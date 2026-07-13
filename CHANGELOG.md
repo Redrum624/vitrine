@@ -4,6 +4,12 @@ All notable changes to **Vitrine** (formerly Photo Editor Pro) are documented in
 this file. The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- **Microsoft Store (MSIX) build target.** Why: signed, SmartScreen-free distribution with automatic updates, without the cost of a code-signing certificate. `npm run build:store` produces `release/Vitrine <version>.appx` (unsigned — the Store signs on ingestion), with the account-specific Partner Center identity read from a gitignored `store-identity.json` (`scripts/build-store.cjs`); a clearly-labeled local test identity is used when the file is absent. Data continuity with the NSIS install was verified end-to-end on Windows 11 by the new `scripts/msix-smoke.cjs` (11/11: package identity, shared `%APPDATA%\photo_app`, NSIS-era edits and presets readable, RAW full-quality open, restart survival, profile left clean). Setup, submission steps, validation recipe, and Windows 10 caveats: `docs/STORE.md`.
+- **winget distribution.** `Redrum624.Vitrine` submitted to the winget community repo against the v1.24.1 release (`winget install vitrine` once merged); per-release manifest maintenance documented in `docs/STORE.md`.
+
 ## [1.24.1] - 2026-07-12
 
 ### Fixed

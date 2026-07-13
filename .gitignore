@@ -213,6 +213,8 @@ coverage/
 # Configuration files with secrets
 config/secrets.json
 .env.secret
+# Microsoft Store package identity (account-specific Partner Center values)
+store-identity.json
 
 # Large sample files
 samples/

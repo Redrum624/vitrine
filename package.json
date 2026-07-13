@@ -20,6 +20,7 @@
     "build:win": "npm run clean:installer && npm run clean:dist && npm run preflight:models && npm run build && node scripts/build-installer.cjs --win --publish=never && node scripts/gen-readme-txt.cjs && node scripts/gen-license-files.cjs && node scripts/collect-installer.cjs",
     "release:win": "npm run build:win && node scripts/gh-release.cjs",
     "build:win:dir": "npm run clean:dist && npm run preflight:models && npm run build && node scripts/build-installer.cjs --win --dir --publish=never",
+    "build:store": "npm run clean:dist && npm run preflight:models && npm run build && node scripts/build-store.cjs",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "lint:fix": "eslint . --ext ts,tsx --fix",
     "typecheck": "tsc --noEmit",
@@ -112,6 +113,13 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "Vitrine"
+    },
+    "appx": {
+      "applicationId": "Vitrine",
+      "displayName": "Vitrine",
+      "backgroundColor": "#08080a",
+      "showNameOnTiles": true,
+      "artifactName": "${productName} ${version}.${ext}"
     },
     "extraResources": [
       {
