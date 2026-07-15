@@ -1,6 +1,6 @@
 {
   "name": "photo_app",
-  "version": "1.25.0",
+  "version": "1.26.0",
   "description": "Vitrine — a free, non-destructive RAW photo editor for Windows",
   "main": "electron/main.cjs",
   "scripts": {

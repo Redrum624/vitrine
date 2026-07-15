@@ -90,6 +90,10 @@ the versioned `Setup …​.exe` and `… portable.exe`, their `SHA256SUMS.txt`,
 
 ![Before and after — RAW to developed](docs/shots/before-after.png)
 
+**Colors that match your camera.** By default, Vitrine fits each RAW's develop to the camera's own embedded render at decode time — so what you see on open is what the camera meant, not a generic bright decode. Measured against OM Workspace (which uses the in-camera engine) on real ORFs: ΔE76 of 1.2–4.7, where Workspace's own difference to the camera JPEG is ~0.8–1.1. Methodology: default settings on both sides, sRGB exports, untouched files; the only known drift is deep-shadow foliage in backlit scenes (the camera's local tone mapping is position-dependent; a color transform is not). Toggle per photo in the RAW Decode panel — off gives Vitrine's neutral bright starting point.
+
+![Camera JPEG vs OM Workspace vs Vitrine — color fidelity comparison](docs/shots/color-fidelity.jpg)
+
 **RAW, handled properly.** Choose the demosaic algorithm and highlight-recovery mode per photo, and read camera/lens details straight from the RAW container.
 
 | RAW Decode (per-photo) | Camera & lens, from the RAW |
@@ -126,6 +130,7 @@ the versioned `Setup …​.exe` and `… portable.exe`, their `SHA256SUMS.txt`,
 ## Features
 
 - **RAW processing** — native LibRaw (`dcraw_emu`) Bayer demosaic in the Electron main process for 15+ formats (CR2/CR3, NEF, ARW, ORF, DNG, RW2, PEF, …), decoding with DCB demosaic + blended highlight reconstruction by default; `libraw-wasm` and embedded-JPEG fallbacks ensure every RAW opens.
+- **Camera match (default)** — each RAW is fitted at decode time to its own embedded camera JPEG, so the opening render matches the out-of-camera look (picture mode and gradation included) instead of a generic decode; per-photo toggle in the RAW Decode panel, works with any brand that embeds a preview.
 - **Per-image RAW decode control** — a "RAW Decode" panel (shown only for RAW files) lets you choose the demosaic algorithm (AHD/DCB) and highlight-recovery mode (Off/Blend/Reconstruct) per photo (changing either re-decodes from disk), plus a post-decode "Highlight recovery" slider that reconstructs single-channel-clipped highlights; all saved per image and applied on export.
 - **Instant RAW preview (progressive open)** — opening a RAW paints the camera's embedded preview in ~0.5 s with your saved edits applied, while the full 16-bit decode develops in the background and swaps in seamlessly ("Developing full quality…" shows in the footer); pixel-precise actions (Auto adjustments, transforms, upscale, print, copy style) wait for full quality automatically.
 - **Persistent RAW decode cache** — decoded full-quality bases are kept on disk (up to 2 GB, LRU) keyed by file, decode options, and file modification time, so reopening a RAW in a later session loads full quality in about a second instead of re-decoding; entries invalidate automatically when the source file or decode options change.

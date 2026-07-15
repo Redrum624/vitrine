@@ -28,7 +28,7 @@ const crypto = require('crypto');
 const DEFAULT_BUDGET_BYTES = 2 * 1024 * 1024 * 1024; // ~2 GB
 
 // Default decode options — kept in sync with rawDecoder.cjs / types/electron.ts (DCB + blend).
-const DEFAULT_OPTIONS = { demosaic: 'dcb', highlightMode: 'blend' };
+const DEFAULT_OPTIONS = { demosaic: 'dcb', highlightMode: 'blend', cameraMatch: true };
 
 // ---------------------------------------------------------------------------
 // Pure helpers (no I/O — directly unit-testable)
@@ -45,7 +45,16 @@ const DEFAULT_OPTIONS = { demosaic: 'dcb', highlightMode: 'blend' };
 function optionsHash(options) {
   const demosaic = (options && options.demosaic) || DEFAULT_OPTIONS.demosaic;
   const highlightMode = (options && options.highlightMode) || DEFAULT_OPTIONS.highlightMode;
-  return crypto.createHash('sha1').update(`${demosaic}|${highlightMode}`).digest('hex').slice(0, 8);
+  // cameraMatch mirrors decodeRawFile's resolution exactly: an ABSENT options
+  // object falls back to the default (match ON), but an options object WITHOUT
+  // the field means false (e.g. options persisted before the field existed) —
+  // `|| DEFAULT` here would alias two different pixel outputs to one key.
+  const cameraMatch = options ? !!options.cameraMatch : DEFAULT_OPTIONS.cameraMatch;
+  // NOTE: the camera-match FIT PARAMETERS (lattice size, smoothing, weighting in
+  // cameraMatch.cjs) are pixel provenance too, but are not part of this key. If
+  // they ever change in a release, bump the `cm:` tag (e.g. `cm2:`) so stale
+  // cached bases fitted with the old parameters miss instead of being served.
+  return crypto.createHash('sha1').update(`${demosaic}|${highlightMode}|cm:${cameraMatch ? 1 : 0}`).digest('hex').slice(0, 8);
 }
 
 /**
@@ -287,6 +296,7 @@ async function write(filePath, options, payload) {
     options: {
       demosaic: (options && options.demosaic) || DEFAULT_OPTIONS.demosaic,
       highlightMode: (options && options.highlightMode) || DEFAULT_OPTIONS.highlightMode,
+      cameraMatch: options ? !!options.cameraMatch : DEFAULT_OPTIONS.cameraMatch,
     },
     sourceMtimeMs: stat.mtimeMs,
     sourceSize: stat.size,

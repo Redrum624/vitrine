@@ -34,6 +34,11 @@ const HIGHLIGHT_OPTIONS: { value: HighlightMode; label: string }[] = [
 
 const RE_DECODE_TOOLTIP = 'Changing this re-decodes the RAW file from disk.';
 
+const CAMERA_MATCH_TOOLTIP =
+  'Fits the decode to this photo’s own embedded camera JPEG, so the starting point ' +
+  'matches the out-of-camera render (picture mode and gradation included). ' +
+  'Off gives Vitrine’s neutral bright render. Changing this re-decodes the file.';
+
 // Shared glass-card select look (kept as REAL native <select>s — see the file-level
 // note below on why Demosaic/Highlights aren't Segmented here).
 const selectStyle: CSSProperties = {
@@ -124,6 +129,10 @@ export function RawDecodePanel({ currentImage }: RawDecodePanelProps) {
     runReDecode({ ...rawDecodeOptions, highlightMode });
   };
 
+  const handleCameraMatchChange = (cameraMatch: boolean) => {
+    runReDecode({ ...rawDecodeOptions, cameraMatch });
+  };
+
   return (
     <div className="glass-card dc-rise" style={{ overflow: 'hidden', marginBottom: 12 }}>
       <div
@@ -141,12 +150,26 @@ export function RawDecodePanel({ currentImage }: RawDecodePanelProps) {
         {!open && (
           <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: 10.5, color: 'var(--glass-text-muted)' }}>
             {rawDecodeOptions.demosaic.toUpperCase()} &middot; {rawDecodeOptions.highlightMode}
+            {rawDecodeOptions.cameraMatch ? ' · cam' : ''}
           </span>
         )}
         {reDecoding && <span style={{ fontSize: 10.5, color: 'var(--accent)' }}>Decoding&hellip;</span>}
       </div>
       {open && (
         <div className="flex flex-col" style={{ gap: 12, padding: '4px 14px 14px' }}>
+          <div className="flex items-center justify-between" style={{ gap: 8 }}>
+            <label htmlFor="raw-decode-camera-match" style={{ fontSize: 11, fontWeight: 500, color: 'var(--glass-text-label)' }}>
+              Camera match
+            </label>
+            <input
+              id="raw-decode-camera-match"
+              type="checkbox"
+              checked={!!rawDecodeOptions.cameraMatch}
+              disabled={reDecoding}
+              title={CAMERA_MATCH_TOOLTIP}
+              onChange={(e) => handleCameraMatchChange(e.target.checked)}
+            />
+          </div>
           <div className="flex flex-col" style={{ gap: 6 }}>
             <label htmlFor="raw-decode-demosaic" style={{ fontSize: 11, fontWeight: 500, color: 'var(--glass-text-label)' }}>
               Demosaic

@@ -37,18 +37,22 @@ const DEMOSAIC_Q = { ahd: '3', dcb: '4' };
 // Highlight mode → dcraw_emu -H value (null = omit -H entirely).
 const HIGHLIGHT_H = { off: null, blend: '2', reconstruct: '5' };
 
-// Default decode options (new default: DCB demosaic + blend highlights).
-const DEFAULT_RAW_DECODE_OPTIONS = { demosaic: 'dcb', highlightMode: 'blend' };
+// Default decode options: DCB demosaic + blend highlights + camera match.
+// cameraMatch fits the decode to the shot's own embedded camera JPEG (see
+// cameraMatch.cjs) so a fresh open looks like the out-of-camera render. Saved
+// edits from before this option existed carry no cameraMatch field and validate
+// to undefined (false) — their look is untouched.
+const DEFAULT_RAW_DECODE_OPTIONS = { demosaic: 'dcb', highlightMode: 'blend', cameraMatch: true };
 
 /**
  * Build the dcraw_emu CLI flag array from structured decode options.
  * Pure function — no I/O; directly unit-testable.
  *
- * @param {object} options  { demosaic: 'ahd'|'dcb', highlightMode: 'off'|'blend'|'reconstruct' }
+ * @param {object} options  { demosaic: 'ahd'|'dcb', highlightMode: 'off'|'blend'|'reconstruct', cameraMatch?: boolean }
  * @returns {string[]} full flags array ready to spread before the input path
  */
 function buildDcrawFlags(options) {
-  const { demosaic = 'dcb', highlightMode = 'blend' } = options || {};
+  const { demosaic = 'dcb', highlightMode = 'blend', cameraMatch = false } = options || {};
   const flags = [];
 
   // Demosaic quality (-q)
@@ -58,6 +62,12 @@ function buildDcrawFlags(options) {
   const hVal = HIGHLIGHT_H[highlightMode];
   if (hVal != null) {
     flags.push('-H', hVal);
+  }
+
+  // Camera match fits decode → embedded-JPEG afterwards; -W (disable
+  // auto-brighten) gives that fit a stable, un-stretched input to map from.
+  if (cameraMatch) {
+    flags.push('-W');
   }
 
   // Base flags always present
@@ -375,12 +385,32 @@ function sweepStaleRawTmpDirs({ baseDir = os.tmpdir(), maxAgeMs = 24 * 60 * 60 *
  */
 async function decodeRawFile(filePath, log = console, options) {
   const resolvedOpts = options || DEFAULT_RAW_DECODE_OPTIONS;
+
+  // Camera match post-pass: applied to the true-demosaic rungs only. The
+  // embedded-JPEG fallback rung already IS the camera render — matching it to
+  // itself would be a no-op at best. Fail-open: any camera-match failure
+  // returns the unmatched decode (see cameraMatch.cjs).
+  const maybeMatch = async (decoded) => {
+    if (!resolvedOpts.cameraMatch) return decoded;
+    try {
+      const { applyCameraMatch } = require('./cameraMatch.cjs');
+      const orfBuf = await fs.promises.readFile(filePath);
+      return await applyCameraMatch(decoded, orfBuf, log);
+    } catch (err) {
+      // Fail-open at this level too: a camera-match hiccup (e.g. the source
+      // file vanished between decode and re-read) must not discard a decode
+      // that already succeeded, and must not cascade to the next rung.
+      log.warn(`camera-match post-pass failed (${err.message}) — using unmatched decode`);
+      return decoded;
+    }
+  };
+
   try {
-    return await decodeNative(filePath, log, resolvedOpts);
+    return await maybeMatch(await decodeNative(filePath, log, resolvedOpts));
   } catch (nativeError) {
     log.warn(`Native dcraw_emu decode failed (${nativeError.message}); trying libraw-wasm/Node`);
     try {
-      return await decodeWasm(filePath, log, resolvedOpts);
+      return await maybeMatch(await decodeWasm(filePath, log, resolvedOpts));
     } catch (wasmError) {
       log.warn(`libraw-wasm/Node decode failed (${wasmError.message}); falling back to embedded JPEG`);
       return await decodeEmbeddedJpeg(filePath, log);

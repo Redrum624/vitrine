@@ -21,7 +21,10 @@ function isValidRawDecodeOptions(o: unknown): o is RawDecodeOptions {
   const demosaicOk = opts.demosaic === 'ahd' || opts.demosaic === 'dcb';
   const highlightOk =
     opts.highlightMode === 'off' || opts.highlightMode === 'blend' || opts.highlightMode === 'reconstruct';
-  return demosaicOk && highlightOk;
+  // cameraMatch was added after demosaic/highlightMode shipped: absent (older
+  // edit states — keeps their pre-feature look) or boolean are both valid.
+  const cameraMatchOk = opts.cameraMatch === undefined || typeof opts.cameraMatch === 'boolean';
+  return demosaicOk && highlightOk && cameraMatchOk;
 }
 
 /**

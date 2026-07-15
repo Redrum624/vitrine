@@ -4,11 +4,19 @@ export type HighlightMode = 'off' | 'blend' | 'reconstruct';
 export interface RawDecodeOptions {
   demosaic: DemosaicAlgo;
   highlightMode: HighlightMode;
+  /**
+   * Fit the decode to the shot's own embedded camera JPEG at decode time, so the
+   * starting point matches the manufacturer's render (picture mode, adaptive
+   * gradation, WB nuance included). Optional & undefined-as-false so edit states
+   * persisted before this field existed keep their exact look on reopen.
+   */
+  cameraMatch?: boolean;
 }
-/** Default used when no options are supplied (new default: DCB + blend). */
+/** Default used when no options are supplied: DCB + blend + camera match. */
 export const DEFAULT_RAW_DECODE_OPTIONS: RawDecodeOptions = {
   demosaic: 'dcb',
   highlightMode: 'blend',
+  cameraMatch: true,
 };
 
 // Durable upscale INTENT persisted per-image (Q7): {scale, mode} when an upscale bake is active

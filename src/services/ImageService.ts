@@ -401,7 +401,9 @@ export class ImageService {
       const identityChanged = !stillCurrent || stillCurrent.filePath !== filePath;
       const storeOpts = useAppStore.getState().rawDecodeOptions;
       const optionsChanged =
-        storeOpts.demosaic !== decodeOptions.demosaic || storeOpts.highlightMode !== decodeOptions.highlightMode;
+        storeOpts.demosaic !== decodeOptions.demosaic ||
+        storeOpts.highlightMode !== decodeOptions.highlightMode ||
+        !storeOpts.cameraMatch !== !decodeOptions.cameraMatch;
 
       // A re-decode (RawDecodePanel → RawImageService.reDecode) for THIS path may be in flight.
       // reDecode updates the store's rawDecodeOptions only AFTER its own decode resolves, so when
@@ -575,7 +577,13 @@ export class ImageService {
     const recorded = entry.metadata?.decodeOptions as RawDecodeOptions | undefined;
     if (!recorded) return false;
     const current = useAppStore.getState().rawDecodeOptions;
-    return recorded.demosaic !== current.demosaic || recorded.highlightMode !== current.highlightMode;
+    // cameraMatch compares by truthiness: a pre-feature entry recorded no field
+    // (undefined) and its pixels are unmatched, so it must only serve cameraMatch-off.
+    return (
+      recorded.demosaic !== current.demosaic ||
+      recorded.highlightMode !== current.highlightMode ||
+      !recorded.cameraMatch !== !current.cameraMatch
+    );
   }
 
   getCurrentImage(): ImageData | null {

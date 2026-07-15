@@ -2,7 +2,7 @@
 // The function lives in electron/rawDecoder.cjs; imported via require so ts-jest
 // treats it as CommonJS (matching the jest.config.js transform setup).
 const { buildDcrawFlags } = require('../../electron/rawDecoder.cjs') as {
-  buildDcrawFlags: (opts: { demosaic: string; highlightMode: string }) => string[];
+  buildDcrawFlags: (opts: { demosaic: string; highlightMode: string; cameraMatch?: boolean }) => string[];
 };
 
 const BASE_FLAGS = ['-w', '-o', '1', '-6', '-g', '2.4', '12.92'];
@@ -48,5 +48,14 @@ describe('buildDcrawFlags', () => {
     for (const f of BASE_FLAGS) {
       expect(flags).toContain(f);
     }
+  });
+
+  it('cameraMatch → -W (stable un-auto-brightened input for the fit)', () => {
+    expect(buildDcrawFlags({ demosaic: 'dcb', highlightMode: 'blend', cameraMatch: true })).toContain('-W');
+  });
+
+  it('no cameraMatch (false or absent) → no -W', () => {
+    expect(buildDcrawFlags({ demosaic: 'dcb', highlightMode: 'blend', cameraMatch: false })).not.toContain('-W');
+    expect(buildDcrawFlags({ demosaic: 'dcb', highlightMode: 'blend' })).not.toContain('-W');
   });
 });

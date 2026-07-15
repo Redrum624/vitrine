@@ -15,7 +15,7 @@ import * as os from 'os';
 import * as path from 'path';
 
 const baseCache = require('../../electron/baseCache.cjs') as {
-  optionsHash: (o: { demosaic?: string; highlightMode?: string } | undefined) => string;
+  optionsHash: (o: { demosaic?: string; highlightMode?: string; cameraMatch?: boolean } | undefined) => string;
   entryName: (filePath: string, o?: { demosaic?: string; highlightMode?: string }) => string;
   sidecarIsValid: (meta: { sourceMtimeMs?: number; sourceSize?: number } | null, stat: { mtimeMs: number; size: number } | null) => boolean;
   selectEvictions: (entries: { key: string; size: number; lastAccess: number }[], incomingSize: number, budget: number) => string[];
@@ -47,8 +47,23 @@ describe('baseCache pure helpers', () => {
       expect(baseCache.optionsHash({ demosaic: 'dcb', highlightMode: 'blend' }))
         .not.toBe(baseCache.optionsHash({ demosaic: 'dcb', highlightMode: 'off' }));
     });
-    it('falls back to the default options for undefined', () => {
-      expect(baseCache.optionsHash(undefined)).toBe(baseCache.optionsHash({ demosaic: 'dcb', highlightMode: 'blend' }));
+    it('falls back to the FULL default options for undefined (camera match ON)', () => {
+      // An absent options object means "decode with defaults", which includes
+      // cameraMatch: true — it must NOT key the same entry as an explicit
+      // options object without the field (whose pixels are unmatched).
+      expect(baseCache.optionsHash(undefined)).toBe(
+        baseCache.optionsHash({ demosaic: 'dcb', highlightMode: 'blend', cameraMatch: true }),
+      );
+      expect(baseCache.optionsHash(undefined)).not.toBe(
+        baseCache.optionsHash({ demosaic: 'dcb', highlightMode: 'blend' }),
+      );
+    });
+    it('differs when cameraMatch changes; absent field keys as false', () => {
+      const off = baseCache.optionsHash({ demosaic: 'dcb', highlightMode: 'blend', cameraMatch: false });
+      const on = baseCache.optionsHash({ demosaic: 'dcb', highlightMode: 'blend', cameraMatch: true });
+      const absent = baseCache.optionsHash({ demosaic: 'dcb', highlightMode: 'blend' });
+      expect(on).not.toBe(off);
+      expect(absent).toBe(off);
     });
   });
 
