@@ -4,9 +4,11 @@ All notable changes to **Vitrine** (formerly Photo Editor Pro) are documented in
 this file. The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.25.0] - 2026-07-15
 
 ### Added
+- **Portable build.** Why: photographers asked for a way to try Vitrine without running an installer or having admin rights — download `Vitrine <version> portable.exe`, run it from anywhere (USB stick included), delete it when done. It shares the same on-disk profile as the installed app, so edits and presets carry over. Note it is not a way around SmartScreen: like any downloaded unsigned executable it may still show the "unknown publisher" prompt on first run. Affects: `package.json` (win `portable` target), `scripts/collect-installer.cjs`, `scripts/gh-release.cjs`.
+- **SHA256 checksums published with every release.** Why: lets users verify an unsigned download is byte-identical to what was built before running it. `scripts/gen-checksums.cjs` (new, wired into `build:win`) writes `SHA256SUMS.txt` covering the installer and the portable exe; it ships in `installer/`, uploads as a release asset, and is embedded in the GitHub release notes. Verify with `CertUtil -hashfile <file> SHA256`. Affects: `package.json`, `scripts/gen-checksums.cjs`, `scripts/collect-installer.cjs`, `scripts/gh-release.cjs`.
 - **Microsoft Store (MSIX) build target.** Why: signed, SmartScreen-free distribution with automatic updates, without the cost of a code-signing certificate. `npm run build:store` produces `release/Vitrine <version>.appx` (unsigned — the Store signs on ingestion), with the account-specific Partner Center identity read from a gitignored `store-identity.json` (`scripts/build-store.cjs`); a clearly-labeled local test identity is used when the file is absent. Data continuity with the NSIS install was verified end-to-end on Windows 11 by the new `scripts/msix-smoke.cjs` (11/11: package identity, shared `%APPDATA%\photo_app`, NSIS-era edits and presets readable, RAW full-quality open, restart survival, profile left clean). Setup, submission steps, validation recipe, and Windows 10 caveats: `docs/STORE.md`.
 - **winget distribution.** `Redrum624.Vitrine` submitted to the winget community repo against the v1.24.1 release (`winget install vitrine` once merged); per-release manifest maintenance documented in `docs/STORE.md`.
 

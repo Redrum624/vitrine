@@ -3,10 +3,12 @@
  * collect-installer.cjs
  *
  * Copies just the user-facing distributables into a clean `installer/` folder at the repo root:
- *   - Vitrine Setup <version>.exe   (the NSIS installer)
- *   - Vitrine <version> README.txt  (plain-text readme)
- *   - LICENSE                                 (project license)
- *   - THIRD-PARTY-LICENSES.md                 (required: BSD/LGPL attribution must accompany the build)
+ *   - Vitrine Setup <version>.exe      (the NSIS installer)
+ *   - Vitrine <version> portable.exe   (no-install single-exe build)
+ *   - Vitrine <version> README.txt     (plain-text readme)
+ *   - SHA256SUMS.txt                   (checksums of both exes, from gen-checksums.cjs)
+ *   - LICENSE                          (project license)
+ *   - THIRD-PARTY-LICENSES.md          (required: BSD/LGPL attribution must accompany the build)
  *
  * Everything else electron-builder drops in `release/` (win-unpacked, .blockmap, etc.) is left behind.
  * Run automatically at the end of `build:win`; can also be run standalone after a build.
@@ -23,7 +25,9 @@ const VERSION = require(path.join(ROOT, 'package.json')).version;
 
 const WANTED = [
   `Vitrine Setup ${VERSION}.exe`,
+  `Vitrine ${VERSION} portable.exe`,
   `Vitrine ${VERSION} README.txt`,
+  'SHA256SUMS.txt',
   'LICENSE',
   'THIRD-PARTY-LICENSES.md',
 ];
