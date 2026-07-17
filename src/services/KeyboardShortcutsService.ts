@@ -10,6 +10,16 @@ export interface KeyboardShortcut {
   description: string;
   category: 'file' | 'edit' | 'view' | 'tools' | 'processing' | 'help';
   action: () => void;
+  /**
+   * Optional applicability gate, evaluated at keypress time. When it returns
+   * false the shortcut neither fires NOR swallows the event — the capture-phase
+   * handler returns BEFORE preventDefault/stopPropagation, so the keydown still
+   * reaches bubble-phase listeners. This is how a shortcut yields to a
+   * view-specific handler for the same key: the rating digits no-op'd in
+   * Gallery but still swallowed the event at capture, which made GalleryView's
+   * own 1-5/0 selection-rating listener silently dead (live-verified).
+   */
+  when?: () => boolean;
 }
 
 export class KeyboardShortcutsService {
@@ -100,6 +110,11 @@ export class KeyboardShortcutsService {
     const shortcut = this.shortcuts.get(key);
 
     if (shortcut) {
+      // Applicability gate: return BEFORE swallowing, so an inapplicable
+      // shortcut leaves the event for bubble-phase listeners (see the
+      // KeyboardShortcut.when doc comment).
+      if (shortcut.when && !shortcut.when()) return;
+
       event.preventDefault();
       event.stopPropagation();
 
@@ -363,7 +378,8 @@ export const createDefaultShortcuts = (callbacks: {
 // 0 clears it. (Plain digits — Ctrl+0/Ctrl+1 stay bound to zoom in
 // createDefaultShortcuts since modifier combos map to distinct keys.)
 export const createRatingShortcuts = (
-  onRate: (rating: number) => void
+  onRate: (rating: number) => void,
+  when?: () => boolean,
 ): KeyboardShortcut[] =>
   [0, 1, 2, 3, 4, 5].map((n) => ({
     id: `rate-${n}`,
@@ -371,6 +387,7 @@ export const createRatingShortcuts = (
     description: n === 0 ? 'Clear star rating' : `Set ${n}-star rating`,
     category: 'edit' as const,
     action: () => onRate(n),
+    when,
   }));
 
 export const keyboardShortcutsService = new KeyboardShortcutsService();

@@ -327,8 +327,8 @@ export function GalleryView({ images, onImageSelect, visible, onRequestRemove }:
                         // Free byproduct of the decode the browser already performs to
                         // paint this thumbnail — no extra IPC/decode (Task B2). RAW
                         // formats are excluded: `read-image-as-data-url` (electron/main.cjs)
-                        // returns a preview downscaled to <=300x200 for RAW files, never the
-                        // sensor's true dimensions — recording that would be confidently
+                        // returns a preview downscaled to fit 512×512 for RAW files, never
+                        // the sensor's true dimensions — recording that would be confidently
                         // wrong (fix round 1, Critical review finding).
                         const { naturalWidth, naturalHeight } = e.currentTarget;
                         if (naturalWidth && naturalHeight && !isRawImage(image)) {

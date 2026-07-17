@@ -4,6 +4,18 @@ All notable changes to **Vitrine** (formerly Photo Editor Pro) are documented in
 this file. The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.28.0] - 2026-07-17
+
+### Added
+- **Star ratings on filmstrip thumbnails.** Rated photos show a small gold star strip on their dock thumbnail, so the culled/kept signal is visible at a glance without opening the Gallery. Affects: `src/components/Panels/ThumbnailPanel.tsx`.
+- **Sharper RAW thumbnails.** The embedded-preview thumbnail for RAW files is now rendered into a 512px box (was 300×200 — portrait previews were squeezed to 150×200 and upscaled ~3× on 420px gallery tiles, visibly soft). Affects: `electron/main.cjs`.
+
+### Changed
+- **Filmstrip tiles follow each photo's aspect ratio.** Cause of the old distortion: fixed 66/114×88 tiles with cover-fit cropped portraits to a horizontal band and the current landscape to a sliver. Tiles now size to the photo's own aspect (clamped 56–132px wide at constant 88px height), so portraits and landscapes both display whole. Affects: `src/components/Panels/ThumbnailPanel.tsx`.
+
+### Fixed
+- **Number-key rating was dead in the Gallery.** Cause: the global shortcuts service swallows matched keys at capture phase (preventDefault + stopPropagation) before its handler runs; the rating digits' handler no-ops in Gallery by design, but the swallow meant GalleryView's own bubble-phase 1–5/0 selection-rating listener never received the keypress. Fix: shortcuts gain a `when` applicability gate evaluated BEFORE the swallow — an inapplicable shortcut lets the event flow through untouched (same pattern the numpad rating path already used). Live-verified: click a tile, press 3, stars fill. Affects: `src/services/KeyboardShortcutsService.ts`, `src/App.tsx`.
+
 ## [1.27.0] - 2026-07-17
 
 ### Changed
