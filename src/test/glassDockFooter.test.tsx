@@ -67,16 +67,32 @@ describe('ThumbnailPanel dock — ratingFilter drives filteredImages', () => {
   });
 });
 
-describe('ThumbnailPanel dock — thumb frame geometry (spec §3)', () => {
-  it('the current (selected) thumb is 66×88 with the accent frame; others are 114×88 with a faint border', () => {
+describe('ThumbnailPanel dock — thumb frame geometry (aspect-adaptive)', () => {
+  // Tile WIDTH now follows each photo's aspect ratio (dockThumbAspect.test.ts
+  // covers the mapping) so portraits/landscapes display whole — the former
+  // fixed 66/114×88 spec-§3 tiles cover-cropped them. Before a thumb loads and
+  // reports its aspect, every tile uses the neutral 114px fallback; selection
+  // is expressed by the frame alone.
+  it('pre-aspect, both thumbs use the fallback width; the current one carries the accent frame', () => {
     render(
       <ThumbnailPanel images={images} selectedImage={images[0]} onImageSelect={jest.fn()} onClose={jest.fn()} visible={true} />,
     );
     const current = document.querySelector('[data-image-id="img1"]') as HTMLElement;
     const other = document.querySelector('[data-image-id="img2"]') as HTMLElement;
 
-    expect(current).toHaveStyle({ width: '66px', height: '88px', borderColor: '#3b82f6' });
+    expect(current).toHaveStyle({ width: '114px', height: '88px', borderColor: '#3b82f6' });
     expect(other).toHaveStyle({ width: '114px', height: '88px', borderColor: 'rgba(255, 255, 255, 0.09)' });
+  });
+
+  it('shows a gold star strip on rated thumbs and none on unrated ones', () => {
+    useAppStore.setState({ imageRatings: { img1: 3 }, ratingFilter: 0 });
+    render(
+      <ThumbnailPanel images={images} selectedImage={images[0]} onImageSelect={jest.fn()} onClose={jest.fn()} visible={true} />,
+    );
+    const strips = document.querySelectorAll('[data-testid="dock-thumb-rating"]');
+    expect(strips.length).toBe(1);
+    expect(strips[0].textContent).toBe('★★★');
+    expect(strips[0].closest('[data-image-id]')?.getAttribute('data-image-id')).toBe('img1');
   });
 
   it('renders the Gallery chip as a dashed stub button', () => {

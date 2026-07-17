@@ -727,8 +727,12 @@ ipcMain.handle('read-image-as-data-url', async (event, filePath) => {
               } else if (containerOrientation > 1) {
                 pipe = applyExifOrientation(pipe, containerOrientation);
               }
+              // 512px box (was 300x200): gallery tiles run 420px+ wide, and the
+              // old cap left RAW tiles visibly soft — portrait previews were
+              // squeezed to 150x200 and upscaled ~3x. 512 keeps a ~2000-entry
+              // worst-case cache in the tens of MB while covering both surfaces.
               const out = await pipe
-                .resize(300, 200, { fit: 'inside', withoutEnlargement: true })
+                .resize(512, 512, { fit: 'inside', withoutEnlargement: true })
                 .jpeg({ quality: 80 })
                 .toBuffer();
               if (out && out.length > 100) {
@@ -750,7 +754,7 @@ ipcMain.handle('read-image-as-data-url', async (event, filePath) => {
       try {
         const out = await sharp(filePath, { failOn: 'none' })
           .rotate()
-          .resize(300, 200, { fit: 'inside', withoutEnlargement: true })
+          .resize(512, 512, { fit: 'inside', withoutEnlargement: true })
           .jpeg({ quality: 80 })
           .toBuffer();
         if (out && out.length > 100) {

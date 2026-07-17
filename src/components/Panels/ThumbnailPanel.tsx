@@ -68,11 +68,21 @@ export function getThumbFrameStyle(isCurrent: boolean, inSelection: boolean): Re
   };
 }
 
-/** Dock thumbnail dimensions (spec §3): the current/selected thumb is a narrow
- * 66×88 tile; every other thumb is a wider ~114×88 tile. Height is constant. */
+/** Dock thumbnail height is constant; width follows each photo's aspect ratio
+ * (clamped) so portraits and landscapes both display WHOLE — the previous fixed
+ * 66/114×88 tiles + object-cover cropped portraits to a horizontal band and
+ * landscapes (when current) to a sliver. Until a thumb loads and reports its
+ * aspect, tiles use the neutral fallback width. */
 const DOCK_THUMB_HEIGHT = 88;
-const DOCK_THUMB_WIDTH_CURRENT = 66;
-const DOCK_THUMB_WIDTH_OTHER = 114;
+const DOCK_THUMB_WIDTH_FALLBACK = 114;
+const DOCK_THUMB_WIDTH_MIN = 56;
+const DOCK_THUMB_WIDTH_MAX = 132;
+
+/** Aspect-derived tile width, clamped so extreme panoramas/verticals stay usable. */
+export function dockThumbWidth(aspect: number | undefined): number {
+  if (!aspect || !Number.isFinite(aspect) || aspect <= 0) return DOCK_THUMB_WIDTH_FALLBACK;
+  return Math.max(DOCK_THUMB_WIDTH_MIN, Math.min(DOCK_THUMB_WIDTH_MAX, Math.round(DOCK_THUMB_HEIGHT * aspect)));
+}
 
 // Base layout for the dock's chevron buttons — interactive :hover/:disabled states
 // come from .glass-pill-btn in index.css (same idiom as Toolbar.tsx / IconSidebar.tsx).
@@ -100,6 +110,10 @@ export function ThumbnailPanel({
 }: ThumbnailPanelProps) {
   const [thumbnails, setThumbnails] = useState<Map<string, string>>(new Map());
   const [loadingThumbnails, setLoadingThumbnails] = useState<Set<string>>(new Set());
+  // Per-image display aspect (w/h), measured from the loaded thumbnail itself —
+  // drives aspect-correct tile widths (no cropping). Uncapped growth is fine:
+  // two numbers per browsed image.
+  const [thumbAspects, setThumbAspects] = useState<Map<string, number>>(new Map());
   // Refs mirroring the maps above so loadThumbnail can bail out synchronously —
   // scroll events re-request every visible thumb, and without these guards each
   // request re-issued the IPC fetch (and raced the eviction cap) even when the
@@ -435,7 +449,7 @@ export function ThumbnailPanel({
                 data-image-id={image.id}
                 className={`relative flex-shrink-0 rounded cursor-pointer ${frameClass}`}
                 style={{
-                  width: isSelected ? DOCK_THUMB_WIDTH_CURRENT : DOCK_THUMB_WIDTH_OTHER,
+                  width: dockThumbWidth(thumbAspects.get(image.id)),
                   height: DOCK_THUMB_HEIGHT,
                   borderRadius: '10px',
                   backgroundColor: 'var(--gray-800)',
@@ -469,12 +483,21 @@ export function ThumbnailPanel({
                       // shared `imageDimensions` store map so the Gallery grid's tile
                       // meta can show real dimensions even before its own lazy loader
                       // reaches this image. RAW formats are excluded: `read-image-as-data-url`
-                      // (electron/main.cjs) returns a preview downscaled to <=300x200 for RAW
-                      // files, never the sensor's true dimensions — recording that would be
-                      // confidently wrong (fix round 1, Critical review finding).
+                      // (electron/main.cjs) returns a preview downscaled to fit 512×512 for
+                      // RAW files, never the sensor's true dimensions — recording that would
+                      // be confidently wrong (fix round 1, Critical review finding).
                       const { naturalWidth, naturalHeight } = e.currentTarget;
                       if (naturalWidth && naturalHeight && !isRawImage(image)) {
                         setImageDimensions(image.id, { width: naturalWidth, height: naturalHeight });
+                      }
+                      // Display ASPECT is orientation-corrected in the thumb bytes for
+                      // every format, so it is safe for all (unlike absolute dims above).
+                      if (naturalWidth && naturalHeight) {
+                        setThumbAspects((prev) => {
+                          const aspect = naturalWidth / naturalHeight;
+                          if (prev.get(image.id) === aspect) return prev;
+                          return new Map(prev).set(image.id, aspect);
+                        });
                       }
                     }}
                   />
@@ -501,6 +524,22 @@ export function ThumbnailPanel({
                     }}
                   >
                     RAW
+                  </div>
+                )}
+
+                {/* Star rating (bottom-left) — the culled/kept signal at a glance,
+                    without opening the Gallery. Only rendered when rated. */}
+                {(imageRatings[image.id] ?? 0) > 0 && (
+                  <div
+                    data-testid="dock-thumb-rating"
+                    className="absolute"
+                    style={{
+                      bottom: '2px', left: '4px', pointerEvents: 'none',
+                      fontSize: '9px', letterSpacing: '1px', color: '#f5c518',
+                      textShadow: '0 1px 2px rgba(0,0,0,0.9)', lineHeight: '12px',
+                    }}
+                  >
+                    {'★'.repeat(imageRatings[image.id])}
                   </div>
                 )}
               </div>

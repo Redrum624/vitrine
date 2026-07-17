@@ -1257,7 +1257,14 @@ function App() {
       // Persist to the file (xmp:Rating) so it shows in OS file details.
       window.electronAPI?.writeImageRating?.(img.path, rating);
     };
-    createRatingShortcuts(applyRating).forEach((shortcut) => keyboardShortcutsService.register(shortcut));
+    // The `when` gate (NOT just the applyRating guard above) is what keeps
+    // Gallery rating alive: the shortcuts service swallows matched keys at
+    // capture phase, so without it the digits never reached GalleryView's own
+    // bubble-phase 1-5/0 selection-rating listener (live-verified dead).
+    createRatingShortcuts(
+      applyRating,
+      () => useAppStore.getState().viewMode !== 'gallery',
+    ).forEach((shortcut) => keyboardShortcutsService.register(shortcut));
 
     // Numpad rating: match by physical key code (Numpad0-5) so it rates regardless
     // of NumLock. With NumLock off the numpad emits arrow/nav keys (Numpad4=ArrowLeft
