@@ -4,6 +4,17 @@ All notable changes to **Vitrine** (formerly Photo Editor Pro) are documented in
 this file. The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.27.0] - 2026-07-17
+
+### Changed
+- **Auto All softens itself on a camera-matched base.** Cause: the one-click style grade targets ABSOLUTE portfolio statistics (e.g. the warm bucket's median-luminance target of 0.33), which is correct on Vitrine's neutral decode but double-grades a camera-matched base — the camera's own tone mapping plus the full portfolio pull crushed bright scenes into a dark, muddy render that users read as "the decoder is broken" (verified live on a 20MP garden portrait). Fix: when the current base is camera-matched, Auto All runs at half strength — every adjustment lerps toward its neutral value — and skips auto white balance entirely (the matched base already carries the camera's WB decision); the toast says so. Affects: `src/services/AutoAdjustService.ts` (strength option + `CAMERA_MATCHED_AUTO_STRENGTH`), `src/App.tsx`.
+
+### Added
+- **"Styled" toolbar chip.** Shows next to Auto All whenever a style grade (Auto All, a preset, or a pasted style) is layered on the decode, with a tooltip explaining that the on-screen colors come from those adjustments, not the RAW render — so a heavy grade can no longer masquerade as a decode problem. Live-detected from the grade's signature params (non-identity base curve / Color Balance offsets), so resetting those modules clears it automatically. Affects: `src/App.tsx`, `src/components/Layout/Toolbar.tsx`.
+
+### Fixed
+- **The Camera match checkbox appeared frozen for the duration of the re-decode.** Cause: a controlled input bound to store options that only update after the multi-second decode resolves — clicking produced no visual change for up to ~10 s on 20MP files, so users clicked repeatedly believing it was dead. Fix: optimistic pending state — the box flips immediately, then settles on the store truth when the decode lands. Affects: `src/components/Panels/RawDecodePanel.tsx`.
+
 ## [1.26.0] - 2026-07-15
 
 ### Added

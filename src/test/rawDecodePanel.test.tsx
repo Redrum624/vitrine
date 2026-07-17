@@ -142,4 +142,54 @@ describe('RawDecodePanel', () => {
     expect(screen.getByLabelText('Demosaic')).toHaveAttribute('title', expect.stringMatching(/re-decode/i));
     expect(screen.getByLabelText('Highlights')).toHaveAttribute('title', expect.stringMatching(/re-decode/i));
   });
+
+  describe('Camera match checkbox', () => {
+    it('reflects the store option and triggers reDecode with the toggled value', () => {
+      useAppStore.setState({ rawDecodeOptions: { demosaic: 'dcb', highlightMode: 'blend', cameraMatch: true } });
+      render(<RawDecodePanel currentImage={RAW_IMAGE} />);
+      fireEvent.click(screen.getByText('RAW Decode'));
+      const cb = screen.getByLabelText('Camera match') as HTMLInputElement;
+      expect(cb.checked).toBe(true);
+      fireEvent.click(cb);
+      expect(rawImageService.reDecode).toHaveBeenCalledWith(
+        { demosaic: 'dcb', highlightMode: 'blend', cameraMatch: false },
+        RAW_IMAGE.id,
+      );
+    });
+
+    it('flips OPTIMISTICALLY on click — before the store catches up', () => {
+      // The store option only updates after the multi-second re-decode resolves;
+      // the box must show the target state immediately or it reads as dead.
+      useAppStore.setState({ rawDecodeOptions: { demosaic: 'dcb', highlightMode: 'blend', cameraMatch: true } });
+      let resolveDecode: () => void = () => {};
+      (rawImageService.reDecode as jest.Mock).mockImplementation(
+        () => new Promise<void>((r) => { resolveDecode = r; }),
+      );
+      render(<RawDecodePanel currentImage={RAW_IMAGE} />);
+      fireEvent.click(screen.getByText('RAW Decode'));
+      const cb = screen.getByLabelText('Camera match') as HTMLInputElement;
+      fireEvent.click(cb);
+      // Store still says cameraMatch: true, but the box already shows false.
+      expect(useAppStore.getState().rawDecodeOptions.cameraMatch).toBe(true);
+      expect(cb.checked).toBe(false);
+      resolveDecode();
+    });
+
+    it('settles on the store truth once the re-decode lands', async () => {
+      useAppStore.setState({
+        rawDecodeOptions: { demosaic: 'dcb', highlightMode: 'blend', cameraMatch: true },
+        reDecoding: false,
+      });
+      render(<RawDecodePanel currentImage={RAW_IMAGE} />);
+      fireEvent.click(screen.getByText('RAW Decode'));
+      const cb = screen.getByLabelText('Camera match') as HTMLInputElement;
+      fireEvent.click(cb);
+      // Simulate the re-decode completing: store options + reDecoding settle.
+      useAppStore.setState({
+        rawDecodeOptions: { demosaic: 'dcb', highlightMode: 'blend', cameraMatch: false },
+        reDecoding: false,
+      });
+      await waitFor(() => expect(cb.checked).toBe(false));
+    });
+  });
 });

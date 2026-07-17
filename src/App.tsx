@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { MenuBar } from './components/Layout/MenuBar';
 import { Toolbar } from './components/Layout/Toolbar';
 import { IconSidebar } from './components/Layout/IconSidebar';
@@ -51,7 +51,7 @@ import {
   resizeImage, FilterContext
 } from './utils/ImageFilters';
 import { styleAnalysisService } from './services/StyleAnalysisService';
-import { autoAdjustService } from './services/AutoAdjustService';
+import { autoAdjustService, CAMERA_MATCHED_AUTO_STRENGTH } from './services/AutoAdjustService';
 import { imageProcessingPipeline } from './services/ImageProcessingPipeline';
 import { PrintDialog } from './components/Dialogs/PrintDialog';
 import { InfoPopover } from './components/InfoPopover';
@@ -676,6 +676,35 @@ function App() {
     [showInfo, showSuccess]
   );
 
+  // ─── Style-grade indicator ─────────────────────────────────────────────
+  // "Styled" chip state: true when a style grade (Auto All / preset / pasted
+  // style) is sitting on top of the decode — detected live from the two
+  // signature params a grade always writes: a non-identity tone-curve base
+  // curve or non-zero Color Balance offsets. Live detection (not a persisted
+  // flag) so manually resetting those modules clears the chip automatically.
+  // externalParamsVersion bumps on every bulk apply, per-image restore, and
+  // reprocess trigger, which covers all the ways these params change.
+  const externalParamsVersion = useAppStore((s) => s.externalParamsVersion);
+  const styleGradeActive = useMemo(() => {
+    void externalParamsVersion; // dependency: recompute on any params change
+    const tcPipe = imageProcessingPipeline.getModule('tonecurve') as unknown as {
+      getToneCurveModule?: () => { getParams?: () => { baseCurve?: Array<{ x: number; y: number }> } };
+    } | undefined;
+    const baseCurve = tcPipe?.getToneCurveModule?.()?.getParams?.()?.baseCurve;
+    if (Array.isArray(baseCurve) && baseCurve.some((pt) => Math.abs(pt.y - pt.x) > 0.001)) return true;
+    const cbPipe = imageProcessingPipeline.getModule('colorbalance') as unknown as {
+      getColorBalanceModule?: () => { getParams?: () => Record<string, Record<string, number>> };
+    } | undefined;
+    const cb = cbPipe?.getColorBalanceModule?.()?.getParams?.();
+    if (cb) {
+      for (const zone of ['shadows', 'midtones', 'highlights']) {
+        const z = cb[zone];
+        if (z && Object.values(z).some((v) => typeof v === 'number' && Math.abs(v) > 0.0005)) return true;
+      }
+    }
+    return false;
+  }, [externalParamsVersion]);
+
   // ─── Auto All ──────────────────────────────────────────────────────────
   const handleAutoAll = useCallback(() => {
     if (guardDeveloping(showInfo, 'Auto All')) return;
@@ -684,10 +713,18 @@ function App() {
 
     useAppStore.getState().setIsProcessing(true); // canvas spinner while applying
 
+    // Camera-matched base → soften the style grade (half strength) and keep the
+    // camera's WB. The profile targets are absolute and were tuned for the
+    // neutral decode; at full strength on a matched base they double-grade
+    // (camera tone mapping + full portfolio pull = crushed bright scenes).
+    const cameraMatched = !!img.isRaw && !!useAppStore.getState().rawDecodeOptions.cameraMatch;
+
     // Single coordinator call: analyses once, picks the user-style bucket, and
     // returns the bundled params for every module.
-    const result = autoAdjustService.autoAll(img.data, img.width, img.height);
-    logger.info(`Auto All: bucket=${result.bucket} (${result.stats.meanLum.toFixed(3)} lum)`);
+    const result = autoAdjustService.autoAll(img.data, img.width, img.height, {
+      strength: cameraMatched ? CAMERA_MATCHED_AUTO_STRENGTH : 1,
+    });
+    logger.info(`Auto All: bucket=${result.bucket} (${result.stats.meanLum.toFixed(3)} lum, cameraMatched=${cameraMatched})`);
 
     // Exposure
     const exposureMod = imageProcessingPipeline.getModule('exposure');
@@ -700,7 +737,9 @@ function App() {
     // as the WB "Auto" button: estimate the illuminant from near-neutral samples
     // (median cast, inverting the module's own gain model), then apply a partial
     // correction that cleans the cast while retaining some of the scene's warmth.
-    const wbMod = imageProcessingPipeline.getModule('temperature');
+    // Skipped on a camera-matched base: the match already reproduces the camera's
+    // WB decision, and a gray-world pull on top of it fights that intent.
+    const wbMod = cameraMatched ? null : imageProcessingPipeline.getModule('temperature');
     if (wbMod) {
       const wbChannels = Math.max(3, Math.round(img.data.length / (img.width * img.height)));
       (wbMod as unknown as { autoDetectWhiteBalance: (d: Float32Array, ctx: { width: number; height: number; channels: number }) => void })
@@ -744,7 +783,10 @@ function App() {
     // Refresh the open module panel's sliders, then reprocess.
     useAppStore.getState().notifyExternalParamsChange();
     useAppStore.getState().triggerReprocessing();
-    showSuccess('Auto All', `Applied "${result.bucket}" style profile`);
+    showSuccess(
+      'Auto All',
+      `Applied "${result.bucket}" style profile${cameraMatched ? ' (softened — camera-matched base)' : ''}`,
+    );
     logger.info(`Auto All: all modules adjusted from user style profile (bucket=${result.bucket})`);
   }, [showSuccess, showError, showInfo]);
 
@@ -1660,6 +1702,7 @@ function App() {
               onActualSize={handleActualSize}
               zoom={viewport.zoom}
               onAutoAll={handleAutoAll}
+              styleGradeActive={styleGradeActive}
               developing={developing}
               onCopyStyle={handleCopyStyle}
               onPasteStyle={handlePasteStyle}
