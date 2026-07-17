@@ -323,8 +323,17 @@ class AutoAdjustService {
    * Run every auto adjustment in pipeline order and return the bundle of params
    * the UI should dispatch into each module. Caller decides whether to apply
    * them as a single transaction (preferred) or piecewise.
+   *
+   * `strength` (0..1, default 1) scales every adjustment toward its neutral
+   * value. The style profile's targets are ABSOLUTE (e.g. the warm bucket's
+   * median-luminance target is 0.33), which is correct on Vitrine's neutral
+   * decode but double-grades a camera-matched base — the camera already applied
+   * its own tone mapping, so a full-strength pull to the portfolio look crushes
+   * bright scenes (verified live: a camera-matched garden portrait rendered
+   * dark-muddy under the full warm bucket). Callers pass
+   * CAMERA_MATCHED_AUTO_STRENGTH when the base is camera-matched.
    */
-  autoAll(data: Float32Array, width: number, height: number): {
+  autoAll(data: Float32Array, width: number, height: number, opts?: { strength?: number }): {
     bucket: BucketName;
     stats: ImageStats;
     exposure: ReturnType<AutoAdjustService['autoExposure']>;
@@ -336,8 +345,9 @@ class AutoAdjustService {
   } {
     const stats = this.analyse(data, width, height);
     const { name: bucket } = this.pickProfile(stats);
-    logger.info(`AutoAll: bucket=${bucket}, samples=${userStyleProfile[bucket].sampleCount}`);
-    return {
+    const strength = clamp(opts?.strength ?? 1, 0, 1);
+    logger.info(`AutoAll: bucket=${bucket}, samples=${userStyleProfile[bucket].sampleCount}, strength=${strength}`);
+    const full = {
       bucket,
       stats,
       exposure: this.autoExposure(stats),
@@ -347,8 +357,57 @@ class AutoAdjustService {
       colorBalance: this.autoColorBalance(stats),
       whiteBalance: this.autoWhiteBalance(stats),
     };
+    return strength >= 1 ? full : this.scaleTowardNeutral(full, strength);
+  }
+
+  /**
+   * Lerp an autoAll bundle toward neutral by `s`: numeric deltas scale by s
+   * (their neutral is 0), Shadows/Highlights lerp around their 50 midpoint,
+   * and tone-curve points lerp toward the identity diagonal y=x. WhiteBalance
+   * is returned unscaled — the camera-matched caller skips auto-WB entirely
+   * (the matched base already carries the camera's WB intent).
+   */
+  private scaleTowardNeutral(
+    full: ReturnType<AutoAdjustService['autoAll']>,
+    s: number,
+  ): ReturnType<AutoAdjustService['autoAll']> {
+    const scaleObj = <T extends Record<string, unknown>>(o: T, keys: string[]): T => {
+      const out: Record<string, unknown> = { ...o };
+      for (const k of keys) if (typeof out[k] === 'number') out[k] = (out[k] as number) * s;
+      return out as T;
+    };
+    const cbSide = (o: Record<string, unknown>) =>
+      scaleObj(o, ['cyan_red', 'magenta_green', 'yellow_blue']);
+    const sh = { ...(full.shadowsHighlights as Record<string, unknown>) };
+    for (const k of ['shadows', 'highlights']) {
+      if (typeof sh[k] === 'number') sh[k] = 50 + ((sh[k] as number) - 50) * s;
+    }
+    const tc = { ...(full.toneCurve as Record<string, unknown>) };
+    if (Array.isArray(tc.baseCurve)) {
+      tc.baseCurve = (tc.baseCurve as Array<{ x: number; y: number }>).map((pt) => ({
+        x: pt.x,
+        y: pt.x + (pt.y - pt.x) * s,
+      }));
+    }
+    const cb = full.colorBalance as Record<string, Record<string, unknown>>;
+    return {
+      ...full,
+      exposure: scaleObj(full.exposure as unknown as Record<string, unknown>, ['exposure', 'black']) as unknown as ReturnType<AutoAdjustService['autoExposure']>,
+      basicAdj: scaleObj(full.basicAdj as unknown as Record<string, unknown>, ['black_point', 'exposure', 'contrast', 'brightness', 'saturation', 'vibrance']) as unknown as ReturnType<AutoAdjustService['autoBasicAdj']>,
+      shadowsHighlights: sh,
+      toneCurve: tc,
+      colorBalance: { ...cb, shadows: cbSide(cb.shadows), midtones: cbSide(cb.midtones), highlights: cbSide(cb.highlights) },
+    };
   }
 }
+
+/**
+ * Auto All strength used when the current base is camera-matched. Half strength
+ * keeps Auto All meaningful (a perceptible nudge toward the user's style) while
+ * letting the camera's own tone mapping remain the dominant voice — the full
+ * profile on top of a matched base double-grades and crushes bright scenes.
+ */
+export const CAMERA_MATCHED_AUTO_STRENGTH = 0.5;
 
 // Singleton
 export const autoAdjustService = new AutoAdjustService();

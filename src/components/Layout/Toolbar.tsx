@@ -23,6 +23,8 @@ interface ToolbarProps {
   onActualSize?: () => void;
   zoom?: number;
   onAutoAll?: () => void;
+  /** True when a style grade (Auto All / preset / pasted style) is active — shows the "Styled" chip. */
+  styleGradeActive?: boolean;
   /** Progressive RAW open: background full decode still running — Auto All, Print, Copy Style,
    *  and Paste Style would each act on the graded preview's pixels/stats rather than the neutral
    *  full-res base. Each handler already gates this itself (the source of truth, via
@@ -202,7 +204,7 @@ function ToolbarOverflowMenu({ items }: { items: OverflowItem[] }) {
   );
 }
 
-export function Toolbar({ onExport, onPrint, onBatchProcess, onUndo: _onUndo, onRedo: _onRedo, canUndo: _canUndo = false, canRedo: _canRedo = false, onZoomIn, onZoomOut, onFitWindow, onActualSize, zoom = 1, onAutoAll, developing = false, onCopyStyle, onPasteStyle, hasStyleClipboard = false, hasImage = false, onToggleOriginal, showOriginal = false, onToggleReference, referenceMode = false, onOpenFolder, onExportSelected }: ToolbarProps) {
+export function Toolbar({ onExport, onPrint, onBatchProcess, onUndo: _onUndo, onRedo: _onRedo, canUndo: _canUndo = false, canRedo: _canRedo = false, onZoomIn, onZoomOut, onFitWindow, onActualSize, zoom = 1, onAutoAll, styleGradeActive = false, developing = false, onCopyStyle, onPasteStyle, hasStyleClipboard = false, hasImage = false, onToggleOriginal, showOriginal = false, onToggleReference, referenceMode = false, onOpenFolder, onExportSelected }: ToolbarProps) {
   const { viewMode, setViewMode, selectedImageIds, gallerySortAscending, toggleGallerySortDirection, alignmentAxisX } = useAppStore();
 
   // Responsive collapse + clamp (Develop pill only, G5 review). Two mechanisms
@@ -363,6 +365,30 @@ export function Toolbar({ onExport, onPrint, onBatchProcess, onUndo: _onUndo, on
         </svg>
         Auto All
       </button>
+      {/* "Styled" chip — visible whenever a style grade (Auto All / preset /
+          pasted style) is layered on the decode. The colors on screen come from
+          those module params, not the RAW decode — without this hint, a heavy
+          grade reads as "the decoder is broken" (verified live: a camera-match
+          toggle appeared dead because a style grade dominated the render). */}
+      {styleGradeActive && hasImage && (
+        <span
+          role="status"
+          className="glass-pill-btn"
+          style={{
+            ...pillBtn,
+            padding: '0 10px',
+            fontSize: 10.5,
+            fontWeight: 600,
+            letterSpacing: 0.4,
+            textTransform: 'uppercase',
+            color: 'var(--accent)',
+            cursor: 'help',
+          }}
+          title={'A style grade is applied on top of the decode (Auto All, a preset, or a pasted style). What you see is those adjustments, not the plain RAW render — reset Tone Curve and Color Balance to see the decode itself.'}
+        >
+          Styled
+        </span>
+      )}
 
       <div style={divider} />
 

@@ -95,6 +95,18 @@ export function RawDecodePanel({ currentImage }: RawDecodePanelProps) {
   // while the slider displays 0 (v1.20.0 smoke H2 caught this live).
   const [hrStrength, setHrStrength] = useState<number>(readHrStrength);
 
+  // Camera match is a CONTROLLED checkbox bound to store options that only
+  // update AFTER the multi-second re-decode resolves — without an optimistic
+  // pending state the box appears frozen for the whole decode (verified live:
+  // users click it repeatedly believing it's dead). Pending shows the target
+  // state immediately; cleared once the re-decode lands (or fails, reverting
+  // the visual to the store truth).
+  const [pendingCameraMatch, setPendingCameraMatch] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    if (!reDecoding) setPendingCameraMatch(null);
+  }, [reDecoding, rawDecodeOptions.cameraMatch]);
+
   useEffect(() => {
     setHrStrength(readHrStrength());
   }, [currentImage?.id, externalParamsVersion]);
@@ -130,6 +142,7 @@ export function RawDecodePanel({ currentImage }: RawDecodePanelProps) {
   };
 
   const handleCameraMatchChange = (cameraMatch: boolean) => {
+    setPendingCameraMatch(cameraMatch); // optimistic — the box flips NOW, not after the decode
     runReDecode({ ...rawDecodeOptions, cameraMatch });
   };
 
@@ -164,7 +177,7 @@ export function RawDecodePanel({ currentImage }: RawDecodePanelProps) {
             <input
               id="raw-decode-camera-match"
               type="checkbox"
-              checked={!!rawDecodeOptions.cameraMatch}
+              checked={pendingCameraMatch ?? !!rawDecodeOptions.cameraMatch}
               disabled={reDecoding}
               title={CAMERA_MATCH_TOOLTIP}
               onChange={(e) => handleCameraMatchChange(e.target.checked)}
