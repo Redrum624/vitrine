@@ -1,7 +1,12 @@
 import '@testing-library/jest-dom';
 
+// jsdom-only mocks. Guarded so suites running in a NODE environment (e.g. the
+// worker-safety regression, which must simulate a worker scope with no
+// `window`) can share this setup file without crashing on DOM globals.
+const HAS_DOM = typeof window !== 'undefined' && typeof HTMLCanvasElement !== 'undefined';
+
 // Mock canvas for tests
-HTMLCanvasElement.prototype.getContext = jest.fn(() => ({
+if (HAS_DOM) HTMLCanvasElement.prototype.getContext = jest.fn(() => ({
   fillRect: jest.fn(),
   clearRect: jest.fn(),
   getImageData: jest.fn(() => ({
@@ -50,7 +55,7 @@ HTMLCanvasElement.prototype.getContext = jest.fn(() => ({
 })) as unknown as typeof HTMLCanvasElement.prototype.getContext;
 
 // Mock OffscreenCanvas
-global.OffscreenCanvas = class OffscreenCanvas {
+if (HAS_DOM) global.OffscreenCanvas = class OffscreenCanvas {
   width: number;
   height: number;
   constructor(width: number, height: number) {
@@ -66,7 +71,7 @@ global.OffscreenCanvas = class OffscreenCanvas {
 } as unknown as typeof OffscreenCanvas;
 
 // Mock window.matchMedia
-Object.defineProperty(window, 'matchMedia', {
+if (HAS_DOM) Object.defineProperty(window, 'matchMedia', {
   writable: true,
   value: jest.fn().mockImplementation(query => ({
     matches: false,

@@ -22,6 +22,14 @@ interface AppStore extends AppState {
   // Processing trigger - increments to signal that reprocessing is needed
   processingVersion: number;
   triggerReprocessing: () => void;
+  // Preview quality cap (long-edge px) the AdjustmentPanel downsamples the
+  // source to. Base 1024; Canvas RATCHETS it up when zoom exceeds the image's
+  // previous farthest zoom or a crop apply raises effective magnification
+  // (utils/previewQuality.ts), and resets it per image open. Consumed
+  // imperatively (getState) by the processing callback — cap changes take
+  // effect through triggerReprocessing, never through render-identity churn.
+  previewQualityCap: number;
+  setPreviewQualityCap: (cap: number) => void;
   // Bumped only when module params are set in BULK from outside the panels
   // (Paste Style, Auto All, presets) so the open module panel can re-read
   // module.getParams() and refresh its sliders. NOT bumped on normal slider
@@ -187,6 +195,7 @@ export const useAppStore = create<AppStore>((set) => ({
   sidebarCollapsed: false,
   isAdjustingRotation: false,
   processingVersion: 0,
+  previewQualityCap: 1024,
   externalParamsVersion: 0,
   isProcessing: false,
   upscaleProgress: null,
@@ -224,6 +233,8 @@ export const useAppStore = create<AppStore>((set) => ({
   triggerReprocessing: () => set((state) => ({
     processingVersion: state.processingVersion + 1
   })),
+
+  setPreviewQualityCap: (cap) => set({ previewQualityCap: cap }),
 
   notifyExternalParamsChange: () => set((state) => ({
     externalParamsVersion: state.externalParamsVersion + 1

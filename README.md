@@ -114,7 +114,7 @@ the versioned `Setup …​.exe` and `… portable.exe`, their `SHA256SUMS.txt`,
 ## Modules
 
 - **File Explorer** — browse and open photos from the local filesystem.
-- **Crop & Transform** — aspect ratios, free rotation, auto-straighten (horizon detection), and flip.
+- **Crop & Transform** — aspect ratios, free rotation, auto-straighten (horizon detection), and flip; the crop overlay is live while the module is open, applies on handle release, and re-cropping brings the full frame back with the rect at its last position.
 - **Basic Adjustments** — exposure, contrast, highlights, brightness, black point, shadows, dehaze, saturation, and vibrance; Highlights/Shadows recovery is integrated here.
 - **Local Adjustments** — radial (circle/oval) and one-sided graduated-filter masks drawn on the canvas, each with its own Basic Adjustments sliders and feather control; managed from the Basic Adjustments panel.
 - **White Balance** — temperature and tint sliders with one-click median gray-world auto-neutralisation.
@@ -135,6 +135,7 @@ the versioned `Setup …​.exe` and `… portable.exe`, their `SHA256SUMS.txt`,
 - **Instant RAW preview (progressive open)** — opening a RAW paints the camera's embedded preview in ~0.5 s with your saved edits applied, while the full 16-bit decode develops in the background and swaps in seamlessly ("Developing full quality…" shows in the footer); pixel-precise actions (Auto adjustments, transforms, upscale, print, copy style) wait for full quality automatically.
 - **Persistent RAW decode cache** — decoded full-quality bases are kept on disk (up to 2 GB, LRU) keyed by file, decode options, and file modification time, so reopening a RAW in a later session loads full quality in about a second instead of re-decoding; entries invalidate automatically when the source file or decode options change.
 - **GPU-accelerated preview** — resident-texture WebGL2 pipeline: image uploaded to the GPU once, all modules run as fragment-shader passes with zero GPU→CPU readback; CPU/Web-Worker fallback runs off the main thread when WebGL2 is unavailable.
+- **Preview quality ratchet** — zooming past an image's previous farthest zoom (or applying a crop) automatically re-renders the preview from a higher-resolution source, up to native size, so zoomed and cropped views stay sharp.
 - **AI super-resolution upscale** — Real-ESRGAN x4plus (onnxruntime-node + DirectML) runs in the main process for sharper ×2/×4 enlargements when a GPU is available, with tiled bounded-memory inference, live progress, an AI/Standard badge, and automatic fallback to the deterministic Lanczos path.
 - **Export** — JPEG, PNG, TIFF, or WebP in 8-bit or 16-bit; sRGB or wide-gamut (Adobe RGB, ProPhoto, Rec.2020) with generated ICC profiles; EXIF/XMP metadata embedded; Enhance output (sharpen/upscale) baked in automatically.
 - **Multi-export** — select any number of filmstrip photos (Ctrl/Shift+click) and export them all with one settings pass, each using its own saved edits, into a chosen folder with auto-suffixed filenames.

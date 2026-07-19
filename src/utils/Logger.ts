@@ -75,6 +75,13 @@ class Logger {
   }
 
   private setupErrorHandling() {
+    // WORKER-SAFETY: this singleton is imported (transitively) by
+    // pipeline.worker.ts — a bare `window` reference here crashed the whole
+    // worker bundle at module evaluation ("window is not defined"), which made
+    // every ≥1MP CPU preview pass hang through 30s dead-worker timeouts.
+    // Workers report errors through their own message channel instead.
+    if (typeof window === 'undefined') return;
+
     // Catch unhandled errors
     window.addEventListener('error', (event) => {
       this.addLog('error', `Uncaught Error: ${event.message}`, event.error);
@@ -126,8 +133,9 @@ class Logger {
       this.logs.shift();
     }
 
-    // Send to Electron main process if available
-    if (window.electronAPI) {
+    // Send to Electron main process if available (renderer only — `window`
+    // doesn't exist inside the pipeline worker).
+    if (typeof window !== 'undefined' && window.electronAPI) {
       // We'll extend the electronAPI to handle logs
       this.sendToElectron(entry);
     }
@@ -236,5 +244,8 @@ class Logger {
 // Create singleton instance
 export const logger = new Logger();
 
-// Global access for debugging
-(window as { __logger?: Logger }).__logger = logger;
+// Global access for debugging (renderer only — the pipeline worker imports
+// this module and has no `window`; see setupErrorHandling).
+if (typeof window !== 'undefined') {
+  (window as { __logger?: Logger }).__logger = logger;
+}
