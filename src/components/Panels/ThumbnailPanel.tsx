@@ -301,6 +301,38 @@ export function ThumbnailPanel({
     }
   }, [selectedImage]);
 
+  // Keep the strip anchored on the CURRENT picture when the rating filter
+  // changes — it used to snap back to the beginning (fewer tiles → the old
+  // scrollLeft clamps toward 0 and nothing re-centered). Re-center the selected
+  // tile after the filtered list re-renders; when the filter hides the selected
+  // picture, anchor on the nearest tile (by folder order) that survived.
+  // Deliberately keyed on the FILTER only — the [selectedImage] effect above
+  // owns selection-driven scrolling. Values are read from this render's
+  // closure, which the filter change just refreshed.
+  useEffect(() => {
+    if (!visible) return;
+    const container = scrollContainerRef.current;
+    if (!container || !selectedImage) return;
+    const raf = requestAnimationFrame(() => {
+      const el = selectedImageRef.current;
+      if (el) {
+        el.scrollIntoView?.({ behavior: 'auto', inline: 'center' });
+        return;
+      }
+      const idx = images.findIndex((img) => img.id === selectedImage.id);
+      if (idx < 0 || filteredImages.length === 0) return;
+      let best = filteredImages[0];
+      let bestDist = Infinity;
+      for (const img of filteredImages) {
+        const d = Math.abs(images.findIndex((i) => i.id === img.id) - idx);
+        if (d < bestDist) { bestDist = d; best = img; }
+      }
+      const tile = container.querySelector(`[data-image-id="${window.CSS.escape(best.id)}"]`);
+      (tile as HTMLElement | null)?.scrollIntoView?.({ behavior: 'auto', inline: 'center' });
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [ratingFilter, visible]);
+
   // Translate vertical mouse-wheel into horizontal filmstrip scrolling.
   // Uses a native non-passive listener so preventDefault actually works
   // (React attaches wheel handlers passively).

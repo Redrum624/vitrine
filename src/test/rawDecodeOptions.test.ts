@@ -6,6 +6,7 @@ import { checkpointService } from '../services/CheckpointService';
 import { imageProcessingPipeline } from '../services/ImageProcessingPipeline';
 import { imageCacheService } from '../services/ImageCacheService';
 import { DEFAULT_RAW_DECODE_OPTIONS, RawDecodeOptions } from '../types/electron';
+import { saveRawDecodeDefaults } from '../utils/rawDecodeDefaultsStorage';
 import type { ImageData as ServiceImageData } from '../services/ImageService';
 
 const AHD_RECON: RawDecodeOptions = { demosaic: 'ahd', highlightMode: 'reconstruct' };
@@ -259,12 +260,26 @@ describe('ImageService.decodeForExport — per-file RAW decode options', () => {
     expect(api().decodeRawFile).toHaveBeenCalledWith('/other.orf', AHD_RECON);
   });
 
-  it('falls back to DEFAULT_RAW_DECODE_OPTIONS for a non-current file with nothing persisted', async () => {
+  it('falls back to the USER decode defaults for a non-current file with nothing persisted', async () => {
+    // v1.31.0: the fallback is the user's saved decode defaults (main-process
+    // durable store), not the factory constants. Wire the storeGet/storeSet
+    // mocks to a real in-memory map so a save round-trips.
+    const mem: Record<string, unknown> = {};
+    const eapi = (window as unknown as { electronAPI: Record<string, jest.Mock> }).electronAPI;
+    eapi.storeGet = jest.fn(async (k: string) => (k in mem ? mem[k] : null));
+    eapi.storeSet = jest.fn(async (k: string, v: unknown) => { mem[k] = v; return true; });
     jest.spyOn(imageService, 'getCurrentImage').mockReturnValue(null);
     jest.spyOn(editPersistenceService, 'getSavedRawDecodeOptions').mockResolvedValue(null);
 
     await imageService.decodeForExport('/other.orf');
-
     expect(api().decodeRawFile).toHaveBeenCalledWith('/other.orf', DEFAULT_RAW_DECODE_OPTIONS);
+
+    saveRawDecodeDefaults(AHD_RECON);
+    await Promise.resolve(); // fire-and-forget storeSet lands
+    await imageService.decodeForExport('/other.orf');
+    expect(api().decodeRawFile).toHaveBeenLastCalledWith(
+      '/other.orf',
+      { ...AHD_RECON, cameraMatch: !!AHD_RECON.cameraMatch },
+    );
   });
 });

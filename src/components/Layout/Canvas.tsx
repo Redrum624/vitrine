@@ -17,7 +17,7 @@ import { LocalAdjustmentsPipelineModule } from '../../modules/LocalAdjustmentsPi
 import { LocalAdjustmentMaskOverlay } from '../Canvas/LocalAdjustmentMaskOverlay';
 import { notificationService } from '../../services/NotificationService';
 import { gpuPreviewPipeline } from '../../shaders/GpuPreviewPipeline';
-import { DEFAULT_RAW_DECODE_OPTIONS } from '../../types/electron';
+import { loadRawDecodeDefaults } from '../../utils/rawDecodeDefaultsStorage';
 import { PHOTO_SHADOW } from '../../layout/photoRegion';
 
 // Debug mode for canvas rendering - set to false for production
@@ -767,7 +767,12 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
       // options + a second restoreForPath AFTER the load), where edits restored ~350ms after
       // the first pass — a visible unedited-image flash and a redundant second pass on every
       // edited photo.
-      const savedState = await editPersistenceService.getSavedEditState(image.path);
+      // The user-defaults read rides the same suspension point (Promise.all) so
+      // the load-token check below still guards EVERY await before options land.
+      const [savedState, decodeDefaults] = await Promise.all([
+        editPersistenceService.getSavedEditState(image.path),
+        loadRawDecodeDefaults(),
+      ]);
 
       // The user may have switched images while the above await was in flight (rapid
       // filmstrip/gallery clicks) — bail before writing decode options for a superseded
@@ -786,7 +791,9 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
       // out-of-enum value from an old/buggy build must not seed the decode. Uses the validator's
       // sync variant so this reuses the single getSavedEditState read above (no second IPC).
       const validatedOptions = editPersistenceService.validateSavedRawDecodeOptions(savedState?.rawDecodeOptions);
-      useAppStore.getState().setRawDecodeOptions(validatedOptions ?? DEFAULT_RAW_DECODE_OPTIONS);
+      // No saved per-image options → the USER'S last-chosen defaults (memory
+      // across pictures and sessions, v1.31.0; factory defaults when unset).
+      useAppStore.getState().setRawDecodeOptions(validatedOptions ?? decodeDefaults);
 
       // Load the image. The beforeNotify hook fires synchronously once the base is decoded
       // (real dimensions known) but BEFORE ImageService notifies its load listeners — the

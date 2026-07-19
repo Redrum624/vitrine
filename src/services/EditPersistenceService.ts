@@ -15,7 +15,7 @@ const STORE_VERSION = 1;
  * invalid `-q`/highlight to the decoder and desync the RawDecodePanel's selects. Accept only the
  * exact known enum members. Kept in sync with types/electron.ts (DemosaicAlgo / HighlightMode).
  */
-function isValidRawDecodeOptions(o: unknown): o is RawDecodeOptions {
+export function isValidRawDecodeOptions(o: unknown): o is RawDecodeOptions {
   if (!o || typeof o !== 'object') return false;
   const opts = o as Record<string, unknown>;
   const demosaicOk = opts.demosaic === 'ahd' || opts.demosaic === 'dcb';

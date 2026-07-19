@@ -8,7 +8,8 @@ import { autoRawAdjustmentService, RAWDetectionResult } from './AutoRawAdjustmen
 import { ImageProcessingPipeline } from './ImageProcessingPipeline';
 import { useAppStore } from '../stores/appStore';
 import { editPersistenceService } from './EditPersistenceService';
-import { DEFAULT_RAW_DECODE_OPTIONS, RawDecodeOptions } from '../types/electron';
+import { RawDecodeOptions } from '../types/electron';
+import { loadRawDecodeDefaults } from '../utils/rawDecodeDefaultsStorage';
 
 export interface ImageData {
   width: number;
@@ -839,11 +840,14 @@ export class ImageService {
       // Honor the per-image decode options so the export matches what the user sees in the
       // preview: the CURRENTLY open image's options live in the store (source of truth while
       // it's open); any OTHER file's options were persisted by EditPersistenceService the last
-      // time it was open. Neither present -> DEFAULT_RAW_DECODE_OPTIONS.
+      // time it was open. Neither present -> the user's saved decode defaults.
       const isCurrentImage = this.getCurrentImage()?.filePath === filePath;
       const decodeOptions = isCurrentImage
         ? useAppStore.getState().rawDecodeOptions
-        : (await editPersistenceService.getSavedRawDecodeOptions(filePath)) ?? DEFAULT_RAW_DECODE_OPTIONS;
+        // No saved per-image options → the user's last-chosen defaults (same
+        // fallback the interactive open uses), so a batch export renders a
+        // never-opened RAW the way opening it would.
+        : (await editPersistenceService.getSavedRawDecodeOptions(filePath)) ?? (await loadRawDecodeDefaults());
 
       // interactive=false: an export decode is a one-shot the user never reopens interactively —
       // it must not write-through to (and churn) the disk base-cache LRU. Disk READS still apply.

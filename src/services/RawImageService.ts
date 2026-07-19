@@ -16,6 +16,7 @@ import { imageCacheService } from './ImageCacheService';
 import { editPersistenceService } from './EditPersistenceService';
 import { useAppStore } from '../stores/appStore';
 import { type RawDecodeOptions } from '../types/electron';
+import { saveRawDecodeDefaults } from '../utils/rawDecodeDefaultsStorage';
 import { RAW_EXTENSIONS_DOTTED } from '../utils/rawExtensions';
 
 export interface RawImageData {
@@ -223,6 +224,10 @@ export class RawImageService {
       // (scheduleSave writes serialize(), which embeds rawDecodeOptions into the edit state).
       store.setRawDecodeOptions(options);
       editPersistenceService.scheduleSave();
+      // A successful user-initiated re-decode is the commit point for the
+      // SESSION-CROSSING default too: RAW files with no saved per-image options
+      // will now open with these settings (utils/rawDecodeDefaultsStorage.ts).
+      saveRawDecodeDefaults(options);
 
       // Clear cached module results (base changed) and reprocess so the existing edits re-apply.
       imageProcessingPipeline.clearCache();

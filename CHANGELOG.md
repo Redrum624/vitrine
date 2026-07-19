@@ -4,6 +4,14 @@ All notable changes to **Vitrine** (formerly Photo Editor Pro) are documented in
 this file. The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.31.0] - 2026-07-19
+
+### Added
+- **RAW Decode settings are remembered.** The decode options you last chose (demosaic algorithm, highlight mode, Camera match) become the default for RAW files you haven't opened before — across pictures and across sessions. Committed whenever a re-decode you triggered in the RAW Decode panel succeeds; each already-opened photo still keeps its own saved per-image options, and batch exports of never-opened RAWs use the same defaults so they render exactly as opening them would. Stored in the main-process durable store — a renderer localStorage write was proven to vanish when the app quits soon after. Affects: `src/utils/rawDecodeDefaultsStorage.ts` (new), `src/services/RawImageService.ts`, `src/components/Layout/Canvas.tsx`, `src/services/ImageService.ts`.
+
+### Fixed
+- **Changing the star filter snapped the filmstrip back to the beginning.** Cause: the filtered list shrinks, the old scroll offset clamps toward zero, and nothing re-anchored. The strip now re-centers the current picture after a filter change — or, when the filter hides it, the nearest surviving photo in folder order. Affects: `src/components/Panels/ThumbnailPanel.tsx`.
+
 ## [1.30.0] - 2026-07-19
 
 ### Fixed
