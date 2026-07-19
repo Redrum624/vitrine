@@ -24,6 +24,10 @@ export interface CropParams {
 
   // Transform options (merged from TransformModule)
   angle: number;  // Rotation angle in degrees (-45.0 to +45.0)
+  /** Lossless orthogonal rotation (0 | 90 | 180 | 270, clockwise), applied
+   *  FIRST — before flips, fine rotation, and the crop rect. 90/270 swap the
+   *  output dimensions. Absent in pre-v1.34 saved edits ⇒ treated as 0. */
+  orientation?: number;
   flipHorizontal: boolean;
   flipVertical: boolean;
   expandCanvas: boolean;  // true = expand canvas to fit rotation, false = crop to original size
@@ -74,6 +78,7 @@ export class CropModule {
     customAspectWidth: 1,
     customAspectHeight: 1,
     angle: 0.0,
+    orientation: 0,
     flipHorizontal: false,
     flipVertical: false,
     expandCanvas: true,  // true = expand canvas during rotation, use crop to remove black borders
@@ -124,6 +129,7 @@ export class CropModule {
       customAspectWidth: 1,
       customAspectHeight: 1,
       angle: 0.0,
+      orientation: 0,
       flipHorizontal: false,
       flipVertical: false,
       expandCanvas: true,  // true = expand canvas during rotation
@@ -226,12 +232,21 @@ export class CropModule {
     let currentHeight = context.height;
     const { channels } = context;
 
-    // Step 1: Apply transforms first (flip/rotate)
-    const hasTransforms = this.params.flipHorizontal || this.params.flipVertical || Math.abs(this.params.angle) > 0.01;
+    // Step 1: Apply transforms first (orientation/flip/rotate)
+    const orientation = this.normalizedOrientation();
+    const hasTransforms = orientation !== 0 || this.params.flipHorizontal || this.params.flipVertical || Math.abs(this.params.angle) > 0.01;
 
-    logger.debug(`CropModule.process: hasTransforms=${hasTransforms}, angle=${this.params.angle}, flipH=${this.params.flipHorizontal}, flipV=${this.params.flipVertical}`);
+    logger.debug(`CropModule.process: hasTransforms=${hasTransforms}, orientation=${orientation}, angle=${this.params.angle}, flipH=${this.params.flipHorizontal}, flipV=${this.params.flipVertical}`);
 
     if (hasTransforms) {
+      // Lossless 90°-step rotation FIRST (pure pixel remap, no resampling).
+      if (orientation !== 0) {
+        output = this.rotateOrthogonal(output, currentWidth, currentHeight, channels, orientation);
+        if (orientation === 90 || orientation === 270) {
+          const t = currentWidth; currentWidth = currentHeight; currentHeight = t;
+        }
+      }
+
       // Apply flip/mirror first (fastest operations)
       if (this.params.flipHorizontal) {
         output = this.flipHorizontalInternal(output, currentWidth, currentHeight, channels);
@@ -305,6 +320,12 @@ export class CropModule {
 
     let currentWidth = inputWidth;
     let currentHeight = inputHeight;
+
+    // Step 0: 90°-step orientation swaps the frame for 90/270.
+    const orientation = this.normalizedOrientation();
+    if (orientation === 90 || orientation === 270) {
+      const t = currentWidth; currentWidth = currentHeight; currentHeight = t;
+    }
 
     // Step 1: Apply rotation dimensions first (rotation happens before crop in process())
     if (Math.abs(this.params.angle) > 0.01 && this.params.expandCanvas) {
@@ -400,6 +421,38 @@ export class CropModule {
   }
 
   // ========== TRANSFORM METHODS (merged from TransformModule) ==========
+
+  /** Orientation normalized into {0, 90, 180, 270} (absent/invalid ⇒ 0). */
+  normalizedOrientation(): 0 | 90 | 180 | 270 {
+    const raw = Number(this.params.orientation ?? 0);
+    if (!Number.isFinite(raw)) return 0;
+    const o = ((Math.round(raw / 90) * 90) % 360 + 360) % 360;
+    return (o === 90 || o === 180 || o === 270) ? o : 0;
+  }
+
+  /** Lossless orthogonal rotation (clockwise degrees ∈ {90, 180, 270}).
+   *  90/270 swap the output dimensions; pure index remap — no resampling. */
+  private rotateOrthogonal(input: Float32Array, width: number, height: number, channels: number, orientation: 90 | 180 | 270): Float32Array {
+    const outW = orientation === 180 ? width : height;
+    const outH = orientation === 180 ? height : width;
+    const output = new Float32Array(outW * outH * channels);
+    for (let yd = 0; yd < outH; yd++) {
+      for (let xd = 0; xd < outW; xd++) {
+        let xs: number; let ys: number;
+        if (orientation === 90) {        // CW: src(x,y) → dst(H-1-y, x)
+          xs = yd; ys = height - 1 - xd;
+        } else if (orientation === 180) {
+          xs = width - 1 - xd; ys = height - 1 - yd;
+        } else {                          // 270 CW (= 90 CCW): src(x,y) → dst(y, W-1-x)
+          xs = width - 1 - yd; ys = xd;
+        }
+        const src = (ys * width + xs) * channels;
+        const dst = (yd * outW + xd) * channels;
+        for (let c = 0; c < channels; c++) output[dst + c] = input[src + c];
+      }
+    }
+    return output;
+  }
 
   // Rotate image by angle (in degrees)
   private rotate(input: Float32Array, width: number, height: number, channels: number, angleDeg: number): Float32Array {

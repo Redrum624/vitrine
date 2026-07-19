@@ -4,6 +4,11 @@ All notable changes to **Vitrine** (formerly Photo Editor Pro) are documented in
 this file. The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.34.0] - 2026-07-19
+
+### Changed
+- **The Crop & Transform ±1° nudge arrows are now 90° rotation buttons.** Each click rotates the photo a lossless quarter-turn (clockwise / counter-clockwise, pure pixel remap — no resampling), swapping the frame for portrait/landscape; four clicks return exactly to the original. Fine straightening still lives in the Rotation slider and the ±2°/±5° chips. The orientation persists with the photo's edits and applies before flips, straightening, and the crop rect. Also fixed along the way: on a freshly opened photo, panel-driven crop edits (rotation slider, flips, ratios) could silently not render until an app restart — the same adapter-enable gate as the v1.29.0 interactive-crop fix, now mirrored for panel edits too. Affects: `src/modules/CropModule.ts`, `src/modules/CropPipelineModule.ts`, `src/components/Modules/CropModuleComponent.tsx`, `src/components/Panels/AdjustmentPanel.tsx`.
+
 ## [1.33.0] - 2026-07-19
 
 ### Changed

@@ -180,7 +180,8 @@ export class CropPipelineModule implements PipelineModule {
     const rectIsFullFrame =
       p.x === 0.0 && p.y === 0.0 && p.width === 1.0 && p.height === 1.0;
     const transformIsIdentity =
-      p.angle === 0.0 && !p.flipHorizontal && !p.flipVertical;
+      p.angle === 0.0 && !p.flipHorizontal && !p.flipVertical &&
+      this.cropModule.normalizedOrientation() === 0;
     return rectIsFullFrame && transformIsIdentity;
   }
 

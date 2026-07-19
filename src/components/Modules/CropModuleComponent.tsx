@@ -167,32 +167,13 @@ export const CropModuleComponent: React.FC<CropModuleComponentProps> = ({
     updateParams({ flipVertical: !params.flipVertical, enabled: true });
   }, [params.flipVertical, updateParams]);
 
-  const rotateBy = useCallback((degrees: number) => {
-    // Limit to -5 to +5 degrees for straightening
-    const newAngle = Math.max(-5, Math.min(5, params.angle + degrees));
-
-    // Check if user has an existing crop
-    const hasExistingCrop = params.x !== 0 || params.y !== 0 ||
-                            params.width !== 1.0 || params.height !== 1.0;
-
-    if (Math.abs(newAngle) < 0.01) {
-      // Reset to no rotation - but preserve crop if user has one
-      if (hasExistingCrop) {
-        updateParams({ angle: 0, enabled: true });
-      } else {
-        updateParams({ x: 0, y: 0, width: 1.0, height: 1.0, angle: 0, enabled: true });
-      }
-    } else {
-      if (hasExistingCrop) {
-        // Preserve user's crop, just update angle
-        updateParams({ angle: newAngle, enabled: true });
-      } else {
-        // Apply rotation with auto-crop to remove black borders
-        const autoCrop = module.calculateAutoCropForRotation(imageWidth, imageHeight, newAngle);
-        updateParams({ angle: newAngle, enabled: true, ...autoCrop });
-      }
-    }
-  }, [params.angle, params.x, params.y, params.width, params.height, updateParams, module, imageWidth, imageHeight]);
+  // Lossless 90°-step rotation (v1.34.0, replaced the old ±1° nudge arrows —
+  // fine straightening lives in the slider and the ±2°/±5° chips below).
+  const rotate90 = useCallback((deltaDeg: 90 | -90) => {
+    const current = Number(params.orientation ?? 0);
+    const next = ((current + deltaDeg) % 360 + 360) % 360;
+    updateParams({ orientation: next, enabled: true });
+  }, [params.orientation, updateParams]);
 
   const handleRotationChange = useCallback((newAngle: number) => {
     // Clamp to -5 to +5 range
@@ -311,7 +292,7 @@ export const CropModuleComponent: React.FC<CropModuleComponentProps> = ({
         />
 
         <div className="grid grid-cols-3" style={{ gap: 6 }}>
-          <ChipButton onClick={() => rotateBy(-1)} title="Rotate -1°">
+          <ChipButton onClick={() => rotate90(-90)} title="Rotate 90° counter-clockwise">
             <RotateCcw size={13} />
           </ChipButton>
           <ChipButton
@@ -330,7 +311,7 @@ export const CropModuleComponent: React.FC<CropModuleComponentProps> = ({
             )}
             {isDetecting ? 'Detecting…' : 'Auto-Straighten'}
           </ChipButton>
-          <ChipButton onClick={() => rotateBy(1)} title="Rotate +1°">
+          <ChipButton onClick={() => rotate90(90)} title="Rotate 90° clockwise">
             <RotateCw size={13} />
           </ChipButton>
         </div>
