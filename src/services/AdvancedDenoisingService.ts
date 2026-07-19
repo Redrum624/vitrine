@@ -888,46 +888,21 @@ export class AdvancedDenoisingService {
    */
   private denoiseWaveletSync(
     imageData: Float32Array,
-    width: number,
-    height: number,
-    params: DenoiseParams
+    _width: number,
+    _height: number,
+    _params: DenoiseParams
   ): Float32Array {
-    logger.debug(`Wavelet denoising: levels=3, strength=${params.strength}`);
-
-    // Convert to grayscale for wavelet processing
-    const luma = this.extractLuminance(imageData, width, height);
-
-    // Multi-level wavelet decomposition
-    const levels = 3;
-    let currentLuma = luma;
-    const decomposed: Float32Array[] = [];
-
-    // Decompose
-    for (let level = 0; level < levels; level++) {
-      const transformed = this.haar2DFull(currentLuma, width >> level, height >> level);
-      decomposed.push(transformed);
-
-      // Extract approximation for next level (downsampled by 2)
-      currentLuma = this.extractApproximation(transformed, width >> level, height >> level);
-    }
-
-    // Threshold wavelet coefficients
-    const threshold = (params.strength / 100) * 0.1;
-    for (let level = 0; level < levels; level++) {
-      this.thresholdWaveletCoefficients(decomposed[level], threshold / (level + 1));
-    }
-
-    // Reconstruct
-    let reconstructed = decomposed[levels - 1];
-    for (let level = levels - 2; level >= 0; level--) {
-      reconstructed = this.haar2DInverseFull(reconstructed, width >> level, height >> level);
-    }
-
-    // Apply back to color image
-    const output = new Float32Array(imageData.length);
-    this.applyLuminance(imageData, reconstructed, output, width, height);
-
-    return output;
+    // THE OLD BODY SHREDDED IMAGES (v1.32.0 root cause, user-reported corrupted
+    // export): haar2DFull/haar2DInverseFull below are PLACEHOLDER no-ops, so
+    // "reconstruction" returned the level-2 quarter-resolution approximation
+    // (e.g. 1300×976 for a 5200×3904 RAW) and applyLuminance smeared it across
+    // full dims — 4 repeated strips + NaN-black bottom in every ≥1MP CPU-path
+    // denoise (auto-selection sent ALL >1MP images here). Until a real wavelet
+    // transform exists, this is an HONEST identity: no denoising, no damage.
+    // Large-image denoising now runs on the tiled GPU path in
+    // NoiseReductionModule; this stub is the last-resort fallback only.
+    logger.warn('Wavelet denoiser is not implemented — returning the input unchanged (no denoise)');
+    return new Float32Array(imageData);
   }
 
   /**
@@ -942,101 +917,6 @@ export class AdvancedDenoisingService {
     return this.denoiseWaveletSync(imageData, width, height, params);
   }
 
-  /**
-   * Extract luminance channel
-   */
-  private extractLuminance(imageData: Float32Array, width: number, height: number): Float32Array {
-    const luma = new Float32Array(width * height);
-
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        const idx = (y * width + x) * 4;
-        luma[y * width + x] =
-          0.299 * imageData[idx] +
-          0.587 * imageData[idx + 1] +
-          0.114 * imageData[idx + 2];
-      }
-    }
-
-    return luma;
-  }
-
-  /**
-   * Apply denoised luminance back to color image
-   */
-  private applyLuminance(
-    input: Float32Array,
-    luma: Float32Array,
-    output: Float32Array,
-    width: number,
-    height: number
-  ): void {
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        const idx = (y * width + x) * 4;
-        const lumaIdx = y * width + x;
-
-        const oldLuma =
-          0.299 * input[idx] +
-          0.587 * input[idx + 1] +
-          0.114 * input[idx + 2];
-
-        const newLuma = luma[lumaIdx];
-        const ratio = oldLuma > 0 ? newLuma / oldLuma : 1.0;
-
-        output[idx] = Math.max(0, Math.min(1, input[idx] * ratio));
-        output[idx + 1] = Math.max(0, Math.min(1, input[idx + 1] * ratio));
-        output[idx + 2] = Math.max(0, Math.min(1, input[idx + 2] * ratio));
-        output[idx + 3] = input[idx + 3];
-      }
-    }
-  }
-
-  /**
-   * Full 2D Haar wavelet transform (for grayscale)
-   */
-  private haar2DFull(data: Float32Array, _width: number, _height: number): Float32Array {
-    // Similar to previous implementation but for full image
-    return data; // Placeholder - would implement full transform
-  }
-
-  /**
-   * Inverse full 2D Haar wavelet transform
-   */
-  private haar2DInverseFull(data: Float32Array, _width: number, _height: number): Float32Array {
-    return data; // Placeholder
-  }
-
-  /**
-   * Extract approximation coefficients
-   */
-  private extractApproximation(data: Float32Array, width: number, height: number): Float32Array {
-    const halfWidth = width / 2;
-    const halfHeight = height / 2;
-    const approx = new Float32Array(halfWidth * halfHeight);
-
-    for (let y = 0; y < halfHeight; y++) {
-      for (let x = 0; x < halfWidth; x++) {
-        approx[y * halfWidth + x] = data[y * width + x];
-      }
-    }
-
-    return approx;
-  }
-
-  /**
-   * Threshold wavelet coefficients (soft thresholding)
-   */
-  private thresholdWaveletCoefficients(data: Float32Array, threshold: number): void {
-    for (let i = 0; i < data.length; i++) {
-      const val = data[i];
-      if (Math.abs(val) < threshold) {
-        data[i] = 0;
-      } else {
-        data[i] = val > 0 ? val - threshold : val + threshold;
-      }
-    }
-  }
 
   /**
    * Hybrid Denoising (Synchronous version)

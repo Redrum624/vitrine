@@ -58,27 +58,28 @@ function IconChip({ title, onClick, children }: { title: string; onClick: () => 
 }
 
 /** Section header: SectionLabel (stretched via flex-1 so its hairline still
- * spans) + enable checkbox + optional Auto/Reset icon chips. */
-function SectionHeader({ title, enabled, onToggleEnabled, onAuto, onReset }: {
-  title: string; enabled: boolean; onToggleEnabled: (v: boolean) => void; onAuto?: () => void; onReset?: () => void;
+ * spans) + optional Auto/Reset icon chips. No enable checkbox (v1.32.0, user
+ * request): a section is active exactly when its values are non-neutral — the
+ * `enabled` flags in the params are DERIVED from the values by the setters, so
+ * neutral (0) settings cost nothing and there is nothing to arm. */
+function SectionHeader({ title, active, onAuto, onReset }: {
+  title: string; active: boolean; onAuto?: () => void; onReset?: () => void;
 }) {
   return (
     <div className="flex items-center justify-between" style={{ gap: 8 }}>
       <SectionLabel className="flex-1">{title}</SectionLabel>
       <div className="flex items-center flex-shrink-0" style={{ gap: 6 }}>
+        {active && (
+          <span
+            aria-label={`${title} active`}
+            style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)' }}
+          />
+        )}
         {onAuto && (
           <IconChip title="Auto-detect" onClick={onAuto}>
             <Target size={12} />
           </IconChip>
         )}
-        <input
-          type="checkbox"
-          checked={enabled}
-          onChange={(e) => onToggleEnabled(e.target.checked)}
-          title={`Enable ${title}`}
-          aria-label={`Enable ${title}`}
-          style={{ accentColor: 'var(--accent)', width: 14, height: 14, cursor: 'pointer' }}
-        />
         {onReset && (
           <IconChip title="Reset this section" onClick={onReset}>
             <RotateCcw size={12} />
@@ -127,16 +128,37 @@ export const LensCorrectionsModuleComponent: React.FC<LensCorrectionsModuleCompo
     onParametersChange(partial);
   }, [onParametersChange]);
 
-  const setVignetting = useCallback((key: string, value: number | boolean) =>
-    update({ vignetting: { ...params.vignetting, [key]: value } }), [params.vignetting, update]);
-  const setDistortion = useCallback((key: string, value: number | boolean | object) =>
-    update({ distortion: { ...params.distortion, [key]: value } }), [params.distortion, update]);
-  const setCA = useCallback((key: string, value: number | boolean | object) =>
-    update({ chromaticAberration: { ...params.chromaticAberration, [key]: value } }), [params.chromaticAberration, update]);
-  const setBlur = useCallback((key: string, value: number | boolean) =>
-    update({ blur: { ...params.blur, [key]: value } }), [params.blur, update]);
-  const setFilmGrain = useCallback((key: string, value: number | boolean) =>
-    update({ filmGrain: { ...params.filmGrain, [key]: value } }), [params.filmGrain, update]);
+  // Value-derived activation (v1.32.0): each setter recomputes its section's
+  // `enabled` flag from the NEW values — non-neutral values activate the
+  // correction, neutral values deactivate it. The flags stay in the params
+  // (pipeline gating + persistence compatibility) but the user never arms them.
+  const setVignetting = useCallback((key: string, value: number | boolean) => {
+    const next = { ...params.vignetting, [key]: value };
+    next.enabled = next.amount !== 0;
+    update({ vignetting: next });
+  }, [params.vignetting, update]);
+  const setDistortion = useCallback((key: string, value: number | boolean | object) => {
+    const next = { ...params.distortion, [key]: value };
+    next.enabled = next.barrel !== 0 || next.scale !== 1 ||
+      next.perspective.horizontal !== 0 || next.perspective.vertical !== 0;
+    update({ distortion: next });
+  }, [params.distortion, update]);
+  const setCA = useCallback((key: string, value: number | boolean | object) => {
+    const next = { ...params.chromaticAberration, [key]: value };
+    next.enabled = next.redCyan !== 0 || next.blueMagenta !== 0 ||
+      next.purple.amount !== 0 || next.green.amount !== 0;
+    update({ chromaticAberration: next });
+  }, [params.chromaticAberration, update]);
+  const setBlur = useCallback((key: string, value: number | boolean) => {
+    const next = { ...params.blur, [key]: value };
+    next.enabled = next.radius > 0;
+    update({ blur: next });
+  }, [params.blur, update]);
+  const setFilmGrain = useCallback((key: string, value: number | boolean) => {
+    const next = { ...params.filmGrain, [key]: value };
+    next.enabled = next.amount !== 0;
+    update({ filmGrain: next });
+  }, [params.filmGrain, update]);
 
   const activeCount = [vignetting.enabled, distortion.enabled, ca.enabled, blur.enabled, filmGrain.enabled].filter(Boolean).length;
 
@@ -147,10 +169,12 @@ export const LensCorrectionsModuleComponent: React.FC<LensCorrectionsModuleCompo
     reset: onResetSection ? () => onResetSection('all') : undefined,
   });
 
-  const sectionBodyStyle = (enabled: boolean): React.CSSProperties => ({
+  // Sections are ALWAYS interactive — activation derives from values, so there
+  // is no disabled state to grey out (the old dimming + pointerEvents:none
+  // would have locked a section the user could no longer arm).
+  const sectionBodyStyle: React.CSSProperties = {
     display: 'flex', flexDirection: 'column', gap: 12,
-    opacity: enabled ? 1 : 0.55, pointerEvents: enabled ? 'auto' : 'none',
-  });
+  };
 
   return (
     <div className={`flex flex-col ${className}`} style={{ gap: 18 }}>
@@ -158,12 +182,11 @@ export const LensCorrectionsModuleComponent: React.FC<LensCorrectionsModuleCompo
       <div className="flex flex-col" style={{ gap: 12 }}>
         <SectionHeader
           title="Vignetting"
-          enabled={vignetting.enabled}
-          onToggleEnabled={(v) => setVignetting('enabled', v)}
+          active={vignetting.enabled}
           onAuto={onAutoDetectVignetting}
           onReset={onResetSection && (() => onResetSection('vignetting'))}
         />
-        <div style={sectionBodyStyle(vignetting.enabled)}>
+        <div style={sectionBodyStyle}>
           <Presets items={VIGNETTING_PRESETS} onApply={(i) => update({ vignetting: { ...params.vignetting, enabled: true, ...VIGNETTING_PRESETS[i] } })} />
           <SliderRow label="Amount" value={vignetting.amount} defaultValue={0} min={-100} max={100} step={1} onChange={(v) => setVignetting('amount', v)} />
           <SliderRow label="Midpoint" value={vignetting.midpoint} defaultValue={1.0} min={0.1} max={2.0} step={0.01} formatValue={(v) => v.toFixed(2)} onChange={(v) => setVignetting('midpoint', v)} />
@@ -176,11 +199,10 @@ export const LensCorrectionsModuleComponent: React.FC<LensCorrectionsModuleCompo
       <div className="flex flex-col" style={{ gap: 12 }}>
         <SectionHeader
           title="Distortion"
-          enabled={distortion.enabled}
-          onToggleEnabled={(v) => setDistortion('enabled', v)}
+          active={distortion.enabled}
           onReset={onResetSection && (() => onResetSection('distortion'))}
         />
-        <div style={sectionBodyStyle(distortion.enabled)}>
+        <div style={sectionBodyStyle}>
           <Presets items={DISTORTION_PRESETS} onApply={(i) => update({ distortion: { ...params.distortion, enabled: true, ...DISTORTION_PRESETS[i], perspective: { horizontal: 0, vertical: 0 } } })} />
           <SliderRow label="Barrel / Pincushion" value={distortion.barrel} defaultValue={0} min={-100} max={100} step={1} onChange={(v) => setDistortion('barrel', v)} />
           <Caption>Negative = barrel, positive = pincushion</Caption>
@@ -205,11 +227,10 @@ export const LensCorrectionsModuleComponent: React.FC<LensCorrectionsModuleCompo
       <div className="flex flex-col" style={{ gap: 12 }}>
         <SectionHeader
           title="Chromatic Aberration"
-          enabled={ca.enabled}
-          onToggleEnabled={(v) => setCA('enabled', v)}
+          active={ca.enabled}
           onReset={onResetSection && (() => onResetSection('chromaticAberration'))}
         />
-        <div style={sectionBodyStyle(ca.enabled)}>
+        <div style={sectionBodyStyle}>
           <SubLabel>Lateral (defringe edges)</SubLabel>
           <SliderRow label="Red / Cyan" value={ca.redCyan} defaultValue={0} min={-100} max={100} step={1} onChange={(v) => setCA('redCyan', v)} />
           <SliderRow label="Blue / Magenta" value={ca.blueMagenta} defaultValue={0} min={-100} max={100} step={1} onChange={(v) => setCA('blueMagenta', v)} />
@@ -242,11 +263,10 @@ export const LensCorrectionsModuleComponent: React.FC<LensCorrectionsModuleCompo
       <div className="flex flex-col" style={{ gap: 12 }}>
         <SectionHeader
           title="Blur"
-          enabled={blur.enabled}
-          onToggleEnabled={(v) => setBlur('enabled', v)}
+          active={blur.enabled}
           onReset={onResetSection && (() => onResetSection('blur'))}
         />
-        <div style={sectionBodyStyle(blur.enabled)}>
+        <div style={sectionBodyStyle}>
           <SliderRow label="Radius" value={blur.radius} defaultValue={0} min={0} max={20} step={0.5} formatValue={(v) => `${v.toFixed(1)} px`} onChange={(v) => setBlur('radius', v)} />
           <Caption>Non-destructive Gaussian blur applied to the whole image</Caption>
         </div>
@@ -256,11 +276,10 @@ export const LensCorrectionsModuleComponent: React.FC<LensCorrectionsModuleCompo
       <div className="flex flex-col" style={{ gap: 12 }}>
         <SectionHeader
           title="Film Grain"
-          enabled={filmGrain.enabled}
-          onToggleEnabled={(v) => setFilmGrain('enabled', v)}
+          active={filmGrain.enabled}
           onReset={onResetSection && (() => onResetSection('filmGrain'))}
         />
-        <div style={sectionBodyStyle(filmGrain.enabled)}>
+        <div style={sectionBodyStyle}>
           <SliderRow label="Amount" value={filmGrain.amount} defaultValue={0} min={0} max={100} step={1} formatValue={(v) => `${v}%`} onChange={(v) => setFilmGrain('amount', v)} />
           <Caption>Grain intensity (luminance-weighted, strongest in midtones)</Caption>
           <SliderRow label="Grain Size" value={filmGrain.size} defaultValue={1} min={1} max={4} step={1} onChange={(v) => setFilmGrain('size', v)} />

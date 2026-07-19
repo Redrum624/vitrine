@@ -3,7 +3,9 @@
  * Lens Corrections panel.
  *
  * These exercise the real React render path (which tsc/build cannot) and confirm
- * the checkbox callbacks reach the module + the onChange props.
+ * value changes reach the module + the onChange props. v1.32.0 removed the
+ * per-section enable checkboxes — activation now derives from values (see
+ * lensCorrectionsNoCheckboxes.test.tsx), so Blur is activated via its slider.
  */
 import { render, screen, fireEvent } from '@testing-library/react';
 import { LensCorrectionsModule } from '../modules/LensCorrectionsModule';
@@ -24,16 +26,15 @@ describe('LensCorrectionsModuleComponent — Blur + Film Grain', () => {
     expect(screen.getByText('Blur')).toBeInTheDocument();
     expect(screen.getByText('Film Grain')).toBeInTheDocument();
 
-    // One enable checkbox per section, in order:
-    // Distortion, Vignetting, Chromatic Aberration, Blur, Film Grain.
-    const checkboxes = screen.getAllByRole('checkbox');
-    expect(checkboxes).toHaveLength(5);
-
-    fireEvent.click(checkboxes[3]); // Blur
+    // No enable checkboxes anymore (v1.32.0) — a non-zero Radius activates Blur.
+    expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
+    const radius = screen.getByLabelText('Radius') as HTMLInputElement;
+    fireEvent.change(radius, { target: { value: '2' } });
 
     expect(onParametersChange).toHaveBeenCalled();
     const calls = onParametersChange.mock.calls;
-    const partial = calls[calls.length - 1][0] as { blur?: { enabled?: boolean } };
+    const partial = calls[calls.length - 1][0] as { blur?: { enabled?: boolean; radius?: number } };
     expect(partial.blur?.enabled).toBe(true);
+    expect(partial.blur?.radius).toBe(2);
   });
 });

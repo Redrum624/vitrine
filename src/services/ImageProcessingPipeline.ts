@@ -611,7 +611,23 @@ export class ImageProcessingPipeline {
 
         try {
           logger.debug(`Processing module: ${module.getName()}`);
-          currentData = module.process(currentData, context);
+          // Buffer-conservation guard (v1.32.0): a module's output MUST match
+          // the (possibly module-mutated, e.g. crop) context dims. A defective
+          // module once returned a quarter-resolution buffer here and every
+          // downstream stage — and the export encoder — trusted it, shredding
+          // the output. A lying module is now skipped loudly instead.
+          const preW = context.width, preH = context.height, preC = context.channels;
+          const produced = module.process(currentData, context);
+          const expectedLen = context.width * context.height * context.channels;
+          if (produced.length !== expectedLen) {
+            logger.error(
+              `Module ${module.getName()} returned ${produced.length} floats but context says ` +
+              `${context.width}x${context.height}x${context.channels} (${expectedLen}) — skipping its output`,
+            );
+            context.width = preW; context.height = preH; context.channels = preC;
+          } else {
+            currentData = produced;
+          }
           modulesProcessed++;
 
           // Cache the result for future use with size tracking. Skipped on the
