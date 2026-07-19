@@ -309,5 +309,7 @@ idea-eval/
 docs/go-public-plan.html
 docs/analyses/
 docs/pre-ship-audit-*.html
+# Reddit launch material (posts, traffic exports) — personal, never released
+docs/reddit/
 # Internal design-handoff bundle (mockups + reference shots; not shipped)
 design_handoff_glass_ui/
