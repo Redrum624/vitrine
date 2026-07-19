@@ -22,21 +22,34 @@ const testStats = {
   shadowPixelRatio: 0.3, highlightPixelRatio: 0.01, noiseEstimate: 0.01,
 } as unknown as Stats;
 
+// Bucket resolution kept for documentation: contrast/brightness/saturation
+// still pull toward the user-style profile; only EXPOSURE targets neutral.
 const bucket = selectBucket({ mean_lum: 0.22, rb_ratio: 0.23 / 0.21 });
-const profile = userStyleProfile[bucket];
+void userStyleProfile[bucket];
 
 describe('autoBasicAdj standalone vs composed', () => {
   const standalone = autoAdjustService.autoBasicAdj(testStats, { standalone: true });
   const composed = autoAdjustService.autoBasicAdj(testStats);
 
-  test('standalone corrects exposure toward the bucket target; composed leaves it to ExposureModule', () => {
-    const medianDelta = profile.targetMedianLum - 0.24;
-    if (Math.abs(medianDelta) > 0.03) {
-      expect(standalone.exposure).not.toBe(0);
-      expect(Math.sign(standalone.exposure)).toBe(Math.sign(medianDelta));
-    }
-    expect(Math.abs(standalone.exposure)).toBeLessThanOrEqual(0.7);
+  test('standalone lifts a dark median toward NEUTRAL (0.40), not the style bucket; composed stays 0', () => {
+    // p50=0.24 → delta 0.16, minus 0.05 deadzone, ×1.6 = +0.176 stops.
+    expect(standalone.exposure).toBeCloseTo(0.176, 2);
     expect(composed.exposure).toBe(0);
+  });
+
+  test('standalone never yanks exposure down on a bright image (asymmetric clamp)', () => {
+    // A BRIGHT image (p50 0.75): delta −0.35 → −0.30×1.6 = −0.48, clamped to −0.35.
+    const bright = { ...testStats, meanLum: 0.72, p50: 0.75 } as unknown as Stats;
+    const out = autoAdjustService.autoBasicAdj(bright, { standalone: true });
+    expect(out.exposure).toBeGreaterThanOrEqual(-0.35);
+    expect(out.exposure).toBeLessThan(0);
+  });
+
+  test('a WELL-EXPOSED median gets ZERO exposure correction (regression: −0.5 on a good photo)', () => {
+    // p50 0.42 sits inside the ±0.05 dead zone around the 0.40 neutral target.
+    const good = { ...testStats, meanLum: 0.44, p50: 0.42 } as unknown as Stats;
+    const out = autoAdjustService.autoBasicAdj(good, { standalone: true });
+    expect(out.exposure).toBe(0);
   });
 
   test('standalone corrections are stronger than composed (same direction, bigger magnitude)', () => {
