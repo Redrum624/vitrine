@@ -1,16 +1,17 @@
 /**
  * Unit tests for the multi-export filename helpers.
  */
-import { suffixedName, baseNameOf } from '../utils/exportFilename';
+import { suffixedName, baseNameOf, EXPORT_SUFFIX } from '../utils/exportFilename';
 
 describe('suffixedName', () => {
-  it('uses the bare _PEP suffix at index 0', () => {
-    expect(suffixedName('photo', 'jpg', 0)).toBe('photo_PEP.jpg');
+  it('uses the bare _VIT suffix at index 0 (post-rebrand — no more _PEP)', () => {
+    expect(EXPORT_SUFFIX).toBe('_VIT');
+    expect(suffixedName('photo', 'jpg', 0)).toBe('photo_VIT.jpg');
   });
 
   it('appends a numeric suffix for index > 0', () => {
-    expect(suffixedName('photo', 'jpg', 1)).toBe('photo_PEP_1.jpg');
-    expect(suffixedName('photo', 'png', 2)).toBe('photo_PEP_2.png');
+    expect(suffixedName('photo', 'jpg', 1)).toBe('photo_VIT_1.jpg');
+    expect(suffixedName('photo', 'png', 2)).toBe('photo_VIT_2.png');
   });
 });
 

@@ -1,4 +1,5 @@
 import { logger } from '../utils/Logger';
+import { EXPORT_SUFFIX } from '../utils/exportFilename';
 import { isElectron, EmbeddableMetadata } from '../types/electron';
 import { COLOR_SPACE_CONVERSIONS } from './colorSpaceMatrices';
 
@@ -273,8 +274,13 @@ export class ExportService {
         exportOptions.bitDepth
       );
 
-      // Determine output path
-      const outputPath = this.generateOutputPath(originalFilePath, exportOptions);
+      // Determine output path, then bump the numeric suffix until it's a name
+      // that doesn't exist yet — a single export must never overwrite an
+      // earlier one (photo_VIT.jpg → photo_VIT_1.jpg → …), matching the
+      // multi-export non-clobber behaviour.
+      const outputPath = await this.resolveNonClobberingPath(
+        this.generateOutputPath(originalFilePath, exportOptions),
+      );
 
       // Create the image file. When the resize was deferred, we pass the full-res
       // buffer dimensions plus the target dimensions so the main-process writer
@@ -590,6 +596,34 @@ export class ExportService {
     }
   }
 
+  /**
+   * If `outputPath` already exists on disk, append/bump a numeric suffix
+   * (…_VIT.jpg → …_VIT_1.jpg → …_VIT_2.jpg) until the name is free. Fail-open:
+   * if the existence check is unavailable (browser env / IPC error), the
+   * original path is returned unchanged (pre-existing overwrite behaviour).
+   */
+  private async resolveNonClobberingPath(outputPath: string): Promise<string> {
+    const exists = async (p: string): Promise<boolean> => {
+      try {
+        if (isElectron() && window.electronAPI?.fileExists) {
+          return await window.electronAPI.fileExists(p);
+        }
+      } catch { /* fail-open */ }
+      return false;
+    };
+
+    if (!(await exists(outputPath))) return outputPath;
+
+    const dot = outputPath.lastIndexOf('.');
+    const stem = dot > 0 ? outputPath.slice(0, dot) : outputPath;
+    const ext = dot > 0 ? outputPath.slice(dot) : '';
+    for (let n = 1; n < 1000; n++) {
+      const candidate = `${stem}_${n}${ext}`;
+      if (!(await exists(candidate))) return candidate;
+    }
+    return outputPath; // 999 collisions — give up and overwrite rather than loop forever
+  }
+
   // Generate output file path. NOTE: basenames are split on BOTH "/" and "\\" —
   // Windows source paths use backslashes, so splitting on "/" only left the whole
   // absolute path as the "filename" and produced e.g. "C:\\...\\Desktop/C:\\...\\img.jpg".
@@ -602,7 +636,7 @@ export class ExportService {
     }
 
     const stem = (originalPath ? baseNameOf(originalPath) : 'exported_image').replace(/\.[^/.]+$/, '');
-    const suffix = options.suffix || '_PEP';
+    const suffix = options.suffix || EXPORT_SUFFIX;
     const extension = options.format === 'jpeg' ? 'jpg' : options.format;
     const filename = `${stem}${suffix}.${extension}`;
 

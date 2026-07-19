@@ -43,6 +43,7 @@ import { checkpointService } from './services/CheckpointService';
 import { logger } from './utils/Logger';
 import { sameImageList } from './utils/imageList';
 import { seedImageRatings } from './utils/ratingSeeder';
+import { scheduleThumbnail } from './utils/thumbnailScheduler';
 import { historyService } from './services/HistoryService';
 import { AdjustmentPreset } from './services/PresetService';
 import { errorHandlingService } from './services/ErrorHandlingService';
@@ -899,7 +900,24 @@ function App() {
       availableImages,
       (p) => readRating(p),
       (id, r) => useAppStore.getState().setImageRating(id, r),
-    );
+    ).then(() => {
+      // Warm the thumbnails of RATED photos right after seeding (user report:
+      // "thumbnails don't load fast enough while using the star filters").
+      // Rated photos are exactly what filters reveal — decoding them into the
+      // main-process thumb cache now makes a later filter click near-instant.
+      // Runs through the shared scheduler as an EARLY batch: any subsequent
+      // visible-tile fetch is a newer batch and always jumps ahead, so this
+      // only consumes idle decode slots.
+      const readThumb = window.electronAPI?.readImageAsDataURL;
+      if (!readThumb) return;
+      const ratings = useAppStore.getState().imageRatings;
+      availableImages
+        .filter((img) => (ratings[img.id] ?? 0) > 0)
+        .slice(0, 300)
+        .forEach((img) => {
+          scheduleThumbnail(img.id, () => readThumb(img.path)).catch(() => { /* prefetch is best-effort */ });
+        });
+    });
   }, [availableImages]);
 
   // Opens the multi-export flow for the current selection (≥1 image) — shared by

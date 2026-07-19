@@ -27,7 +27,7 @@ interface Job {
   running: boolean;
 }
 
-const MAX_CONCURRENT = 4;
+const MAX_CONCURRENT = 6;
 
 // Queued + running jobs by key (dedupe); `queue` holds only not-yet-started jobs.
 const jobs = new Map<string, Job>();
