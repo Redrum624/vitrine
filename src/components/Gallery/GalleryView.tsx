@@ -15,6 +15,7 @@ import {
 import { evictOldestThumbnails, MAX_THUMBNAIL_CACHE } from '../Panels/ThumbnailPanel';
 import { getDisplayFormat } from '../../utils/imageFormat';
 import { keyboardEventBlocked } from '../../utils/keyboardScope';
+import { scheduleThumbnail, bumpThumbnail } from '../../utils/thumbnailScheduler';
 import { GalleryTileContextMenu } from './GalleryTileContextMenu';
 
 interface GalleryViewProps {
@@ -151,7 +152,13 @@ export function GalleryView({ images, onImageSelect, visible, onRequestRemove }:
         .catch(() => { /* no rating / unreadable — leave unrated */ });
     }
 
-    if (thumbnailsRef.current.has(image.id) || loadingRef.current.has(image.id)) return;
+    if (thumbnailsRef.current.has(image.id)) return;
+    if (loadingRef.current.has(image.id)) {
+      // Already queued/in flight — promote it so the tile the user can SEE now
+      // (filter change, scroll-back) beats stale queued work.
+      bumpThumbnail(image.id);
+      return;
+    }
     loadingRef.current.add(image.id);
     setLoadingThumbnails((prev) => new Set(prev).add(image.id));
 
@@ -165,7 +172,12 @@ export function GalleryView({ images, onImageSelect, visible, onRequestRemove }:
 
     try {
       if (window.electronAPI) {
-        const dataUrl = await window.electronAPI.readImageAsDataURL(image.path);
+        // Routed through the shared priority queue: newest visible batch first,
+        // capped concurrency — see utils/thumbnailScheduler.ts.
+        const dataUrl = await scheduleThumbnail(
+          image.id,
+          () => window.electronAPI!.readImageAsDataURL(image.path),
+        );
         if (dataUrl) storeThumbnail(dataUrl);
       }
     } catch (error) {

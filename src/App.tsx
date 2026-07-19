@@ -42,6 +42,7 @@ import { editPersistenceService } from './services/EditPersistenceService';
 import { checkpointService } from './services/CheckpointService';
 import { logger } from './utils/Logger';
 import { sameImageList } from './utils/imageList';
+import { seedImageRatings } from './utils/ratingSeeder';
 import { historyService } from './services/HistoryService';
 import { AdjustmentPreset } from './services/PresetService';
 import { errorHandlingService } from './services/ErrorHandlingService';
@@ -884,6 +885,22 @@ function App() {
       setCurrentImage(images[0]);
     }
   }, [currentImage]);
+
+  // Eagerly seed every file's persisted xmp:Rating into the store on folder
+  // load, so the rating filter matches the WHOLE folder — the per-tile lazy
+  // seeds only cover thumbnails that actually mounted, which left rated-but-
+  // never-scrolled-to photos invisible to filters after a restart. Keyed on
+  // `availableImages` (reference-stable across watcher reloads) and deduped
+  // by path inside the seeder, so this runs one cheap metadata read per file.
+  useEffect(() => {
+    const readRating = window.electronAPI?.readImageRating;
+    if (!readRating || availableImages.length === 0) return;
+    void seedImageRatings(
+      availableImages,
+      (p) => readRating(p),
+      (id, r) => useAppStore.getState().setImageRating(id, r),
+    );
+  }, [availableImages]);
 
   // Opens the multi-export flow for the current selection (≥1 image) — shared by
   // the filmstrip dock's "Export N" button (which only appears at ≥2 selected)

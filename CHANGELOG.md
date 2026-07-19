@@ -4,6 +4,12 @@ All notable changes to **Vitrine** (formerly Photo Editor Pro) are documented in
 this file. The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.28.1] - 2026-07-19
+
+### Fixed
+- **Rating filter left rated photos invisible after a restart.** Cause: the store's `imageRatings` starts empty each session and was seeded ONLY by the lazy per-tile thumbnail loads — a rated photo whose tile never mounted (deep in a large folder, never scrolled near) simply didn't match any filter. Fix: an eager seeding pass reads every file's persisted xmp:Rating on folder load (bounded concurrency, deduped by path, canceled by folder switch); the lazy seeds stay as backup. Live-verified: 25-RAW folder, deepest file pre-rated on disk, ≥1★ applied with zero scrolling → the photo appears. Affects: `src/utils/ratingSeeder.ts` (new), `src/App.tsx`.
+- **Filtered thumbnails were not generated in priority.** Cause: every mounted tile fired its `readImageAsDataURL` IPC immediately and the main process served them in arrival order — applying a rating filter on a big folder queued the newly-revealed tiles' decodes BEHIND the whole pre-filter window, so the photos the user asked to see rendered last. Fix: a shared priority queue for gallery + filmstrip thumbnail fetches — max 4 in flight, newest visible batch first (FIFO within a batch), re-requests bump queued tiles — so a filter or scroll change always jumps ahead of stale work. Live-verified: filtered RAW thumbnail decoded 386 ms after the filter click. Affects: `src/utils/thumbnailScheduler.ts` (new), `src/components/Gallery/GalleryView.tsx`, `src/components/Panels/ThumbnailPanel.tsx`.
+
 ## [1.28.0] - 2026-07-17
 
 ### Added

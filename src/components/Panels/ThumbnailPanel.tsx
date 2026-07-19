@@ -9,6 +9,7 @@ import { DOCK_BOTTOM } from '../../layout/photoRegion';
 import { filterImagesByRating, handleImageClick, isRawImage } from '../../utils/gallerySelection';
 import { getDisplayFormat } from '../../utils/imageFormat';
 import { keyboardEventBlocked } from '../../utils/keyboardScope';
+import { scheduleThumbnail, bumpThumbnail } from '../../utils/thumbnailScheduler';
 
 interface ThumbnailPanelProps {
   images: ImageFileInfo[];
@@ -166,7 +167,13 @@ export function ThumbnailPanel({
     }
 
     // Synchronous re-entrancy guard: skip if already loaded or in flight.
-    if (thumbnailsRef.current.has(image.id) || loadingRef.current.has(image.id)) {
+    if (thumbnailsRef.current.has(image.id)) {
+      return;
+    }
+    if (loadingRef.current.has(image.id)) {
+      // Already queued/in flight — promote it so a thumb the user can SEE now
+      // (filter change, scroll-back) beats stale queued work.
+      bumpThumbnail(image.id);
       return;
     }
     loadingRef.current.add(image.id);
@@ -182,9 +189,15 @@ export function ThumbnailPanel({
     };
 
     try {
-      // Try to load thumbnail via Electron API
+      // Try to load thumbnail via Electron API — routed through the shared
+      // priority queue (newest visible batch first, capped concurrency; see
+      // utils/thumbnailScheduler.ts). Keyed by image.id, so if the gallery has
+      // the same fetch queued the two views share one IPC.
       if (window.electronAPI) {
-        const dataUrl = await window.electronAPI.readImageAsDataURL(image.path);
+        const dataUrl = await scheduleThumbnail(
+          image.id,
+          () => window.electronAPI!.readImageAsDataURL(image.path),
+        );
         if (dataUrl) {
           storeThumbnail(dataUrl);
         } else {
