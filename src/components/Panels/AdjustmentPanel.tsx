@@ -495,6 +495,15 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
   const handleModuleParamsChange = useCallback((moduleId: string, params: Record<string, unknown>, changeType: 'slider' | 'input' | 'button' | 'auto' = 'slider') => {
     logger.debug(`Module ${moduleId} parameters changed:`, params);
 
+    // Crop panel edits (rotation slider, 90° buttons, flips, ratios) go
+    // through the INNER CropModule — mirror the enable onto the ADAPTER, whose
+    // flag resetAllModules() clears on every image open. Without this the whole
+    // panel was a visual no-op on a fresh photo until an app restart (same gate
+    // as the v1.29.0 interactive-drag fix; process() requires BOTH flags).
+    if (moduleId === 'crop') {
+      imageProcessingPipeline.getModule<CropPipelineModule>('crop')?.setEnabled(true);
+    }
+
     // Invalidate cache for this module to ensure changes are processed
     imageProcessingPipeline.invalidateModuleCache(moduleId);
 
