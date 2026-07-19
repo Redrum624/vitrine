@@ -4,6 +4,11 @@ All notable changes to **Vitrine** (formerly Photo Editor Pro) are documented in
 this file. The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.33.0] - 2026-07-19
+
+### Changed
+- **The Basic Adjustments card's ⚡ Auto is much stronger.** Cause of the old timidity: exposure was hardcoded to zero (correct inside Auto All, where the Exposure module owns it — but the card's own Auto never touches that module, so under/over-exposed photos got no exposure correction at all) and the remaining gains were whisper-level (brightness capped at 2.5% of its range). Standalone Auto now corrects exposure toward your style profile's target (up to ±0.7 stops) with proportionally stronger contrast/brightness/saturation moves; Auto All's composed look is unchanged (frozen at the original gentler numbers). Live-verified on two RAW scenes: clearly visible, balanced corrections without blowout. Affects: `src/services/AutoAdjustService.ts`, `src/components/Modules/BasicAdjustmentsModuleComponent.tsx`.
+
 ## [1.32.0] - 2026-07-19
 
 ### Fixed

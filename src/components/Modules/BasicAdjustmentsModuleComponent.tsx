@@ -124,7 +124,9 @@ export function BasicAdjustmentsModuleComponent({
     const img = imageService.getCurrentImage();
     if (!img) { logger.warn('No image for auto adjust'); return; }
     const stats = autoAdjustService.analyse(img.data, img.width, img.height);
-    const computed = autoAdjustService.autoBasicAdj(stats);
+    // standalone: this Auto is the ONLY module being adjusted, so it corrects
+    // exposure itself and uses the stronger gains (v1.33.0).
+    const computed = autoAdjustService.autoBasicAdj(stats, { standalone: true });
     module.setParams(computed);
     const newParams = module.getParams() as BasicAdjParams;
     setParams(newParams);
