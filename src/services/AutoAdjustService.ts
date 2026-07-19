@@ -181,17 +181,23 @@ class AutoAdjustService {
     const { name, profile } = this.pickProfile(stats);
     const s = !!opts.standalone;
 
-    // Exposure: standalone corrects the median toward the user's bucket target
-    // (stops, same dead-zone idea as autoExposure); composed mode stays zero —
-    // ExposureModule already handles it, avoid double-dipping.
+    // Exposure (standalone only): correct the median toward NEUTRAL — not the
+    // style bucket. The bucket medians are post-edit PORTFOLIO statistics (the
+    // dark bucket sits at ~0.07): targeting them here pulled a well-exposed
+    // kitchen shot down −0.5 stops (user report, histogram receipts). Style
+    // grading belongs to Auto All; this ⚡ is an exposure CORRECTOR. Asymmetric
+    // clamp: strong lifts for dark shots (the original "too small" complaint),
+    // cautious darkening for bright ones. Composed mode stays zero — the
+    // ExposureModule owns exposure inside Auto All.
     let exposure = 0;
     if (s) {
-      const medianDelta = profile.targetMedianLum - stats.p50;
-      const deadZone = 0.03;
+      const NEUTRAL_TARGET_MEDIAN = 0.40;
+      const medianDelta = NEUTRAL_TARGET_MEDIAN - stats.p50;
+      const deadZone = 0.05;
       const effectiveDelta = Math.abs(medianDelta) > deadZone
         ? (medianDelta > 0 ? medianDelta - deadZone : medianDelta + deadZone)
         : 0;
-      exposure = clamp(effectiveDelta * 2.0, -0.7, 0.7);
+      exposure = clamp(effectiveDelta * 1.6, -0.35, 0.7);
     }
 
     // Contrast: pull toward the user's contrast (std luminance) for this bucket

@@ -4,6 +4,11 @@ All notable changes to **Vitrine** (formerly Photo Editor Pro) are documented in
 this file. The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.34.1] - 2026-07-19
+
+### Fixed
+- **Auto Basic Adjustments could darken a well-exposed photo (−0.5 stops, histogram dragged left).** Cause: the v1.33.0 standalone exposure targeted the style-profile bucket medians — post-edit portfolio statistics (the dark bucket sits at ~0.07 median), so a decent photo classified into a dark-leaning bucket was yanked down at full gain. Fix: standalone exposure now targets a NEUTRAL median (0.40) with a dead zone and an asymmetric clamp — strong lifts for dark shots (up to +0.7), cautious ceiling on darkening (−0.35, and only for genuinely bright medians); style grading remains Auto All's job. Verified: well-exposed scene now gets a subtle refinement with zero darkening, the dark sunset still gets its clear lift. Affects: `src/services/AutoAdjustService.ts`.
+
 ## [1.34.0] - 2026-07-19
 
 ### Changed
