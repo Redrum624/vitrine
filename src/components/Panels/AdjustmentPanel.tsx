@@ -192,7 +192,14 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
       // downsample (boxDownsampleRGBA) — the previous nearest-neighbour "every Nth pixel"
       // sampler aliased high-frequency content into moiré and made the preview diverge from
       // the full-resolution render.
-      const MAX_PREVIEW_SIZE = 1024;
+      //
+      // The cap is DYNAMIC (v1.29 quality ratchet): base 1024, raised by Canvas
+      // when zoom exceeds the image's previous farthest zoom or a crop apply
+      // raises effective magnification (utils/previewQuality.ts). Read
+      // imperatively — NOT a hook/dep — so this callback's identity stays
+      // stable (see the identity-churn warnings above); a cap change reaches
+      // this code through triggerReprocessing.
+      const MAX_PREVIEW_SIZE = useAppStore.getState().previewQualityCap ?? 1024;
       const aspectRatio = currentImage.width / currentImage.height;
 
       let previewWidth, previewHeight;
@@ -311,6 +318,7 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
       const activeCpuBridges = cpuBridges.filter((id) => imageProcessingPipeline.isModuleActive(id));
 
       const previewPath = choosePreviewPath({
+        workersHealthy: webWorkerImageProcessor.isHealthy(),
         gpuAvailable: gpuPreviewPipeline.isAvailable(),
         activeCpuBridgeCount: activeCpuBridges.length,
         passCount: passes.length,

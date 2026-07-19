@@ -41,15 +41,33 @@ interface InteractiveCropHandlesProps {
   // Aspect ratio constraint (null = free, number = width/height ratio)
   aspectRatio?: number | null;
 
+  // Drag anchor override. When the crop is APPLIED, `cropParams` carries a
+  // full-frame rect (handle positions over the cropped content) while the REAL
+  // crop rect lives here — a drag must anchor on the real rect so the crop
+  // "regains its last position" when the display flips back to the full frame.
+  anchorCropParams?: { x: number; y: number; width: number; height: number };
+
   // Canvas element ref for coordinate calculations
   canvasRef: React.RefObject<HTMLCanvasElement | null>;
 }
 
 type HandleType = 'nw' | 'ne' | 'sw' | 'se' | 'n' | 's' | 'e' | 'w' | 'center';
 
+const MIN_SIZE_PX = 20;
+
 /**
  * Interactive crop handles component.
- * Renders draggable handles for resizing and moving the crop region.
+ * Renders draggable handles (4 corners + 4 edges + center move) for resizing
+ * and moving the crop region. Edge handles are ALWAYS present — with a locked
+ * aspect ratio they resize the rect keeping the ratio (opposite edge fixed,
+ * perpendicular axis scaled around its center), matching corner behaviour.
+ *
+ * Drag math is anchored on the crop PARAMS captured at mousedown, converted to
+ * pixels against the CURRENT geometry on every move. This matters for the
+ * apply-on-release lifecycle: grabbing a handle on an applied crop flips the
+ * displayed content from cropped back to full-frame mid-interaction (fit-rect
+ * and scale change under the drag) — a pixel-rect snapshot would go stale, the
+ * normalized anchor cannot.
  */
 export function InteractiveCropHandles({
   imageWidth,
@@ -65,6 +83,7 @@ export function InteractiveCropHandles({
   contentHeight,
   showHandles,
   aspectRatio = null,
+  anchorCropParams,
   canvasRef
 }: InteractiveCropHandlesProps) {
   // Content base for image scaling (fit-rect); the box stays canvasDisplay* (viewport).
@@ -73,27 +92,29 @@ export function InteractiveCropHandles({
   const [isDragging, setIsDragging] = useState(false);
   const [dragHandle, setDragHandle] = useState<HandleType | null>(null);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
-  const [initialCropRect, setInitialCropRect] = useState<{
-    left: number;
-    top: number;
-    right: number;
-    bottom: number;
+  // Normalized crop params snapshot at mousedown — the drag anchor.
+  const [anchorParams, setAnchorParams] = useState<{
+    x: number; y: number; width: number; height: number;
   } | null>(null);
+
+  // Current image placement in canvas pixels.
+  const getImageBox = useCallback(() => {
+    const scaledW = contentW * viewport.zoom;
+    const scaledH = contentH * viewport.zoom;
+    const left = (canvasDisplayWidth - scaledW) / 2 + viewport.panX;
+    const top = (canvasDisplayHeight - scaledH) / 2 + viewport.panY;
+    return { left, top, right: left + scaledW, bottom: top + scaledH, scaledW, scaledH };
+  }, [viewport, canvasDisplayWidth, canvasDisplayHeight, contentW, contentH]);
 
   // Calculate crop region in canvas pixel coordinates
   const getCropRect = useCallback(() => {
-    const scaledImageWidth = contentW * viewport.zoom;
-    const scaledImageHeight = contentH * viewport.zoom;
-
-    const imageX = (canvasDisplayWidth - scaledImageWidth) / 2 + viewport.panX;
-    const imageY = (canvasDisplayHeight - scaledImageHeight) / 2 + viewport.panY;
-
+    const img = getImageBox();
     const { x: cropX, y: cropY, width: cropWidth, height: cropHeight } = cropParams;
 
-    const cropLeft = imageX + cropX * scaledImageWidth;
-    const cropTop = imageY + cropY * scaledImageHeight;
-    const cropRight = cropLeft + cropWidth * scaledImageWidth;
-    const cropBottom = cropTop + cropHeight * scaledImageHeight;
+    const cropLeft = img.left + cropX * img.scaledW;
+    const cropTop = img.top + cropY * img.scaledH;
+    const cropRight = cropLeft + cropWidth * img.scaledW;
+    const cropBottom = cropTop + cropHeight * img.scaledH;
 
     return {
       left: cropLeft,
@@ -102,34 +123,8 @@ export function InteractiveCropHandles({
       bottom: cropBottom,
       width: cropRight - cropLeft,
       height: cropBottom - cropTop,
-      imageX,
-      imageY,
-      scaledImageWidth,
-      scaledImageHeight
     };
-  }, [cropParams, viewport, canvasDisplayWidth, canvasDisplayHeight, contentW, contentH]);
-
-  // Convert canvas pixel coordinates to normalized crop coordinates
-  const pixelToNormalized = useCallback((pixelX: number, pixelY: number, pixelWidth: number, pixelHeight: number) => {
-    const scaledImageWidth = contentW * viewport.zoom;
-    const scaledImageHeight = contentH * viewport.zoom;
-
-    const imageX = (canvasDisplayWidth - scaledImageWidth) / 2 + viewport.panX;
-    const imageY = (canvasDisplayHeight - scaledImageHeight) / 2 + viewport.panY;
-
-    // Clamp to image bounds
-    const clampedX = Math.max(imageX, Math.min(imageX + scaledImageWidth, pixelX));
-    const clampedY = Math.max(imageY, Math.min(imageY + scaledImageHeight, pixelY));
-    const clampedWidth = Math.max(20, Math.min(imageX + scaledImageWidth - clampedX, pixelWidth));
-    const clampedHeight = Math.max(20, Math.min(imageY + scaledImageHeight - clampedY, pixelHeight));
-
-    return {
-      x: (clampedX - imageX) / scaledImageWidth,
-      y: (clampedY - imageY) / scaledImageHeight,
-      width: clampedWidth / scaledImageWidth,
-      height: clampedHeight / scaledImageHeight
-    };
-  }, [viewport, canvasDisplayWidth, canvasDisplayHeight, contentW, contentH]);
+  }, [cropParams, getImageBox]);
 
   // Handle mouse down on handles
   const handleMouseDown = useCallback((e: React.MouseEvent, handle: HandleType) => {
@@ -138,152 +133,156 @@ export function InteractiveCropHandles({
 
     if (!canvasRef.current) return;
 
-    // Use canvas element's bounding rect for accurate coordinates
-    const rect = canvasRef.current.getBoundingClientRect();
-    const mouseX = e.clientX - rect.left;
-    const mouseY = e.clientY - rect.top;
-
-    // Store the initial crop rect at drag start
-    const cropRect = getCropRect();
-    setInitialCropRect({
-      left: cropRect.left,
-      top: cropRect.top,
-      right: cropRect.right,
-      bottom: cropRect.bottom
+    const anchor = anchorCropParams ?? cropParams;
+    setAnchorParams({
+      x: anchor.x,
+      y: anchor.y,
+      width: anchor.width,
+      height: anchor.height,
     });
-
     setIsDragging(true);
     setDragHandle(handle);
-    setDragStart({ x: mouseX, y: mouseY });
+    // CLIENT coordinates, deliberately NOT canvas-relative: the canvas box
+    // RESIZES mid-drag when grabbing a handle on an applied crop flips the
+    // display back to the full frame — a canvas-relative origin would shift
+    // with the box and corrupt the delta (live-diagnosed: a -10px pull became
+    // a +190px resize). Client-space deltas are frame-independent; the anchor
+    // rect is recomputed against current geometry every move.
+    setDragStart({ x: e.clientX, y: e.clientY });
 
-    // Notify parent that drag started (to prevent canvas panning)
+    // Notify parent that drag started (to prevent canvas panning; the parent
+    // may also suspend an applied crop, flipping the display to full-frame).
     onDragStart?.();
-  }, [canvasRef, getCropRect, onDragStart]);
+  }, [canvasRef, cropParams, anchorCropParams, onDragStart]);
 
   // Handle mouse move
   useEffect(() => {
-    if (!isDragging || !dragHandle || !canvasRef.current || !initialCropRect) return;
+    if (!isDragging || !dragHandle || !canvasRef.current || !anchorParams) return;
 
     const handleMouseMove = (e: MouseEvent) => {
       if (!canvasRef.current) return;
-      // Use canvas element's bounding rect for accurate coordinates
-      const rect = canvasRef.current.getBoundingClientRect();
-      const mouseX = e.clientX - rect.left;
-      const mouseY = e.clientY - rect.top;
+      // Deltas in client space (see handleMouseDown) — immune to the canvas
+      // box resizing when the cropped→full-frame flip lands mid-drag.
+      const deltaX = e.clientX - dragStart.x;
+      const deltaY = e.clientY - dragStart.y;
 
-      const deltaX = mouseX - dragStart.x;
-      const deltaY = mouseY - dragStart.y;
+      const img = getImageBox();
+      if (img.scaledW <= 0 || img.scaledH <= 0) return;
 
-      // Use the initial crop rect stored at drag start, not the current one
-      let newLeft = initialCropRect.left;
-      let newTop = initialCropRect.top;
-      let newRight = initialCropRect.right;
-      let newBottom = initialCropRect.bottom;
+      // Anchor rect in CURRENT pixel space (recomputed every move — geometry
+      // may have flipped cropped→full-frame since mousedown).
+      const a = {
+        left: img.left + anchorParams.x * img.scaledW,
+        top: img.top + anchorParams.y * img.scaledH,
+        right: img.left + (anchorParams.x + anchorParams.width) * img.scaledW,
+        bottom: img.top + (anchorParams.y + anchorParams.height) * img.scaledH,
+      };
 
-      // Calculate new bounds based on handle type
+      let newLeft = a.left;
+      let newTop = a.top;
+      let newRight = a.right;
+      let newBottom = a.bottom;
+
       switch (dragHandle) {
-        case 'nw':
-          newLeft = initialCropRect.left + deltaX;
-          newTop = initialCropRect.top + deltaY;
-          break;
-        case 'ne':
-          newRight = initialCropRect.right + deltaX;
-          newTop = initialCropRect.top + deltaY;
-          break;
-        case 'sw':
-          newLeft = initialCropRect.left + deltaX;
-          newBottom = initialCropRect.bottom + deltaY;
-          break;
-        case 'se':
-          newRight = initialCropRect.right + deltaX;
-          newBottom = initialCropRect.bottom + deltaY;
-          break;
-        case 'n':
-          newTop = initialCropRect.top + deltaY;
-          break;
-        case 's':
-          newBottom = initialCropRect.bottom + deltaY;
-          break;
-        case 'w':
-          newLeft = initialCropRect.left + deltaX;
-          break;
-        case 'e':
-          newRight = initialCropRect.right + deltaX;
-          break;
+        case 'nw': newLeft = a.left + deltaX; newTop = a.top + deltaY; break;
+        case 'ne': newRight = a.right + deltaX; newTop = a.top + deltaY; break;
+        case 'sw': newLeft = a.left + deltaX; newBottom = a.bottom + deltaY; break;
+        case 'se': newRight = a.right + deltaX; newBottom = a.bottom + deltaY; break;
+        case 'n': newTop = a.top + deltaY; break;
+        case 's': newBottom = a.bottom + deltaY; break;
+        case 'w': newLeft = a.left + deltaX; break;
+        case 'e': newRight = a.right + deltaX; break;
         case 'center':
-          newLeft = initialCropRect.left + deltaX;
-          newTop = initialCropRect.top + deltaY;
-          newRight = initialCropRect.right + deltaX;
-          newBottom = initialCropRect.bottom + deltaY;
+          newLeft = a.left + deltaX; newTop = a.top + deltaY;
+          newRight = a.right + deltaX; newBottom = a.bottom + deltaY;
           break;
       }
 
-      // Ensure minimum size
-      const minSize = 20;
-      let newWidth = newRight - newLeft;
-      let newHeight = newBottom - newTop;
+      if (dragHandle === 'center') {
+        // Move: clamp by translation, size unchanged.
+        const w = newRight - newLeft;
+        const h = newBottom - newTop;
+        newLeft = Math.min(Math.max(newLeft, img.left), img.right - w);
+        newTop = Math.min(Math.max(newTop, img.top), img.bottom - h);
+        newRight = newLeft + w;
+        newBottom = newTop + h;
+      } else if (aspectRatio === null) {
+        // Free resize: clamp each moved edge into the image, then min size.
+        newLeft = Math.min(Math.max(newLeft, img.left), newRight - MIN_SIZE_PX);
+        newRight = Math.max(Math.min(newRight, img.right), newLeft + MIN_SIZE_PX);
+        newTop = Math.min(Math.max(newTop, img.top), newBottom - MIN_SIZE_PX);
+        newBottom = Math.max(Math.min(newBottom, img.bottom), newTop + MIN_SIZE_PX);
+      } else {
+        // Ratio-locked resize. Each handle has a fixed anchor; the other axis
+        // follows the ratio. Bounds are enforced by shrinking toward the
+        // anchor (uniform), never by breaking the ratio.
+        let w = Math.max(MIN_SIZE_PX, newRight - newLeft);
+        let h = Math.max(MIN_SIZE_PX, newBottom - newTop);
+        const cx = (a.left + a.right) / 2;
+        const cy = (a.top + a.bottom) / 2;
 
-      if (newWidth < minSize) {
-        if (dragHandle.includes('w')) newLeft = newRight - minSize;
-        else newRight = newLeft + minSize;
-        newWidth = newRight - newLeft;
-      }
-      if (newHeight < minSize) {
-        if (dragHandle.includes('n')) newTop = newBottom - minSize;
-        else newBottom = newTop + minSize;
-        newHeight = newBottom - newTop;
-      }
-
-      // Apply aspect ratio constraint for corner handles
-      if (aspectRatio !== null && dragHandle !== 'center' &&
-          (dragHandle === 'nw' || dragHandle === 'ne' || dragHandle === 'sw' || dragHandle === 'se')) {
-        const currentRatio = newWidth / newHeight;
-
-        if (currentRatio > aspectRatio) {
-          // Width is too wide, adjust it based on height
-          newWidth = newHeight * aspectRatio;
+        // Width drives e/w; height drives n/s; corners follow the DOMINANT
+        // axis (cover semantics — the old fit-inside rule made a purely
+        // horizontal corner drag a no-op under a locked ratio).
+        if (dragHandle === 'n' || dragHandle === 's') {
+          w = h * aspectRatio;
+        } else if (dragHandle === 'e' || dragHandle === 'w') {
+          h = w / aspectRatio;
         } else {
-          // Height is too tall, adjust it based on width
-          newHeight = newWidth / aspectRatio;
+          w = Math.max(w, h * aspectRatio);
+          h = w / aspectRatio;
         }
 
-        // Adjust bounds based on which corner is being dragged (keep opposite corner fixed)
+        // Available space from the fixed anchor, per handle.
+        let availW: number;
+        let availH: number;
         switch (dragHandle) {
-          case 'nw':
-            newLeft = newRight - newWidth;
-            newTop = newBottom - newHeight;
-            break;
-          case 'ne':
-            newRight = newLeft + newWidth;
-            newTop = newBottom - newHeight;
-            break;
-          case 'sw':
-            newLeft = newRight - newWidth;
-            newBottom = newTop + newHeight;
-            break;
-          case 'se':
-            newRight = newLeft + newWidth;
-            newBottom = newTop + newHeight;
-            break;
+          case 'nw': availW = a.right - img.left; availH = a.bottom - img.top; break;
+          case 'ne': availW = img.right - a.left; availH = a.bottom - img.top; break;
+          case 'sw': availW = a.right - img.left; availH = img.bottom - a.top; break;
+          case 'se': availW = img.right - a.left; availH = img.bottom - a.top; break;
+          case 'e': availW = img.right - a.left; availH = 2 * Math.min(cy - img.top, img.bottom - cy); break;
+          case 'w': availW = a.right - img.left; availH = 2 * Math.min(cy - img.top, img.bottom - cy); break;
+          case 'n': availW = 2 * Math.min(cx - img.left, img.right - cx); availH = a.bottom - img.top; break;
+          default: availW = 2 * Math.min(cx - img.left, img.right - cx); availH = img.bottom - a.top; break; // 's'
         }
+        const maxW = Math.max(1, Math.min(availW, availH * aspectRatio));
+        if (w > maxW) { w = maxW; h = w / aspectRatio; }
+
+        // Reposition from the fixed anchor.
+        switch (dragHandle) {
+          case 'nw': newRight = a.right; newBottom = a.bottom; newLeft = a.right - w; newTop = a.bottom - h; break;
+          case 'ne': newLeft = a.left; newBottom = a.bottom; newRight = a.left + w; newTop = a.bottom - h; break;
+          case 'sw': newRight = a.right; newTop = a.top; newLeft = a.right - w; newBottom = a.top + h; break;
+          case 'se': newLeft = a.left; newTop = a.top; newRight = a.left + w; newBottom = a.top + h; break;
+          case 'e': newLeft = a.left; newRight = a.left + w; newTop = cy - h / 2; newBottom = cy + h / 2; break;
+          case 'w': newRight = a.right; newLeft = a.right - w; newTop = cy - h / 2; newBottom = cy + h / 2; break;
+          case 'n': newBottom = a.bottom; newTop = a.bottom - h; newLeft = cx - w / 2; newRight = cx + w / 2; break;
+          case 's': newTop = a.top; newBottom = a.top + h; newLeft = cx - w / 2; newRight = cx + w / 2; break;
+        }
+        // Centered-axis drags can still poke out when the center sits off-middle;
+        // translate back inside (size already fits by the avail computation).
+        const finalW = newRight - newLeft;
+        const finalH = newBottom - newTop;
+        newLeft = Math.min(Math.max(newLeft, img.left), img.right - finalW);
+        newTop = Math.min(Math.max(newTop, img.top), img.bottom - finalH);
+        newRight = newLeft + finalW;
+        newBottom = newTop + finalH;
       }
 
-      // Convert to normalized coordinates
-      const normalized = pixelToNormalized(
-        newLeft,
-        newTop,
-        newRight - newLeft,
-        newBottom - newTop
-      );
-
-      onCropChange(normalized);
+      onCropChange({
+        x: (newLeft - img.left) / img.scaledW,
+        y: (newTop - img.top) / img.scaledH,
+        width: (newRight - newLeft) / img.scaledW,
+        height: (newBottom - newTop) / img.scaledH,
+      });
     };
 
     const handleMouseUp = () => {
       setIsDragging(false);
       setDragHandle(null);
-      setInitialCropRect(null);
-      // Notify parent that drag ended
+      setAnchorParams(null);
+      // Notify parent that drag ended (the parent applies the crop here).
       onDragEnd?.();
     };
 
@@ -294,7 +293,7 @@ export function InteractiveCropHandles({
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [isDragging, dragHandle, dragStart, initialCropRect, pixelToNormalized, onCropChange, aspectRatio, canvasRef, onDragEnd]);
+  }, [isDragging, dragHandle, dragStart, anchorParams, getImageBox, onCropChange, aspectRatio, canvasRef, onDragEnd]);
 
   if (!showHandles || imageWidth === 0 || imageHeight === 0) {
     return null;
@@ -304,20 +303,30 @@ export function InteractiveCropHandles({
   const handleSize = 12;
   const handleOffset = handleSize / 2;
 
+  // Keep every handle fully INSIDE the canvas box. A handle centered on a rect
+  // edge overhangs the box by half its size; when the canvas box coincides with
+  // the photo region (maximized fit, zoomed-in), that overhang lands in an
+  // overflow-hidden ancestor and the handle's outer half stops being
+  // hit-testable — live-diagnosed via elementFromPoint returning the region
+  // container at the handle center. Clamping shifts edge handles inward by at
+  // most half a handle; interior rects are unaffected.
+  const clampX = (x: number) => Math.min(Math.max(x, 0), Math.max(0, canvasDisplayWidth - handleSize));
+  const clampY = (y: number) => Math.min(Math.max(y, 0), Math.max(0, canvasDisplayHeight - handleSize));
+
   // Corner handles
   const handles: { type: HandleType; x: number; y: number; cursor: string }[] = [
-    { type: 'nw', x: cropRect.left - handleOffset, y: cropRect.top - handleOffset, cursor: 'nw-resize' },
-    { type: 'ne', x: cropRect.right - handleOffset, y: cropRect.top - handleOffset, cursor: 'ne-resize' },
-    { type: 'sw', x: cropRect.left - handleOffset, y: cropRect.bottom - handleOffset, cursor: 'sw-resize' },
-    { type: 'se', x: cropRect.right - handleOffset, y: cropRect.bottom - handleOffset, cursor: 'se-resize' },
+    { type: 'nw', x: clampX(cropRect.left - handleOffset), y: clampY(cropRect.top - handleOffset), cursor: 'nw-resize' },
+    { type: 'ne', x: clampX(cropRect.right - handleOffset), y: clampY(cropRect.top - handleOffset), cursor: 'ne-resize' },
+    { type: 'sw', x: clampX(cropRect.left - handleOffset), y: clampY(cropRect.bottom - handleOffset), cursor: 'sw-resize' },
+    { type: 'se', x: clampX(cropRect.right - handleOffset), y: clampY(cropRect.bottom - handleOffset), cursor: 'se-resize' },
   ];
 
-  // Edge handles (midpoints)
+  // Edge handles (midpoints) — always present; ratio-locked drags keep the ratio.
   const edgeHandles: { type: HandleType; x: number; y: number; cursor: string }[] = [
-    { type: 'n', x: (cropRect.left + cropRect.right) / 2 - handleOffset, y: cropRect.top - handleOffset, cursor: 'n-resize' },
-    { type: 's', x: (cropRect.left + cropRect.right) / 2 - handleOffset, y: cropRect.bottom - handleOffset, cursor: 's-resize' },
-    { type: 'w', x: cropRect.left - handleOffset, y: (cropRect.top + cropRect.bottom) / 2 - handleOffset, cursor: 'w-resize' },
-    { type: 'e', x: cropRect.right - handleOffset, y: (cropRect.top + cropRect.bottom) / 2 - handleOffset, cursor: 'e-resize' },
+    { type: 'n', x: clampX((cropRect.left + cropRect.right) / 2 - handleOffset), y: clampY(cropRect.top - handleOffset), cursor: 'n-resize' },
+    { type: 's', x: clampX((cropRect.left + cropRect.right) / 2 - handleOffset), y: clampY(cropRect.bottom - handleOffset), cursor: 's-resize' },
+    { type: 'w', x: clampX(cropRect.left - handleOffset), y: clampY((cropRect.top + cropRect.bottom) / 2 - handleOffset), cursor: 'w-resize' },
+    { type: 'e', x: clampX(cropRect.right - handleOffset), y: clampY((cropRect.top + cropRect.bottom) / 2 - handleOffset), cursor: 'e-resize' },
   ];
 
   return (
@@ -335,6 +344,7 @@ export function InteractiveCropHandles({
       {/* Center drag area (move entire crop) */}
       <div
         className="pointer-events-auto"
+        data-testid="crop-handle-center"
         style={{
           position: 'absolute',
           left: cropRect.left,
@@ -352,6 +362,7 @@ export function InteractiveCropHandles({
         <div
           key={handle.type}
           className="pointer-events-auto"
+          data-testid={`crop-handle-${handle.type}`}
           style={{
             position: 'absolute',
             left: handle.x,
@@ -370,11 +381,12 @@ export function InteractiveCropHandles({
         />
       ))}
 
-      {/* Edge handles - only shown when no aspect ratio constraint */}
-      {aspectRatio === null && edgeHandles.map(handle => (
+      {/* Edge handles */}
+      {edgeHandles.map(handle => (
         <div
           key={handle.type}
           className="pointer-events-auto"
+          data-testid={`crop-handle-${handle.type}`}
           style={{
             position: 'absolute',
             left: handle.x,

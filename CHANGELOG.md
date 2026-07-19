@@ -4,6 +4,20 @@ All notable changes to **Vitrine** (formerly Photo Editor Pro) are documented in
 this file. The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.29.0] - 2026-07-19
+
+### Changed
+- **Crop tool reworked around apply-on-release.** The crop overlay now appears the moment the Crop & Transform module opens (no click-on-the-image needed) and stays up while it's open. Releasing a handle applies the crop to the preview immediately; grabbing a handle again brings the full picture back with the rect at its last position, so re-cropping always happens against the whole frame. Why: the old flow (arm by clicking the image, apply only when the overlay closed) read as "the crop does nothing". Affects: `src/components/Layout/Canvas.tsx`, `src/components/Canvas/InteractiveCropHandles.tsx`.
+
+### Added
+- **Side handles on the crop rect, always.** The n/s/e/w mid-edge handles now render with a locked aspect ratio too (they used to vanish): edge drags resize keeping the ratio (opposite edge fixed, the other axis scales around its center) and corner drags follow the dominant axis. Affects: `src/components/Canvas/InteractiveCropHandles.tsx`.
+- **Preview quality ratchet.** Zooming past an image's previous farthest zoom — or applying a crop, which magnifies what's left — now re-renders the preview from a higher-resolution source (base 1024px long edge, ratcheted up to 4096px or the file's native size), so zoomed and cropped views regain fit-view sharpness instead of showing upscaled preview pixels. The cap resets per image and only ever ratchets up, debounced so continuous zooming triggers one refresh at rest. Why: the preview pipeline always processed a 1024px source and both render paths upscale it. Affects: `src/utils/previewQuality.ts` (new), `src/stores/appStore.ts`, `src/components/Layout/Canvas.tsx`, `src/components/Panels/AdjustmentPanel.tsx`.
+
+### Fixed
+- **Interactive crops never actually applied to the preview.** Cause: the drag path enabled only the inner CropModule while `CropPipelineModule.process()` gates on the adapter-level `isEnabled` too — which every image open resets to false — so the crop rendered in the overlay but was a pipeline no-op until an app restart restored it. Fix: apply goes through `setCropRegion` (enables both), with a regression test pinning the gate. Affects: `src/components/Layout/Canvas.tsx`, `src/test/cropAdapterGate.test.ts`.
+- **CPU worker pool was dead on arrival — ≥1MP previews froze on "Applying…" for 30–60 s.** Cause: the Logger singleton registered `window` listeners at module scope; the pipeline worker imports it transitively, so the whole worker bundle crashed at evaluation ("window is not defined"), INITIALIZE never got answered, and callers sat through stacked 30-second dead-worker timeouts (the store's `isProcessing` flag — and the spinner — stuck the whole time). Invisible until now because 1024px previews sit below the 1MP worker threshold. Fix: worker-safe Logger guards; worker `error` events reject all pending requests immediately; failed initialization is sticky, tears down the half-built pool, and routes subsequent big frames to the main thread (`workersHealthy` in preview routing). Regression-tested by importing the pipeline in a windowless environment. Affects: `src/utils/Logger.ts`, `src/services/WebWorkerImageProcessor.ts`, `src/services/previewRouting.ts`, `src/components/Panels/AdjustmentPanel.tsx`.
+- **Crop handles could be unclickable at the image edge.** Cause: handles centered on the rect edge overhang the canvas box; with the box flush against the photo region (maximized fit, zoomed in) the overflow-clipped half stopped being hit-testable. Fix: handles clamp fully inside the canvas box. Affects: `src/components/Canvas/InteractiveCropHandles.tsx`.
+
 ## [1.28.1] - 2026-07-19
 
 ### Fixed

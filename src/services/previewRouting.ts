@@ -15,16 +15,20 @@ export interface PreviewRoutingOpts {
   passCount: number;
   width: number;
   height: number;
+  /** WebWorkerImageProcessor.isHealthy() — false once worker init has failed.
+   *  Routes ≥1MP frames to 'main' instead of a dead worker pool. Optional so
+   *  existing callers/tests keep the pre-health behaviour (assumed healthy). */
+  workersHealthy?: boolean;
 }
 
 export function choosePreviewPath(opts: PreviewRoutingOpts): 'gpu' | 'worker' | 'main' {
-  const { gpuAvailable, activeCpuBridgeCount, passCount, width, height } = opts;
+  const { gpuAvailable, activeCpuBridgeCount, passCount, width, height, workersHealthy = true } = opts;
 
   if (gpuAvailable && activeCpuBridgeCount === 0 && passCount > 0) {
     return 'gpu';
   }
 
-  if (width * height >= WORKER_MIN_PIXELS) {
+  if (workersHealthy && width * height >= WORKER_MIN_PIXELS) {
     return 'worker';
   }
 

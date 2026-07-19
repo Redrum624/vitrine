@@ -39,6 +39,10 @@ export class WebWorkerImageProcessor {
   private workers: Worker[] = [];
   private availableWorkers: Worker[] = [];
   private isInitialized = false;
+  // Sticky failure flag: once initialization fails (e.g. the worker bundle
+  // crashed at module evaluation), do NOT retry on every frame — each retry
+  // costs the caller the full init sequence. Callers route to the main thread.
+  private initFailed = false;
   private messageId = 0;
   private pendingMessages = new Map<number, {
     resolve: (value: unknown) => void;
@@ -59,8 +63,14 @@ export class WebWorkerImageProcessor {
     return WebWorkerImageProcessor.instance;
   }
 
+  /** False once initialization has failed — preview routing then keeps ≥1MP
+   *  frames on the main thread instead of paying dead-worker timeouts. */
+  isHealthy(): boolean {
+    return !this.initFailed;
+  }
+
   async initialize(): Promise<void> {
-    if (this.isInitialized) return;
+    if (this.isInitialized || this.initFailed) return;
 
     try {
       logger.info(`Initializing Web Worker image processing with ${this.maxWorkers} workers...`);
@@ -86,8 +96,16 @@ export class WebWorkerImageProcessor {
 
     } catch (error) {
       logger.warn('Web Worker initialization failed, will use main-thread processing:', error);
-      // Don't throw — the pipeline falls back to main thread automatically
+      // Don't throw — the pipeline falls back to main thread automatically.
+      // Mark the failure STICKY and tear down any half-created workers so no
+      // dead worker lingers in the pool for a later request to hang on.
       this.isInitialized = false;
+      this.initFailed = true;
+      for (const w of this.workers) {
+        try { w.terminate(); } catch { /* already dead */ }
+      }
+      this.workers = [];
+      this.availableWorkers = [];
     }
   }
 
@@ -150,7 +168,15 @@ export class WebWorkerImageProcessor {
 
     worker.addEventListener('error', (error) => {
       logger.error('Worker error:', error);
-      // Handle worker errors - could restart worker if needed
+      // A worker 'error' event (e.g. the bundle threw at module evaluation)
+      // means in-flight requests will never get a response message. Reject
+      // every pending request NOW so callers hit their main-thread fallbacks
+      // immediately instead of waiting out the 30s message timeout.
+      const message = (error && (error as ErrorEvent).message) || 'Worker crashed';
+      for (const [id, pending] of this.pendingMessages) {
+        pending.reject(new Error(`Worker error: ${message}`));
+        this.pendingMessages.delete(id);
+      }
     });
   }
 
@@ -193,6 +219,17 @@ export class WebWorkerImageProcessor {
   async processImage(imageData: WorkerImageData, pipeline: WorkerModuleConfig[]): Promise<ProcessingResult> {
     if (!this.isInitialized) {
       await this.initialize();
+    }
+    // Init failed (now or previously): fail fast so the caller's main-thread
+    // fallback runs immediately — getAvailableWorker() would spin forever on
+    // an empty pool.
+    if (!this.isInitialized) {
+      return {
+        success: false,
+        data: imageData.data,
+        processingTime: 0,
+        error: 'Web Workers unavailable (initialization failed)',
+      };
     }
 
     const pixelCount = imageData.width * imageData.height;

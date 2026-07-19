@@ -55,7 +55,7 @@ jest.mock('../shaders/passDescriptors', () => ({
 }));
 
 jest.mock('../services/WebWorkerImageProcessor', () => ({
-  webWorkerImageProcessor: { processImage: jest.fn() },
+  webWorkerImageProcessor: { processImage: jest.fn(), isHealthy: jest.fn(() => true) },
 }));
 
 jest.mock('../services/ProgressivePreviewService', () => ({

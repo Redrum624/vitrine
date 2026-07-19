@@ -6,6 +6,7 @@ import { logger } from '../../utils/Logger';
 import { computeViewportGeometry, overlayContentRect } from '../../utils/viewportGeometry';
 import { computeRenderCacheHash } from '../../utils/renderCacheHash';
 import { clampPan } from '../../utils/panBounds';
+import { computeRequiredPreviewCap, BASE_PREVIEW_CAP } from '../../utils/previewQuality';
 import { CropTransformOverlay } from '../Canvas/CropTransformOverlay';
 import { InteractiveCropHandles } from '../Canvas/InteractiveCropHandles';
 import { imageProcessingPipeline } from '../../services/ImageProcessingPipeline';
@@ -96,7 +97,12 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
   const [displayImage, setDisplayImage] = useState<ImageFileInfo | null>(null);
   const [imageLoading, setImageLoading] = useState(false);
   const [cropModule, setCropModule] = useState<CropPipelineModule | null>(null);
-  const [showCropOverlay, setShowCropOverlay] = useState(false);
+  // Crop overlay lifecycle (v1.29): the overlay is visible the WHOLE time the
+  // crop module is open — no click-on-image to arm it, no outside-click
+  // dismissal. The crop applies to the preview on handle mouse-release (see
+  // applyCropToPreview below); leaving the module applies pending state as a
+  // safety net (transition effect below).
+  const showCropOverlay = selectedTool === 'crop' && !!displayImage;
   // Viewport-canvas model (Task R5). `canvasDimensions` is the VIEWPORT box (the canvas
   // element, which grows from the fit-rect up to the photo region when zoomed in) — it
   // drives the wrapper size, box-shadow, thirds-grid/rulers and the overlay boxes.
@@ -743,6 +749,10 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
       // first render if the new image is eligible.
       useAppStore.getState().setRenderMode('cpu');
       imageProcessingPipeline.resetAllModules();
+      // New image: the preview quality ratchet starts over at the base cap
+      // (utils/previewQuality.ts) — a previous image's deep-zoom cap must not
+      // tax every slider drag on this one.
+      useAppStore.getState().setPreviewQualityCap(BASE_PREVIEW_CAP);
 
 
       setImageLoading(true);
@@ -990,67 +1000,66 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
     }
   }, []);
 
-  // Hide crop overlay when leaving crop mode or clicking outside canvas
+  // Apply the current crop rect to the PREVIEW. Enables the crop through the
+  // ADAPTER (setCropRegion) — the interactive path used to enable only the
+  // inner CropModule while CropPipelineModule.process() gates on BOTH flags
+  // (adapter isEnabled is cleared by resetAllModules on image open), so a
+  // dragged crop never actually ran until a restart restored it via setParams.
+  const applyCropToPreview = useCallback(() => {
+    if (!cropModule) return;
+    const p = cropModule.getCropModule().getParams();
+    cropModule.setCropRegion(p.x, p.y, p.width, p.height);
+    // A crop raises effective magnification (fewer source pixels rendered into
+    // the same screen area) — bump the quality cap so the cropped preview
+    // re-renders at restored pixel density. Same single reprocess covers both.
+    const native = imageService.getCurrentImage();
+    const need = computeRequiredPreviewCap({
+      zoom: viewportRef.current.zoom,
+      cropFraction: Math.min(p.width, p.height),
+      nativeLongEdge: native ? Math.max(native.width, native.height) : 0,
+    });
+    const st = useAppStore.getState();
+    if (need > st.previewQualityCap) st.setPreviewQualityCap(need);
+    imageProcessingPipeline.invalidateModuleCache('crop');
+    triggerReprocessing();
+    setHasPendingCropChanges(false);
+    setLiveCropParams(null);
+  }, [cropModule, triggerReprocessing]);
+
+  // Quality ratchet (v1.29): whenever zoom exceeds this image's previous
+  // farthest zoom, refresh the preview at a higher cap so zoomed-in pixels
+  // regain fit-view density. Debounced — continuous wheel-zoom triggers ONE
+  // reprocess at rest; the cap only ratchets up (reset on image open).
   useEffect(() => {
-    if (selectedTool !== 'crop') {
-      setShowCropOverlay(false);
-      return;
-    }
-
-    // Hide crop overlay when clicking outside the canvas container
-    const handleDocumentClick = (e: MouseEvent) => {
-      const container = containerRef.current;
-      if (!container) return;
-
-      // Check if click is outside the canvas container
-      if (!container.contains(e.target as unknown as HTMLElement)) {
-        setShowCropOverlay(false);
+    if (!displayImage) return;
+    const t = setTimeout(() => {
+      const native = imageService.getCurrentImage();
+      const cropP = cropModule?.getCropModule().getParams();
+      const cropApplied = !!cropModule?.getEnabled() && !!cropP?.enabled;
+      const need = computeRequiredPreviewCap({
+        zoom: viewport.zoom,
+        cropFraction: cropApplied && cropP ? Math.min(cropP.width, cropP.height) : 1,
+        nativeLongEdge: native ? Math.max(native.width, native.height) : 0,
+      });
+      const st = useAppStore.getState();
+      if (need > st.previewQualityCap) {
+        st.setPreviewQualityCap(need);
+        st.triggerReprocessing();
       }
-    };
+    }, 350);
+    return () => clearTimeout(t);
+  }, [viewport.zoom, displayImage, cropModule]);
 
-    document.addEventListener('mousedown', handleDocumentClick);
-    return () => document.removeEventListener('mousedown', handleDocumentClick);
-  }, [selectedTool]);
-
-  // Apply crop when crop overlay is closed (only if there are pending changes)
+  // Safety net: leaving the crop module with un-applied changes (apply normally
+  // happens on handle mouse-release) still applies them.
   useEffect(() => {
-    // Detect transition from showing to hidden
     if (prevShowCropOverlay.current && !showCropOverlay && hasPendingCropChanges) {
-      // Crop overlay was just closed and we have pending changes - apply the crop
-      imageProcessingPipeline.invalidateModuleCache('crop');
-      triggerReprocessing();
-      setHasPendingCropChanges(false);
-      setLiveCropParams(null); // Clear live params after applying
+      applyCropToPreview();
     }
     prevShowCropOverlay.current = showCropOverlay;
-  }, [showCropOverlay, hasPendingCropChanges, triggerReprocessing]);
+  }, [showCropOverlay, hasPendingCropChanges, applyCropToPreview]);
 
   // Check if a point is inside the image bounds
-  const isPointOnImage = useCallback((clientX: number, clientY: number): boolean => {
-    const canvas = canvasRef.current;
-    if (!canvas) return false;
-
-    const canvasRect = canvas.getBoundingClientRect();
-
-    // Get click position relative to canvas
-    const x = clientX - canvasRect.left;
-    const y = clientY - canvasRect.top;
-
-    // Image bounds = content (fit × zoom) centered in the viewport box (canvas element),
-    // pan applied. The box is the canvas element (viewport); the content scales by the
-    // fit-rect (contentDimensions), not the box (Task R5).
-    const boxW = canvas.offsetWidth;
-    const boxH = canvas.offsetHeight;
-    const contentW = (contentDimensions.width || boxW) * viewport.zoom;
-    const contentH = (contentDimensions.height || boxH) * viewport.zoom;
-    const imageX = (boxW - contentW) / 2 + viewport.panX;
-    const imageY = (boxH - contentH) / 2 + viewport.panY;
-
-    // Check if click is within image bounds
-    return x >= imageX && x <= imageX + contentW &&
-           y >= imageY && y <= imageY + contentH;
-  }, [viewport, contentDimensions]);
-
   // Handle window/container resize.
   // LOAD-BEARING: [redrawCanvas] deps are intentional — redrawCanvas's identity
   // changes with `viewport`, so this effect re-subscribes per zoom/pan and the
@@ -1073,16 +1082,6 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
   }, [redrawCanvas]);
 
   const handleMouseDown = (e: React.MouseEvent) => {
-    // Handle crop overlay visibility when in crop mode
-    if (selectedTool === 'crop') {
-      const clickedOnImage = isPointOnImage(e.clientX, e.clientY);
-      if (clickedOnImage) {
-        setShowCropOverlay(true);
-      } else {
-        setShowCropOverlay(false);
-      }
-    }
-
     // Don't start canvas dragging if crop handles are being used
     if (isCropHandleDragging) {
       return;
@@ -1311,7 +1310,18 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
             {cropModule && displayImage && canvasDimensions.width > 0 && (() => {
               // Get base params from module, override with live params during drag for real-time feedback
               const baseParams = cropModule.getCropModule().getParams();
-              const displayParams = liveCropParams ? { ...baseParams, ...liveCropParams } : baseParams;
+              // While a crop is APPLIED (adapter enabled, no drag in progress) the
+              // displayed content IS the cropped image — the rect (normalized to the
+              // FULL image) would mis-map onto it. Render a full-frame rect instead:
+              // handles sit on the cropped image's edges; grabbing one suspends the
+              // crop (onDragStart below), the full picture returns and the rect
+              // snaps back to its true position (the drag anchors on the REAL
+              // params via anchorCropParams).
+              const cropIsApplied =
+                cropModule.getEnabled() && baseParams.enabled && !isCropHandleDragging;
+              const displayParams = cropIsApplied
+                ? { ...baseParams, x: 0, y: 0, width: 1, height: 1 }
+                : (liveCropParams ? { ...baseParams, ...liveCropParams } : baseParams);
 
               return (
               <>
@@ -1335,6 +1345,7 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
                   imageWidth={imageService.getCurrentImage()?.width || 0}
                   imageHeight={imageService.getCurrentImage()?.height || 0}
                   cropParams={displayParams}
+                  anchorCropParams={baseParams}
                   onCropChange={(crop) => {
                     // Update crop module params (don't trigger reprocessing yet)
                     const module = cropModule.getCropModule();
@@ -1351,14 +1362,24 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
                     // Update live crop params for real-time visual feedback
                     setLiveCropParams(crop);
 
-                    // Mark that we have pending crop changes to apply when overlay closes
+                    // Mark pending changes (applied on release; module-exit safety net)
                     setHasPendingCropChanges(true);
                   }}
-                  onDragStart={() => setIsCropHandleDragging(true)}
+                  onDragStart={() => {
+                    setIsCropHandleDragging(true);
+                    // Re-crop: a currently-applied crop is SUSPENDED for the drag so
+                    // the full picture becomes visible again; the rect stays at its
+                    // last position (drag anchor = real params, full-image space).
+                    if (cropModule.getEnabled() && cropModule.getCropModule().getParams().enabled) {
+                      cropModule.setEnabled(false);
+                      imageProcessingPipeline.invalidateModuleCache('crop');
+                      triggerReprocessing();
+                    }
+                  }}
                   onDragEnd={() => {
                     setIsCropHandleDragging(false);
-                    // Keep liveCropParams so the grid stays at the new position
-                    // It will be cleared when overlay closes
+                    // Apply on mouse release — the preview shows the crop immediately.
+                    applyCropToPreview();
                   }}
                   viewport={viewport}
                   canvasDisplayWidth={canvasDimensions.width}
