@@ -4,6 +4,15 @@ All notable changes to **Vitrine** (formerly Photo Editor Pro) are documented in
 this file. The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.34.2] - 2026-07-19
+
+### Fixed
+- **Starting a crop on a 90°-rotated photo snapped it back to the original rotation.** Cause: the re-crop "show the full frame" suspension disabled the whole crop module — which now also owns the quarter-turn orientation. The suspension now zeroes only the crop rect (orientation, straighten angle, and flips keep applying), and a plain handle click restores the rect losslessly. Also fixed: the 'Original' aspect lock used the unrotated frame's ratio under 90°/270°, forcing landscape crops inside a portrait frame — it now follows the rotated frame. Affects: `src/components/Layout/Canvas.tsx`, `src/modules/CropModule.ts`.
+- **Straightening left the exposed non-photo wedges visible.** The ±2°/±5° chips and Auto-Straighten never applied the auto-crop, and the slider only did with no existing crop. All straighten entry points now end wedge-free: the largest inscribed crop is applied (or intersected with your existing crop), orientation-aware. Affects: `src/components/Modules/CropModuleComponent.tsx`.
+
+### Changed
+- **Before/After: the Before pane now shows the 90° rotation too.** Comparing a rotated After against an unrotated Before was useless; the Before stays otherwise pristine (no crop/straighten/edits). Affects: `src/App.tsx`.
+
 ## [1.34.1] - 2026-07-19
 
 ### Fixed

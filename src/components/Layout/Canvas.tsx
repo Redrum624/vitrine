@@ -130,6 +130,11 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
 
   // Local state for crop params during dragging (for real-time visual feedback)
   const [liveCropParams, setLiveCropParams] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
+  // Re-crop drag bookkeeping: whether THIS drag actually changed the rect, and
+  // the rect to restore when it didn't (a plain handle click must be lossless —
+  // the rect is temporarily zeroed during the drag to show the full frame).
+  const cropDragChangedRef = useRef(false);
+  const preDragRectRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
 
   const drawLoadedImage = useCallback((ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, imageMetadata: { width: number; height: number }, imageData: Float32Array) => {
     const { width: imageWidth, height: imageHeight } = imageMetadata;
@@ -1365,6 +1370,7 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
                       height: crop.height,
                       enabled: true
                     });
+                    cropDragChangedRef.current = true;
 
                     // Update live crop params for real-time visual feedback
                     setLiveCropParams(crop);
@@ -1374,17 +1380,30 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
                   }}
                   onDragStart={() => {
                     setIsCropHandleDragging(true);
-                    // Re-crop: a currently-applied crop is SUSPENDED for the drag so
-                    // the full picture becomes visible again; the rect stays at its
-                    // last position (drag anchor = real params, full-image space).
-                    if (cropModule.getEnabled() && cropModule.getCropModule().getParams().enabled) {
-                      cropModule.setEnabled(false);
+                    cropDragChangedRef.current = false;
+                    // Re-crop: show the full frame during the drag by zeroing only
+                    // the RECT — the module stays ENABLED so the 90° orientation
+                    // (and angle/flips) keep applying. Disabling the whole module
+                    // here un-rotated the photo mid-drag (user bug: "when trying
+                    // to crop it goes back to original rotation"). The rect stays
+                    // visible at its last position (drag anchor = real params).
+                    const inner = cropModule.getCropModule();
+                    const p = inner.getParams();
+                    const rectCropped = p.x !== 0 || p.y !== 0 || p.width !== 1 || p.height !== 1;
+                    preDragRectRef.current = { x: p.x, y: p.y, width: p.width, height: p.height };
+                    if (cropModule.getEnabled() && p.enabled && rectCropped) {
+                      inner.setParams({ x: 0, y: 0, width: 1, height: 1 });
                       imageProcessingPipeline.invalidateModuleCache('crop');
                       triggerReprocessing();
                     }
                   }}
                   onDragEnd={() => {
                     setIsCropHandleDragging(false);
+                    // A plain click (no movement) must not lose the crop: the rect
+                    // was zeroed for the drag — put the pre-drag rect back first.
+                    if (!cropDragChangedRef.current && preDragRectRef.current) {
+                      cropModule.getCropModule().setParams(preDragRectRef.current);
+                    }
                     // Apply on mouse release — the preview shows the crop immediately.
                     applyCropToPreview();
                   }}
