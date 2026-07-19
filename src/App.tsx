@@ -55,6 +55,7 @@ import {
 import { styleAnalysisService } from './services/StyleAnalysisService';
 import { autoAdjustService, CAMERA_MATCHED_AUTO_STRENGTH } from './services/AutoAdjustService';
 import { imageProcessingPipeline } from './services/ImageProcessingPipeline';
+import type { CropPipelineModule } from './modules/CropPipelineModule';
 import { PrintDialog } from './components/Dialogs/PrintDialog';
 import { InfoPopover } from './components/InfoPopover';
 import { guardDeveloping } from './utils/developingGuard';
@@ -101,6 +102,8 @@ export function OriginalPane() {
   // Cache the uint8 offscreen canvas built from the float32 original so we
   // only do the expensive conversion once per image (not on every pan/zoom).
   const offscreenRef = useRef<HTMLCanvasElement | null>(null);
+  // Derived 90°-rotated variant, cached per (orientation, source snapshot).
+  const orientedRef = useRef<{ orientation: number; source: HTMLCanvasElement; canvas: HTMLCanvasElement } | null>(null);
 
   const { viewport, mainCanvasFit, baseImageVersion, originalSnapshotVersion } = useAppStore();
 
@@ -143,13 +146,46 @@ export function OriginalPane() {
   // state, so a pure pane resize (dragging the before/after divider without changing zoom
   // or pan) has to re-fit off its element's ResizeObserver.
   const redrawOriginal = useCallback(() => {
-    const offscreen = offscreenRef.current;
+    const base = offscreenRef.current;
     const canvas = canvasRef.current;
     const container = containerRef.current;
-    if (!offscreen || !canvas || !container) return;
+    if (!base || !canvas || !container) return;
 
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
+
+    // Mirror the ACTIVE 90°-step orientation onto the Before pane (v1.34.2,
+    // user request): comparing a rotated After against an unrotated Before is
+    // useless. Only the lossless quarter-turn is mirrored — the Before stays
+    // otherwise pristine (no crop/straighten/edits). Cached per orientation;
+    // rotation changes re-trigger this redraw through the mainCanvasFit swap.
+    const cropAdapter = imageProcessingPipeline.getModule<CropPipelineModule>('crop');
+    const orientation = (cropAdapter?.getEnabled() && cropAdapter.getCropModule().getParams().enabled)
+      ? cropAdapter.getCropModule().normalizedOrientation()
+      : 0;
+    let offscreen = base;
+    if (orientation !== 0) {
+      const cached = orientedRef.current;
+      if (cached && cached.orientation === orientation && cached.source === base) {
+        offscreen = cached.canvas;
+      } else {
+        const rotated = document.createElement('canvas');
+        const swap = orientation === 90 || orientation === 270;
+        rotated.width = swap ? base.height : base.width;
+        rotated.height = swap ? base.width : base.height;
+        const rctx = rotated.getContext('2d');
+        if (rctx) {
+          rctx.save();
+          if (orientation === 90) { rctx.translate(rotated.width, 0); rctx.rotate(Math.PI / 2); }
+          else if (orientation === 180) { rctx.translate(rotated.width, rotated.height); rctx.rotate(Math.PI); }
+          else { rctx.translate(0, rotated.height); rctx.rotate(-Math.PI / 2); }
+          rctx.drawImage(base, 0, 0);
+          rctx.restore();
+          orientedRef.current = { orientation, source: base, canvas: rotated };
+          offscreen = rotated;
+        }
+      }
+    }
 
     const imageWidth = offscreen.width;
     const imageHeight = offscreen.height;

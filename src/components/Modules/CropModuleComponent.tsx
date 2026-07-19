@@ -144,7 +144,9 @@ export const CropModuleComponent: React.FC<CropModuleComponentProps> = ({
         const updatedParams = module.getParams();
         paramsRef.current = updatedParams;  // Update ref immediately to avoid race condition
         setParams(updatedParams);
-        onParamsChange(updatedParams);
+        // Straighten must end wedge-free too (v1.34.2): apply/intersect the
+        // inscribed auto-crop for the detected angle, same as the slider path.
+        ensureWedgeFreeCrop(updatedParams.angle as number);
         logger.info('Auto-straighten completed successfully');
       } else {
         logger.warn('Auto-straighten: Could not detect reliable lines for straightening');
@@ -175,6 +177,50 @@ export const CropModuleComponent: React.FC<CropModuleComponentProps> = ({
     updateParams({ orientation: next, enabled: true });
   }, [params.orientation, updateParams]);
 
+  // Straightening must ALWAYS end wedge-free (v1.34.2, user report: rotating
+  // left the exposed non-photo corners visible). One helper for every entry
+  // point (slider release, ±2°/±5° chips, Auto-Straighten):
+  //  - no user crop  → apply the largest inscribed auto-crop
+  //  - existing crop → INTERSECT it with the inscribed rect (keeps the user's
+  //    framing, removes any wedge overlap)
+  // Orientation-aware: the inscribed-rect math needs the ROTATED frame's dims.
+  const ensureWedgeFreeCrop = useCallback((angle: number, extra: Partial<CropParams> = {}) => {
+    const p = paramsRef.current;
+    const hasExistingCrop = p.x !== 0 || p.y !== 0 || p.width !== 1.0 || p.height !== 1.0;
+
+    if (Math.abs(angle) < 0.01) {
+      // No straighten angle: nothing to inscribe. Keep the user's crop if any.
+      if (hasExistingCrop) updateParams({ angle: 0, enabled: true, ...extra });
+      else updateParams({ x: 0, y: 0, width: 1.0, height: 1.0, angle: 0, enabled: true, ...extra });
+      return;
+    }
+    if (imageWidth <= 0 || imageHeight <= 0) {
+      updateParams({ angle, enabled: true, ...extra });
+      return;
+    }
+
+    const swapped = module.normalizedOrientation() === 90 || module.normalizedOrientation() === 270;
+    const frameW = swapped ? imageHeight : imageWidth;
+    const frameH = swapped ? imageWidth : imageHeight;
+    const auto = module.calculateAutoCropForRotation(frameW, frameH, angle);
+
+    if (!hasExistingCrop) {
+      updateParams({ angle, enabled: true, ...auto, ...extra });
+    } else {
+      const x1 = Math.max(p.x, auto.x);
+      const y1 = Math.max(p.y, auto.y);
+      const x2 = Math.min(p.x + p.width, auto.x + auto.width);
+      const y2 = Math.min(p.y + p.height, auto.y + auto.height);
+      updateParams({
+        angle, enabled: true,
+        x: x1, y: y1,
+        width: Math.max(0.05, x2 - x1),
+        height: Math.max(0.05, y2 - y1),
+        ...extra,
+      });
+    }
+  }, [module, imageWidth, imageHeight, updateParams]);
+
   const handleRotationChange = useCallback((newAngle: number) => {
     // Clamp to -5 to +5 range
     const clampedAngle = Math.max(-5, Math.min(5, newAngle));
@@ -191,25 +237,22 @@ export const CropModuleComponent: React.FC<CropModuleComponentProps> = ({
         updateParams({ x: 0, y: 0, width: 1.0, height: 1.0, angle: 0, enabled: true });
       }
     } else {
-      // During rotation adjustment, just update angle (preserve crop)
+      // During LIVE rotation adjustment, just update angle (preserve crop);
+      // the wedge-free crop lands on release (handleRotationEnd).
       updateParams({ angle: clampedAngle, enabled: true });
     }
   }, [params.x, params.y, params.width, params.height, updateParams]);
 
-  // Apply auto-crop when rotation adjustment ends (mouse up) - only if no existing crop
+  // Chip clicks are instantaneous applies — angle + wedge-free crop in one step.
+  const applyAngleChip = useCallback((angle: number) => {
+    ensureWedgeFreeCrop(Math.max(-5, Math.min(5, angle)));
+  }, [ensureWedgeFreeCrop]);
+
+  // Apply the wedge-free crop when the slider drag ends (mouse up).
   const handleRotationEnd = useCallback(() => {
     setIsAdjustingRotation(false);
-
-    // Check if user has an existing crop
-    const hasExistingCrop = params.x !== 0 || params.y !== 0 ||
-                            params.width !== 1.0 || params.height !== 1.0;
-
-    // Only apply auto-crop if user hasn't already cropped
-    if (!hasExistingCrop && Math.abs(params.angle) > 0.01 && imageWidth > 0 && imageHeight > 0) {
-      const autoCrop = module.calculateAutoCropForRotation(imageWidth, imageHeight, params.angle);
-      updateParams({ ...autoCrop });
-    }
-  }, [setIsAdjustingRotation, params.angle, params.x, params.y, params.width, params.height, module, imageWidth, imageHeight, updateParams]);
+    ensureWedgeFreeCrop(paramsRef.current.angle);
+  }, [setIsAdjustingRotation, ensureWedgeFreeCrop]);
 
   const outputDims = module.getOutputDimensions(imageWidth, imageHeight);
   const cropPercentage = ((outputDims.width * outputDims.height) / (imageWidth * imageHeight) * 100).toFixed(1);
@@ -318,7 +361,7 @@ export const CropModuleComponent: React.FC<CropModuleComponentProps> = ({
 
         <div className="grid grid-cols-4" style={{ gap: 6 }}>
           {[-5, -2, 2, 5].map((angle) => (
-            <ChipButton key={angle} onClick={() => handleRotationChange(angle)}>
+            <ChipButton key={angle} onClick={() => applyAngleChip(angle)}>
               {angle > 0 ? '+' : ''}{angle}°
             </ChipButton>
           ))}

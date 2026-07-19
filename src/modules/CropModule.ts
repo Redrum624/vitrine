@@ -180,8 +180,17 @@ export class CropModule {
     switch (this.params.aspectRatio) {
       case 'free':
         return null;
-      case 'original':
-        return this.originalWidth > 0 ? this.originalWidth / this.originalHeight : null;
+      case 'original': {
+        if (this.originalWidth <= 0) return null;
+        // 'Original' means the aspect of the frame BEING cropped: under a
+        // 90°/270° orientation that frame is the rotated one. Without the swap
+        // an e-drag on a rotated photo locked the rect to the UNROTATED ratio
+        // and produced a landscape crop inside a portrait frame (v1.34.2).
+        const swapped = this.normalizedOrientation() === 90 || this.normalizedOrientation() === 270;
+        return swapped
+          ? this.originalHeight / this.originalWidth
+          : this.originalWidth / this.originalHeight;
+      }
       case 'custom':
         return this.params.customAspectWidth / this.params.customAspectHeight;
       default:

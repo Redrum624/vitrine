@@ -85,6 +85,19 @@ describe('CropModule orientation', () => {
     expect(adapter.isNoOp()).toBe(true);
   });
 
+  test("the 'original' aspect lock follows the ROTATED frame under 90/270", () => {
+    const m = new CropModule();
+    m.setOriginalDimensions(3200, 2400);
+    m.setParams({ aspectRatio: 'original' });
+    expect(m.getAspectRatioValue()).toBeCloseTo(3200 / 2400, 5);
+    m.setParams({ orientation: 90 });
+    expect(m.getAspectRatioValue()).toBeCloseTo(2400 / 3200, 5);
+    m.setParams({ orientation: 180 });
+    expect(m.getAspectRatioValue()).toBeCloseTo(3200 / 2400, 5);
+    m.setParams({ orientation: 270 });
+    expect(m.getAspectRatioValue()).toBeCloseTo(2400 / 3200, 5);
+  });
+
   test('orientation composes with a crop rect (rect applies to the ROTATED frame)', () => {
     const m = new CropModule();
     // 90° CW of 3x2 → 2x3; crop the top half (2x1... height 1/3 → 1 row)
