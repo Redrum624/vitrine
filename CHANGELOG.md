@@ -4,6 +4,17 @@ All notable changes to **Vitrine** (formerly Photo Editor Pro) are documented in
 this file. The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.32.0] - 2026-07-19
+
+### Fixed
+- **Exports with Noise Reduction came out shredded (repeated strips at the top, black below).** Cause: the CPU "wavelet" denoiser was an unfinished placeholder — its no-op transforms returned a quarter-resolution buffer, and auto-selection routed EVERY image above 1MP into it. Only exports were affected because previews always use the GPU denoiser; the CPU path runs when the image exceeds the single-pass GPU size cap. Fixes: full-resolution denoise now runs the SAME GPU NLM kernel in seam-free tiles (exports match the preview's look); the stub is an honest, logged identity; the module validates every output buffer; and the pipeline itself now skips any module whose output size lies (buffer-conservation guard) so this entire corruption class is dead. Affects: `src/services/AdvancedDenoisingService.ts`, `src/modules/NoiseReductionModule.ts`, `src/services/ImageProcessingPipeline.ts`.
+
+### Changed
+- **Lens Corrections no longer has per-section enable checkboxes.** A correction is active exactly when its values are non-neutral (amount ≠ 0, radius > 0, …) — sliders are always live, a small accent dot marks active sections, and neutral settings cost nothing. Affects: `src/components/Modules/LensCorrectionsModuleComponent.tsx`.
+
+### Added
+- **Enhance settings are remembered.** Sharpen/upscale toggles, scale, detail sliders, chroma clean, and the Noise Reduction toggle/strength persist across pictures and sessions (durable store, debounced). A photo's own saved enhance state always wins; prefs only seed a panel at factory defaults. Applying remains an explicit per-photo action. Affects: `src/utils/enhancePrefsStorage.ts` (new), `src/components/Modules/EnhanceModuleComponent.tsx`.
+
 ## [1.31.0] - 2026-07-19
 
 ### Added

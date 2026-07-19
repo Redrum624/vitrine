@@ -228,14 +228,35 @@ export class NoiseReductionModule {
 
     // GPU fast-path: a fast WebGL2 Non-Local-Means denoise (sub-second even on
     // RAW), replacing the slow CPU BM3D/NLMeans. Falls back to the CPU service when
-    // WebGL2 is unavailable. RGBA only.
+    // WebGL2 is unavailable. RGBA only. Output length is VALIDATED — a wrong-size
+    // buffer flowing downstream corrupts the whole pipeline (v1.32.0 export bug).
     if (input.length === width * height * 4 && webGLImageProcessor.isAvailable()) {
       const gpu = webGLImageProcessor.denoise(input, width, height, this.params.strength);
-      if (gpu) {
+      if (gpu && gpu.length === input.length) {
         logger.info(`NoiseReduction (GPU NLM) completed in ${(performance.now() - startTime).toFixed(2)}ms`);
         this.logQualityMetrics(input, gpu);
         return gpu;
       }
+      // Full-resolution exports exceed the single-pass GPU size cap (the pass
+      // throws → null). Denoise in GPU TILES instead — the SAME NLM kernel the
+      // preview uses, so the export matches the preview's look. The NLM search
+      // window is local (~10px), so a modest apron eliminates tile seams.
+      const tiled = this.denoiseTiledGPU(input, width, height, this.params.strength);
+      if (tiled && tiled.length === input.length) {
+        logger.info(`NoiseReduction (GPU NLM, tiled) completed in ${(performance.now() - startTime).toFixed(2)}ms`);
+        this.logQualityMetrics(input, tiled);
+        return tiled;
+      }
+    }
+
+    // CPU service: real (verified) methods are O(n·window²·patch²) and only
+    // sane below ~1MP. Above that, the old auto-selection routed into a
+    // PLACEHOLDER wavelet implementation that returned a quarter-resolution
+    // buffer and shredded every NR export (v1.32.0 root cause) — now the
+    // large-image CPU case is an honest, logged no-op instead.
+    if (width * height > 1_000_000) {
+      logger.warn(`NoiseReduction: ${width}x${height} too large for CPU denoise and no GPU available — passing through unchanged`);
+      return new Float32Array(input);
     }
 
     try {
@@ -262,6 +283,11 @@ export class NoiseReductionModule {
       // Log quality metrics
       this.logQualityMetrics(input, output);
 
+      if (output.length !== input.length) {
+        // Never let a wrong-size buffer continue down the pipeline.
+        logger.error(`NoiseReduction: CPU service returned ${output.length} floats for a ${input.length}-float input — discarding`);
+        return new Float32Array(input);
+      }
       return output;
 
     } catch (error) {
@@ -269,6 +295,59 @@ export class NoiseReductionModule {
       // On error, return original image
       return new Float32Array(input);
     }
+  }
+
+  /**
+   * Tiled GPU NLM denoise for images above the single-pass GPU size cap
+   * (full-resolution exports). Tiles carry an APRON of neighbour pixels sized
+   * well past the NLM kernel's reach, so interior seams are exact; the apron is
+   * cropped off when stitching. Returns null if any tile fails (caller falls
+   * back). `tileSize` is parameterized for tests.
+   */
+  denoiseTiledGPU(
+    input: Float32Array,
+    width: number,
+    height: number,
+    strength: number,
+    tileSize = 2048,
+    apron = 16,
+  ): Float32Array | null {
+    const out = new Float32Array(input.length);
+    for (let ty = 0; ty < height; ty += tileSize) {
+      for (let tx = 0; tx < width; tx += tileSize) {
+        const tw = Math.min(tileSize, width - tx);
+        const th = Math.min(tileSize, height - ty);
+        // Padded tile bounds (clamped to the image).
+        const px0 = Math.max(0, tx - apron);
+        const py0 = Math.max(0, ty - apron);
+        const px1 = Math.min(width, tx + tw + apron);
+        const py1 = Math.min(height, ty + th + apron);
+        const pw = px1 - px0;
+        const ph = py1 - py0;
+
+        const tile = new Float32Array(pw * ph * 4);
+        for (let y = 0; y < ph; y++) {
+          const srcOff = ((py0 + y) * width + px0) * 4;
+          tile.set(input.subarray(srcOff, srcOff + pw * 4), y * pw * 4);
+        }
+
+        const denoised = webGLImageProcessor.denoise(tile, pw, ph, strength);
+        if (!denoised || denoised.length !== tile.length) {
+          logger.warn(`NoiseReduction: tiled GPU denoise failed at tile (${tx},${ty})`);
+          return null;
+        }
+
+        // Copy the UNPADDED interior back.
+        const ix = tx - px0;
+        const iy = ty - py0;
+        for (let y = 0; y < th; y++) {
+          const srcOff = ((iy + y) * pw + ix) * 4;
+          const dstOff = ((ty + y) * width + tx) * 4;
+          out.set(denoised.subarray(srcOff, srcOff + tw * 4), dstOff);
+        }
+      }
+    }
+    return out;
   }
 
   /**

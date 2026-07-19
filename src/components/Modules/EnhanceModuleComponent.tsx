@@ -4,6 +4,7 @@ import type { CSSProperties } from 'react';
 import { EnhanceModule } from '../../modules/EnhanceModule';
 import { NoiseReductionModule, NoiseReductionParams } from '../../modules/NoiseReductionModule';
 import { EnhanceParams, DEFAULT_ENHANCE_PARAMS } from '../../utils/enhanceChain';
+import { loadEnhancePrefs, saveEnhancePrefs } from '../../utils/enhancePrefsStorage';
 import { enhanceService, getUpscaleFeasibility, UpscaleFeasibility } from '../../services/EnhanceService';
 import { aiDeblurClient } from '../../services/AiDeblurClient';
 import { imageService } from '../../services/ImageService';
@@ -29,6 +30,13 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
   const paramsRef = useRef(params); paramsRef.current = params;
   const [nrEnabled, setNrEnabled] = useState<boolean>(() => noiseReductionModule.getParams().enabled);
   const [nrStrength, setNrStrength] = useState<number>(() => noiseReductionModule.getParams().strength);
+  const nrRef = useRef({ enabled: nrEnabled, strength: nrStrength });
+  nrRef.current = { enabled: nrEnabled, strength: nrStrength };
+  // Preference memory (v1.32.0): seed the panel from saved prefs ONLY when the
+  // module is still at factory defaults (a photo's own restored per-image state
+  // always wins), then persist every change. hydratedRef gates saving so the
+  // mount itself never writes factory values over the stored prefs.
+  const hydratedRef = useRef(false);
   const [busy, setBusy] = useState(false);
   const upscaleProgress = useAppStore((s) => s.upscaleProgress);
   const upscaleMode = useAppStore((s) => s.upscaleMode);
@@ -56,6 +64,42 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
     setParams((prev) => ({ ...prev, ...patch }));
     module.setParams(patch);
   }, [module]);
+
+  const PREF_KEYS = ['sharpen', 'upscale', 'scale', 'denoiseStrength', 'psfSigma', 'rlIters', 'alpha', 'hpSigma', 'sharpness', 'chromaClean'] as const;
+
+  // Seed from saved prefs once per mount (the panel remounts per photo/module
+  // switch), only when the module still sits at factory defaults.
+  useEffect(() => {
+    let cancelled = false;
+    void loadEnhancePrefs().then((prefs) => {
+      if (cancelled) return;
+      if (prefs) {
+        const cur = module.getParams();
+        const atDefaults = PREF_KEYS.every((k) => cur[k] === DEFAULT_ENHANCE_PARAMS[k]);
+        if (atDefaults) {
+          const { nrEnabled: prefNrEnabled, nrStrength: prefNrStrength, ...enhance } = prefs;
+          if (Object.keys(enhance).length) update(enhance);
+          if (typeof prefNrEnabled === 'boolean') setNrEnabled(prefNrEnabled);
+          if (typeof prefNrStrength === 'number') setNrStrength(prefNrStrength);
+        }
+      }
+      hydratedRef.current = true;
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  // Persist the durable preference snapshot on every change (debounced in the
+  // storage util; gated until hydration so the mount never clobbers the store).
+  useEffect(() => {
+    if (!hydratedRef.current) return;
+    const p = paramsRef.current;
+    saveEnhancePrefs({
+      sharpen: p.sharpen, upscale: p.upscale, scale: p.scale,
+      denoiseStrength: p.denoiseStrength, psfSigma: p.psfSigma, rlIters: p.rlIters,
+      alpha: p.alpha, hpSigma: p.hpSigma, sharpness: p.sharpness, chromaClean: p.chromaClean,
+      nrEnabled: nrRef.current.enabled, nrStrength: nrRef.current.strength,
+    });
+  }, [params, nrEnabled, nrStrength]);
 
   const resetSection = useCallback(() => {
     setNrStrength(50);
