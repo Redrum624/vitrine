@@ -16,6 +16,7 @@ import { SliderRow } from '../Controls/SliderRow';
 import { inputStyle, selectStyle, infoBoxStyle } from './glassFormStyles';
 import { ExportOptions, ExportPreset, exportService } from '../../services/ExportService';
 import { estimateExportSizeBytes } from '../../utils/exportSizeEstimate';
+import { loadExportSettings, saveExportSettings } from '../../utils/exportSettingsStorage';
 import { imageService } from '../../services/ImageService';
 import { resolveExportSource } from './resolveExportSource';
 import { formatSkippedNames } from './formatSkippedNames';
@@ -77,12 +78,26 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
   const bakeNotApplied = upscaleNotApplied || deblurNotApplied;
   const [activeTab, setActiveTab] = useState<TabType>('format');
   const [selectedPreset, setSelectedPreset] = useState<string>('');
-  const [exportOptions, setExportOptions] = useState<ExportOptions>(exportService.getDefaultOptions());
+  // Settings memory (v1.29.1): seed from the saved last-used settings, not the
+  // factory defaults — the dialog remembers format/quality/color/etc. and the
+  // chosen output folder across opens AND sessions (localStorage; per-image
+  // fields like resize dims and filename are never persisted).
+  const [exportOptions, setExportOptions] = useState<ExportOptions>(
+    () => loadExportSettings(exportService.getDefaultOptions()).options,
+  );
   const [isExporting, setIsExporting] = useState(false);
   const [presets, setPresets] = useState<ExportPreset[]>([]);
   const [estimatedFileSize, setEstimatedFileSize] = useState<string>('');
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
-  const [outputDirectory, setOutputDirectory] = useState<string>('');
+  const [outputDirectory, setOutputDirectory] = useState<string>(
+    () => loadExportSettings(exportService.getDefaultOptions()).outputDirectory,
+  );
+
+  // Persist the durable settings whenever they change while the dialog is open.
+  useEffect(() => {
+    if (!isOpen) return;
+    saveExportSettings(exportOptions, outputDirectory);
+  }, [isOpen, exportOptions, outputDirectory]);
 
   const handleChooseFolder = useCallback(async () => {
     try {
@@ -287,8 +302,14 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
             exportHeight = previewData.height;
           } else if (processedData && processedData instanceof Float32Array) {
             exportImageData = processedData;
-            exportWidth = source.width;
-            exportHeight = source.height;
+            // Use the CONTEXT dims, not the source dims: CropModule mutates
+            // context.width/height in place when a crop is active, and the
+            // returned buffer has exactly those dims. Encoding a crop-shrunk
+            // buffer with the original dims shredded the output (content
+            // squeezed into the top ¾ + black bottom band — user-reported the
+            // day interactive crops started actually applying, v1.29.0).
+            exportWidth = context.width;
+            exportHeight = context.height;
           } else {
             logger.warn('[Export] processImage returned an unusable buffer — exporting the ORIGINAL pixels (edits will be missing)');
             exportImageData = source.data;

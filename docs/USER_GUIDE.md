@@ -1,4 +1,4 @@
-# Photo Editing Application - User Guide
+﻿# Photo Editing Application - User Guide
 
 **Version:** 1.0.0
 **Last Updated:** 2025-10-22
@@ -50,9 +50,9 @@ Welcome to the Professional Photo Editing Application - a powerful, privacy-focu
 
 ### Opening an Image
 
-1. Use **File → Open…**, or **Window → Welcome Screen…** to bring up the welcome /
+1. Use **File â†’ Openâ€¦**, or **Window â†’ Welcome Screenâ€¦** to bring up the welcome /
    open-folder screen, or drag-and-drop a file onto the application
-2. Supported formats: JPG, PNG, TIFF, RAW (CR2, CR3, NEF, ARW, ORF, DNG, RW2, PEF, …)
+2. Supported formats: JPG, PNG, TIFF, RAW (CR2, CR3, NEF, ARW, ORF, DNG, RW2, PEF, â€¦)
 3. Wait for the image to load and process
 
 ### The Filmstrip
@@ -60,17 +60,17 @@ Welcome to the Professional Photo Editing Application - a powerful, privacy-focu
 The thumbnail strip along the bottom lists every image in the current folder:
 
 - **Scroll** left/right with the mouse wheel
-- **Navigate** with ← / → or by clicking a thumbnail
+- **Navigate** with â† / â†’ or by clicking a thumbnail
 - **Rate** images with the inline stars and **filter** by minimum rating (you can also
-  rate the open image from the bottom-right star overlay on the canvas, or press `1`–`5`)
-- **Select multiple** images for export — **Ctrl/Cmd+click** toggles a thumbnail,
-  **Shift+click** selects a contiguous range — then click the **Export N** button to
+  rate the open image from the bottom-right star overlay on the canvas, or press `1`â€“`5`)
+- **Select multiple** images for export â€” **Ctrl/Cmd+click** toggles a thumbnail,
+  **Shift+click** selects a contiguous range â€” then click the **Export N** button to
   export them all with the same settings (each keeps **its own** edits). A cancellable
-  progress bar appears at the top-left, and the files are written as `<name>_PEP.<ext>`
+  progress bar appears at the top-left, and the files are written as `<name>_VIT.<ext>`
 - **Selection borders**: the image open on the canvas has a **bright blue border**;
   other images in a multi-selection have a **dimmer blue border**. Ctrl/Cmd+click a
   bordered thumbnail to remove it from the selection
-- **Collapse / expand** the strip with the chevron (▼ / ▲) button in its header
+- **Collapse / expand** the strip with the chevron (â–¼ / â–²) button in its header
 
 ### Basic Workflow
 
@@ -95,7 +95,7 @@ The application processes images through these modules in this order:
 
 **Controls:**
 - **Aspect Ratio:** Free, 1:1, 3:2, 4:3, 16:9, Custom
-- **Straighten Angle:** -45° to +45°
+- **Straighten Angle:** -45Â° to +45Â°
 - **Auto-Straighten:** Automatically detect and correct horizon
 
 **Tips:**
@@ -104,7 +104,7 @@ The application processes images through these modules in this order:
 - Hold Shift while dragging to maintain aspect ratio
 
 ### 2. Lens Corrections
-**Purpose:** Correct lens distortion, vignetting, chromatic aberration — plus creative
+**Purpose:** Correct lens distortion, vignetting, chromatic aberration â€” plus creative
 finishing effects (Blur, Film Grain)
 **When to use:** After crop, before color adjustments
 
@@ -112,14 +112,14 @@ finishing effects (Blur, Film Grain)
 - **Distortion Correction:** Barrel and pincushion correction
 - **Vignetting Removal:** Brighten darkened corners
 - **Chromatic Aberration:** Remove color fringing
-- **Blur:** Non-destructive Gaussian blur (radius 0–20 px)
-- **Film Grain:** Non-destructive grain (Amount 0–100%, Grain Size 1–4)
+- **Blur:** Non-destructive Gaussian blur (radius 0â€“20 px)
+- **Film Grain:** Non-destructive grain (Amount 0â€“100%, Grain Size 1â€“4)
 
 **Tips:**
 - Enable for wide-angle shots (distortion)
 - Use for images with dark corners (vignetting)
 - Most noticeable in high-contrast edges
-- Blur and Film Grain are non-destructive sections — they re-process live and persist
+- Blur and Film Grain are non-destructive sections â€” they re-process live and persist
   with the image like every other adjustment
 
 ### 3. Exposure
@@ -152,7 +152,7 @@ finishing effects (Blur, Film Grain)
 - **Fluorescent:** 4000K - For office lighting
 - **Flash:** 5500K - Camera flash
 
-**Auto:** The **Auto** button uses **median gray-world** neutralisation — it scans the
+**Auto:** The **Auto** button uses **median gray-world** neutralisation â€” it scans the
 image's overall median colour cast and corrects both warmth (Temperature) and Tint in
 one click. (The same logic drives the white-balance step of **Auto All**.)
 
@@ -278,28 +278,28 @@ that area only. Switch masks with the chips, and remove one with the trash icon.
 **When to use:** After noise reduction, just before export; upscale before cropping for social/print delivery
 
 **Controls:**
-- **Sharpen toggle** — enables Richardson–Lucy deconvolution deblur + edge-masked luma
+- **Sharpen toggle** â€” enables Richardsonâ€“Lucy deconvolution deblur + edge-masked luma
   graft + AMD FidelityFX CAS sharpening + luma-guided chroma cleanup (BT.601, alpha
   preserved).
-- **Upscale toggle** — ×2 or ×4 Lanczos upscale (linear light). Bakes the enlarged image
+- **Upscale toggle** â€” Ã—2 or Ã—4 Lanczos upscale (linear light). Bakes the enlarged image
   as the working image for the session; reopening the file returns the native original.
-- **Apply Enhance** — runs the enabled operations (Sharpen and/or Upscale). Like Noise
+- **Apply Enhance** â€” runs the enabled operations (Sharpen and/or Upscale). Like Noise
   Reduction, it never auto-processes on slider change.
 
 **Notes:**
 - Reached from the sidebar (below Noise Reduction), replacing the old Sharpen module.
 - The Sharpen result is baked into every export automatically; no separate export-sharpening
   option needed.
-- Upscale is in-session only: History records an "Enhanced ×N" checkpoint and a multi-level
+- Upscale is in-session only: History records an "Enhanced Ã—N" checkpoint and a multi-level
   Revert stack keeps the native original accessible.
 
 ---
 
 ## Auto Adjustments
 
-Every **Auto** button — the per-module ones and the **Auto All** button in the toolbar — now uses *your personal style profile*, extracted from your graded photos. Instead of aiming at generic "neutral" targets, the Auto functions aim at the way *you* actually grade: darker, warmer, with more contrast and less saturation than a textbook neutral.
+Every **Auto** button â€” the per-module ones and the **Auto All** button in the toolbar â€” now uses *your personal style profile*, extracted from your graded photos. Instead of aiming at generic "neutral" targets, the Auto functions aim at the way *you* actually grade: darker, warmer, with more contrast and less saturation than a textbook neutral.
 
-The profile is split into 5 **buckets** — `low_light`, `high_key`, `warm`, `cool`, and `standard`. **Auto All** automatically picks the right bucket for the current image based on its brightness and white balance, then adjusts Exposure, Basic Adjustments (including Highlights/Shadows), Tone Curve, and Color Balance in one click. Its **white-balance step** uses **median gray-world** neutralisation (the same as the WB panel's **Auto** button) — it scans the image's overall median colour cast and neutralises both warmth and tint, rather than nudging toward the style profile. The bucket it chose is written to the log (e.g. `AutoExposure[warm]: …`) so you can tell which profile fired.
+The profile is split into 5 **buckets** â€” `low_light`, `high_key`, `warm`, `cool`, and `standard`. **Auto All** automatically picks the right bucket for the current image based on its brightness and white balance, then adjusts Exposure, Basic Adjustments (including Highlights/Shadows), Tone Curve, and Color Balance in one click. Its **white-balance step** uses **median gray-world** neutralisation (the same as the WB panel's **Auto** button) â€” it scans the image's overall median colour cast and neutralises both warmth and tint, rather than nudging toward the style profile. The bucket it chose is written to the log (e.g. `AutoExposure[warm]: â€¦`) so you can tell which profile fired.
 
 **To regenerate the profile after grading more photos**, re-run the extractor:
 
@@ -323,7 +323,7 @@ python scripts/extract_style_profile.py \
 - `F` - Fit to screen
 - `Ctrl/Cmd + 1` - 100% zoom
 - `Ctrl/Cmd + 0` - Reset zoom
-- `1`–`5` - Rate the current image · `0` - Clear rating
+- `1`â€“`5` - Rate the current image Â· `0` - Clear rating
 
 ### Module Controls
 - `Tab` - Next module

@@ -56,4 +56,31 @@ describe('Export applies edits (regression for missing-edits export)', () => {
 
     expect(maxImageDifference(input, out)).toBeLessThan(0.01);
   });
+
+  it('CROPPED export: the buffer matches the MUTATED context dims, not the source dims', async () => {
+    // Regression for the shredded-export bug (v1.29.1): with a crop active the
+    // pipeline returns a SMALLER buffer and mutates context.width/height in
+    // place. Encoding that buffer with the ORIGINAL dims compresses the image
+    // into the top of the frame and leaves a black bottom band. The export
+    // callers (ExportDialog, MultiExportService) must read the context back.
+    const width = 32;
+    const height = 32;
+    const input = createTestImage(width, height, 0.5, 0.5, 0.5);
+    const context: ProcessingContext = { width, height, channels: 4 };
+
+    const pipeline = new ImageProcessingPipeline();
+    const cropModule = pipeline.getModule('crop') as unknown as {
+      setCropRegion: (x: number, y: number, w: number, h: number) => void;
+    };
+    cropModule.setCropRegion(0, 0, 0.5, 0.5);
+
+    const out = await pipeline.processImage(new Float32Array(input), context, { useWebWorkers: false, cacheResults: false });
+
+    // Context reflects the crop…
+    expect(context.width).toBe(16);
+    expect(context.height).toBe(16);
+    // …and the buffer is exactly context dims × RGBA — NOT source dims.
+    expect(out.length).toBe(context.width * context.height * 4);
+    expect(out.length).not.toBe(input.length);
+  });
 });

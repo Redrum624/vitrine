@@ -2,7 +2,7 @@
  * Unit tests for MultiExportService.exportMany.
  *
  * Verifies the core guarantees: each image is exported with ITS OWN saved edits
- * (reset → restoreForPath per image), output names use the _PEP suffix and never
+ * (reset → restoreForPath per image), output names use the _VIT suffix and never
  * clobber (auto-suffix vs both on-disk files and same-run names), cancellation
  * stops the loop, per-image failures are collected without aborting, and the
  * editor's pre-export state is always restored afterward.
@@ -73,11 +73,28 @@ describe('exportMany — per-image edits', () => {
     expect(resetAllModules).toHaveBeenCalledTimes(3);
   });
 
-  it('exports each image with a _PEP filename into the chosen folder', async () => {
+  it('exports each image with a _VIT filename into the chosen folder', async () => {
     await multiExportService.exportMany(['/i/a.jpg', '/i/b.png'], okOptions, controls());
     expect(exportImage).toHaveBeenCalledTimes(2);
-    expect(exportImage.mock.calls[0][3]).toMatchObject({ outputDirectory: 'C:\\out', filename: 'a_PEP.jpg' });
-    expect(exportImage.mock.calls[1][3]).toMatchObject({ filename: 'b_PEP.jpg' });
+    expect(exportImage.mock.calls[0][3]).toMatchObject({ outputDirectory: 'C:\\out', filename: 'a_VIT.jpg' });
+    expect(exportImage.mock.calls[1][3]).toMatchObject({ filename: 'b_VIT.jpg' });
+  });
+});
+
+describe('exportMany — cropped images export with the POST-CROP dims', () => {
+  it('reads the crop-mutated context dims when processImage returns a bare Float32Array', async () => {
+    // Regression (v1.29.1 shredded-export class): with a crop active the
+    // pipeline mutates context.width/height and returns a SMALLER buffer.
+    // Exporting that buffer with the original dims corrupts the file.
+    processImage.mockImplementation(async (_d: Float32Array, context: { width: number; height: number }) => {
+      context.width = 50;   // crop to half
+      context.height = 25;
+      return new Float32Array(50 * 25 * 4);
+    });
+    await multiExportService.exportMany(['/i/a.jpg'], okOptions, controls());
+    expect(exportImage).toHaveBeenCalledTimes(1);
+    expect(exportImage.mock.calls[0][1]).toBe(50);  // width  = post-crop
+    expect(exportImage.mock.calls[0][2]).toBe(25);  // height = post-crop
   });
 });
 
@@ -88,7 +105,7 @@ describe('exportMany — unapplied upscale intent (Q7, NO silent loss)', () => {
     );
     const summary = await multiExportService.exportMany(['/i/a.jpg', '/i/b.png'], okOptions, controls());
     // Both still export (at native resolution) — the intent is surfaced, never silently dropped.
-    expect(summary.exported).toEqual(['a_PEP.jpg', 'b_PEP.jpg']);
+    expect(summary.exported).toEqual(['a_VIT.jpg', 'b_VIT.jpg']);
     expect(summary.upscaleSkipped).toEqual(['a']);
   });
 
@@ -101,15 +118,15 @@ describe('exportMany — unapplied upscale intent (Q7, NO silent loss)', () => {
 describe('exportMany — collision handling', () => {
   it('auto-suffixes when a file already exists on disk', async () => {
     // First candidate exists; the bumped one does not.
-    fileExists.mockImplementation(async (p: string) => p.endsWith('a_PEP.jpg'));
+    fileExists.mockImplementation(async (p: string) => p.endsWith('a_VIT.jpg'));
     await multiExportService.exportMany(['/i/a.jpg'], okOptions, controls());
-    expect(exportImage.mock.calls[0][3].filename).toBe('a_PEP_1.jpg');
+    expect(exportImage.mock.calls[0][3].filename).toBe('a_VIT_1.jpg');
   });
 
   it('auto-suffixes when two sources share a base name', async () => {
     await multiExportService.exportMany(['/x/a.jpg', '/y/a.png'], okOptions, controls());
-    expect(exportImage.mock.calls[0][3].filename).toBe('a_PEP.jpg');
-    expect(exportImage.mock.calls[1][3].filename).toBe('a_PEP_1.jpg');
+    expect(exportImage.mock.calls[0][3].filename).toBe('a_VIT.jpg');
+    expect(exportImage.mock.calls[1][3].filename).toBe('a_VIT_1.jpg');
   });
 });
 
@@ -119,7 +136,7 @@ describe('exportMany — cancellation & failures', () => {
     const isCancelled = () => calls++ > 0; // false for first check, true afterwards
     const summary = await multiExportService.exportMany(['/i/a.jpg', '/i/b.jpg', '/i/c.jpg'], okOptions, controls({ isCancelled }));
     expect(exportImage).toHaveBeenCalledTimes(1);
-    expect(summary.exported).toEqual(['a_PEP.jpg']);
+    expect(summary.exported).toEqual(['a_VIT.jpg']);
   });
 
   it('collects a failed export and continues with the rest', async () => {
@@ -128,14 +145,14 @@ describe('exportMany — cancellation & failures', () => {
       .mockResolvedValueOnce({ success: true });
     const summary = await multiExportService.exportMany(['/i/a.jpg', '/i/b.jpg'], okOptions, controls());
     expect(summary.failed).toEqual([{ path: '/i/a.jpg', error: 'disk full' }]);
-    expect(summary.exported).toEqual(['b_PEP.jpg']);
+    expect(summary.exported).toEqual(['b_VIT.jpg']);
   });
 
   it('collects a thrown error and continues', async () => {
     loadImageForExport.mockRejectedValueOnce(new Error('decode failed'));
     const summary = await multiExportService.exportMany(['/i/a.jpg', '/i/b.jpg'], okOptions, controls());
     expect(summary.failed[0]).toEqual({ path: '/i/a.jpg', error: 'decode failed' });
-    expect(summary.exported).toEqual(['b_PEP.jpg']);
+    expect(summary.exported).toEqual(['b_VIT.jpg']);
   });
 });
 

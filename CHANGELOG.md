@@ -4,6 +4,19 @@ All notable changes to **Vitrine** (formerly Photo Editor Pro) are documented in
 this file. The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.30.0] - 2026-07-19
+
+### Fixed
+- **Exporting a cropped photo produced a shredded image (content squeezed into the top of the frame, black band at the bottom).** Cause: with a crop active the pipeline returns a SMALLER buffer and reports the post-crop dimensions by mutating the processing context in place — but both export paths encoded that buffer with the ORIGINAL dimensions, so the encoder ran out of rows. Latent for months: until v1.29.0 fixed the crop adapter gate, interactive crops were pipeline no-ops and the export path never saw a crop-shrunk buffer. Fix: both single and multi export now read the post-crop context dims; regression tests pin the contract (including a pipeline-wide channel/length conservation suite). Affects: `src/components/Dialogs/ExportDialog.tsx`, `src/services/MultiExportService.ts`.
+
+### Changed
+- **Exported filenames now use the `_VIT` suffix** (Vitrine) instead of the pre-rebrand `_PEP` (Photo Editor Pro), e.g. `photo_VIT.jpg`. Affects: `src/utils/exportFilename.ts`, `src/services/ExportService.ts`.
+- **Single exports never overwrite an earlier export.** If `photo_VIT.jpg` already exists the name auto-increments (`photo_VIT_1.jpg`, `photo_VIT_2.jpg`, …), matching the multi-export behaviour. Affects: `src/services/ExportService.ts`.
+
+### Added
+- **Export settings are remembered.** The Export dialog restores the last-used format, quality, bit depth, color space, compression, sharpening, and output folder across sessions (per-image values like resize dimensions are never persisted). Affects: `src/utils/exportSettingsStorage.ts` (new), `src/components/Dialogs/ExportDialog.tsx`.
+- **Star-filtered thumbnails appear faster.** Right after a folder's ratings load, the rated photos' thumbnails are prefetched in the background at idle priority (they are exactly what filters reveal), and the decode queue runs six-wide — so clicking a filter chip shows thumbnails near-instantly instead of decoding on demand. Affects: `src/App.tsx`, `src/utils/thumbnailScheduler.ts`.
+
 ## [1.29.0] - 2026-07-19
 
 ### Changed

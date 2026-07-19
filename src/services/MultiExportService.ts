@@ -91,10 +91,15 @@ class MultiExportService {
               height = p.height;
             } else if (processed instanceof Float32Array) {
               data = processed;
+              // Context dims, not img dims — an active crop mutates
+              // context.width/height and returns a smaller buffer (same
+              // corruption class as the single-export fix in ExportDialog).
+              width = context.width;
+              height = context.height;
             }
           }
 
-          // Resolve a non-clobbering output name: <base>_PEP.<ext>, then _PEP_1, …
+          // Resolve a non-clobbering output name: <base>_VIT.<ext>, then _VIT_1, …
           let index = 0;
           let name = suffixedName(baseNameOf(path), ext, index);
           while (emitted.has(name.toLowerCase()) || (await this.fileExists(joinPath(outputDirectory, name)))) {

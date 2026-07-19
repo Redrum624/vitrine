@@ -47,17 +47,17 @@ describe('thumbnailScheduler', () => {
     deferreds = new Map();
   });
 
-  test('caps concurrent run() calls at 4', async () => {
+  test('caps concurrent run() calls at 6', async () => {
     for (let i = 1; i <= 10; i++) sched.scheduleThumbnail(`t${i}`, makeRun(`t${i}`));
     await tick();
-    expect(started).toEqual(['t1', 't2', 't3', 't4']);
+    expect(started).toEqual(['t1', 't2', 't3', 't4', 't5', 't6']);
   });
 
   test('a later batch is served before earlier queued requests', async () => {
-    // Batch 1: eight tiles mounted pre-filter; four start, four queue.
-    for (let i = 1; i <= 8; i++) sched.scheduleThumbnail(`a${i}`, makeRun(`a${i}`));
+    // Batch 1: ten tiles mounted pre-filter; six start, four queue.
+    for (let i = 1; i <= 10; i++) sched.scheduleThumbnail(`a${i}`, makeRun(`a${i}`));
     await tick();
-    expect(started).toEqual(['a1', 'a2', 'a3', 'a4']);
+    expect(started).toEqual(['a1', 'a2', 'a3', 'a4', 'a5', 'a6']);
 
     // Batch 2 (a later sync burst): the filtered tiles.
     sched.scheduleThumbnail('b1', makeRun('b1'));
@@ -65,38 +65,38 @@ describe('thumbnailScheduler', () => {
 
     deferreds.get('a1')!.resolve('data:1');
     await tick();
-    expect(started[4]).toBe('b1'); // filtered tile beats queued a5..a8
+    expect(started[6]).toBe('b1'); // filtered tile beats queued a7..a10
 
     deferreds.get('a2')!.resolve('data:2');
     await tick();
-    expect(started[5]).toBe('b2'); // FIFO within the newer batch
+    expect(started[7]).toBe('b2'); // FIFO within the newer batch
 
     deferreds.get('a3')!.resolve('data:3');
     await tick();
-    expect(started[6]).toBe('a5'); // then the stale batch resumes in order
+    expect(started[8]).toBe('a7'); // then the stale batch resumes in order
   });
 
   test('re-scheduling a queued key bumps it to the newest batch', async () => {
-    for (let i = 1; i <= 8; i++) sched.scheduleThumbnail(`a${i}`, makeRun(`a${i}`));
+    for (let i = 1; i <= 10; i++) sched.scheduleThumbnail(`a${i}`, makeRun(`a${i}`));
     await tick();
 
-    // a7 is re-requested later (e.g. scrolled back into view) — no new run(),
-    // but it should now beat a5/a6.
-    sched.scheduleThumbnail('a7', makeRun('dup-a7'));
+    // a9 is re-requested later (e.g. scrolled back into view) — no new run(),
+    // but it should now beat a7/a8.
+    sched.scheduleThumbnail('a9', makeRun('dup-a9'));
     deferreds.get('a1')!.resolve('data:1');
     await tick();
-    expect(started[4]).toBe('a7');
-    expect(started).not.toContain('dup-a7');
+    expect(started[6]).toBe('a9');
+    expect(started).not.toContain('dup-a9');
   });
 
   test('bumpThumbnail promotes a queued key without a new run()', async () => {
-    for (let i = 1; i <= 8; i++) sched.scheduleThumbnail(`a${i}`, makeRun(`a${i}`));
+    for (let i = 1; i <= 10; i++) sched.scheduleThumbnail(`a${i}`, makeRun(`a${i}`));
     await tick();
 
-    sched.bumpThumbnail('a8');
+    sched.bumpThumbnail('a10');
     deferreds.get('a2')!.resolve('data:2');
     await tick();
-    expect(started[4]).toBe('a8');
+    expect(started[6]).toBe('a10');
   });
 
   test('same key dedupes to one run() and one shared result', async () => {
@@ -124,13 +124,13 @@ describe('thumbnailScheduler', () => {
 
   test('rejection propagates and frees the slot', async () => {
     const failing = sched.scheduleThumbnail('bad', makeRun('bad'));
-    for (let i = 1; i <= 4; i++) sched.scheduleThumbnail(`t${i}`, makeRun(`t${i}`));
+    for (let i = 1; i <= 6; i++) sched.scheduleThumbnail(`t${i}`, makeRun(`t${i}`));
     await tick();
-    expect(started).toEqual(['bad', 't1', 't2', 't3']);
+    expect(started).toEqual(['bad', 't1', 't2', 't3', 't4', 't5']);
 
     deferreds.get('bad')!.reject(new Error('decode failed'));
     await expect(failing).rejects.toThrow('decode failed');
     await tick();
-    expect(started).toContain('t4'); // slot was released
+    expect(started).toContain('t6'); // slot was released
   });
 });

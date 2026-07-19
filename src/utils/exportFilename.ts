@@ -1,16 +1,23 @@
 /**
+ * The filename suffix stamped on exported images. "_VIT" for Vitrine —
+ * replaced the pre-rebrand "_PEP" (Photo Editor Pro) in v1.29.1. Single- and
+ * multi-export share this constant so the two paths can never drift.
+ */
+export const EXPORT_SUFFIX = '_VIT';
+
+/**
  * Returns a suffixed filename for multi-export output.
- * index 0  → `${baseName}_PEP.${ext}`
- * index N  → `${baseName}_PEP_${N}.${ext}`
+ * index 0  → `${baseName}_VIT.${ext}`
+ * index N  → `${baseName}_VIT_${N}.${ext}`
  * @param baseName  The base name without extension.
  * @param ext       The bare extension WITHOUT a dot (e.g. 'jpg').
  * @param index     Zero-based export index.
  */
 export function suffixedName(baseName: string, ext: string, index: number): string {
   if (index === 0) {
-    return `${baseName}_PEP.${ext}`;
+    return `${baseName}${EXPORT_SUFFIX}.${ext}`;
   }
-  return `${baseName}_PEP_${index}.${ext}`;
+  return `${baseName}${EXPORT_SUFFIX}_${index}.${ext}`;
 }
 
 /**
