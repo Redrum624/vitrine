@@ -165,31 +165,52 @@ class AutoAdjustService {
 
   // ── Basic Adjustments ────────────────────────────────────────────────────
 
-  autoBasicAdj(stats: ImageStats): {
+  /**
+   * @param opts.standalone TRUE when invoked by the Basic Adjustments card's
+   * own ⚡ Auto (v1.33.0, user: "changes are too small"). Standalone mode
+   * corrects EXPOSURE here (in Auto All the ExposureModule owns it — but the
+   * card's Auto never touches that module, so images stayed under/over-exposed)
+   * and uses stronger gains/clamps. Auto All keeps the original gentler
+   * numbers untouched — its composed look (incl. the camera-match softening)
+   * was tuned as a whole in v1.27.0.
+   */
+  autoBasicAdj(stats: ImageStats, opts: { standalone?: boolean } = {}): {
     black_point: number; exposure: number; contrast: number;
     brightness: number; saturation: number; vibrance: number;
   } {
     const { name, profile } = this.pickProfile(stats);
+    const s = !!opts.standalone;
 
-    // Exposure: zero — ExposureModule already handles it, avoid double-dipping
-    const exposure = 0;
+    // Exposure: standalone corrects the median toward the user's bucket target
+    // (stops, same dead-zone idea as autoExposure); composed mode stays zero —
+    // ExposureModule already handles it, avoid double-dipping.
+    let exposure = 0;
+    if (s) {
+      const medianDelta = profile.targetMedianLum - stats.p50;
+      const deadZone = 0.03;
+      const effectiveDelta = Math.abs(medianDelta) > deadZone
+        ? (medianDelta > 0 ? medianDelta - deadZone : medianDelta + deadZone)
+        : 0;
+      exposure = clamp(effectiveDelta * 2.0, -0.7, 0.7);
+    }
 
     // Contrast: pull toward the user's contrast (std luminance) for this bucket
-    const contrast = clamp((profile.targetStdLum - stats.stdLum) * 1.5, -0.2, 0.3);
+    const contrast = clamp((profile.targetStdLum - stats.stdLum) * (s ? 2.5 : 1.5), s ? -0.3 : -0.2, s ? 0.6 : 0.3);
 
-    // Brightness: very gentle fine-tune toward the user's mean luminance
-    const brightness = clamp((profile.targetMeanLum - stats.meanLum) * 0.15, -0.1, 0.1);
+    // Brightness: fine-tune toward the user's mean luminance (complements the
+    // exposure move in standalone mode; stays a whisper in composed mode)
+    const brightness = clamp((profile.targetMeanLum - stats.meanLum) * (s ? 0.6 : 0.15), s ? -0.35 : -0.1, s ? 0.35 : 0.1);
 
     // Saturation: pull toward the user's saturation for this bucket
-    const saturation = clamp((profile.targetMeanSat - stats.meanSat) * 0.5, -0.2, 0.2);
+    const saturation = clamp((profile.targetMeanSat - stats.meanSat) * (s ? 0.8 : 0.5), s ? -0.25 : -0.2, s ? 0.35 : 0.2);
 
     // Vibrance: proportional to saturation correction
-    const vibrance = clamp(saturation * 0.4, -0.1, 0.15);
+    const vibrance = clamp(saturation * (s ? 0.6 : 0.4), s ? -0.15 : -0.1, s ? 0.25 : 0.15);
 
     // Black point: minimal
     const black_point = 0;
 
-    logger.info(`AutoBasicAdj[${name}]: lum=${stats.meanLum.toFixed(3)}, std=${stats.stdLum.toFixed(3)}, sat=${stats.meanSat.toFixed(3)} → exp=${exposure.toFixed(2)}, cont=${contrast.toFixed(2)}, sat=${saturation.toFixed(2)}`);
+    logger.info(`AutoBasicAdj[${name}${s ? ', standalone' : ''}]: lum=${stats.meanLum.toFixed(3)}, std=${stats.stdLum.toFixed(3)}, sat=${stats.meanSat.toFixed(3)} → exp=${exposure.toFixed(2)}, cont=${contrast.toFixed(2)}, sat=${saturation.toFixed(2)}`);
     return { black_point, exposure, contrast, brightness, saturation, vibrance };
   }
 
