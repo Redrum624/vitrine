@@ -86,6 +86,11 @@ export interface ProcessingContext {
    *  normalises by the same global constant (seam-free sharpen gain). Absent on the whole-image /
    *  main-thread path — edgeMask then uses its own buffer max (byte-identical to before). */
   edgeMaskGlobalMax?: number;
+  /** True when this pass produces an EXPORT buffer (ExportDialog / MultiExportService). Modules may
+   *  use it to skip diagnostics-only work — e.g. NoiseReductionModule's logQualityMetrics runs two
+   *  full-buffer O(n) loops that are pure logging; at export resolution that is measurable waste.
+   *  Never changes pixel output. */
+  isExport?: boolean;
 }
 
 /** Trailing options for {@link ImageProcessingPipeline.processImage}. Replaces the
@@ -382,6 +387,17 @@ export class ImageProcessingPipeline {
           return tempNeutral && tintNeutral;
         }
 
+        case 'exposure': {
+          // ExposureModule.process() applies ONLY `exposure` (2^ev multiplier) and `black`
+          // (level subtraction); the deflicker_* params are inert on the pipeline path
+          // (processWithAutoDeflicker is a separate API). The generic all-zero fallback wrongly
+          // marked the DEFAULT state non-identity (deflicker_percentile 50, target level -4), so
+          // every unedited preview/export ran a full-buffer no-op exposure pass — and the
+          // zero-active-modules identity fast path below could never fire (R5, 2026-07-20).
+          const p = params as { exposure?: number; black?: number };
+          return Math.abs(p.exposure ?? 0) < 0.001 && Math.abs(p.black ?? 0) < 0.001;
+        }
+
         case 'basicadj': {
           // All numeric parameters should be 0 for identity
           return Object.entries(params).every(([key, val]) => {
@@ -559,6 +575,24 @@ export class ImageProcessingPipeline {
         return this.processOnMainThread(input, context);
       }
 
+      // Mirror the main-thread contract: CropModule mutates context.width/height in place, and the
+      // worker's local context mutation dies at the structured-clone boundary — the pool returns
+      // the TRUE output dims instead (PROCESS_COMPLETE outputWidth/outputHeight; undefined on the
+      // tiled path, which never changes dims). Write them back into the CALLER's context so export
+      // callers reading `context.width/height` after processImage stay correct (the v1.30.0
+      // cropped-export corruption class). Guarded by a buffer-conservation check first (v1.32.0
+      // ethos): a result whose length disagrees with its claimed dims falls back to main thread.
+      const outW = typeof result.width === 'number' ? result.width : context.width;
+      const outH = typeof result.height === 'number' ? result.height : context.height;
+      if (result.data.length !== outW * outH * context.channels) {
+        logger.error(
+          `Worker result length ${result.data.length} does not match claimed dims ` +
+          `${outW}x${outH}x${context.channels} — falling back to main thread`,
+        );
+        return this.processOnMainThread(input, context);
+      }
+      context.width = outW;
+      context.height = outH;
       return result.data;
 
     } catch (error) {
@@ -573,23 +607,27 @@ export class ImageProcessingPipeline {
     onProgress?: (completed: number, total: number) => void,
     cacheResults = true,
   ): Promise<Float32Array> {
+    // Pre-count the modules that will actually run (enabled AND non-identity). Two uses:
+    //  - ZERO active modules → return the input as-is, skipping the defensive full-buffer copy
+    //    below. Nothing runs, so nothing can mutate the buffer — an identity export of a 20MP+
+    //    image no longer pays a ~320MB Float32 copy for nothing. Callers treat the result as
+    //    read-only either way (they encode it or blit it).
+    //  - progress reporting (export path): a meaningful done/total fraction.
+    let progressTotal = 0;
+    let progressDone = 0;
+    for (const id of this.processingOrder) {
+      const m = this.modules.get(id);
+      if (m && m.isEnabled !== false && !this.isModuleIdentity(m)) progressTotal++;
+    }
+    if (progressTotal === 0) {
+      logger.warn('No modules were processed - image unchanged');
+      return input;
+    }
+
     let currentData: Float32Array = new Float32Array(input);
 
     // Track processing statistics
     let modulesProcessed = 0;
-
-    // When a progress callback is supplied (export path), pre-count the modules
-    // that will actually run so we can report a meaningful fraction and yield to
-    // the event loop between modules — keeping the UI responsive and the
-    // top-left export bar animating instead of freezing the whole renderer.
-    let progressTotal = 0;
-    let progressDone = 0;
-    if (onProgress) {
-      for (const id of this.processingOrder) {
-        const m = this.modules.get(id);
-        if (m && m.isEnabled !== false && !this.isModuleIdentity(m)) progressTotal++;
-      }
-    }
     const reportProgress = async (yieldToEventLoop: boolean) => {
       if (!onProgress) return;
       progressDone++;

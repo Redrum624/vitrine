@@ -156,6 +156,73 @@ describe('exportMany — cancellation & failures', () => {
   });
 });
 
+describe('exportMany — batch pipelining (R4, 2026-07-20)', () => {
+  const flush = async (rounds = 20) => { for (let r = 0; r < rounds; r++) await Promise.resolve(); };
+
+  it('decodes the NEXT image while the current one is still processing (decode-ahead)', async () => {
+    // Gate each processImage call so we can observe the world while photo A is "processing".
+    const gates: Array<(v: Float32Array) => void> = [];
+    processImage.mockImplementation((d: Float32Array) => new Promise<Float32Array>((res) => gates.push(() => res(d))));
+
+    const run = multiExportService.exportMany(['/i/a.jpg', '/i/b.jpg'], okOptions, controls());
+    await flush();
+
+    // A is processing (unresolved) — B's decode has ALREADY been kicked off.
+    expect(processImage).toHaveBeenCalledTimes(1);
+    expect(loadImageForExport).toHaveBeenCalledTimes(2);
+    expect(loadImageForExport).toHaveBeenNthCalledWith(1, '/i/a.jpg');
+    expect(loadImageForExport).toHaveBeenNthCalledWith(2, '/i/b.jpg');
+    // …but B's EDITS are not restored yet (module state stays serial — worker-fallback safety).
+    expect(restoreState).toHaveBeenCalledTimes(1);
+
+    gates.shift()!(new Float32Array(4));
+    await flush();
+    gates.shift()!(new Float32Array(4));
+    const summary = await run;
+    expect(summary.exported).toEqual(['a_VIT.jpg', 'b_VIT.jpg']);
+  });
+
+  it('processes photo N+1 while photo N is still encoding (fire-and-track encode, ≤1 in flight)', async () => {
+    let resolveEncodeA: ((v: { success: boolean }) => void) | null = null;
+    exportImage
+      .mockImplementationOnce(() => new Promise((res) => { resolveEncodeA = res; }))
+      .mockResolvedValueOnce({ success: true });
+
+    const run = multiExportService.exportMany(['/i/a.jpg', '/i/b.jpg'], okOptions, controls());
+    await flush();
+
+    // A's encode is in flight (unresolved) — B has already been decoded AND processed.
+    expect(resolveEncodeA).not.toBeNull();
+    expect(processImage).toHaveBeenCalledTimes(2);
+    // …but B's encode has NOT fired yet (bounded: one encode in flight).
+    expect(exportImage).toHaveBeenCalledTimes(1);
+
+    resolveEncodeA!({ success: true });
+    const summary = await run;
+    expect(exportImage).toHaveBeenCalledTimes(2);
+    expect(summary.exported).toEqual(['a_VIT.jpg', 'b_VIT.jpg']);
+  });
+
+  it('a decode-ahead failure is charged to the RIGHT photo and the batch continues', async () => {
+    loadImageForExport.mockImplementation(async (p: string) => {
+      if (p === '/i/b.jpg') throw new Error('decode failed');
+      return { width: 100, height: 50, data: new Float32Array(100 * 50 * 4) };
+    });
+    const summary = await multiExportService.exportMany(['/i/a.jpg', '/i/b.jpg', '/i/c.jpg'], okOptions, controls());
+    expect(summary.exported).toEqual(['a_VIT.jpg', 'c_VIT.jpg']);
+    expect(summary.failed).toEqual([{ path: '/i/b.jpg', error: 'decode failed' }]);
+  });
+
+  it('the last photo\'s tracked encode result is awaited before the summary returns', async () => {
+    exportImage
+      .mockResolvedValueOnce({ success: true })
+      .mockImplementationOnce(() => new Promise((res) => setTimeout(() => res({ success: false, error: 'disk full' }), 5)));
+    const summary = await multiExportService.exportMany(['/i/a.jpg', '/i/b.jpg'], okOptions, controls());
+    expect(summary.exported).toEqual(['a_VIT.jpg']);
+    expect(summary.failed).toEqual([{ path: '/i/b.jpg', error: 'disk full' }]);
+  });
+});
+
 describe('exportMany — editor state restore', () => {
   it('always restores the snapshot with the current image dims in finally', async () => {
     await multiExportService.exportMany(['/i/a.jpg'], okOptions, controls());

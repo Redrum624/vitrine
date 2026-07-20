@@ -29,6 +29,10 @@ export interface NoiseReductionContext {
   width: number;
   height: number;
   channels: number;
+  /** Export pass (ProcessingContext.isExport): skip the diagnostics-only PSNR/avg-change metric
+   *  loops — two full-buffer O(n) sweeps of pure logging that are measurable at export resolution.
+   *  Pixel output is identical either way. */
+  isExport?: boolean;
 }
 
 export class NoiseReductionModule {
@@ -234,7 +238,7 @@ export class NoiseReductionModule {
       const gpu = webGLImageProcessor.denoise(input, width, height, this.params.strength);
       if (gpu && gpu.length === input.length) {
         logger.info(`NoiseReduction (GPU NLM) completed in ${(performance.now() - startTime).toFixed(2)}ms`);
-        this.logQualityMetrics(input, gpu);
+        if (!context.isExport) this.logQualityMetrics(input, gpu);
         return gpu;
       }
       // Full-resolution exports exceed the single-pass GPU size cap (the pass
@@ -244,7 +248,7 @@ export class NoiseReductionModule {
       const tiled = this.denoiseTiledGPU(input, width, height, this.params.strength);
       if (tiled && tiled.length === input.length) {
         logger.info(`NoiseReduction (GPU NLM, tiled) completed in ${(performance.now() - startTime).toFixed(2)}ms`);
-        this.logQualityMetrics(input, tiled);
+        if (!context.isExport) this.logQualityMetrics(input, tiled);
         return tiled;
       }
     }
@@ -280,8 +284,8 @@ export class NoiseReductionModule {
       const elapsed = performance.now() - startTime;
       logger.info(`NoiseReduction completed in ${elapsed.toFixed(2)}ms`);
 
-      // Log quality metrics
-      this.logQualityMetrics(input, output);
+      // Log quality metrics (diagnostics only — skipped on export passes)
+      if (!context.isExport) this.logQualityMetrics(input, output);
 
       if (output.length !== input.length) {
         // Never let a wrong-size buffer continue down the pipeline.

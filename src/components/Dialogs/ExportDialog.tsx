@@ -21,6 +21,7 @@ import { imageService } from '../../services/ImageService';
 import { resolveExportSource } from './resolveExportSource';
 import { formatSkippedNames } from './formatSkippedNames';
 import { multiExportService } from '../../services/MultiExportService';
+import { decideExportProcessing } from '../../services/exportRouting';
 import { useAppStore } from '../../stores/appStore';
 import { notificationService } from '../../services/NotificationService';
 import { logger } from '../../utils/Logger';
@@ -280,16 +281,22 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
             const active = order.filter((m) => pipeline.isModuleActive(m.getId()));
             logger.info(`[Export] ${exportName}: pipeline connected, ${active.length}/${order.length} modules active: [${active.map((m) => m.getId()).join(', ')}]`);
           } catch { /* diagnostic only — never block an export */ }
-          const context = { width: source.width, height: source.height, channels: 4 };
-          // Force main-thread processing for exports (web workers may produce
-          // different results). The onProgress hook yields between modules.
+          const context = { width: source.width, height: source.height, channels: 4, isExport: true };
+          // Route through the worker pool when healthy and the routing rules allow
+          // (see exportRouting.ts — NR-active and >48MP exports stay on the main
+          // thread; parity of the worker path is pinned by exportWorkerParity.test.ts).
+          // On the main-thread path the onProgress hook still yields between modules;
+          // the worker path reports no per-module progress (the pass runs off-thread
+          // and typically completes much faster than the old main-thread pass).
           // cacheResults=false: never park full-resolution module results in the
           // pipeline cache (hundreds of MB per module at 24MP+).
+          const route = decideExportProcessing(pipeline, source.width, source.height);
+          logger.info(`[Export] ${exportName}: processing route ${route.useWebWorkers ? 'worker' : 'main'} (${route.reason})`);
           const processedData = await pipeline.processImage(
             source.data,
             context,
             {
-              useWebWorkers: false,
+              useWebWorkers: route.useWebWorkers,
               onProgress: (done, total) => setProgress(0.1 + 0.75 * (total > 0 ? done / total : 1)),
               cacheResults: false,
             },
