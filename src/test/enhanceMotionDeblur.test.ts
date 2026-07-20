@@ -72,7 +72,7 @@ beforeEach(() => {
 const okRun = () => mockAiRun.mockImplementation(async (_rgba: Uint8Array, w: number, h: number, onProgress?: (p: { done: number; total: number }) => void) => {
   onProgress?.({ done: 1, total: 2 });
   onProgress?.({ done: 2, total: 2 });
-  return { data: new Uint8Array(w * h * 4), width: w, height: h, backend: 'directml' };
+  return { data: new Uint8Array(w * h * 4).fill(128), width: w, height: h, backend: 'directml' };
 });
 
 describe('EnhanceService.applyMotionDeblur — 384px floor', () => {

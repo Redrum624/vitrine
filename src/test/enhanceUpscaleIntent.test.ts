@@ -21,7 +21,7 @@ jest.mock('../services/ImageProcessingPipeline', () => ({ imageProcessingPipelin
   processImage: jest.fn(async (d: Float32Array) => d), resetAllModules: jest.fn(), getModule: jest.fn(() => undefined),
 } }));
 jest.mock('../services/EnhanceWorkerClient', () => ({ enhanceWorkerClient: {
-  run: jest.fn(async () => ({ enhanced: new Float32Array(8 * 8 * 4), base: new Float32Array(8 * 8 * 4), width: 8, height: 8 })),
+  run: jest.fn(async () => ({ enhanced: new Float32Array(8 * 8 * 4).fill(0.5), base: new Float32Array(8 * 8 * 4).fill(0.5), width: 8, height: 8 })),
 } }));
 jest.mock('../services/AiUpscaleClient', () => ({ aiUpscaleClient: { isAvailable: jest.fn(async () => false), run: jest.fn() } }));
 jest.mock('../services/CheckpointService', () => ({ checkpointService: { record: jest.fn(), recordLabeled: jest.fn(), setBakeBridge: jest.fn() } }));

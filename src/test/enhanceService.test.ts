@@ -10,7 +10,7 @@ jest.mock('../services/ImageProcessingPipeline', () => ({ imageProcessingPipelin
   getModule: jest.fn(() => undefined), // No crop module active by default
 } }));
 jest.mock('../services/EnhanceWorkerClient', () => ({ enhanceWorkerClient: {
-  run: jest.fn(async () => ({ enhanced: new Float32Array(8*8*4), base: new Float32Array(8*8*4), width: 8, height: 8 })),
+  run: jest.fn(async () => ({ enhanced: new Float32Array(8*8*4).fill(0.5), base: new Float32Array(8*8*4).fill(0.5), width: 8, height: 8 })),
 } }));
 // AI unavailable here so these tests exercise the deterministic ('Standard') path. The AI route
 // has its own suite in enhanceAiRouting.test.ts.

@@ -592,6 +592,18 @@ export class ImageService {
   }
 
   /**
+   * Read-only view of the monotonic load token bumped by every loadImage() — the same
+   * supersession guard the async open/progressive-decode paths use internally. Exposed so
+   * long-running bakes (EnhanceService) can capture {filePath, generation} before their first
+   * await and detect ANY image switch before committing — including a re-open of the SAME file,
+   * which a filePath comparison alone would miss. Reuses the existing token's semantics rather
+   * than inventing a parallel counter (2026-07-20 W2 F1).
+   */
+  getLoadGeneration(): number {
+    return this.loadGeneration;
+  }
+
+  /**
    * Returns the pristine original image data as it was at load time (or as explicitly
    * overwritten by setOriginalImage — see that method's doc comment). Used for instant
    * before/after comparison without re-reading from disk.

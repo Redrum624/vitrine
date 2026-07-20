@@ -16,7 +16,7 @@ jest.mock('../services/ImageProcessingPipeline', () => ({ imageProcessingPipelin
   processImage: jest.fn(async (d: Float32Array) => d), resetAllModules: jest.fn(), getModule: jest.fn(() => undefined),
 } }));
 jest.mock('../services/EnhanceWorkerClient', () => ({ enhanceWorkerClient: {
-  run: jest.fn(async () => ({ enhanced: new Float32Array(8 * 8 * 4), base: new Float32Array(8 * 8 * 4), width: 8, height: 8 })),
+  run: jest.fn(async () => ({ enhanced: new Float32Array(8 * 8 * 4).fill(0.5), base: new Float32Array(8 * 8 * 4).fill(0.5), width: 8, height: 8 })),
 } }));
 jest.mock('../services/AiUpscaleClient', () => ({ aiUpscaleClient: { isAvailable: mockAiIsAvailable, run: mockAiRun } }));
 jest.mock('../services/CheckpointService', () => ({ checkpointService: { record: jest.fn(), recordLabeled: jest.fn(), setBakeBridge: jest.fn() } }));
@@ -47,7 +47,7 @@ describe('EnhanceService.applyUpscale — AI routing', () => {
     mockAiRun.mockImplementation(async (_rgba, _w, _h, _scale, onProgress) => {
       onProgress?.({ done: 1, total: 2 });
       onProgress?.({ done: 2, total: 2 });
-      return { data: new Uint8Array(8 * 8 * 4), width: 8, height: 8, backend: 'directml' };
+      return { data: new Uint8Array(8 * 8 * 4).fill(128), width: 8, height: 8, backend: 'directml' };
     });
 
     await enhanceService.applyUpscale(params);

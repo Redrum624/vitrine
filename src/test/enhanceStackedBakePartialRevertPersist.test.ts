@@ -47,14 +47,14 @@ jest.mock('../services/ImageProcessingPipeline', () => ({ imageProcessingPipelin
   invalidateModuleCache: jest.fn(),
 } }));
 jest.mock('../services/EnhanceWorkerClient', () => ({ enhanceWorkerClient: {
-  run: jest.fn(async () => ({ enhanced: new Float32Array(8 * 8 * 4), base: new Float32Array(8 * 8 * 4), width: 8, height: 8 })),
+  run: jest.fn(async () => ({ enhanced: new Float32Array(8 * 8 * 4).fill(0.5), base: new Float32Array(8 * 8 * 4).fill(0.5), width: 8, height: 8 })),
 } }));
 // AI upscale unavailable — stacked upscales take the deterministic ('standard') route.
 jest.mock('../services/AiUpscaleClient', () => ({ aiUpscaleClient: { isAvailable: jest.fn(async () => false), run: jest.fn() } }));
 // AI deblur available — the reviewer-repro test stacks a deblur onto a live upscale.
 jest.mock('../services/AiDeblurClient', () => ({ aiDeblurClient: {
   isAvailable: jest.fn(async () => true),
-  run: jest.fn(async (_rgba: Uint8Array, w: number, h: number) => ({ data: new Uint8Array(w * h * 4), width: w, height: h, backend: 'directml' })),
+  run: jest.fn(async (_rgba: Uint8Array, w: number, h: number) => ({ data: new Uint8Array(w * h * 4).fill(128), width: w, height: h, backend: 'directml' })),
 } }));
 jest.mock('../services/CheckpointService', () => ({ checkpointService: { record: jest.fn(), recordLabeled: jest.fn(), setBakeBridge: jest.fn() } }));
 
@@ -139,7 +139,7 @@ describe('Z1 re-review MEDIUM regression — the reviewer repro (edit → upscal
     // Image large enough for the deblur floor; the upscale worker returns 768×768.
     curOrig = { data: new Float32Array(4 * 4 * 4), width: 384, height: 384 };
     (enhanceWorkerClient.run as jest.Mock).mockResolvedValueOnce({
-      enhanced: new Float32Array(768 * 768 * 4), base: new Float32Array(768 * 768 * 4), width: 768, height: 768,
+      enhanced: new Float32Array(768 * 768 * 4).fill(0.5), base: new Float32Array(768 * 768 * 4).fill(0.5), width: 768, height: 768,
     });
 
     // 1. Pre-bake grading.

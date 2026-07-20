@@ -10,6 +10,7 @@ import { useAppStore } from '../stores/appStore';
 import { EnhanceParams, enhanceAiUpscaled } from '../utils/enhanceChain';
 import { gpuPreviewPipeline } from '../shaders/GpuPreviewPipeline';
 import { guardDeveloping } from '../utils/developingGuard';
+import { logger } from '../utils/Logger';
 
 /** Float32 RGBA 0..1 (pipeline domain) → Uint8 RGBA 0..255 (AI IPC domain). */
 function float32ToUint8Rgba(f: Float32Array): Uint8Array {
@@ -160,6 +161,78 @@ class EnhanceService {
     return this.restoreStack.length;
   }
 
+  /**
+   * Identity of the photo a bake is running FOR, captured before the bake's first await.
+   * Reuses ImageService's `loadGeneration` token (the same supersession guard loadImage and the
+   * progressive-decode swap use) alongside the file path, so a re-open of the SAME file also
+   * invalidates a stale bake — a path comparison alone would miss it. Optional-chained so unit
+   * mocks that omit these methods degrade to a never-changing identity (same pattern as the
+   * `getModule?.` / `setImageSwitchHook?.` calls in this file).
+   */
+  private captureBakeTarget(): { filePath: string | null; generation: number | null } {
+    return {
+      filePath: imageService.getCurrentImage?.()?.filePath ?? null,
+      generation: imageService.getLoadGeneration?.() ?? null,
+    };
+  }
+
+  /**
+   * F1 (CRITICAL, 2026-07-20 audit): cross-image bake commit guard. A bake's awaits (develop pass
+   * + AI inference) can span minutes and the filmstrip is NOT disabled while one runs (only the
+   * Enhance panel's own buttons are), so the user can switch photos mid-bake. The completing bake
+   * would then setOriginalImage the OLD photo's pixels onto the NEW photo, push a foreign restore
+   * point onto the new photo's freshly-cleared revert stack, and persist the old photo's edit
+   * state into the new photo's sidecar (persistBakedUpscaleIntent reads getCurrentImage() at
+   * completion). Returns true — after logging and showing a one-shot toast — when the working
+   * image changed since `captured`; callers must abort BEFORE any commit-side effect (the finally
+   * block clears the busy state). Aborting also means the persist never runs, satisfying the
+   * "persist for the captured identity or not at all" contract.
+   */
+  private bakeTargetChanged(captured: { filePath: string | null; generation: number | null }, label: string): boolean {
+    const now = this.captureBakeTarget();
+    if (now.filePath === captured.filePath && now.generation === captured.generation) return false;
+    logger.warn(
+      `${label} canceled: photo changed mid-bake (${captured.filePath ?? 'unknown'} gen ${captured.generation ?? '?'} → ${now.filePath ?? 'none'} gen ${now.generation ?? '?'})`,
+    );
+    notificationService.warning('Photo changed', `${label} was canceled because the photo changed while it was processing — nothing was applied.`);
+    return true;
+  }
+
+  /**
+   * F2 (IMPORTANT, 2026-07-20 audit): buffer-conservation + sanity guard at the bake commit
+   * boundary — the pipeline-wide guard class added in v1.32.0 after the wavelet stub shipped
+   * quarter-res buffers into exports, applied here at the WORST spot (setOriginalImage permanently
+   * replaces the working base). Asserts the buffer exactly matches the dimensions it is about to
+   * be committed under, then samples the first/middle/last 1k values for finiteness and
+   * not-all-zero (RGBA alpha is 1.0 on every legitimate pipeline buffer, so an all-zero sample can
+   * only be corruption). Throws after logging loudly — the Enhance panel surfaces the message via
+   * its error seam, the previous base is left untouched, and the finally block clears busy state.
+   */
+  private assertBakeBufferSane(label: string, data: Float32Array, outW: number, outH: number): void {
+    const expected = outW * outH * 4;
+    if (data.length !== expected) {
+      logger.error(`Bake commit rejected: ${label} buffer is ${data.length} values, expected ${outW}×${outH}×4 = ${expected}`);
+      throw new Error(`Enhance failed: the ${label} result does not match its ${outW}×${outH} dimensions — the image was left untouched.`);
+    }
+    const win = Math.min(1024, data.length);
+    const starts = [0, Math.max(0, (data.length >> 1) - (win >> 1)), Math.max(0, data.length - win)];
+    let allZero = true;
+    for (const s of starts) {
+      for (let i = s; i < s + win; i++) {
+        const v = data[i];
+        if (!Number.isFinite(v)) {
+          logger.error(`Bake commit rejected: ${label} buffer has a non-finite value at index ${i} (${outW}×${outH})`);
+          throw new Error(`Enhance failed: the ${label} result contains invalid pixel values — the image was left untouched.`);
+        }
+        if (v !== 0) allZero = false;
+      }
+    }
+    if (allZero) {
+      logger.error(`Bake commit rejected: ${label} buffer sampled all-zero (${outW}×${outH})`);
+      throw new Error(`Enhance failed: the ${label} result is empty — the image was left untouched.`);
+    }
+  }
+
   async applyUpscale(params: EnhanceParams): Promise<void> {
     // Base-MUTATING: bakes a whole new original/current base (setOriginalImage +
     // updateCurrentImageData) and sets the `bakedUpscale` marker. During the
@@ -176,6 +249,9 @@ class EnhanceService {
 
     const original = imageService.getOriginalImage();
     if (!original) throw new Error('No image loaded');
+
+    // F1: capture the bake target BEFORE the first await — see bakeTargetChanged's doc.
+    const bakeTarget = this.captureBakeTarget();
 
     const { width, height } = original;
 
@@ -214,6 +290,10 @@ class EnhanceService {
         { width, height, channels: 4 },
         { useWebWorkers: true },
       );
+
+      // F1 early bail: if the photo already changed during the develop pass, abort before
+      // spending minutes on AI inference / the worker run for a result that can never commit.
+      if (this.bakeTargetChanged(bakeTarget, 'Enhance Upscale')) return;
 
       // Capture snapshot before the (AI or worker) call (cheap), but do not commit it yet.
       // The restore point stores the NATIVE (pre-crop) buffer and dims so that revert
@@ -286,6 +366,14 @@ class EnhanceService {
         mode = 'standard';
       }
 
+      // F1 commit-boundary re-check: everything below this line is a commit-side effect
+      // (restore-point push, setOriginalImage, markers, intents, persist, checkpoint) and the
+      // block is fully synchronous — so ONE re-check here guards every one of them.
+      if (this.bakeTargetChanged(bakeTarget, 'Enhance Upscale')) return;
+      // F2 buffer sanity BEFORE any mutation — a malformed result must leave the base untouched.
+      this.assertBakeBufferSane('upscaled base', base, outWidth, outHeight);
+      this.assertBakeBufferSane('upscaled image', enhanced, outWidth, outHeight);
+
       // Result obtained — now safe to push the restore point and mutate.
       store.setUpscaleMode(mode);
       this.restoreStack.push({ data: restoreData, width, height, kind: 'upscale', scale: params.scale, mode, editState });
@@ -356,6 +444,11 @@ class EnhanceService {
 
     const original = imageService.getOriginalImage();
     if (!original) throw new Error('No image loaded');
+
+    // F1: capture the bake target BEFORE the first await (the isAvailable() probe below) — see
+    // bakeTargetChanged's doc.
+    const bakeTarget = this.captureBakeTarget();
+
     const { width, height } = original;
 
     // Crop-adjusted processed dims (mirrors applyUpscale) — deblur runs on the developed output.
@@ -403,6 +496,10 @@ class EnhanceService {
         { useWebWorkers: true },
       );
 
+      // F1 early bail: abort before the (potentially minutes-long) AI run if the photo already
+      // changed during the develop pass.
+      if (this.bakeTargetChanged(bakeTarget, 'AI Motion Deblur')) return;
+
       // Snapshot the NATIVE (pre-crop) base + edit state for revert BEFORE the AI call.
       const restoreData = new Float32Array(original.data);
       const editState = editPersistenceService.serialize();
@@ -414,6 +511,12 @@ class EnhanceService {
         (p) => { if (p.total > 0) store.setDeblurProgress(p.done / p.total); },
       );
       const base = uint8ToFloat32Rgba(ai.data); // clean model output (new editable base, same dims)
+
+      // F1 commit-boundary re-check — everything below is a synchronous commit-side effect, so
+      // one re-check guards them all (mirrors applyUpscale).
+      if (this.bakeTargetChanged(bakeTarget, 'AI Motion Deblur')) return;
+      // F2 buffer sanity BEFORE any mutation (also validates ai.data — `base` is its 1:1 mapping).
+      this.assertBakeBufferSane('deblurred base', base, ai.width, ai.height);
 
       this.restoreStack.push({ data: restoreData, width, height, kind: 'deblur', editState });
 

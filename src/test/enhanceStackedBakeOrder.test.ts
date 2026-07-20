@@ -32,12 +32,12 @@ jest.mock('../services/EditPersistenceService', () => ({ editPersistenceService:
   suspendRedirectForStackedBake: jest.fn(), resumeRedirectAfterStackedUnwind: jest.fn(),
 } }));
 jest.mock('../services/EnhanceWorkerClient', () => ({ enhanceWorkerClient: {
-  run: jest.fn(async () => ({ enhanced: new Float32Array(768 * 768 * 4), base: new Float32Array(768 * 768 * 4), width: 768, height: 768 })),
+  run: jest.fn(async () => ({ enhanced: new Float32Array(768 * 768 * 4).fill(0.5), base: new Float32Array(768 * 768 * 4).fill(0.5), width: 768, height: 768 })),
 } }));
 jest.mock('../services/AiUpscaleClient', () => ({ aiUpscaleClient: { isAvailable: jest.fn(async () => false), run: jest.fn() } }));
 jest.mock('../services/AiDeblurClient', () => ({ aiDeblurClient: {
   isAvailable: jest.fn(async () => true),
-  run: jest.fn(async (_rgba: Uint8Array, w: number, h: number) => ({ data: new Uint8Array(w * h * 4), width: w, height: h, backend: 'directml' })),
+  run: jest.fn(async (_rgba: Uint8Array, w: number, h: number) => ({ data: new Uint8Array(w * h * 4).fill(128), width: w, height: h, backend: 'directml' })),
 } }));
 jest.mock('../services/CheckpointService', () => ({ checkpointService: { record: jest.fn(), recordLabeled: jest.fn(), setBakeBridge: jest.fn() } }));
 
