@@ -13,7 +13,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { ImageProcessingPipeline } from '../services/ImageProcessingPipeline';
+import { ImageProcessingPipeline, setWorkerPool, type WorkerPoolLike } from '../services/ImageProcessingPipeline';
 import { evictOldestThumbnails, MAX_THUMBNAIL_CACHE } from '../components/Panels/ThumbnailPanel';
 
 const { sweepStaleRawTmpDirs } = require('../../electron/rawDecoder.cjs') as {
@@ -65,6 +65,30 @@ describe('ImageProcessingPipeline module cache vs export path', () => {
     const a = await makeNonIdentityPipeline().processImage(makeImage(w, h), ctx, { useWebWorkers: false });
     const b = await makeNonIdentityPipeline().processImage(makeImage(w, h), ctx, { useWebWorkers: false, cacheResults: false });
     expect(Array.from(b)).toEqual(Array.from(a));
+  });
+
+  // W4 R2: the worker route's main-thread FALLBACK must honor cacheResults=false too. Before this,
+  // a bake/export develop pass whose worker run failed fell back via processOnMainThread(input,
+  // context) — silently re-enabling caching and parking full-res module results after all.
+  it('worker-path fallback to the main thread still honors cacheResults=false', async () => {
+    const pipeline = makeNonIdentityPipeline();
+    // 256x256 clears the small-preview floor so the pool is consulted; the pool then fails.
+    const fw = 256, fh = 256;
+    const failingPool: WorkerPoolLike = {
+      shouldUseWorkers: () => true,
+      processImage: async () => { throw new Error('pool exploded (test)'); },
+    };
+    setWorkerPool(failingPool);
+    try {
+      const out = await pipeline.processImage(
+        makeImage(fw, fh), { width: fw, height: fh, channels: 4 },
+        { useWebWorkers: true, cacheResults: false },
+      );
+      expect(out.length).toBe(fw * fh * 4);
+      expect(cacheSizeOf(pipeline)).toBe(0);
+    } finally {
+      setWorkerPool(null as unknown as WorkerPoolLike);
+    }
   });
 });
 

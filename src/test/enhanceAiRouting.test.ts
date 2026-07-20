@@ -15,8 +15,10 @@ jest.mock('../services/ImageService', () => ({ imageService: {
 jest.mock('../services/ImageProcessingPipeline', () => ({ imageProcessingPipeline: {
   processImage: jest.fn(async (d: Float32Array) => d), resetAllModules: jest.fn(), getModule: jest.fn(() => undefined),
 } }));
+const mockRunAiFinish = jest.fn();
 jest.mock('../services/EnhanceWorkerClient', () => ({ enhanceWorkerClient: {
   run: jest.fn(async () => ({ enhanced: new Float32Array(8 * 8 * 4).fill(0.5), base: new Float32Array(8 * 8 * 4).fill(0.5), width: 8, height: 8 })),
+  runAiFinish: mockRunAiFinish,
 } }));
 jest.mock('../services/AiUpscaleClient', () => ({ aiUpscaleClient: { isAvailable: mockAiIsAvailable, run: mockAiRun } }));
 jest.mock('../services/CheckpointService', () => ({ checkpointService: { record: jest.fn(), recordLabeled: jest.fn(), setBakeBridge: jest.fn() } }));
@@ -128,5 +130,73 @@ describe('EnhanceService.applyUpscale — AI route applies the Enhance sliders (
     });
     const shown = (imageService.updateCurrentImageData as jest.Mock).mock.calls[0][0] as Float32Array;
     expect(bytesEqual(shown, aiFloat)).toBe(false);
+  });
+
+  it('neutral sliders never touch the enhance worker (pass-through skips the finishing pass entirely)', async () => {
+    await enhanceService.applyUpscale({
+      ...DEFAULT_ENHANCE_PARAMS, upscale: true, scale: 2,
+      denoiseStrength: 0, alpha: 0, sharpness: 0, chromaClean: false,
+    });
+    expect(mockRunAiFinish).not.toHaveBeenCalled();
+  });
+});
+
+// W4 R2: both bake develop passes must run with cacheResults:false — the full-res per-module
+// results (~320MB Float32 each at 20MP) have no consumer (resetAllModules runs post-bake) and
+// would evict the preview-size entries the slider fast path relies on.
+describe('EnhanceService.applyUpscale — develop pass caching (W4 R2)', () => {
+  it('the develop pass runs with cacheResults:false', async () => {
+    mockAiIsAvailable.mockResolvedValue(false);
+    await enhanceService.applyUpscale(params);
+    const { imageProcessingPipeline } = jest.requireMock('../services/ImageProcessingPipeline');
+    const call = (imageProcessingPipeline.processImage as jest.Mock).mock.calls[0];
+    expect(call[2]).toMatchObject({ useWebWorkers: true, cacheResults: false });
+  });
+});
+
+// W4 R4: the AI-route finishing pass (enhanceAiUpscaled orchestration) must run in the enhance
+// worker — before this it ran whole-buffer on the renderer MAIN thread at output resolution,
+// freezing the UI parked at 92% progress. A worker failure falls back to the main thread (never
+// to the deterministic route — the AI inference already succeeded).
+describe('EnhanceService.applyUpscale — AI finishing pass off the main thread (W4 R4)', () => {
+  const aiOut = new Uint8Array(8 * 8 * 4).fill(128);
+  const sliderParams = {
+    ...DEFAULT_ENHANCE_PARAMS, upscale: true, scale: 2 as const,
+    denoiseStrength: 10, alpha: 0, sharpness: 0, chromaClean: false,
+  };
+
+  beforeEach(() => {
+    mockAiIsAvailable.mockResolvedValue(true);
+    mockAiRun.mockResolvedValue({ data: aiOut.slice(), width: 8, height: 8, backend: 'directml' });
+  });
+
+  it('routes the finishing pass through enhanceWorkerClient.runAiFinish; the worker result is displayed', async () => {
+    const finished = new Float32Array(8 * 8 * 4).fill(0.25);
+    mockRunAiFinish.mockResolvedValue(finished.slice());
+
+    await enhanceService.applyUpscale(sliderParams);
+
+    expect(mockRunAiFinish).toHaveBeenCalledWith(expect.any(Float32Array), 8, 8, expect.objectContaining({ denoiseStrength: 10 }));
+    const shown = (imageService.updateCurrentImageData as jest.Mock).mock.calls[0][0] as Float32Array;
+    expect(shown.every((v) => v === 0.25)).toBe(true);
+    expect(mockSetUpscaleMode).toHaveBeenCalledWith('ai');
+  });
+
+  it('a worker-finish failure falls back to the MAIN-thread finish — still the AI route, base preserved', async () => {
+    mockRunAiFinish.mockRejectedValue(new Error('enhance worker crashed: boom'));
+
+    await enhanceService.applyUpscale(sliderParams);
+
+    // Fallback applied the denoise on the main thread: displayed differs from the raw AI output…
+    const shown = (imageService.updateCurrentImageData as jest.Mock).mock.calls[0][0] as Float32Array;
+    const aiFloat = Float32Array.from(aiOut, (v) => v / 255);
+    // …the committed base is still the clean model output at the right size…
+    const committedBase = (imageService.setOriginalImage as jest.Mock).mock.calls[0][0] as Float32Array;
+    expect(committedBase.length).toBe(aiFloat.length);
+    expect(shown.length).toBe(aiFloat.length);
+    // …and the route stayed AI (never demoted to the deterministic worker).
+    expect(enhanceWorkerClient.run).not.toHaveBeenCalled();
+    expect(mockSetUpscaleMode).toHaveBeenCalledWith('ai');
+    expect(checkpointService.recordLabeled).toHaveBeenCalledWith('Enhanced ×2 (AI)', 1);
   });
 });

@@ -16,6 +16,9 @@ export interface AiDeblurResult {
   width: number;
   height: number;
   backend: string | null;
+  /** Tiles whose model output failed the runner's garbage tripwire and kept their input pixels
+   *  (W4 — see electron/aiDeblur.cjs tileOutputSane). Absent from older mains ⇒ treated as 0. */
+  skippedTiles?: number;
 }
 
 export type AiDeblurProgress = (p: { done: number; total: number }) => void;

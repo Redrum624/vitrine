@@ -7,7 +7,7 @@ import { checkpointService } from './CheckpointService';
 import { editPersistenceService } from './EditPersistenceService';
 import { notificationService } from './NotificationService';
 import { useAppStore } from '../stores/appStore';
-import { EnhanceParams, enhanceAiUpscaled } from '../utils/enhanceChain';
+import { EnhanceParams, enhanceAiUpscaled, aiFinishRequested } from '../utils/enhanceChain';
 import { gpuPreviewPipeline } from '../shaders/GpuPreviewPipeline';
 import { guardDeveloping } from '../utils/developingGuard';
 import { logger } from '../utils/Logger';
@@ -233,6 +233,30 @@ class EnhanceService {
     }
   }
 
+  /**
+   * W4 R4: the AI-route finishing pass (chroma denoise / detail / CAS / chroma clean on the model
+   * output at FINAL resolution) — routed through the enhance worker so the renderer main thread is
+   * never parked on a whole-buffer pass (the frozen-UI-at-92% symptom). Failure semantics: a
+   * worker crash/timeout/boot failure falls back to the MAIN-thread finish — never to the
+   * deterministic route, because the AI inference already succeeded and its result must not be
+   * discarded. The worker call TRANSFERS `aiRgba` (detaching it), so the fallback re-derives from
+   * the pristine `cleanBase` copy. A fully-neutral slider set skips the round-trip entirely
+   * (aiFinishRequested — same gate as enhanceAiUpscaled's pass-through).
+   */
+  private async finishAiRoute(
+    aiRgba: Float32Array, w: number, h: number, params: EnhanceParams, cleanBase: Float32Array,
+  ): Promise<{ enhanced: Float32Array; route: 'worker' | 'main' | 'none' }> {
+    if (!aiFinishRequested(params)) return { enhanced: aiRgba, route: 'none' };
+    try {
+      const out = await enhanceWorkerClient.runAiFinish(aiRgba, w, h, params);
+      if (!(out instanceof Float32Array)) throw new Error('enhance worker returned no buffer');
+      return { enhanced: out, route: 'worker' };
+    } catch (e) {
+      logger.warn(`AI finishing pass fell back to the main thread: ${e instanceof Error ? e.message : String(e)}`);
+      return { enhanced: enhanceAiUpscaled(new Float32Array(cleanBase), w, h, params), route: 'main' };
+    }
+  }
+
   async applyUpscale(params: EnhanceParams): Promise<void> {
     // Base-MUTATING: bakes a whole new original/current base (setOriginalImage +
     // updateCurrentImageData) and sets the `bakedUpscale` marker. During the
@@ -285,11 +309,16 @@ class EnhanceService {
     store.setIsProcessing(true);
     store.setUpscaleProgress(null);
     try {
+      const tDevelop0 = performance.now();
+      // W4 R2: cacheResults=false — the full-res per-module results have no consumer after the
+      // bake (resetAllModules runs on commit; an aborted bake never reads them) and at 20MP each
+      // is a ~320MB Float32 parked in the LRU, evicting the preview entries sliders rely on.
       const edited = await imageProcessingPipeline.processImage(
         new Float32Array(original.data),
         { width, height, channels: 4 },
-        { useWebWorkers: true },
+        { useWebWorkers: true, cacheResults: false },
       );
+      const developMs = Math.round(performance.now() - tDevelop0);
 
       // F1 early bail: if the photo already changed during the develop pass, abort before
       // spending minutes on AI inference / the worker run for a result that can never commit.
@@ -314,27 +343,39 @@ class EnhanceService {
       if (await aiUpscaleClient.isAvailable()) {
         try {
           store.setUpscaleProgress(0);
+          const tInfer0 = performance.now();
           const ai = await aiUpscaleClient.run(
             float32ToUint8Rgba(edited),
             procW,
             procH,
             params.scale as 2 | 4,
-            // Reserve the top 10% of the bar for the renderer-side finishing pass below, which
-            // is synchronous and can take a second on a large output — so the bar advances into
-            // the finish instead of sitting frozen at 100% while it runs.
+            // Reserve the top 10% of the bar for the finishing pass below (worker round-trip on
+            // a large output) — so the bar advances into the finish instead of sitting frozen at
+            // 100% while it runs.
             (p) => { if (p.total > 0) store.setUpscaleProgress((p.done / p.total) * 0.9); },
           );
+          const inferMs = Math.round(performance.now() - tInfer0);
+          const tFinish0 = performance.now();
           const aiRgba = uint8ToFloat32Rgba(ai.data); // clean model output (new editable base)
           store.setUpscaleProgress(0.92); // entering the finishing pass (chroma/detail/sharpen)
           // Apply the user's Chroma-noise / Detail / Sharpen sliders to the AI OUTPUT so they are
           // not silent no-ops on this route (parity with the deterministic Lanczos route). RL
           // deblur is intentionally skipped on AI output — see enhanceAiUpscaled's doc.
-          enhanced = enhanceAiUpscaled(aiRgba, ai.width, ai.height, params);
-          base = new Float32Array(aiRgba); // Before/After 'After' ref + editable canvas; distinct
-          outWidth = ai.width;             // buffer from `enhanced` (which may alias aiRgba on the
-          outHeight = ai.height;           // neutral-sliders pass-through path).
+          // W4 R4: runs in the enhance worker (finishAiRoute), keeping the main thread free.
+          base = new Float32Array(aiRgba); // Before/After 'After' ref + editable canvas — copied
+                                           // BEFORE the worker transfer detaches aiRgba.
+          const fin = await this.finishAiRoute(aiRgba, ai.width, ai.height, params, base);
+          enhanced = fin.enhanced;
+          store.setUpscaleProgress(1);
+          outWidth = ai.width;
+          outHeight = ai.height;
           mode = 'ai';
           usedAi = true;
+          // W4 R5 diagnosability (file log survives console-stripping).
+          logger.info(
+            `AI upscale ×${params.scale}: ${procW}x${procH} → ${outWidth}x${outHeight}, ` +
+            `develop=${developMs}ms, inference=${inferMs}ms, finish=${Math.round(performance.now() - tFinish0)}ms (${fin.route})`,
+          );
         } catch {
           usedAi = false; // fall through to the deterministic path below
         }
@@ -490,11 +531,15 @@ class EnhanceService {
     store.setIsProcessing(true);
     store.setDeblurProgress(0);
     try {
+      const tDevelop0 = performance.now();
+      // W4 R2: cacheResults=false — same rationale as applyUpscale's develop pass (no consumer
+      // post-bake; ~320MB Float32 per module at 20MP would churn the preview cache for nothing).
       const edited = await imageProcessingPipeline.processImage(
         new Float32Array(original.data),
         { width, height, channels: 4 },
-        { useWebWorkers: true },
+        { useWebWorkers: true, cacheResults: false },
       );
+      const developMs = Math.round(performance.now() - tDevelop0);
 
       // F1 early bail: abort before the (potentially minutes-long) AI run if the photo already
       // changed during the develop pass.
@@ -504,12 +549,26 @@ class EnhanceService {
       const restoreData = new Float32Array(original.data);
       const editState = editPersistenceService.serialize();
 
+      let tileTotal = 0;
+      const tInfer0 = performance.now();
       const ai = await aiDeblurClient.run(
         float32ToUint8Rgba(edited),
         procW,
         procH,
-        (p) => { if (p.total > 0) store.setDeblurProgress(p.done / p.total); },
+        (p) => { if (p.total > 0) { tileTotal = p.total; store.setDeblurProgress(p.done / p.total); } },
       );
+      const inferMs = Math.round(performance.now() - tInfer0);
+      const tFinish0 = performance.now();
+      // Output range over RGB (alpha skipped) — the "silently returned garbage" tripwire for the
+      // R5 log line below; costs one linear pass over the Uint8 result.
+      let outMin = 255, outMax = 0;
+      for (let i = 0; i < ai.data.length; i += 4) {
+        for (let c = 0; c < 3; c++) {
+          const v = ai.data[i + c];
+          if (v < outMin) outMin = v;
+          if (v > outMax) outMax = v;
+        }
+      }
       const base = uint8ToFloat32Rgba(ai.data); // clean model output (new editable base, same dims)
 
       // F1 commit-boundary re-check — everything below is a synchronous commit-side effect, so
@@ -544,6 +603,14 @@ class EnhanceService {
       checkpointService.recordLabeled('Motion deblur (AI)', this.getRestoreDepth());
       store.notifyExternalParamsChange();
       store.triggerReprocessing();
+      // W4 R5: ONE line per run through the app logger (survives console-stripping into the file
+      // log) — dims, tile count, backend, per-phase ms, output range. Makes any future "deblur is
+      // slow / broke the photo" report attributable from the log alone.
+      logger.info(
+        `AI deblur: ${procW}x${procH}, ${tileTotal} tiles, backend=${ai.backend ?? 'unknown'}, ` +
+        `develop=${developMs}ms, inference=${inferMs}ms, finish=${Math.round(performance.now() - tFinish0)}ms, ` +
+        `out=[${outMin}..${outMax}], skippedTiles=${ai.skippedTiles ?? 0}`,
+      );
     } finally {
       this.inFlight = false;
       store.setIsProcessing(false);

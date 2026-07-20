@@ -457,7 +457,7 @@ ipcMain.handle('ai-deblur-available', async () => {
 ipcMain.handle('ai-deblur', async (event, { rgba, width, height }) => {
   const onProgress = (p) => { try { event.sender.send('ai-deblur-progress', p); } catch { /* window gone */ } };
   const r = await aiDeblur.deblur(new Uint8Array(rgba), width, height, onProgress);
-  return { data: r.data, width: r.width, height: r.height, backend: aiDeblur.getBackend() };
+  return { data: r.data, width: r.width, height: r.height, backend: aiDeblur.getBackend(), skippedTiles: r.skippedTiles ?? 0 };
 });
 
 ipcMain.handle('show-open-dialog', async (event, options) => {

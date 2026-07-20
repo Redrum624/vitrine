@@ -556,16 +556,20 @@ export class ImageProcessingPipeline {
 
     // Check if we should use Web Workers for performance
     if (useWebWorkers && !isSmallPreview && workerPool && workerPool.shouldUseWorkers(imageData)) {
-      return this.processWithWebWorkers(input, context);
+      return this.processWithWebWorkers(input, context, cacheResults);
     } else {
       return this.processOnMainThread(input, context, onProgress, cacheResults);
     }
   }
 
-  private async processWithWebWorkers(input: Float32Array, context: ProcessingContext): Promise<Float32Array> {
+  // W4 R2: `cacheResults` is threaded through so the MAIN-THREAD FALLBACKS below honor the
+  // caller's caching intent — before this, a bake/export develop pass whose worker run failed
+  // fell back via processOnMainThread(input, context) and silently re-enabled caching, parking
+  // full-resolution module results after all. The worker path itself never touches moduleCache.
+  private async processWithWebWorkers(input: Float32Array, context: ProcessingContext, cacheResults = true): Promise<Float32Array> {
     if (!workerPool) {
       // No pool registered (worker scope, or tests) — stay on this thread.
-      return this.processOnMainThread(input, context);
+      return this.processOnMainThread(input, context, undefined, cacheResults);
     }
 
     try {
@@ -602,7 +606,7 @@ export class ImageProcessingPipeline {
 
       if (!result.success) {
         logger.warn('Web Worker processing failed, falling back to main thread');
-        return this.processOnMainThread(input, context);
+        return this.processOnMainThread(input, context, undefined, cacheResults);
       }
 
       // Mirror the main-thread contract: CropModule mutates context.width/height in place, and the
@@ -619,7 +623,7 @@ export class ImageProcessingPipeline {
           `Worker result length ${result.data.length} does not match claimed dims ` +
           `${outW}x${outH}x${context.channels} — falling back to main thread`,
         );
-        return this.processOnMainThread(input, context);
+        return this.processOnMainThread(input, context, undefined, cacheResults);
       }
       context.width = outW;
       context.height = outH;
@@ -627,7 +631,7 @@ export class ImageProcessingPipeline {
 
     } catch (error) {
       logger.error('Web Worker processing error, falling back to main thread:', error);
-      return this.processOnMainThread(input, context);
+      return this.processOnMainThread(input, context, undefined, cacheResults);
     }
   }
 
