@@ -35,8 +35,26 @@ describe('chooseExportProcessing — decision table', () => {
     expect(chooseExportProcessing({ ...base, width: 8000, height: 6000 }).useWebWorkers).toBe(true);
   });
 
-  it('threshold constant mirrors WebWorkerImageProcessor.largeImageThreshold (8000x6000)', () => {
-    expect(EXPORT_TILED_MIN_PIXELS).toBe(8000 * 6000);
+  it('BOTH dims ≤4096 → main thread (keeps the renderer-GPU module passes and their pre-W3 output)', () => {
+    expect(chooseExportProcessing({ ...base, width: 4096, height: 4096 }))
+      .toEqual({ useWebWorkers: false, reason: 'small-image-gpu-parity' });
+    expect(chooseExportProcessing({ ...base, width: 4000, height: 3000 }))
+      .toEqual({ useWebWorkers: false, reason: 'small-image-gpu-parity' });
+  });
+
+  it('>4096 on EITHER dim (no NR, ≤48MP) → worker (past the GPU per-side cap, main thread was CPU anyway)', () => {
+    expect(chooseExportProcessing({ ...base, width: 4097, height: 2000 }))
+      .toEqual({ useWebWorkers: true, reason: 'worker-pool' });
+    expect(chooseExportProcessing({ ...base, width: 2000, height: 4097 }))
+      .toEqual({ useWebWorkers: true, reason: 'worker-pool' });
+  });
+
+  it('threshold constant mirrors WebWorkerImageProcessor.largeImageThreshold (read from the source of truth)', () => {
+    // Read the REAL module (the top-of-file mock only stubs the singleton's isHealthy) so a
+    // drift in largeImageThreshold fails this test instead of a literal asserting itself.
+    const { webWorkerImageProcessor: real } =
+      jest.requireActual<typeof import('../services/WebWorkerImageProcessor')>('../services/WebWorkerImageProcessor');
+    expect(EXPORT_TILED_MIN_PIXELS).toBe(real.getStats().largeImageThreshold);
   });
 
   it('NR takes precedence over size only after health (rule order is stable for log forensics)', () => {
@@ -68,5 +86,10 @@ describe('decideExportProcessing — live wrapper', () => {
 
   it('a missing pipeline routes like NR-off (defensive null handling)', () => {
     expect(decideExportProcessing(null, 5184, 3888).useWebWorkers).toBe(true);
+  });
+
+  it('small exports (both dims ≤4096) stay on the main thread through the live wrapper too', () => {
+    expect(decideExportProcessing(pipelineWith(false), 4000, 3000))
+      .toEqual({ useWebWorkers: false, reason: 'small-image-gpu-parity' });
   });
 });

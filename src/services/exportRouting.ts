@@ -25,13 +25,29 @@
  *    edgeMask mmax approximation) are NOT parity-exact there. Exports must stay byte-meaningful,
  *    so >48MP keeps today's main-thread behaviour. Below the threshold the pool processes the
  *    WHOLE image in one worker running the identical pipeline code — parity by construction.
+ *  - BOTH dims ≤ EXPORT_GPU_MAX_DIM (4096) → main thread (W3 fix round 1, finding M2). On the
+ *    main thread several module passes (lens distortion/CA/vignetting, NR NLM) run on the
+ *    renderer's WebGL2 via webGLImageProcessor, which caps GPU work at 4096 per side
+ *    (WebGLImageProcessor.runPass safeDim); a worker has no WebGL, so routing a small export
+ *    into the pool silently swaps those GPU passes for their CPU fallbacks — numerically close
+ *    but only within the GPU self-check tolerances (up to 0.02 for vignette), i.e. an output
+ *    CHANGE vs pre-W3. The worker-pool speedup on ≤4096² images is marginal anyway, so small
+ *    exports keep their exact pre-W3 (GPU-capable main-thread) output. Above 4096 on either
+ *    side the main thread was already all-CPU, so the worker route is bit-parity there.
  */
 
 import { webWorkerImageProcessor } from './WebWorkerImageProcessor';
 
 /** Pixel count above which WebWorkerImageProcessor switches to its TILED path. MUST mirror
- *  `largeImageThreshold` (8000×6000) in WebWorkerImageProcessor — pinned by exportRouting.test.ts. */
+ *  `largeImageThreshold` (8000×6000) in WebWorkerImageProcessor — pinned by exportRouting.test.ts
+ *  against the live source of truth (getStats().largeImageThreshold). */
 export const EXPORT_TILED_MIN_PIXELS = 8000 * 6000;
+
+/** Per-side ceiling for renderer-GPU passes. MUST mirror the `safeDim` cap in
+ *  WebGLImageProcessor.runPass (`Math.min(maxTextureSize, 4096)`): at or below this on BOTH
+ *  sides, main-thread module passes may run on the GPU — a worker cannot, so small exports stay
+ *  on the main thread to preserve their pre-W3 GPU output (see header). */
+export const EXPORT_GPU_MAX_DIM = 4096;
 
 export interface ExportRoutingOpts {
   /** WebWorkerImageProcessor.isHealthy() — false once worker init has failed. */
@@ -46,12 +62,18 @@ export interface ExportProcessingDecision {
   useWebWorkers: boolean;
   /** Human-readable routing reason — logged by the export call sites so a packaged-app log shows
    *  which path an export took. */
-  reason: 'worker-pool' | 'workers-unhealthy' | 'nr-needs-renderer-gpu' | 'tiled-path-not-parity-proven';
+  reason: 'worker-pool' | 'workers-unhealthy' | 'nr-needs-renderer-gpu' | 'small-image-gpu-parity' | 'tiled-path-not-parity-proven';
 }
 
 export function chooseExportProcessing(opts: ExportRoutingOpts): ExportProcessingDecision {
   if (!opts.workersHealthy) return { useWebWorkers: false, reason: 'workers-unhealthy' };
   if (opts.nrActive) return { useWebWorkers: false, reason: 'nr-needs-renderer-gpu' };
+  // Size floor (finding M2): with BOTH dims ≤4096 the main-thread pipeline can run its
+  // renderer-GPU module passes (workers can't — no WebGL), and the worker speedup is marginal
+  // at this size. Stay on the main thread so small exports keep their exact pre-W3 output.
+  if (opts.width <= EXPORT_GPU_MAX_DIM && opts.height <= EXPORT_GPU_MAX_DIM) {
+    return { useWebWorkers: false, reason: 'small-image-gpu-parity' };
+  }
   if (opts.width * opts.height > EXPORT_TILED_MIN_PIXELS) {
     return { useWebWorkers: false, reason: 'tiled-path-not-parity-proven' };
   }

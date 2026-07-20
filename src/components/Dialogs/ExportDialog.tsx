@@ -283,8 +283,9 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
           } catch { /* diagnostic only — never block an export */ }
           const context = { width: source.width, height: source.height, channels: 4, isExport: true };
           // Route through the worker pool when healthy and the routing rules allow
-          // (see exportRouting.ts — NR-active and >48MP exports stay on the main
-          // thread; parity of the worker path is pinned by exportWorkerParity.test.ts).
+          // (see exportRouting.ts — NR-active, ≤4096-per-side (renderer-GPU parity)
+          // and >48MP exports stay on the main thread; parity of the worker path is
+          // pinned by exportWorkerParity.test.ts).
           // On the main-thread path the onProgress hook still yields between modules;
           // the worker path reports no per-module progress (the pass runs off-thread
           // and typically completes much faster than the old main-thread pass).

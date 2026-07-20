@@ -395,7 +395,18 @@ export class ImageProcessingPipeline {
           // every unedited preview/export ran a full-buffer no-op exposure pass — and the
           // zero-active-modules identity fast path below could never fire (R5, 2026-07-20).
           const p = params as { exposure?: number; black?: number };
-          return Math.abs(p.exposure ?? 0) < 0.001 && Math.abs(p.black ?? 0) < 0.001;
+          if (Math.abs(p.exposure ?? 0) >= 0.001 || Math.abs(p.black ?? 0) >= 0.001) return false;
+          // The default-params pass is still LOAD-BEARING when lens vignetting is active
+          // (W3 fix round 1, finding M1): pipeline order is crop(0) → lens(1) → exposure(2),
+          // and pre-W3 the always-run exposure pass clamped every pixel to [0,1] here.
+          // Vignetting correction is the pipeline's ONLY upstream producer of >1 values (its
+          // multiplicative factor is unclamped, up to 1 + 9·strength at the corners; film grain
+          // clamps its own output, resampling is convex, everything else runs after exposure).
+          // Skipping the pass would leak >1 values into every downstream module and change
+          // pre-W3 output bytes. Clamping inside the vignetting module instead would alter
+          // behaviour when exposure is NOT at defaults and require a matching GPU-shader
+          // change — wrong altitude; keep the clamp where it always lived.
+          return !this.lensVignettingActive();
         }
 
         case 'basicadj': {
@@ -466,6 +477,25 @@ export class ImageProcessingPipeline {
       logger.warn(`Identity check failed for module ${module.getId()}:`, error);
       return false; // Process on error
     }
+  }
+
+  /** True when the lens-corrections module would actually run its vignetting pass
+   *  (module enabled, vignetting section enabled, amount ≠ 0) — the only module upstream of
+   *  exposure that produces values > 1. Used by the exposure identity check above: the
+   *  default-params exposure pass doubles as the pipeline's [0,1] clamp and must not be
+   *  skipped while such values can reach it. Reads the same param shape on both the renderer
+   *  pipeline and the worker pipeline (applyWorkerConfig round-trips lensCorrectionsParams),
+   *  so worker/main parity holds. */
+  private lensVignettingActive(): boolean {
+    const lens = this.modules.get('lenscorrections');
+    if (!lens || lens.isEnabled === false) return false;
+    const lensParams = this.getModuleParams(lens, 'lenscorrections') as {
+      enabled?: boolean;
+      lensCorrectionsParams?: { vignetting?: { enabled?: boolean; amount?: number } };
+    };
+    if (lensParams.enabled === false) return false;
+    const vignetting = lensParams.lensCorrectionsParams?.vignetting;
+    return vignetting?.enabled === true && (vignetting.amount ?? 0) !== 0;
   }
 
   // Helper method to check if a curve array represents a linear (identity) transformation
