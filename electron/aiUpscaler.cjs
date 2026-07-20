@@ -77,6 +77,36 @@ function reflect(i, n) {
 }
 
 // ---- session init -------------------------------------------------------
+/**
+ * Backend detection by CONSTRUCTION, not timing (W5 R1, mirrors aiDeblur.cjs): create with
+ * ['dml'] ONLY first — ORT throws at session init when the DirectML EP can't bind, so success
+ * means DirectML genuinely runs the graph. The previous ['dml','cpu'] list let ORT silently
+ * fall through to the CPU EP, and the timing probe (<500ms == DML) both misclassified under
+ * GPU contention (see aiDeblur's header for the reproduced case) and — worse — still reported
+ * the feature available on a CPU-bound session: a 20MP ×2 upscale auto-routed into ~2,000
+ * tiles at ~2s each (>1h, uncancellable) while the UI claimed AI-on-GPU.
+ * `create(modelPath, opts)` is parameterized so the EP-selection logic is unit-testable
+ * without onnxruntime-node (aiUpscalerAvailability.test.ts).
+ */
+async function createSessionByConstruction(create, modelPath) {
+  try {
+    return { session: await create(modelPath, { executionProviders: ['dml'] }), backend: 'directml' };
+  } catch (_) {
+    try {
+      return { session: await create(modelPath, { executionProviders: ['cpu'] }), backend: 'cpu' };
+    } catch (_2) {
+      return { session: null, backend: null };
+    }
+  }
+}
+
+/**
+ * AI upscale is offered ONLY on a DirectML-bound session (chain-audit F3). A CPU-EP session is
+ * kept for diagnostics (getBackend) but reports unavailable, so EnhanceService's router falls
+ * back to the deterministic Lanczos path instead of the >1h CPU tile crawl.
+ */
+function availableFor(sess, be) { return !!sess && be === 'directml'; }
+
 async function ensureSession() {
   if (session) return session;
   if (initPromise) return initPromise;
@@ -84,22 +114,17 @@ async function ensureSession() {
     const modelPath = resolveModelPath();
     if (!fs.existsSync(modelPath)) { backend = null; return null; }
     ort = require('onnxruntime-node');
-    let created = null;
-    for (const eps of [['dml', 'cpu'], ['cpu']]) {
-      try {
-        created = await ort.InferenceSession.create(modelPath, { executionProviders: eps });
-        break;
-      } catch (_) { created = null; }
-    }
-    if (!created) { backend = null; return null; }
-    session = created;
-    // Probe the backend honestly: one warmup inference; DML ~90ms, CPU ~2000ms per 128 tile.
+    const r = await createSessionByConstruction((p, o) => ort.InferenceSession.create(p, o), modelPath);
+    if (!r.session) { backend = null; return null; }
+    session = r.session;
+    backend = r.backend;
+    // Warmup primes the graph so the first real tile doesn't pay compile/upload costs. A THROW
+    // here means the session can't run at all: reclassify to cpu (gates the feature off) rather
+    // than advertise a broken DML (same recovery as aiDeblur).
     try {
       const probe = new Float32Array(3 * MODEL_TILE * MODEL_TILE);
       const feeds = {}; feeds[session.inputNames[0]] = new ort.Tensor('float32', probe, [1, 3, MODEL_TILE, MODEL_TILE]);
-      const t0 = Date.now();
       await session.run(feeds);
-      backend = (Date.now() - t0) < 500 ? 'directml' : 'cpu';
     } catch (_) {
       backend = 'cpu';
     }
@@ -109,7 +134,10 @@ async function ensureSession() {
 }
 
 async function isAvailable() {
-  try { return !!(await ensureSession()); } catch (_) { return false; }
+  try {
+    await ensureSession();
+    return availableFor(session, backend);
+  } catch (_) { return false; }
 }
 function getBackend() { return backend; }
 
@@ -226,4 +254,8 @@ function clamp255(v01) {
   return v < 0 ? 0 : v > 255 ? 255 : v;
 }
 
-module.exports = { isAvailable, getBackend, upscale };
+module.exports = {
+  isAvailable, getBackend, upscale,
+  // test seams (aiUpscalerAvailability.test.ts)
+  createSessionByConstruction, availableFor,
+};

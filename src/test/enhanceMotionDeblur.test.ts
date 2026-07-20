@@ -181,6 +181,25 @@ describe('EnhanceService.applyMotionDeblur — bake + revert', () => {
     );
   });
 
+  // W5 R2 (W4 review follow-up a): the W4 tripwire silently keeps input pixels for garbled tiles;
+  // the user must be told once per bake when that happened (skippedTiles was log-only before).
+  it('notifies ONCE with the count when the run reports skippedTiles > 0', async () => {
+    mockAiRun.mockImplementation(async (_rgba: Uint8Array, w: number, h: number) => (
+      { data: new Uint8Array(w * h * 4).fill(128), width: w, height: h, backend: 'directml', skippedTiles: 2 }
+    ));
+    await enhanceService.applyMotionDeblur();
+    const skipCalls = mockInfo.mock.calls.filter((c) => String(c[1]).includes('2 region'));
+    expect(skipCalls).toHaveLength(1);
+    expect(String(skipCalls[0][1])).toMatch(/skipped 2 region/i);
+    expect(enhanceService.canRevert()).toBe(true); // the bake itself still committed
+  });
+
+  it('no skipped-tile notification when skippedTiles is 0 (or absent)', async () => {
+    okRun(); // returns no skippedTiles field — the ?? 0 path
+    await enhanceService.applyMotionDeblur();
+    expect(mockInfo).not.toHaveBeenCalled();
+  });
+
   it('revert restores the pre-deblur base, clears the marker, and empties the stack', async () => {
     okRun();
     await enhanceService.applyMotionDeblur();

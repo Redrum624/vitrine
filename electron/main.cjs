@@ -439,7 +439,9 @@ ipcMain.handle('open-external-url', async (_e, url) => {
 
 ipcMain.handle('file-exists', (_e, p) => { try { return fs.existsSync(p); } catch { return false; } });
 
-// AI super-resolution upscale (Real-ESRGAN via onnxruntime-node, main-process native).
+// AI super-resolution upscale (Real-ESRGAN via onnxruntime-node, main-process native). Availability
+// is DirectML-gated (see aiUpscaler.cjs, W5 R1) so a CPU-only machine reports unavailable and the
+// renderer auto-routes to the deterministic Lanczos path instead of an hours-long CPU tile crawl.
 ipcMain.handle('ai-upscale-available', async () => {
   try { return await aiUpscaler.isAvailable(); } catch { return false; }
 });

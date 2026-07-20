@@ -139,6 +139,40 @@ describe('EnhanceWorkerClient', () => {
       expect(calls).toBe(2);
     });
 
+    // W5 R3 (W4 review follow-up c): failAll/dispose racing an in-flight async boot used to leak
+    // the eventually-resolved Worker — adopt() still ran after workerPromise was cleared, the
+    // zombie was never terminated, and its 'error' listener could later failAll a FRESH worker.
+    it('dispose during an async boot TERMINATES the late-resolved worker instead of adopting it', async () => {
+      let resolveBoot!: (w: Worker) => void;
+      const zombie = new FakeWorker(true);
+      const fresh = new FakeWorker();
+      let calls = 0;
+      const client = new EnhanceWorkerClient(() => {
+        calls++;
+        return (calls === 1
+          ? new Promise<Worker>((res) => { resolveBoot = res; })
+          : Promise.resolve(fresh as unknown as Worker)) as unknown as Worker;
+      });
+      const p = client.run(new Float32Array([0, 0, 0, 1]), 1, 1, DEFAULT_ENHANCE_PARAMS);
+      const guarded = expect(p).rejects.toThrow(/disposed/);
+      client.dispose();
+      await guarded;
+      // The boot resolves AFTER the dispose: the worker must be terminated, never adopted.
+      resolveBoot(zombie as unknown as Worker);
+      await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+      expect(zombie.terminated).toBe(true);
+      // A subsequent run boots a FRESH worker, unaffected by the zombie.
+      const r = await client.run(new Float32Array([0.5, 0.5, 0.5, 1]), 1, 1, DEFAULT_ENHANCE_PARAMS);
+      expect(r.width).toBe(2);
+      expect(calls).toBe(2);
+      // The zombie never got listeners: a late 'error' on it must NOT failAll the fresh worker.
+      zombie.dispatch('error', { message: 'zombie crash' });
+      expect(fresh.terminated).toBe(false);
+      const r2 = await client.run(new Float32Array([0.5, 0.5, 0.5, 1]), 1, 1, DEFAULT_ENHANCE_PARAMS);
+      expect(r2.width).toBe(2);
+      expect(calls).toBe(2); // still the same fresh worker — no spurious reboot
+    });
+
     it("a crash while a run is queued behind an async boot still rejects it (worker 'error' after boot)", async () => {
       const crashed = new FakeWorker(true);
       const client = new EnhanceWorkerClient(() => Promise.resolve(crashed as unknown as Worker) as unknown as Worker);

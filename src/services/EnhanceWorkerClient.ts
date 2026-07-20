@@ -53,7 +53,17 @@ export class EnhanceWorkerClient {
         return Promise.reject(e instanceof Error ? e : new Error(String(e)));
       }
       if (created && typeof (created as Promise<Worker>).then === 'function') {
-        const boot = (created as Promise<Worker>).then((w) => this.adopt(w));
+        const boot: Promise<Worker> = (created as Promise<Worker>).then((w) => {
+          // W5 R3 (W4 review follow-up c): failAll/dispose may have cleared — or a later run
+          // replaced — the cached promise while this boot was in flight. Adopting the late
+          // worker would leak it (never terminated) and attach an 'error' listener that could
+          // later failAll a FRESH worker. Terminate it and reject this stale boot instead.
+          if (this.workerPromise !== boot) {
+            w.terminate();
+            throw new Error('enhance worker boot superseded (client reset during boot)');
+          }
+          return this.adopt(w);
+        });
         this.workerPromise = boot;
         // A failed async boot (fetch failed, blob refused) must not poison future runs: clear the
         // cached promise so the next run retries, mirroring failAll's drop-and-reboot semantic.

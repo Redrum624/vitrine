@@ -611,6 +611,16 @@ class EnhanceService {
         `develop=${developMs}ms, inference=${inferMs}ms, finish=${Math.round(performance.now() - tFinish0)}ms, ` +
         `out=[${outMin}..${outMax}], skippedTiles=${ai.skippedTiles ?? 0}`,
       );
+      // W5 R2 (W4 review follow-up a): the tripwire silently keeps input pixels for garbled tiles —
+      // tell the user once per bake when that happened (it was file-log-only before). Placed after
+      // the F1 commit-boundary re-check above, so it fires only for a bake that actually committed.
+      const skipped = ai.skippedTiles ?? 0;
+      if (skipped > 0) {
+        notificationService.info(
+          'Motion deblur',
+          `Motion deblur skipped ${skipped} region(s) that the model couldn't process cleanly — the original pixels were kept there.`,
+        );
+      }
     } finally {
       this.inFlight = false;
       store.setIsProcessing(false);
