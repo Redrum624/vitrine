@@ -12,7 +12,30 @@ import { LocalAdjustmentsPipelineModule } from '../modules/LocalAdjustmentsPipel
 import { LensCorrectionsPipelineModule } from '../modules/LensCorrectionsPipelineModule';
 import { NoiseReductionModule } from '../modules/NoiseReductionModule';
 import { enhanceModule } from '../modules/EnhanceModule';
-import { webWorkerImageProcessor, WorkerModuleConfig } from './WebWorkerImageProcessor';
+import type { WorkerModuleConfig, WorkerImageData, ProcessingResult } from './WebWorkerImageProcessor';
+
+/**
+ * Worker-pool delegate, INJECTED rather than imported.
+ *
+ * This module is the entry graph of pipeline.worker.ts. A value import of
+ * webWorkerImageProcessor here would drag the pool manager — and its own
+ * worker factory (`./pipeline.worker?worker&url`) — into the worker bundle,
+ * making the worker chunk reference itself at build time. The pool registers
+ * itself via setWorkerPool() at ITS module evaluation (WebWorkerImageProcessor
+ * is value-imported by the renderer, e.g. AdjustmentPanel). Inside a worker no
+ * registration ever happens — workerPool stays null and every pass runs on the
+ * worker's own thread, exactly the intended useWebWorkers=false path.
+ */
+export interface WorkerPoolLike {
+  shouldUseWorkers(imageData: WorkerImageData): boolean;
+  processImage(imageData: WorkerImageData, pipeline: WorkerModuleConfig[]): Promise<ProcessingResult>;
+}
+
+let workerPool: WorkerPoolLike | null = null;
+
+export function setWorkerPool(pool: WorkerPoolLike): void {
+  workerPool = pool;
+}
 
 // Module-specific param interfaces for type-safe identity checks
 interface CurveNode {
@@ -486,7 +509,7 @@ export class ImageProcessingPipeline {
     const isSmallPreview = imageSize < 256 * 256; // Less than 256x256 pixels
 
     // Check if we should use Web Workers for performance
-    if (useWebWorkers && !isSmallPreview && webWorkerImageProcessor.shouldUseWorkers(imageData)) {
+    if (useWebWorkers && !isSmallPreview && workerPool && workerPool.shouldUseWorkers(imageData)) {
       return this.processWithWebWorkers(input, context);
     } else {
       return this.processOnMainThread(input, context, onProgress, cacheResults);
@@ -494,6 +517,10 @@ export class ImageProcessingPipeline {
   }
 
   private async processWithWebWorkers(input: Float32Array, context: ProcessingContext): Promise<Float32Array> {
+    if (!workerPool) {
+      // No pool registered (worker scope, or tests) — stay on this thread.
+      return this.processOnMainThread(input, context);
+    }
 
     try {
       // Build pipeline configuration for workers
@@ -525,7 +552,7 @@ export class ImageProcessingPipeline {
         channels: context.channels
       };
 
-      const result = await webWorkerImageProcessor.processImage(imageData, pipeline);
+      const result = await workerPool.processImage(imageData, pipeline);
 
       if (!result.success) {
         logger.warn('Web Worker processing failed, falling back to main thread');

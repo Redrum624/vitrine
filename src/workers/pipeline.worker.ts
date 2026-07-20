@@ -1,10 +1,16 @@
 /**
- * Vite MODULE worker for CPU image processing — ZERO drift.
+ * Vite-bundled worker for CPU image processing — ZERO drift.
  *
  * Replaces the old hand-ported public/workers/image-processor.worker.js, which kept
  * its own diverged copies of 5 modules' pixel math. This worker imports the REAL
  * ImageProcessingPipeline (a fresh instance per worker thread) and runs its actual
  * registered modules, so there is NO duplicated math and ALL 12 modules are covered.
+ *
+ * Bundling/boot: built as a self-contained iife chunk (vite.config.ts worker.format)
+ * and booted through src/workers/createPipelineWorker.ts — module worker on the dev
+ * server, blob: classic worker in the packaged file:// app. Because this entry's
+ * graph is ImageProcessingPipeline, that graph must never value-import
+ * WebWorkerImageProcessor (self-referencing bundle) — see WorkerPoolLike there.
  *
  * Worker safety: the modules gate their GPU fast-paths on webGLImageProcessor
  * .isAvailable(), which returns false inside a worker (no `document` → no WebGL2

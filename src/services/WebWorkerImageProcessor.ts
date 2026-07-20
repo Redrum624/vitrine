@@ -1,5 +1,6 @@
 import { logger } from '../utils/Logger';
-import { pipelineWorkerUrl } from '../workers/pipelineWorkerUrl';
+import { createPipelineWorker } from '../workers/createPipelineWorker';
+import { setWorkerPool } from './ImageProcessingPipeline';
 import { spatialApron, effectiveTileSize, planApronTile, pipelineUsesEdgeMask } from '../utils/tiledPipeline';
 import { computeGlobalEdgeMax } from '../utils/enhanceOps';
 
@@ -78,10 +79,10 @@ export class WebWorkerImageProcessor {
 
       // Create workers
       for (let i = 0; i < this.maxWorkers; i++) {
-        // Vite MODULE worker — bundles the real ImageProcessingPipeline (zero drift).
-        // pipelineWorkerUrl wraps `new URL('./pipeline.worker.ts', import.meta.url)`,
-        // which Vite rewrites to the hashed worker chunk at build time.
-        const worker = new Worker(pipelineWorkerUrl, { type: 'module' });
+        // Vite-compiled worker chunk bundling the real ImageProcessingPipeline
+        // (zero drift). Boot path differs per environment — blob: URL under the
+        // packaged file:// app — see src/workers/createPipelineWorker.ts.
+        const worker = await createPipelineWorker();
         this.setupWorkerEventHandlers(worker);
         this.workers.push(worker);
         this.availableWorkers.push(worker);
@@ -480,3 +481,9 @@ export class WebWorkerImageProcessor {
 }
 
 export const webWorkerImageProcessor = WebWorkerImageProcessor.getInstance();
+
+// Register as the pipeline's worker-routing delegate. Registration lives HERE —
+// not as a value import inside ImageProcessingPipeline — so the worker bundle
+// (whose entry graph is ImageProcessingPipeline) never contains this module or
+// its own worker factory. See WorkerPoolLike in ImageProcessingPipeline.ts.
+setWorkerPool(webWorkerImageProcessor);

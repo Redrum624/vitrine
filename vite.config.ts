@@ -46,5 +46,13 @@ export default defineConfig({
   // Optimize dependencies
   optimizeDeps: {
     include: ['react', 'react-dom', 'zustand', 'lucide-react']
+  },
+  worker: {
+    // The pipeline worker chunk MUST stay a self-contained iife: the packaged
+    // app (file://) can only boot workers from blob: URLs (see
+    // src/workers/createPipelineWorker.ts), and a blob has no base URL to
+    // resolve ES-module imports against. 'iife' is Vite's default — pinned
+    // here because the blob boot path hard-depends on it.
+    format: 'iife'
   }
 })
