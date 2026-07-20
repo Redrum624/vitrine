@@ -76,12 +76,21 @@ export function enhanceImage(rgba: Float32Array, w: number, h: number, p: Enhanc
  * Runs whole-buffer in the renderer (not the tiled CPU worker), so tiledPipeline's moduleApron is
  * not involved.
  */
+/**
+ * True when any finishing stage is requested — the single gate shared by enhanceAiUpscaled's
+ * pass-through and EnhanceService's worker dispatch (W4 R4: a fully-neutral slider set must not
+ * pay a worker round-trip/transfer just to get its own buffer back).
+ */
+export function aiFinishRequested(p: EnhanceParams): boolean {
+  return p.denoiseStrength > 0 || p.alpha > 0 || p.sharpness > 0 || !!p.chromaClean;
+}
+
 export function enhanceAiUpscaled(rgba: Float32Array, w: number, h: number, p: EnhanceParams): Float32Array {
   const doDenoise = p.denoiseStrength > 0;
   const doDetail = p.alpha > 0;
   const doSharpen = p.sharpness > 0;
   const doChromaClean = p.chromaClean;
-  if (!doDenoise && !doDetail && !doSharpen && !doChromaClean) return rgba;
+  if (!aiFinishRequested(p)) return rgba;
 
   const ycc = rgbaToYCrCb(rgba);
   let { y, cr, cb } = ycc; const a = ycc.a;

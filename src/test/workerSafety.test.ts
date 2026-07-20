@@ -109,3 +109,55 @@ describe('packaged worker build contract (2026-07-20 regression lock)', () => {
     expect(src).toMatch(/worker:\s*\{[^}]*format:\s*'iife'/);
   });
 });
+
+describe('packaged ENHANCE worker build contract (W4 — same file:// trap as the pipeline worker)', () => {
+  // W1's live probes proved BOTH parts apply to the enhance worker too: its compiled chunk exists
+  // (the inline `new URL` pattern did compile it) but Chromium refuses ALL worker scripts on
+  // file:// pages — so the packaged enhance worker NEVER booted (Probe B: error event, empty
+  // message). Same fix as createPipelineWorker: import the compiled chunk via `?worker&url`,
+  // fetch it once under file:, boot from a blob: URL. These pins are the regression lock (jsdom
+  // cannot exercise the packaged loader).
+  const read = (rel: string) => fs.readFileSync(path.join(__dirname, rel), 'utf8');
+
+  test('enhance factory imports the compiled chunk (?worker&url) and blob-instantiates for file://', () => {
+    const src = read('../utils/createEnhanceWorker.ts');
+    expect(src).toMatch(/from\s+'\.\.\/workers\/enhance\.worker\?worker&url'/);
+    expect(src).toMatch(/URL\.createObjectURL/);
+    // The import.meta.url pattern (which bypasses the ?worker&url chunk) must never come back.
+    expect(src).not.toMatch(/import\.meta\.url/);
+  });
+
+  test('EnhanceWorkerClient constructs workers only through the factory', () => {
+    const src = read('../services/EnhanceWorkerClient.ts');
+    expect(src).toMatch(/createEnhanceWorker/);
+    expect(src).not.toMatch(/new\s+Worker\(/);
+  });
+
+  test('enhance worker ENTRY evaluates and round-trips ENHANCE + ENHANCE_AI_FINISH without window', () => {
+    expect(typeof window).toBe('undefined');
+    const posted: Array<{ type: string; id: number; rgba?: Float32Array; enhanced?: Float32Array; error?: string }> = [];
+    const g = globalThis as { self?: unknown };
+    const prevSelf = g.self;
+    const shim: { onmessage?: (e: { data: unknown }) => void; postMessage: (m: unknown) => void } = {
+      postMessage: (m: unknown) => { posted.push(m as (typeof posted)[number]); },
+    };
+    g.self = shim;
+    try {
+      expect(() => require('../workers/enhance.worker')).not.toThrow();
+      expect(typeof shim.onmessage).toBe('function');
+      const rgba = new Float32Array(4 * 4 * 4).fill(0.5);
+      shim.onmessage!({ data: { type: 'ENHANCE', id: 1, data: { rgba: rgba.slice(), width: 4, height: 4, params: { enabled: true, sharpen: true, upscale: false, scale: 2, denoiseStrength: 0, psfSigma: 1, rlIters: 2, alpha: 0.8, hpSigma: 1.2, sharpness: 0.4, chromaClean: true } } } });
+      const enh = posted.find((m) => m.type === 'ENHANCE_COMPLETE' && m.id === 1);
+      expect(enh).toBeDefined();
+      expect(enh!.enhanced).toBeInstanceOf(Float32Array);
+      // W4 R4: the AI finishing pass rides the same worker.
+      shim.onmessage!({ data: { type: 'ENHANCE_AI_FINISH', id: 2, data: { rgba: rgba.slice(), width: 4, height: 4, params: { enabled: true, sharpen: true, upscale: false, scale: 2, denoiseStrength: 0, psfSigma: 1, rlIters: 0, alpha: 0, hpSigma: 1.2, sharpness: 0.3, chromaClean: true } } } });
+      const fin = posted.find((m) => m.type === 'ENHANCE_AI_FINISH_COMPLETE' && m.id === 2);
+      expect(fin).toBeDefined();
+      expect(fin!.rgba).toBeInstanceOf(Float32Array);
+      expect(fin!.rgba!.length).toBe(4 * 4 * 4);
+    } finally {
+      if (prevSelf === undefined) delete g.self; else g.self = prevSelf;
+    }
+  });
+});

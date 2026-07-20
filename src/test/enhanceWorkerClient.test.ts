@@ -112,4 +112,86 @@ describe('EnhanceWorkerClient', () => {
     await guarded;
     expect(fake.terminated).toBe(true);
   });
+
+  // W4 R1: the packaged enhance worker boots via fetch→blob (async), so the client must accept an
+  // ASYNC factory — while keeping every W2 failure semantic (crash/timeout/dispose still reject).
+  describe('async worker boot (packaged blob-boot factory)', () => {
+    it('boots from a factory that resolves a Worker and completes a run', async () => {
+      const fake = new FakeWorker();
+      const client = new EnhanceWorkerClient(() => Promise.resolve(fake as unknown as Worker) as unknown as Worker);
+      const r = await client.run(new Float32Array([0.5, 0.5, 0.5, 1]), 1, 1, DEFAULT_ENHANCE_PARAMS);
+      expect(r.width).toBe(2);
+      expect((fake.posted[0].msg as { type: string }).type).toBe('ENHANCE');
+    });
+
+    it('rejects the run when the async factory fails, and the NEXT run retries with a fresh boot', async () => {
+      let calls = 0;
+      const fake = new FakeWorker();
+      const client = new EnhanceWorkerClient(() => {
+        calls++;
+        return (calls === 1
+          ? Promise.reject(new Error('fetch of worker chunk failed'))
+          : Promise.resolve(fake as unknown as Worker)) as unknown as Worker;
+      });
+      await expect(client.run(new Float32Array([0, 0, 0, 1]), 1, 1, DEFAULT_ENHANCE_PARAMS)).rejects.toThrow(/fetch of worker chunk failed/);
+      const r = await client.run(new Float32Array([0.5, 0.5, 0.5, 1]), 1, 1, DEFAULT_ENHANCE_PARAMS);
+      expect(r.width).toBe(2);
+      expect(calls).toBe(2);
+    });
+
+    it("a crash while a run is queued behind an async boot still rejects it (worker 'error' after boot)", async () => {
+      const crashed = new FakeWorker(true);
+      const client = new EnhanceWorkerClient(() => Promise.resolve(crashed as unknown as Worker) as unknown as Worker);
+      const p = client.run(new Float32Array([0, 0, 0, 1]), 1, 1, DEFAULT_ENHANCE_PARAMS);
+      const guarded = expect(p).rejects.toThrow(/late crash/);
+      // Let the boot settle (listeners attach), then crash.
+      await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+      crashed.dispatch('error', { message: 'late crash' });
+      await guarded;
+      expect(crashed.terminated).toBe(true);
+    });
+  });
+
+  // W4 R4: the AI-route finishing pass rides the same worker via runAiFinish.
+  describe('runAiFinish (AI finishing pass)', () => {
+    class FinishFakeWorker extends FakeWorker {
+      postMessage(msg: { id: number; type?: string; data?: { rgba: Float32Array } }): void {
+        this.posted.push({ msg, transfer: undefined });
+        const out = new Float32Array(msg.data!.rgba.length).fill(0.25);
+        this.dispatch('message', { data: { type: 'ENHANCE_AI_FINISH_COMPLETE', id: msg.id, rgba: out } });
+      }
+    }
+
+    it('posts ENHANCE_AI_FINISH and resolves with the finished buffer', async () => {
+      const fake = new FinishFakeWorker();
+      const client = new EnhanceWorkerClient(() => fake as unknown as Worker);
+      const rgba = new Float32Array(2 * 2 * 4).fill(0.5);
+      const out = await client.runAiFinish(rgba, 2, 2, DEFAULT_ENHANCE_PARAMS);
+      expect((fake.posted[0].msg as { type: string }).type).toBe('ENHANCE_AI_FINISH');
+      expect(out).toBeInstanceOf(Float32Array);
+      expect(out.length).toBe(2 * 2 * 4);
+      expect(out[0]).toBe(0.25);
+    });
+
+    it('rejects on ENHANCE_AI_FINISH_ERROR', async () => {
+      const fake = new FakeWorker(true);
+      fake.postMessage = function (this: FakeWorker, msg: { id: number }): void {
+        this.dispatch('message', { data: { type: 'ENHANCE_AI_FINISH_ERROR', id: msg.id, error: 'finish boom' } });
+      } as never;
+      const client = new EnhanceWorkerClient(() => fake as unknown as Worker);
+      await expect(client.runAiFinish(new Float32Array(4), 1, 1, DEFAULT_ENHANCE_PARAMS)).rejects.toThrow('finish boom');
+    });
+
+    it('a silent worker trips the same watchdog as run()', async () => {
+      jest.useFakeTimers();
+      const fake = new FakeWorker(true);
+      const client = new EnhanceWorkerClient(() => fake as unknown as Worker);
+      const p = client.runAiFinish(new Float32Array(4), 1, 1, DEFAULT_ENHANCE_PARAMS);
+      const guarded = expect(p).rejects.toThrow(/timed out/);
+      await Promise.resolve(); // let the boot microtask post the message
+      jest.advanceTimersByTime(ENHANCE_WORKER_WATCHDOG_MS);
+      await guarded;
+      expect(fake.terminated).toBe(true);
+    });
+  });
 });
