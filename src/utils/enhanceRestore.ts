@@ -1,18 +1,23 @@
-import { gaussianBlur1 } from './enhanceOps';
+import { gaussianBlurInto } from './enhanceOps';
 
 /** Richardson-Lucy on luma with a symmetric Gaussian PSF (its own mirror -> blur twice per iter). */
 export function rlDeconvLuma(y: Float32Array, w: number, h: number, psfSigma: number, iters: number): Float32Array {
   if (iters <= 0 || psfSigma <= 0) return y.slice();
   const eps = 1e-6, n = w * h;
   const est = y.slice();
-  // Reused scratch for the relative-blur ratio: it is FULLY overwritten (every index written)
-  // on each iteration below, so hoisting it out of the loop is a pure allocation win with
+  // Reused scratch, hoisted out of the loop: `rel` (the relative-blur ratio) and the two blur
+  // outputs `conv`/`corr` are FULLY overwritten (every index written) on each iteration below —
+  // gaussianBlurInto writes every output pixel — so reusing them is a pure allocation win with
   // bit-identical output (verified by enhanceRestore.test.ts's reference-impl equality test).
+  // The old shape allocated 2 fresh w*h buffers per iteration via gaussianBlur1 (24 with the
+  // default rlIters=12 — ~1.9 GB of churn per 20MP export photo).
   const rel = new Float32Array(n);
+  const conv = new Float32Array(n);
+  const corr = new Float32Array(n);
   for (let k = 0; k < iters; k++) {
-    const conv = gaussianBlur1(est, w, h, psfSigma);
+    gaussianBlurInto(est, w, h, psfSigma, conv);
     for (let p = 0; p < n; p++) rel[p] = y[p] / Math.max(conv[p], eps);
-    const corr = gaussianBlur1(rel, w, h, psfSigma);
+    gaussianBlurInto(rel, w, h, psfSigma, corr);
     for (let p = 0; p < n; p++) { const v = est[p] * corr[p]; est[p] = v < 0 ? 0 : v > 1 ? 1 : v; }
   }
   return est;

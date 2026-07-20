@@ -1,21 +1,162 @@
 import { clamp01 } from './enhanceColor';
 
-export function gaussianBlur1(src: Float32Array, w: number, h: number, sigma: number): Float32Array {
-  if (sigma <= 0) return src.slice();
+/**
+ * Normalised discrete Gaussian kernel for `sigma`, cached by exact sigma value. The kernel maths is
+ * byte-identical to the historical inline construction (same exp/normalise order), so caching is a
+ * pure allocation win. Only a handful of sigmas ever occur (psfSigma, hpSigma, edgeMask 2.0,
+ * cleanChroma 1.2, …) — the cache is cleared if it somehow grows past 16 entries.
+ */
+const kernelCache = new Map<number, Float32Array>();
+function gaussianKernel(sigma: number): Float32Array {
+  const cached = kernelCache.get(sigma);
+  if (cached) return cached;
   const radius = Math.max(1, Math.ceil(sigma * 3));
   const k = new Float32Array(radius * 2 + 1); let sum = 0;
   for (let i = -radius; i <= radius; i++) { const v = Math.exp(-(i * i) / (2 * sigma * sigma)); k[i + radius] = v; sum += v; }
   for (let i = 0; i < k.length; i++) k[i] /= sum;
-  const tmp = new Float32Array(w * h), out = new Float32Array(w * h);
-  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-    let acc = 0; for (let t = -radius; t <= radius; t++) { const xx = Math.min(w - 1, Math.max(0, x + t)); acc += src[y * w + xx] * k[t + radius]; }
-    tmp[y * w + x] = acc;
+  if (kernelCache.size >= 16) kernelCache.clear();
+  kernelCache.set(sigma, k);
+  return k;
+}
+
+// Pooled scratch for gaussianBlurInto: the horizontal-pass intermediate (w*h) and the vertical
+// clamped-row-base table (2r+1). Both are FULLY overwritten before being read on every call, and
+// there is no await inside the blur, so reuse across calls is safe in a single-threaded JS context
+// (each worker thread gets its own module instance). Exact-size policy for tmp: keeps at most one
+// allocation of the last-used image size instead of two fresh w*h buffers per call — the RL
+// deconvolution calls this 2×rlIters times per image (24 with defaults), so at 20MP the old code
+// churned ~1.9 GB of throwaway allocations per photo.
+let poolTmp: Float32Array | null = null;
+let poolBases: Int32Array | null = null;
+
+/** Horizontal border pixel (needs the clamp): exact per-tap clamp arithmetic of the historical loop. */
+function hBorderTap(src: Float32Array, row: number, x: number, w: number, k: Float32Array, radius: number): number {
+  let acc = 0;
+  for (let t = -radius; t <= radius; t++) { const xx = Math.min(w - 1, Math.max(0, x + t)); acc += src[row + xx] * k[t + radius]; }
+  return acc;
+}
+
+/**
+ * Separable Gaussian blur of `src` into `out` (both w*h luma planes; aliasing src===out is safe —
+ * the horizontal pass writes only the pooled intermediate). BIT-IDENTICAL to the historical
+ * gaussianBlur1 (proven by src/test/enhanceOps.test.ts reference-equality + the tileSeams
+ * bit-exactness suite), only faster:
+ *  - horizontal pass: the border clamp (`Math.min/Math.max` PER TAP) is hoisted out of the
+ *    interior span — interior pixels index directly; border pixels keep the exact clamp.
+ *  - vertical pass: the row clamp is precomputed once per (y,t) as a row base offset, and the
+ *    per-pixel accumulator stays in a register (f64, ascending-t adds, one f32 rounding at the
+ *    store — exactly the historical per-pixel loop's arithmetic).
+ *  - the hot radii (2, 3, 4 — psfSigma ≤ ~1.33, hpSigma/cleanChroma 1.2) run fully-unrolled
+ *    interior spans: a left-to-right chained sum `a*k0 + b*k1 + …` evaluates in the SAME ascending
+ *    tap order as `acc += …` (JS + is left-associative), so every intermediate f64 sum is
+ *    bit-identical — the unroll only removes loop overhead (measured ~4.3× on the radius-3 pass
+ *    that dominates RL deconvolution).
+ * Kernel taps, tap order and normalisation are unchanged (visual behavior frozen — R3 contract).
+ */
+export function gaussianBlurInto(src: Float32Array, w: number, h: number, sigma: number, out: Float32Array): Float32Array {
+  if (sigma <= 0) { out.set(src.subarray(0, w * h)); return out; }
+  const k = gaussianKernel(sigma);
+  const radius = (k.length - 1) >> 1;
+  const n = w * h;
+  if (!poolTmp || poolTmp.length !== n) poolTmp = new Float32Array(n);
+  if (!poolBases || poolBases.length < k.length) poolBases = new Int32Array(k.length);
+  const tmp = poolTmp, bases = poolBases;
+  const xL = Math.min(radius, w);
+  const xR = Math.max(xL, w - radius);
+  const clampY = (v: number) => (v < 0 ? 0 : v >= h ? h - 1 : v);
+
+  if (radius === 3) {
+    const k0 = k[0], k1 = k[1], k2 = k[2], k3 = k[3], k4 = k[4], k5 = k[5], k6 = k[6];
+    for (let y = 0; y < h; y++) {
+      const row = y * w;
+      for (let x = 0; x < xL; x++) tmp[row + x] = hBorderTap(src, row, x, w, k, 3);
+      for (let x = xL; x < xR; x++) {
+        const b = row + x;
+        tmp[b] = src[b - 3] * k0 + src[b - 2] * k1 + src[b - 1] * k2 + src[b] * k3 + src[b + 1] * k4 + src[b + 2] * k5 + src[b + 3] * k6;
+      }
+      for (let x = xR; x < w; x++) tmp[row + x] = hBorderTap(src, row, x, w, k, 3);
+    }
+    for (let y = 0; y < h; y++) {
+      const b0 = clampY(y - 3) * w, b1 = clampY(y - 2) * w, b2 = clampY(y - 1) * w, b3 = y * w,
+        b4 = clampY(y + 1) * w, b5 = clampY(y + 2) * w, b6 = clampY(y + 3) * w;
+      const outRow = y * w;
+      for (let x = 0; x < w; x++) {
+        out[outRow + x] = tmp[b0 + x] * k0 + tmp[b1 + x] * k1 + tmp[b2 + x] * k2 + tmp[b3 + x] * k3 + tmp[b4 + x] * k4 + tmp[b5 + x] * k5 + tmp[b6 + x] * k6;
+      }
+    }
+    return out;
   }
-  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-    let acc = 0; for (let t = -radius; t <= radius; t++) { const yy = Math.min(h - 1, Math.max(0, y + t)); acc += tmp[yy * w + x] * k[t + radius]; }
-    out[y * w + x] = acc;
+
+  if (radius === 2) {
+    const k0 = k[0], k1 = k[1], k2 = k[2], k3 = k[3], k4 = k[4];
+    for (let y = 0; y < h; y++) {
+      const row = y * w;
+      for (let x = 0; x < xL; x++) tmp[row + x] = hBorderTap(src, row, x, w, k, 2);
+      for (let x = xL; x < xR; x++) {
+        const b = row + x;
+        tmp[b] = src[b - 2] * k0 + src[b - 1] * k1 + src[b] * k2 + src[b + 1] * k3 + src[b + 2] * k4;
+      }
+      for (let x = xR; x < w; x++) tmp[row + x] = hBorderTap(src, row, x, w, k, 2);
+    }
+    for (let y = 0; y < h; y++) {
+      const b0 = clampY(y - 2) * w, b1 = clampY(y - 1) * w, b2 = y * w, b3 = clampY(y + 1) * w, b4 = clampY(y + 2) * w;
+      const outRow = y * w;
+      for (let x = 0; x < w; x++) {
+        out[outRow + x] = tmp[b0 + x] * k0 + tmp[b1 + x] * k1 + tmp[b2 + x] * k2 + tmp[b3 + x] * k3 + tmp[b4 + x] * k4;
+      }
+    }
+    return out;
+  }
+
+  if (radius === 4) {
+    const k0 = k[0], k1 = k[1], k2 = k[2], k3 = k[3], k4 = k[4], k5 = k[5], k6 = k[6], k7 = k[7], k8 = k[8];
+    for (let y = 0; y < h; y++) {
+      const row = y * w;
+      for (let x = 0; x < xL; x++) tmp[row + x] = hBorderTap(src, row, x, w, k, 4);
+      for (let x = xL; x < xR; x++) {
+        const b = row + x;
+        tmp[b] = src[b - 4] * k0 + src[b - 3] * k1 + src[b - 2] * k2 + src[b - 1] * k3 + src[b] * k4 + src[b + 1] * k5 + src[b + 2] * k6 + src[b + 3] * k7 + src[b + 4] * k8;
+      }
+      for (let x = xR; x < w; x++) tmp[row + x] = hBorderTap(src, row, x, w, k, 4);
+    }
+    for (let y = 0; y < h; y++) {
+      const b0 = clampY(y - 4) * w, b1 = clampY(y - 3) * w, b2 = clampY(y - 2) * w, b3 = clampY(y - 1) * w, b4 = y * w,
+        b5 = clampY(y + 1) * w, b6 = clampY(y + 2) * w, b7 = clampY(y + 3) * w, b8 = clampY(y + 4) * w;
+      const outRow = y * w;
+      for (let x = 0; x < w; x++) {
+        out[outRow + x] = tmp[b0 + x] * k0 + tmp[b1 + x] * k1 + tmp[b2 + x] * k2 + tmp[b3 + x] * k3 + tmp[b4 + x] * k4 + tmp[b5 + x] * k5 + tmp[b6 + x] * k6 + tmp[b7 + x] * k7 + tmp[b8 + x] * k8;
+      }
+    }
+    return out;
+  }
+
+  // Generic radius: hoisted border clamps horizontally; precomputed clamped row bases vertically.
+  for (let y = 0; y < h; y++) {
+    const row = y * w;
+    for (let x = 0; x < xL; x++) tmp[row + x] = hBorderTap(src, row, x, w, k, radius);
+    for (let x = xL; x < xR; x++) {
+      let acc = 0; const b = row + x;
+      for (let t = -radius; t <= radius; t++) acc += src[b + t] * k[t + radius];
+      tmp[b] = acc;
+    }
+    for (let x = xR; x < w; x++) tmp[row + x] = hBorderTap(src, row, x, w, k, radius);
+  }
+  const taps = k.length;
+  for (let y = 0; y < h; y++) {
+    for (let t = -radius; t <= radius; t++) bases[t + radius] = clampY(y + t) * w;
+    const outRow = y * w;
+    for (let x = 0; x < w; x++) {
+      let acc = 0;
+      for (let t = 0; t < taps; t++) acc += tmp[bases[t] + x] * k[t];
+      out[outRow + x] = acc;
+    }
   }
   return out;
+}
+
+export function gaussianBlur1(src: Float32Array, w: number, h: number, sigma: number): Float32Array {
+  if (sigma <= 0) return src.slice();
+  return gaussianBlurInto(src, w, h, sigma, new Float32Array(w * h));
 }
 
 export function highpass(y: Float32Array, w: number, h: number, sigma: number): Float32Array {
