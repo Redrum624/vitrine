@@ -11,6 +11,7 @@
  */
 
 import type { BasicAdjustmentsParams, DehazeState, HueCurveLuts } from '../services/WebGLImageProcessor';
+import { nrStrengthToH } from '../utils/nrCurve';
 
 /** Setter type used by WebGLImageProcessor.runPass. */
 export type UniformSetter = (gl: WebGL2RenderingContext, prog: WebGLProgram) => void;
@@ -241,8 +242,10 @@ export function layerBlendUniforms(opacity: number): UniformSetter {
 // ── Denoise pass ─────────────────────────────────────────────────────────────
 
 export function denoiseUniforms(width: number, height: number, strength: number): UniformSetter {
-  const s = Math.max(0, Math.min(100, strength)) / 100;
-  const h = 0.015 + s * 0.12;
+  // v1.36.0 C1/F1: strength → h goes through the SHARED recalibrated curve (nrCurve.ts) — the
+  // old inline `0.015 + s·0.12` was a full low-ISO denoise at s=0 and destructive from s≈5.
+  // The tiled export path calls this same factory, so it inherits the curve automatically.
+  const h = nrStrengthToH(strength);
   const h2 = h * h * 27.0;
   return (gl, prog) => {
     gl.uniform2f(gl.getUniformLocation(prog, 'u_texel'), 1 / width, 1 / height);

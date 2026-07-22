@@ -44,12 +44,14 @@ export function enhanceImage(rgba: Float32Array, w: number, h: number, p: Enhanc
   // NOTE: `sharpen`/`upscale` in EnhanceParams are CALLER-level toggles, not gates here.
   // EnhanceModule.process() only invokes enhanceImage for the same-resolution sharpen path
   // (passing upscale:false); EnhanceService forces sharpen:true for the upscale path.
-  // enhanceImage ALWAYS applies the finishing CAS + chroma cleanup — per spec, the finish
-  // is always-on regardless of toggles.
+  // v1.36.0 C1/F2: the finishing CAS is gated on the sharpness VALUE (0 = off, true no-op) —
+  // matching the AI route's gate (enhanceAiUpscaled) and the GPU parity port. The old
+  // "finish is always-on" behavior applied 62.5% of max sharpening even at sharpness 0.
+  // Chroma cleanup stays gated by chromaClean only.
 
-  // 3 finish: CAS on luma + chroma clean at final res
+  // 3 finish: CAS on luma (skipped at sharpness ≤ 0) + chroma clean at final res
   const fin = rgbaToYCrCb(cur);
-  const fy = cas(fin.y, cw, ch, p.sharpness);
+  const fy = p.sharpness > 0 ? cas(fin.y, cw, ch, p.sharpness) : fin.y;
   let fcr = fin.cr, fcb = fin.cb;
   if (p.chromaClean) { const c = cleanChroma(fcr, fcb, cw, ch); fcr = c.cr; fcb = c.cb; }
   const enhanced = yCrCbToRgba({ y: fy, cr: fcr, cb: fcb, a: fin.a });

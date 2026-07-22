@@ -228,9 +228,20 @@ export function computeGlobalEdgeMax(rgba: Float32Array, w: number, h: number): 
   return mmax;
 }
 
+/**
+ * CAS peak weight from the sharpness slider (0..1). v1.36.0 C1/F2 recalibration: the old
+ * `-(0.125 + 0.075·s)` applied 62.5% of maximum sharpening at s=0 and squashed the whole slider
+ * into a 1.6× range. New curve: `-0.2·s` — zero means OFF, the s=1 maximum (-0.2) is unchanged.
+ * SHARED by the CPU chain (cas below) and the GPU parity port (GpuPreviewPipeline enh_cas pass)
+ * so the two can never drift. Callers skip the CAS pass entirely at s≤0 (true no-op).
+ */
+export function casPeak(sharpness: number): number {
+  return -0.2 * clamp01(sharpness);
+}
+
 export function cas(y: Float32Array, w: number, h: number, sharpness: number): Float32Array {
   const out = new Float32Array(w * h);
-  const peak = -(0.125 + 0.075 * clamp01(sharpness));
+  const peak = casPeak(sharpness);
   const at = (x: number, yy: number) => y[Math.min(h - 1, Math.max(0, yy)) * w + Math.min(w - 1, Math.max(0, x))];
   for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) {
     const a=at(i-1,j-1), b=at(i,j-1), c=at(i+1,j-1), d=at(i-1,j), e=y[j*w+i], f=at(i+1,j), g=at(i-1,j+1), hh=at(i,j+1), ii=at(i+1,j+1);

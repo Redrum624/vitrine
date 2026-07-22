@@ -38,6 +38,7 @@ import { buildPassList, buildLocalAdjustmentsPass, getGpuUnsafeModuleIds } from 
 import { ENHANCE_PROGRAM_SOURCES } from './enhance.frag';
 import { enhanceImage, DEFAULT_ENHANCE_PARAMS } from '../utils/enhanceChain';
 import type { EnhanceParams, EnhanceResult } from '../utils/enhanceChain';
+import { casPeak } from '../utils/enhanceOps';
 import { computeGlobalEdgeMax } from '../utils/enhanceOps';
 import { basicAdjUniforms, exposureUniforms, shadowsHighlightsUniforms, highlightRecoveryUniforms, gainsUniforms, colorBalanceUniforms, vignetteUniforms } from './uniforms';
 import type { ShadowsHighlightsUniformParams } from './uniforms';
@@ -1273,12 +1274,18 @@ export class GpuPreviewPipeline {
       draw('enh_rgb2ycc', F, dw, dh, [{ tex: curFinal.tex, sampler: 'u_image' }]);
       freeRes(curFinal);
 
-      const peak = -(0.125 + 0.075 * Math.max(0, Math.min(1, params.sharpness)));
-      const Fcas = allocFbo(dw, dh);
-      draw('enh_cas', Fcas, dw, dh, [{ tex: F.tex, sampler: 'u_image' }], (prog) => {
-        gl.uniform2f(loc(prog, 'u_texel'), 1 / dw, 1 / dh);
-        gl.uniform1f(loc(prog, 'u_peak'), peak);
-      });
+      // v1.36.0 C1/F2: peak comes from the SHARED enhanceOps.casPeak (lockstep with the CPU
+      // chain — the GPU/CPU self-check would drift otherwise), and sharpness ≤ 0 skips the
+      // enh_cas draw entirely, mirroring enhanceImage's gate (zero means off).
+      let casTex = F.tex;
+      if (params.sharpness > 0) {
+        const Fcas = allocFbo(dw, dh);
+        draw('enh_cas', Fcas, dw, dh, [{ tex: F.tex, sampler: 'u_image' }], (prog) => {
+          gl.uniform2f(loc(prog, 'u_texel'), 1 / dw, 1 / dh);
+          gl.uniform1f(loc(prog, 'u_peak'), casPeak(params.sharpness));
+        });
+        casTex = Fcas.tex;
+      }
 
       // chroma clean blurs Cr/Cb only; the finish takes Y from Fcas, chroma from here.
       let chromaTex = F.tex;
@@ -1294,7 +1301,7 @@ export class GpuPreviewPipeline {
 
       const enhFbo = allocFbo(dw, dh);
       draw('enh_ycc2rgb', enhFbo, dw, dh, [
-        { tex: Fcas.tex, sampler: 'u_luma' },
+        { tex: casTex, sampler: 'u_luma' },
         { tex: chromaTex, sampler: 'u_chroma' },
       ]);
       const enhanced = readbackRes(enhFbo, dw, dh);

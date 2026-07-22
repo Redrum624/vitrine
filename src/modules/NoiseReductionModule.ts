@@ -1,6 +1,7 @@
 import { logger } from '../utils/Logger';
 import { AdvancedDenoisingService, DenoiseMethod, DenoiseParams } from '../services/AdvancedDenoisingService';
 import { webGLImageProcessor } from '../services/WebGLImageProcessor';
+import { nrHToStrength, legacyNrStrengthToH } from '../utils/nrCurve';
 
 /**
  * NoiseReductionModule - Professional noise reduction for the processing pipeline
@@ -131,27 +132,35 @@ export class NoiseReductionModule {
     let preserveDetail: number;
     let method: DenoiseMethod;
 
+    // v1.36.0 C1/F1: the bucket strengths below were tuned against the LEGACY strength→h curve
+    // (h = 0.015 + s·0.12). The slider curve was recalibrated (nrCurve.ts), so each bucket now
+    // targets the SAME EFFECTIVE h through the new curve. The old moderate/high/very-high
+    // strengths (50/70/85 → h 0.075/0.099/0.117) sit above the new curve's deliberate ceiling
+    // (h(100) = 0.047 ≈ old 27 — everything beyond smeared detail), so they clamp to 100.
+    const strengthForLegacy = (legacyStrength: number): number =>
+      nrHToStrength(legacyNrStrengthToH(legacyStrength));
+
     if (noiseLevel < 0.01) {
       // Low noise - minimal denoising
-      strength = 20;
+      strength = strengthForLegacy(20);
       preserveDetail = 90;
       method = 'wavelet';
       logger.info('Low noise detected - minimal denoising');
     } else if (noiseLevel < 0.03) {
       // Moderate noise
-      strength = 50;
+      strength = strengthForLegacy(50);
       preserveDetail = 75;
       method = 'nlmeans';
       logger.info('Moderate noise detected - balanced denoising');
     } else if (noiseLevel < 0.06) {
       // High noise
-      strength = 70;
+      strength = strengthForLegacy(70);
       preserveDetail = 60;
       method = 'bm3d';
       logger.info('High noise detected - aggressive denoising');
     } else {
       // Very high noise - use hybrid approach
-      strength = 85;
+      strength = strengthForLegacy(85);
       preserveDetail = 50;
       method = 'hybrid';
       logger.info('Very high noise detected - hybrid denoising');

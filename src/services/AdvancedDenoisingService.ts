@@ -10,6 +10,7 @@
  */
 
 import { logger } from '../utils/Logger';
+import { nrStrengthToH } from '../utils/nrCurve';
 
 export type DenoiseMethod = 'auto' | 'bm3d' | 'nlmeans' | 'wavelet' | 'hybrid';
 
@@ -728,7 +729,9 @@ export class AdvancedDenoisingService {
     logger.debug(`NLMeans denoising: search=${params.searchRadius}, strength=${params.strength}`);
 
     const output = new Float32Array(imageData.length);
-    const h = (params.strength / 100) * 0.1; // Filtering parameter
+    // v1.36.0 C1/F1: unified with the GPU NLM curve (nrCurve.ts) — this CPU fallback previously
+    // used a mismatched `(s/100)·0.1`, so CPU and GPU denoise disagreed at the same slider value.
+    const h = nrStrengthToH(params.strength); // Filtering parameter
     const searchWindow = params.searchRadius;
     const patchSize = Math.floor(params.blockSize / 2);
 

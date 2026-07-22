@@ -52,11 +52,14 @@ describe('enhance.frag shader sources', () => {
     expect(ENHANCE_PROGRAM_SOURCES.enh_rl_update).toContain('clamp(v, 0.0, 1.0)');
   });
 
-  it('CAS uses the FidelityFX peak formula of enhanceOps.cas', () => {
+  it('CAS uses the FidelityFX peak formula of enhanceOps.cas, via the SHARED casPeak helper', () => {
     // out = clamp01((e + wv*(b+d+f+h)) / (1 + 4*wv)); peak passed in as u_peak.
     expect(ENHANCE_PROGRAM_SOURCES.enh_cas).toContain('(e + wv * (b + d + f + h)) / (1.0 + 4.0 * wv)');
-    // The peak coefficient lives on the CPU side; assert the pipeline computes it.
-    expect(pipelineSrc).toContain('-(0.125 + 0.075 * Math.max(0, Math.min(1, params.sharpness)))');
+    // C1/F2 (v1.36.0): the peak coefficient is COMPUTED by enhanceOps.casPeak on both the CPU
+    // chain and this GPU parity port — lockstep by construction (was a duplicated literal).
+    expect(pipelineSrc).toContain('casPeak(params.sharpness)');
+    // Zero must mean OFF on the GPU route too: the enh_cas draw is gated on sharpness > 0.
+    expect(pipelineSrc).toContain('if (params.sharpness > 0)');
   });
 
   it('Lanczos resample is a linear-light sinc window (a=4) via texelFetch', () => {

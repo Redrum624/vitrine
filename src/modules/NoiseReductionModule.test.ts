@@ -6,6 +6,7 @@
  */
 
 import { NoiseReductionModule, NoiseReductionParams, NoiseReductionContext } from './NoiseReductionModule';
+import { nrStrengthToH, legacyNrStrengthToH } from '../utils/nrCurve';
 import {
   createTestImage,
   createGradientImage,
@@ -517,9 +518,12 @@ describe('NoiseReductionModule', () => {
 
       const autoParams = module.autoAdjust(input, context);
 
-      // Low noise should result in lower strength (20) and higher detail preservation (90)
-      // and wavelet method selection
-      expect(autoParams.strength).toBeLessThanOrEqual(50);
+      // Low noise → the low bucket: higher detail preservation, and a strength whose
+      // EFFECTIVE h equals the old tuning (legacy strength 20). v1.36.0 C1/F1: the raw
+      // strength is no longer 20 — the slider curve was recalibrated (nrCurve.ts), so the
+      // bucket's raw value is remapped to keep the same denoise effect (~85 on the new scale).
+      expect(nrStrengthToH(autoParams.strength)).toBeCloseTo(legacyNrStrengthToH(20), 8);
+      expect(autoParams.strength).toBeLessThan(100); // below the clamped stronger buckets
       expect(autoParams.preserveDetail).toBeGreaterThanOrEqual(70);
     });
 

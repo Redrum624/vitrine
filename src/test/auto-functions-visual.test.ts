@@ -20,6 +20,7 @@ import { ColorBalanceModule } from '../modules/ColorBalanceModule';
 import { ShadowsHighlightsModule } from '../modules/ShadowsHighlightsModule';
 import { NoiseReductionModule } from '../modules/NoiseReductionModule';
 import { LensCorrectionsModule } from '../modules/LensCorrectionsModule';
+import { nrStrengthToH, legacyNrStrengthToH } from '../utils/nrCurve';
 
 // ─── Mocks ──────────────────────────────────────────────────────────────────
 
@@ -639,7 +640,10 @@ describe('NoiseReductionModule.autoAdjust', () => {
     const result = module.autoAdjust(img, CTX);
 
     expect(result.enabled).toBe(true);
-    expect(result.strength).toBeLessThanOrEqual(30);
+    // v1.36.0 C1/F1: the low bucket's raw strength is remapped through the recalibrated NR
+    // curve (nrCurve.ts) to preserve its old EFFECTIVE h — ~85 on the new scale, not 20.
+    expect(nrStrengthToH(result.strength)).toBeCloseTo(legacyNrStrengthToH(20), 8);
+    expect(result.strength).toBeLessThan(100);
     expect(result.preserveDetail).toBeGreaterThanOrEqual(80);
     expect(result.method).toBe('wavelet');
     logVisual('autoNR on uniform', result as unknown as Record<string, unknown>);

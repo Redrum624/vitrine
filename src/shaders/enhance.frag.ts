@@ -221,7 +221,8 @@ void main() {
 
 /**
  * AMD FidelityFX CAS on the luma (.r). 3x3 min/max → adaptive weight, cross-tap sharpen.
- * Cr/Cb/A pass through. u_peak = -(0.125 + 0.075*clamp01(sharpness)) (caller pre-computes).
+ * Cr/Cb/A pass through. u_peak = casPeak(sharpness) = -0.2*clamp01(sharpness) (caller
+ * pre-computes via the shared enhanceOps.casPeak; the pass is skipped at sharpness <= 0).
  */
 export const FRAG_ENH_CAS = `#version 300 es
 precision highp float;
