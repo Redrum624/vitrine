@@ -60,10 +60,19 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
   const [error, setError] = useState<string | null>(null);
   const [revertVersion, setRevertVersion] = useState(0);
 
+  // C4 finding 3 — the panel's ONE commit model: STAGED until Apply arms the module
+  // (enabled=false → edits only stage panel/module state, nothing renders or reprocesses),
+  // LIVE write-through once armed (enabled=true → every edit commits + fires the parent's
+  // debounced reprocess, exactly how every other module panel commits). Before this, a
+  // post-Apply slider tweak (or toggling Sharpen OFF) wrote the module but never rendered —
+  // exports picked up never-previewed values. Firing on the was-enabled edge too means a
+  // patch that DISABLES the module (header Reset) still reprocesses the removal.
   const update = useCallback((patch: Partial<EnhanceParams>) => {
     setParams((prev) => ({ ...prev, ...patch }));
+    const wasEnabled = module.getParams().enabled;
     module.setParams(patch);
-  }, [module]);
+    if (wasEnabled || module.getParams().enabled) onParamsChange?.(patch);
+  }, [module, onParamsChange]);
 
   const PREF_KEYS = ['sharpen', 'upscale', 'scale', 'denoiseStrength', 'psfSigma', 'rlIters', 'alpha', 'hpSigma', 'sharpness', 'chromaClean'] as const;
 
@@ -74,11 +83,25 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
     void loadEnhancePrefs().then((prefs) => {
       if (cancelled) return;
       if (prefs) {
+        const { nrEnabled: prefNrEnabled, nrStrength: prefNrStrength, ...enhance } = prefs;
         const cur = module.getParams();
-        const atDefaults = PREF_KEYS.every((k) => cur[k] === DEFAULT_ENHANCE_PARAMS[k]);
+        // C4 finding 1: per-image state ALWAYS wins — a LIVE (enabled) module is never
+        // reseeded, even when its sliders happen to sit at factory defaults. Without the
+        // enabled gate, any remount (undo, Auto All, reopen) silently grafted pref sliders
+        // into the applied module with no reprocess.
+        const atDefaults = cur.enabled === false && PREF_KEYS.every((k) => cur[k] === DEFAULT_ENHANCE_PARAMS[k]);
         if (atDefaults) {
-          const { nrEnabled: prefNrEnabled, nrStrength: prefNrStrength, ...enhance } = prefs;
+          // C4 finding 5: never re-arm the Upscale toggle over a live baked upscale — the
+          // post-bake remount reseeds an at-defaults module, and an armed toggle invites an
+          // accidental stacked second bake.
+          if (enhance.upscale && imageService.isBakedUpscaleActive()) delete enhance.upscale;
           if (Object.keys(enhance).length) update(enhance);
+        }
+        // C4 finding 2: NR seeding gates on the NR MODULE's OWN factory defaults — the
+        // enhance-module gate said nothing about saved NR-only edits, so prefs overwrote
+        // their display (and Apply then committed pref NR over the saved NR).
+        const nr = noiseReductionModule.getParams();
+        if (nr.enabled === false && nr.strength === 50) {
           if (typeof prefNrEnabled === 'boolean') setNrEnabled(prefNrEnabled);
           if (typeof prefNrStrength === 'number') setNrStrength(prefNrStrength);
         }
@@ -101,9 +124,45 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
     });
   }, [params, nrEnabled, nrStrength]);
 
+  // C4 finding 3 (NR side of the ONE commit model): NR controls stage while the NR module
+  // is disabled (Apply commits them), but once the module is LIVE (a prior Apply enabled it)
+  // every toggle/strength edit commits + fires the parent's debounced reprocess — same
+  // staged-until-armed / live-after rule as the enhance params in update().
+  const handleNrToggle = useCallback(() => {
+    const next = !nrRef.current.enabled;
+    setNrEnabled(next);
+    if (noiseReductionModule.getParams().enabled) {
+      const patch = next
+        ? { enabled: true, strength: nrRef.current.strength, method: 'auto' as const }
+        : { enabled: false };
+      noiseReductionModule.setParams(patch);
+      onNoiseReductionChange?.(patch);
+    }
+  }, [noiseReductionModule, onNoiseReductionChange]);
+
+  const handleNrStrength = useCallback((v: number) => {
+    setNrStrength(v);
+    if (noiseReductionModule.getParams().enabled) {
+      const patch = { enabled: true, strength: v, method: 'auto' as const };
+      noiseReductionModule.setParams(patch);
+      onNoiseReductionChange?.(patch);
+    }
+  }, [noiseReductionModule, onNoiseReductionChange]);
+
+  // C4 finding 8: Reset neutralizes EVERYTHING the panel shows as active — the three mode
+  // toggles and staged NR strength included, not just the detail sliders. A LIVE enhance
+  // module gets its disable committed + reprocessed through update()'s live path; a LIVE NR
+  // module gets an explicit disable commit, firing its own trigger only when no enhance
+  // reprocess already covers it (the full-pipeline pass runs NR before enhance).
   const resetSection = useCallback(() => {
+    setNrEnabled(false);
     setNrStrength(50);
+    const enhanceWasEnabled = module.getParams().enabled;
     update({
+      enabled: false,
+      sharpen: DEFAULT_ENHANCE_PARAMS.sharpen,
+      upscale: DEFAULT_ENHANCE_PARAMS.upscale,
+      scale: DEFAULT_ENHANCE_PARAMS.scale,
       sharpness: DEFAULT_ENHANCE_PARAMS.sharpness,
       alpha: DEFAULT_ENHANCE_PARAMS.alpha,
       hpSigma: DEFAULT_ENHANCE_PARAMS.hpSigma,
@@ -112,11 +171,27 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
       denoiseStrength: DEFAULT_ENHANCE_PARAMS.denoiseStrength,
       chromaClean: DEFAULT_ENHANCE_PARAMS.chromaClean,
     });
-  }, [update]);
+    if (noiseReductionModule.getParams().enabled) {
+      const nrOff = { enabled: false };
+      noiseReductionModule.setParams(nrOff);
+      if (!enhanceWasEnabled) onNoiseReductionChange?.(nrOff);
+    }
+  }, [update, module, noiseReductionModule, onNoiseReductionChange]);
 
-  // Card header (Task 2): Reset ↺ = reset the detail/quality params (Enhance has
+  // Card header (Task 2): Reset ↺ = reset the panel's full active scope (Enhance has
   // no auto function). Reuses the existing resetSection handler unchanged.
   useRegisterModuleCardActions(onRegisterActions, { reset: resetSection });
+
+  // C4 finding 4 — "did the bake actually commit?" signal: applyUpscale/applyMotionDeblur
+  // return early on guardDeveloping/inFlight refusals and mid-bake photo-switch aborts (W2's
+  // identity-abort paths, which toast their own notices), all WITHOUT pushing a restore
+  // point. A grown restore depth is therefore the observable commit marker — marking applied
+  // on a refused bake manufactured a false "Re-apply to update" staleness for a bake that
+  // never ran. Optional-chained so unit mocks without getRestoreDepth degrade to the legacy
+  // always-committed behavior (null before-depth → treated as committed).
+  const readBakeDepth = useCallback((): number | null => enhanceService.getRestoreDepth?.() ?? null, []);
+  const bakeCommitted = useCallback((depthBefore: number | null): boolean =>
+    depthBefore === null || (readBakeDepth() ?? depthBefore) > depthBefore, [readBakeDepth]);
 
   const handleApply = useCallback(async () => {
     setBusy(true); setError(null);
@@ -142,24 +217,30 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
       noiseReductionModule.setParams(nrParams);
       if (!isUpscale && !paramsRef.current.sharpen) onNoiseReductionChange?.(nrParams);
 
+      // Snapshot the upstream param state this Apply result reflects (markEnhanceApplied), so a
+      // later upstream edit surfaces the "Re-apply to update" staleness hint. Only after a REAL
+      // apply: the sharpen path always commits, but the upscale path marks ONLY when the bake
+      // actually committed (C4 finding 4) — guard-refused/aborted bakes leave the baseline (and
+      // revertVersion) untouched. A no-op click (neither toggle on) touches nothing.
       if (isUpscale) {
+        const depthBefore = readBakeDepth();
         await enhanceService.applyUpscale({ ...paramsRef.current, upscale: true });
-        setRevertVersion((v) => v + 1);
+        if (bakeCommitted(depthBefore)) {
+          setRevertVersion((v) => v + 1);
+          enhanceService.markEnhanceApplied();
+        }
       } else if (paramsRef.current.sharpen) {
         const patch = { enabled: true, sharpen: true, upscale: false };
         module.setParams(patch); setParams((p) => ({ ...p, ...patch }));
         onParamsChange?.(patch);
+        enhanceService.markEnhanceApplied();
       }
-      // Snapshot the upstream param state this Apply result reflects, so a later upstream edit
-      // surfaces the "Re-apply to update" staleness hint. Only after a real apply (upscale or
-      // sharpen) — a no-op click (neither toggle on) leaves the baseline untouched.
-      if (isUpscale || paramsRef.current.sharpen) enhanceService.markEnhanceApplied();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
-  }, [nrEnabled, nrStrength, module, onParamsChange, onNoiseReductionChange]);
+  }, [nrEnabled, nrStrength, module, onParamsChange, onNoiseReductionChange, readBakeDepth, bakeCommitted]);
 
   // Re-apply a persisted bake intent on a reopened image (Q7 upscale + Z1 deblur/stacked): replays
   // the saved bake sequence (upscale with the saved scale, and/or AI motion deblur) in order on top
@@ -179,32 +260,53 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
       const saved = img?.filePath ? await editPersistenceService.getSavedEditState(img.filePath) : null;
       const postBakeEdits = saved?.editsOnBakedBase ?? null;
       postBakeEditsRead = postBakeEdits;
+      // C4 finding 6: the replay must re-derive the SAME baked result the user had — so it
+      // feeds the PERSISTED pre-bake editState's enhance params (what the original bake ran
+      // with), not the live panel params, which the prefs seeding may have drifted since
+      // (the detail sliders shape the AI finishing pass and the deterministic chain alike).
+      // Live params remain only the fallback for pre-Q7 saves that carry no enhance entry.
+      const savedEnhance = (saved?.modules?.['enhance'] ?? null) as Partial<EnhanceParams> | null;
       // Derive the replay order: an explicit stacked bakeOrder, else the single active intent.
       const order = bakeOrder.length
         ? bakeOrder
         : upscaleIntent
           ? (['upscale'] as const)
           : (['deblur'] as const);
+      // C4 finding 4 (same honesty as handleApply): count what we ATTEMPT vs what COMMITTED
+      // (restore-depth growth) — a guard-refused replay must not mark applied, and the saved
+      // post-bake edits must never be grafted onto a base the bakes never produced.
+      const depthBefore = readBakeDepth();
+      let attempted = 0;
       for (const kind of order) {
         if (kind === 'upscale' && upscaleIntent) {
-          await enhanceService.applyUpscale({ ...module.getParams(), upscale: true, scale: upscaleIntent.scale });
+          attempted++;
+          await enhanceService.applyUpscale({ ...module.getParams(), ...(savedEnhance ?? {}), upscale: true, scale: upscaleIntent.scale });
         } else if (kind === 'deblur') {
+          attempted++;
           await enhanceService.applyMotionDeblur();
         }
       }
+      const depthAfter = readBakeDepth();
+      const bakesRun = depthBefore === null || depthAfter === null ? attempted : depthAfter - depthBefore;
       if (postBakeEdits) {
         const baked = imageService.getCurrentImage();
-        if (baked) {
+        if (baked && bakesRun >= attempted) {
           editPersistenceService.applyPostBakeEdits(postBakeEdits, baked.width, baked.height);
           useAppStore.getState().notifyExternalParamsChange();
           useAppStore.getState().triggerReprocessing();
           // Deterministically re-attach the replayed edits to disk. NOT a plain flush(): the redirect
           // is suspended when the replay stacked >1 bake, and flush would then silently drop them.
           editPersistenceService.persistPostBakeEdits(postBakeEdits);
+        } else {
+          // Replay incomplete (a bake was refused) — re-attach the already-read edits so a retry /
+          // the next reopen can still replay them (mirrors the catch path below).
+          editPersistenceService.persistPostBakeEdits(postBakeEdits);
         }
       }
-      setRevertVersion((v) => v + 1);
-      enhanceService.markEnhanceApplied();
+      if (bakesRun > 0) {
+        setRevertVersion((v) => v + 1);
+        enhanceService.markEnhanceApplied();
+      }
     } catch (e) {
       // Mid-replay failure (review LOW fix): an earlier bake's persist write already consumed
       // editsOnBakedBase from disk before a later bake threw. Re-attach the already-read edits so a
@@ -214,7 +316,7 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
     } finally {
       setBusy(false);
     }
-  }, [upscaleIntent, deblurIntent, bakeOrder, module]);
+  }, [upscaleIntent, deblurIntent, bakeOrder, module, readBakeDepth]);
 
   // Probe AI-deblur availability once (capability doesn't change at runtime; the client caches it).
   useEffect(() => {
@@ -227,15 +329,20 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
   const handleMotionDeblur = useCallback(async () => {
     setBusy(true); setError(null);
     try {
+      // C4 finding 4: mark applied only when the bake actually committed (restore depth grew) —
+      // guardDeveloping/inFlight refusals return early without pushing a restore point.
+      const depthBefore = readBakeDepth();
       await enhanceService.applyMotionDeblur();
-      setRevertVersion((v) => v + 1);
-      enhanceService.markEnhanceApplied();
+      if (bakeCommitted(depthBefore)) {
+        setRevertVersion((v) => v + 1);
+        enhanceService.markEnhanceApplied();
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
-  }, []);
+  }, [readBakeDepth, bakeCommitted]);
 
   // Show the reopen notice when a durable intent exists (upscale and/or deblur) but the working base
   // is NOT currently baked (reopened, not yet re-applied). Once re-applied, the base carries a bake
@@ -368,7 +475,7 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
 
       {/* Three mode toggles */}
       <div style={{ display: 'flex', gap: 8 }}>
-        <button type="button" aria-pressed={nrEnabled} onClick={() => setNrEnabled((v) => !v)} style={modeTileStyle(nrEnabled)}>
+        <button type="button" aria-pressed={nrEnabled} onClick={handleNrToggle} style={modeTileStyle(nrEnabled)}>
           <span style={modeDotStyle(nrEnabled)} />
           <span>Noise Reduction</span>
         </button>
@@ -443,7 +550,7 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
           min={0}
           max={100}
           step={1}
-          onChange={setNrStrength}
+          onChange={handleNrStrength}
         />
         <SliderRow
           label="Sharpen strength"
@@ -575,17 +682,19 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
 
       {error && <div role="alert" className="text-xs" style={{ color: '#f87171' }}>{error}</div>}
 
-      {/* Apply button */}
+      {/* Apply button. C4 finding 4: gated while developing (parity with Re-apply and Motion
+          deblur) — the service guard would refuse the bake anyway; disabling makes it honest. */}
       <button
         type="button"
-        disabled={busy || selectedScaleInfeasible}
+        disabled={busy || developing || selectedScaleInfeasible}
+        title={developing ? 'Available when full quality finishes developing' : undefined}
         style={{
           width: '100%', padding: 11, borderRadius: 11,
           border: '1px solid var(--accent-ring)',
           background: 'var(--accent)', color: '#0b0b0c', fontSize: 12.5, fontWeight: 700,
-          cursor: busy ? 'wait' : selectedScaleInfeasible ? 'not-allowed' : 'pointer',
-          opacity: busy || selectedScaleInfeasible ? 0.6 : 1,
-          boxShadow: busy || selectedScaleInfeasible ? 'none' : '0 2px 18px var(--accent-ring)',
+          cursor: busy ? 'wait' : developing || selectedScaleInfeasible ? 'not-allowed' : 'pointer',
+          opacity: busy || developing || selectedScaleInfeasible ? 0.6 : 1,
+          boxShadow: busy || developing || selectedScaleInfeasible ? 'none' : '0 2px 18px var(--accent-ring)',
           display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
         }}
         onClick={handleApply}
@@ -623,9 +732,11 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
       {revertVersion >= 0 && enhanceService.canRevert() && (
         <button
           type="button"
+          disabled={busy}
           style={{
             width: '100%', padding: 8, borderRadius: 8, border: '1px solid rgba(255,255,255,.1)',
-            background: 'transparent', color: 'var(--glass-text-secondary)', fontSize: 11.5, cursor: 'pointer',
+            background: 'transparent', color: 'var(--glass-text-secondary)', fontSize: 11.5,
+            cursor: busy ? 'not-allowed' : 'pointer', opacity: busy ? 0.6 : 1,
           }}
           onClick={() => { enhanceService.revert(); setRevertVersion((v) => v + 1); }}
         >

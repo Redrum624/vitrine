@@ -56,6 +56,32 @@ export function saveEnhancePrefs(prefs: EnhancePrefs): void {
   }
 }
 
+/**
+ * Flush a pending debounced save immediately (C4 finding 7): change-then-quit inside the
+ * 400ms window lost the trailing snapshot — the exact tail-loss class this util exists to
+ * prevent. Fire-and-forget is fine at quit time: the IPC invoke reaches the main process
+ * synchronously, and main completes the durable-store write even if the window closes.
+ */
+export function flushPendingEnhancePrefs(): void {
+  try {
+    if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+    const payload = pending;
+    pending = null;
+    if (!payload) return;
+    if (typeof window === 'undefined' || !window.electronAPI?.storeSet) return;
+    void window.electronAPI.storeSet(ENHANCE_PREFS_KEY, payload)
+      .catch((e) => logger.warn('Failed to save enhance prefs:', e));
+  } catch (e) {
+    logger.warn('Failed to save enhance prefs:', e);
+  }
+}
+
+// Quit-time safety net — registered once at module load (this module is a renderer-only util;
+// `window` exists everywhere it is imported, and the guard keeps non-DOM contexts safe).
+if (typeof window !== 'undefined') {
+  window.addEventListener('beforeunload', flushPendingEnhancePrefs);
+}
+
 /** Validated prefs, or null when unset/corrupt/no-Electron. */
 export async function loadEnhancePrefs(): Promise<EnhancePrefs | null> {
   try {

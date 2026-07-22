@@ -62,4 +62,26 @@ describe('enhancePrefsStorage', () => {
     expect(() => saveEnhancePrefs({ sharpness: 0.5 })).not.toThrow();
     expect(await loadEnhancePrefs()).toBeNull();
   });
+
+  // C4 finding 7: change-then-quit lost the trailing snapshot — the exact tail-loss class
+  // this util exists to prevent. beforeunload must flush the pending debounced save.
+  test('beforeunload flushes a pending debounced save (change-then-quit keeps the snapshot)', async () => {
+    saveEnhancePrefs({ sharpness: 0.7, nrStrength: 42 });
+    window.dispatchEvent(new Event('beforeunload'));
+    await Promise.resolve();
+    const api = (window as unknown as { electronAPI: { storeSet: jest.Mock } }).electronAPI;
+    expect(api.storeSet).toHaveBeenCalledTimes(1);
+    expect(mem[ENHANCE_PREFS_KEY]).toEqual({ sharpness: 0.7, nrStrength: 42 });
+    // The cleared debounce timer must not double-write afterwards.
+    jest.advanceTimersByTime(500);
+    await Promise.resolve();
+    expect(api.storeSet).toHaveBeenCalledTimes(1);
+  });
+
+  test('beforeunload with nothing pending is a no-op', async () => {
+    window.dispatchEvent(new Event('beforeunload'));
+    await Promise.resolve();
+    const api = (window as unknown as { electronAPI: { storeSet: jest.Mock } }).electronAPI;
+    expect(api.storeSet).not.toHaveBeenCalled();
+  });
 });
