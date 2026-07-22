@@ -36,9 +36,22 @@ export function computeWBGains(temperature: number, tint: number): { r: number; 
   const tempRGB = temperatureToRgb(temperature);
   const referenceRGB = temperatureToRgb(6500);
 
-  let r = safeDivide(referenceRGB.r, tempRGB.r, 1);
-  let g = safeDivide(referenceRGB.g, tempRGB.g, 1);
-  let b = safeDivide(referenceRGB.b, tempRGB.b, 1);
+  // Only the R/B RATIO of the Tanner-Helland kelvin→RGB curve is trusted here.
+  // Its green component does not track the geometric mean of R and B (log on
+  // the cool side, power-law on the warm side), so deriving a green gain from
+  // it leaked every temperature move onto the green↔magenta axis (at tint=0:
+  // ≈ +4.5% green at 9250K, ≈ −2.9% magenta at 3200K — "temperature shifts the
+  // tint"). Pinning r = k, g = 1, b = 1/k keeps G/√(R·B) ≡ 1, so temperature
+  // moves strictly along blue↔amber and tint below stays the sole
+  // green↔magenta control. The R/B ratio (k²) is unchanged from the old model,
+  // so solveTemperature/solveTint still invert this exactly.
+  const rRatio = safeDivide(referenceRGB.r, tempRGB.r, 1);
+  const bRatio = safeDivide(referenceRGB.b, tempRGB.b, 1);
+  const k = Math.sqrt(safeDivide(rRatio, bRatio, 1));
+
+  let r = k;
+  let g = 1;
+  let b = safeDivide(1, k, 1);
 
   // Apply green/magenta tint (positive = more green, negative = more magenta)
   const tintFactor = tint / 100.0;

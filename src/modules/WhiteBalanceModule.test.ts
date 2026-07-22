@@ -405,8 +405,10 @@ describe('WhiteBalanceModule', () => {
       const w = 24, h = 24;
       const ctx = { width: w, height: h, channels: 4 };
       // Slightly blue-leaning near-grays — the live-app medians measured on an
-      // already-balanced sunset (hazy sky). Solved ≈ 6756K / +9.3: inside the
-      // dead-band, so Auto must report "no cast" instead of a token warm nudge.
+      // already-balanced sunset (hazy sky). Solved ≈ 6759K / +25.1 under the
+      // decoupled-axis gain model (was 6756K / +9.3 under the old coupled one):
+      // inside the dead-band, so Auto must report "no cast" instead of a token
+      // warm nudge.
       const input = fill(w, h, 0.6, 0.58, 0.62);
       const exp = expected(0.6, 0.58, 0.62);
       expect(exp.noCast).toBe(true); // fixture sanity: solved correction is in-band

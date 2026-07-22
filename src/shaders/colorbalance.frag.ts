@@ -1,5 +1,6 @@
 /**
- * DEAD CODE — unused (only imported by the equally-dead GPUImageProcessor.ts).
+ * DEAD CODE — unused (its only importer, the equally-dead GPUImageProcessor.ts,
+ * was deleted alongside whitebalance.frag.ts in the WB axis-decoupling fix).
  * The live color-balance shader is FRAG_COLORBALANCE in ./sources.ts.
  *
  * Color Balance Shader
