@@ -9,6 +9,11 @@ export interface WorkerImageData {
   height: number;
   data: Float32Array;
   channels: number;
+  /** v1.36.0 C5: full-PASS `processingLongEdge / nativeLongEdge` (WYSIWYG enhance kernels).
+   *  Rides the whole-image message as-is and is forwarded verbatim to every PROCESS_TILE —
+   *  never re-derived from tile dims (same out-of-band rule as edgeMaskGlobalMax).
+   *  Undefined → native semantics (scale 1). */
+  kernelScale?: number;
 }
 
 export interface WorkerModuleConfig {
@@ -402,7 +407,10 @@ export class WebWorkerImageProcessor {
         pipeline,
         // Full-image edge-mask max (undefined unless the pipeline runs the enhance edgeMask); the
         // worker puts it on the ProcessingContext so this tile's edgeMask normalises globally.
-        edgeMaskGlobalMax
+        edgeMaskGlobalMax,
+        // C5: the FULL-pass kernel scale (never derived from this tile's padded dims) so every
+        // tile's enhance sharpen kernels compensate identically — no per-tile sharpen seams.
+        kernelScale: imageData.kernelScale
       }) as TileProcessingResult;
 
       if (!result.success) {

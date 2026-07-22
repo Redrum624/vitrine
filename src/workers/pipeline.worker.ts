@@ -75,6 +75,10 @@ interface ProcessTileMessage {
      *  it). Placed on the ProcessingContext so every tile's edgeMask normalises by the SAME global
      *  constant → seam-free sharpen gain (see WebWorkerImageProcessor.processTiledImage). */
     edgeMaskGlobalMax?: number;
+    /** v1.36.0 C5: the FULL-pass processing/native long-edge ratio (WYSIWYG enhance kernels).
+     *  Threaded verbatim from the caller's WorkerImageData — NEVER derived from this tile's
+     *  padded dims, so every tile compensates identically (no per-tile sharpen seams). */
+    kernelScale?: number;
     pipeline: WorkerModuleConfig[];
   };
 }
@@ -96,11 +100,14 @@ async function runPipeline(
   channels: number,
   config: WorkerModuleConfig[],
   edgeMaskGlobalMax?: number,
+  kernelScale?: number,
 ): Promise<Float32Array> {
   pipeline.applyWorkerConfig(config);
   // edgeMaskGlobalMax rides on the context (undefined unless the tiled caller computed it) so the
   // enhance module's edgeMask normalises by the full-image max instead of this tile's local max.
-  const context: ProcessingContext = { width, height, channels, edgeMaskGlobalMax };
+  // kernelScale (C5) rides the same way: the FULL-pass processing/native ratio for the WYSIWYG
+  // enhance kernel compensation — undefined → native semantics (scale 1).
+  const context: ProcessingContext = { width, height, channels, edgeMaskGlobalMax, kernelScale };
   // useWebWorkers=false → CPU in-worker, NO nested workers (no recursion).
   return pipeline.processImage(data, context, { useWebWorkers: false });
 }
@@ -129,6 +136,8 @@ ctx.addEventListener('message', async (event: MessageEvent) => {
           width: imageData.width,
           height: imageData.height,
           channels: imageData.channels,
+          // C5: whole-image pass — the caller's pass-level kernel scale applies directly.
+          kernelScale: imageData.kernelScale,
         };
         pipeline.applyWorkerConfig(pipelineConfig);
         const result = await pipeline.processImage(imageData.data, context, { useWebWorkers: false });
@@ -151,7 +160,7 @@ ctx.addEventListener('message', async (event: MessageEvent) => {
 
       case 'PROCESS_TILE': {
         const startTime = performance.now();
-        const { tileData, tileWidth, tileHeight, tileX, tileY, channels, edgeMaskGlobalMax, pipeline: pipelineConfig } = msg.data;
+        const { tileData, tileWidth, tileHeight, tileX, tileY, channels, edgeMaskGlobalMax, kernelScale, pipeline: pipelineConfig } = msg.data;
         // Tiles are processed as standalone images. The caller (WebWorkerImageProcessor.processTile)
         // grows each tile by an APRON of neighbour pixels sized to the enabled modules' summed kernel
         // radius (spatialApron), so every INTERIOR pixel already has full kernel context here; the
@@ -164,7 +173,7 @@ ctx.addEventListener('message', async (event: MessageEvent) => {
         // tileWidth/tileHeight are the PADDED dims; fullWidth/fullHeight remain informational only.
         const resolvedChannels = channels ?? 4;
         const result = await runPipeline(
-          tileData, tileWidth, tileHeight, resolvedChannels, pipelineConfig, edgeMaskGlobalMax,
+          tileData, tileWidth, tileHeight, resolvedChannels, pipelineConfig, edgeMaskGlobalMax, kernelScale,
         );
         const processingTime = performance.now() - startTime;
         ctx.postMessage(

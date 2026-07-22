@@ -30,6 +30,7 @@ import { imageService } from '../../services/ImageService';
 import { notificationService } from '../../services/NotificationService';
 import { guardDeveloping } from '../../utils/developingGuard';
 import { boxDownsampleRGBA } from '../../utils/imageDownsample';
+import { enhanceKernelScale } from '../../utils/enhanceOps';
 import { progressivePreviewService } from '../../services/ProgressivePreviewService';
 import { adaptiveDebounceService } from '../../services/AdaptiveDebounceService';
 import { useAppStore } from '../../stores/appStore';
@@ -281,11 +282,24 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
       // The pipeline has its own optimizations to skip unchanged modules
       console.log('AdjustmentPanel: Processing preview', previewWidth, 'x', previewHeight);
 
+      // v1.36.0 C5 (WYSIWYG kernels): this preview's long edge vs the image's NATIVE long edge,
+      // derived ONCE per pass here (the pass-build seam) and threaded to every CPU route below
+      // (main-thread context + worker imageData). Sub-native previews (<1) scale the enhance
+      // sharpen kernels down so the preview matches what the native-res export produces; at 1:1
+      // the quality ratchet drives previewWidth/Height to native → scale 1 → preview == export.
+      // Crop runs inside the pass on BOTH the preview and the export, shrinking both long edges
+      // by the same fraction, so the pre-crop ratio computed here is the correct pass scale.
+      const kernelScale = enhanceKernelScale(
+        Math.max(previewWidth, previewHeight),
+        Math.max(currentImage.width, currentImage.height),
+      );
+
       // CRITICAL: Create context object to track dimension changes from rotation/crop
       const processingContext = {
         width: previewWidth,
         height: previewHeight,
-        channels: 4
+        channels: 4,
+        kernelScale
       };
 
       // ── GPU resident-texture fast path ──────────────────────────────────────────
@@ -412,7 +426,9 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
 
         try {
           const workerResult = await webWorkerImageProcessor.processImage(
-            { width: previewWidth, height: previewHeight, data: previewData, channels: 4 },
+            // kernelScale: same pass-level C5 scale as the main-thread context above (the worker
+            // path forwards it to every tile verbatim — never re-derived from tile dims).
+            { width: previewWidth, height: previewHeight, data: previewData, channels: 4, kernelScale },
             workerConfig,
           );
 

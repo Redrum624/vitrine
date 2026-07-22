@@ -86,6 +86,13 @@ export interface ProcessingContext {
    *  normalises by the same global constant (seam-free sharpen gain). Absent on the whole-image /
    *  main-thread path — edgeMask then uses its own buffer max (byte-identical to before). */
   edgeMaskGlobalMax?: number;
+  /** v1.36.0 C5 (WYSIWYG kernels): `processingLongEdge / nativeLongEdge` of this PASS, derived
+   *  once at pass-build (enhanceKernelScale). Sub-native preview passes set it (<1) so the
+   *  enhance sharpen kernels scale down to match what the native-resolution export produces.
+   *  Absent/1 = native semantics — exports and bake develop passes never set it, keeping their
+   *  output bit-identical. Threaded to workers via WorkerImageData (full-pass value, NEVER
+   *  re-derived from tile dims — same out-of-band rule as edgeMaskGlobalMax). */
+  kernelScale?: number;
   /** True when this pass produces an EXPORT buffer (ExportDialog / MultiExportService). Modules may
    *  use it to skip diagnostics-only work — e.g. NoiseReductionModule's logQualityMetrics runs two
    *  full-buffer O(n) loops that are pure logging; at export resolution that is measurable waste.
@@ -599,7 +606,10 @@ export class ImageProcessingPipeline {
         width: context.width,
         height: context.height,
         data: input,
-        channels: context.channels
+        channels: context.channels,
+        // C5: full-pass kernel scale rides to the worker (single/tiled) so the enhance sharpen
+        // kernels compensate for a sub-native preview there too. Undefined → native semantics.
+        kernelScale: context.kernelScale
       };
 
       const result = await workerPool.processImage(imageData, pipeline);
@@ -700,6 +710,9 @@ export class ImageProcessingPipeline {
             cached.context.width === context.width &&
             cached.context.height === context.height &&
             cached.context.channels === context.channels &&
+            // C5: a pass at the same dims but a different kernel scale (e.g. a quality-ratchet
+            // native pass vs a same-size export) must not reuse a differently-sharpened result.
+            cached.context.kernelScale === context.kernelScale &&
             cached.result.length === currentData.length) {
           // Use cached result
           logger.debug(`Module ${module.getName()} used cached result`);

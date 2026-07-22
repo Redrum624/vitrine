@@ -1,5 +1,5 @@
 import { rgbaToYCrCb, yCrCbToRgba } from './enhanceColor';
-import { cas, cleanChroma, lumaGraft } from './enhanceOps';
+import { cas, cleanChroma, effectiveEnhanceKernels, lumaGraft } from './enhanceOps';
 import { denoiseChroma, rlDeconvLuma } from './enhanceRestore';
 import { lanczosResizeLinear } from './lanczos';
 
@@ -16,17 +16,31 @@ export const DEFAULT_ENHANCE_PARAMS: EnhanceParams = {
 };
 export interface EnhanceResult { enhanced: Float32Array; base: Float32Array; width: number; height: number; }
 
-export function enhanceImage(rgba: Float32Array, w: number, h: number, p: EnhanceParams, edgeMaskGlobalMax?: number): EnhanceResult {
+export function enhanceImage(rgba: Float32Array, w: number, h: number, p: EnhanceParams, edgeMaskGlobalMax?: number, kernelScale = 1): EnhanceResult {
   // 0+1 native res: denoise chroma, RL-deconv deblur + luma graft
   // edgeMaskGlobalMax (optional): the full-image Sobel-gradient max, supplied by the tiled CPU
   // worker path so lumaGraft's edgeMask normalises by the SAME constant in every tile (seam-free
   // sharpen gain). Undefined on the untiled/whole-image path → edgeMask uses its own buffer max.
+  //
+  // kernelScale (optional, v1.36.0 C5 WYSIWYG): processingLongEdge / nativeLongEdge of the PASS
+  // (never of a tile — the tiled path threads the full-pass scale, like edgeMaskGlobalMax).
+  // Parameter semantics are NATIVE-resolution: sub-native preview passes scale psfSigma / hpSigma
+  // down by this factor and attenuate the CAS peak likewise, so the preview's sharpening matches
+  // what the native-resolution export produces. Default 1 = native semantics, bit-identical to
+  // pre-C5 (exports / bake develops never thread it). Below ~0.3px effective sigma the stages
+  // degenerate to visually-nil near-delta kernels but STILL RUN (structure kept — toggles keep
+  // previewing something consistent). Full doc: effectiveEnhanceKernels in enhanceOps.ts.
+  // NOTE: the tiled worker path's apron (moduleApron 'enhance') stays sized from the RAW native
+  // params — oversized for a scaled preview, which is safe; it must never shrink with the scale.
+  const eff = effectiveEnhanceKernels(p.psfSigma, p.hpSigma, kernelScale);
   const ycc = rgbaToYCrCb(rgba);
   let { y, cr, cb } = ycc; const a = ycc.a;
   if (p.denoiseStrength > 0) { const d = denoiseChroma(cr, cb, y, w, h, p.denoiseStrength); cr = d.cr; cb = d.cb; }
+  // Gate on the RAW psfSigma (not σ_eff) so the run condition stays equivalent at every scale —
+  // pipelineUsesEdgeMask (tiledPipeline.ts) mirrors this exact raw-param gate for the mmax sweep.
   if (p.rlIters > 0 && p.psfSigma > 0) {
-    const restored = rlDeconvLuma(y, w, h, p.psfSigma, p.rlIters);
-    y = lumaGraft(y, restored, w, h, p.alpha, p.hpSigma, edgeMaskGlobalMax);
+    const restored = rlDeconvLuma(y, w, h, eff.psfSigma, p.rlIters);
+    y = lumaGraft(y, restored, w, h, p.alpha, eff.hpSigma, edgeMaskGlobalMax);
   }
   let cur = yCrCbToRgba({ y, cr, cb, a }); let cw = w, ch = h;
   let base: Float32Array;
@@ -49,9 +63,11 @@ export function enhanceImage(rgba: Float32Array, w: number, h: number, p: Enhanc
   // "finish is always-on" behavior applied 62.5% of max sharpening even at sharpness 0.
   // Chroma cleanup stays gated by chromaClean only.
 
-  // 3 finish: CAS on luma (skipped at sharpness ≤ 0) + chroma clean at final res
+  // 3 finish: CAS on luma (skipped at sharpness ≤ 0) + chroma clean at final res.
+  // C5: the CAS 3×3 window can't shrink below its pixel support, so a sub-native preview
+  // attenuates its peak amplitude by eff.casGain instead (1 at native — exact no-op).
   const fin = rgbaToYCrCb(cur);
-  const fy = p.sharpness > 0 ? cas(fin.y, cw, ch, p.sharpness) : fin.y;
+  const fy = p.sharpness > 0 ? cas(fin.y, cw, ch, p.sharpness, eff.casGain) : fin.y;
   let fcr = fin.cr, fcb = fin.cb;
   if (p.chromaClean) { const c = cleanChroma(fcr, fcb, cw, ch); fcr = c.cr; fcb = c.cb; }
   const enhanced = yCrCbToRgba({ y: fy, cr: fcr, cb: fcb, a: fin.a });

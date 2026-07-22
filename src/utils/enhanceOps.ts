@@ -229,6 +229,70 @@ export function computeGlobalEdgeMax(rgba: Float32Array, w: number, h: number): 
 }
 
 /**
+ * v1.36.0 C5 — WYSIWYG resolution-compensated sharpen kernels (chain-audit F7).
+ *
+ * Enhance parameter semantics are defined at NATIVE resolution: psfSigma / hpSigma / the CAS
+ * window describe the effect on the full-resolution image — what an EXPORT produces. A preview
+ * pass runs at the quality cap (1024 base, ratcheted up to 4096/native), so applying the same
+ * pixel-space σ to a ~4-5× smaller buffer looked ~4-5× stronger than the export. The fix
+ * (industry convention, Lightroom-style): preview passes scale their kernels DOWN by
+ * `kernelScale = processingLongEdge / nativeLongEdge`. Consequences:
+ *   - export / bake develop passes run at native → scale 1 → BIT-IDENTICAL to pre-C5;
+ *   - at fit zoom the sharpen preview becomes subtle BY DESIGN; at 1:1 (where the quality
+ *     ratchet already delivers native-res processing) the preview now MATCHES the export —
+ *     tune sharpening at 1:1. That is the WYSIWYG contract.
+ *
+ * σ floor ({@link ENHANCE_KERNEL_SIGMA_FLOOR_PX}): below ~0.3px an effective Gaussian sigma
+ * degenerates to a near-delta kernel (gaussianKernel's min radius 1 tap weight → ~1), so the
+ * stage is treated as VISUALLY-NIL — but the pipeline structure is deliberately KEPT (no stage
+ * is skipped, σ_eff is never clamped up), so toggling a slider still previews *something*
+ * consistent and gate conditions (`psfSigma > 0` etc.) stay equivalent to the raw params.
+ *
+ * The CAS window is a fixed 3×3 stencil — it cannot shrink below its pixel support — so its
+ * PEAK AMPLITUDE scales by `casGain = kernelScale` instead (the sub-pixel-window approximation);
+ * below the floor that amplitude is a sliver but never zeroed (same keep-the-structure rule).
+ *
+ * Derive the scale ONCE per pass (enhanceKernelScale at pass-build) and thread it — never
+ * per-stage ad hoc, and NEVER from tile dims (a tiled pass threads the full-pass scale to every
+ * tile exactly like edgeMaskGlobalMax). Both the CPU chain (enhanceImage) and the GPU parity
+ * port (GpuPreviewPipeline.runEnhanceChain) read the SAME derived values from
+ * {@link effectiveEnhanceKernels} so the two routes can never drift.
+ */
+export const ENHANCE_KERNEL_SIGMA_FLOOR_PX = 0.3;
+
+/**
+ * `processingLongEdge / nativeLongEdge`, clamped to ≤1 (kernels are only ever scaled DOWN — a
+ * super-native pass keeps native semantics). Fail-safe: an unknown/invalid native long edge
+ * returns 1, so every caller that does not thread native dims (exports, bake develop passes,
+ * the enhance worker's native-res routes) keeps exact pre-C5 behavior.
+ */
+export function enhanceKernelScale(processingLongEdge: number, nativeLongEdge?: number): number {
+  if (!Number.isFinite(processingLongEdge) || processingLongEdge <= 0) return 1;
+  if (nativeLongEdge === undefined || !Number.isFinite(nativeLongEdge) || nativeLongEdge <= 0) return 1;
+  return Math.min(1, processingLongEdge / nativeLongEdge);
+}
+
+/** Resolution-compensated kernel parameters — the single source shared by CPU and GPU routes. */
+export interface EffectiveEnhanceKernels {
+  /** RL-deconvolution PSF sigma at processing resolution (σ × kernelScale). */
+  psfSigma: number;
+  /** lumaGraft highpass sigma at processing resolution (σ × kernelScale). */
+  hpSigma: number;
+  /** CAS peak-amplitude multiplier (the 3×3 window can't shrink — amplitude scales instead). */
+  casGain: number;
+}
+
+/**
+ * Scale the sharpen kernels for a pass. `kernelScale` outside (0,1) — including NaN/Infinity —
+ * is treated as 1: kernels are never amplified, and an unthreaded scale means native semantics.
+ * At scale 1 the multiplications are exact no-ops (IEEE ×1), so native passes stay bit-identical.
+ */
+export function effectiveEnhanceKernels(psfSigma: number, hpSigma: number, kernelScale: number): EffectiveEnhanceKernels {
+  const s = Number.isFinite(kernelScale) && kernelScale > 0 && kernelScale < 1 ? kernelScale : 1;
+  return { psfSigma: psfSigma * s, hpSigma: hpSigma * s, casGain: s };
+}
+
+/**
  * CAS peak weight from the sharpness slider (0..1). v1.36.0 C1/F2 recalibration: the old
  * `-(0.125 + 0.075·s)` applied 62.5% of maximum sharpening at s=0 and squashed the whole slider
  * into a 1.6× range. New curve: `-0.2·s` — zero means OFF, the s=1 maximum (-0.2) is unchanged.
@@ -239,9 +303,15 @@ export function casPeak(sharpness: number): number {
   return -0.2 * clamp01(sharpness);
 }
 
-export function cas(y: Float32Array, w: number, h: number, sharpness: number): Float32Array {
+/**
+ * CAS luma sharpen. `casGain` (default 1 = native semantics, bit-identical to the pre-C5 4-arg
+ * call) is the C5 resolution compensation: the 3×3 window cannot shrink below its pixel support,
+ * so a sub-native preview attenuates the PEAK amplitude by kernelScale instead — see
+ * {@link effectiveEnhanceKernels}.
+ */
+export function cas(y: Float32Array, w: number, h: number, sharpness: number, casGain = 1): Float32Array {
   const out = new Float32Array(w * h);
-  const peak = casPeak(sharpness);
+  const peak = casPeak(sharpness) * casGain;
   const at = (x: number, yy: number) => y[Math.min(h - 1, Math.max(0, yy)) * w + Math.min(w - 1, Math.max(0, x))];
   for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) {
     const a=at(i-1,j-1), b=at(i,j-1), c=at(i+1,j-1), d=at(i-1,j), e=y[j*w+i], f=at(i+1,j), g=at(i-1,j+1), hh=at(i,j+1), ii=at(i+1,j+1);

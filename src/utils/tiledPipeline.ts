@@ -120,6 +120,12 @@ export function moduleApron(moduleId: string, params: Record<string, unknown>): 
       // not worth the added cost or the dishonest correction factor. Full numbers: .superpowers/sdd
       // task-z3 report. (The sweep site — WebWorkerImageProcessor computeGlobalEdgeMax(data) — links
       // back here.)
+      // v1.36.0 C5 (WYSIWYG kernels) — the apron DELIBERATELY ignores the pass's kernelScale.
+      // A sub-native preview shrinks the effective sigmas (σ_eff = σ × kernelScale inside
+      // enhanceImage), so an apron derived from the RAW native-resolution params below is
+      // OVERSIZED for such a pass — which is safe (more real context than the kernels read).
+      // Do NOT shrink it with the scale: the apron formula couples to the enhance kernels, and
+      // under-sizing it reintroduces tile seams; the raw params are the worst case at any scale.
       const enabled = params.enabled === true;
       const sharpen = params.sharpen !== false;
       const upscale = params.upscale === true;

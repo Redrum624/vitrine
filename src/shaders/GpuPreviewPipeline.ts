@@ -38,7 +38,7 @@ import { buildPassList, buildLocalAdjustmentsPass, getGpuUnsafeModuleIds } from 
 import { ENHANCE_PROGRAM_SOURCES } from './enhance.frag';
 import { enhanceImage, DEFAULT_ENHANCE_PARAMS } from '../utils/enhanceChain';
 import type { EnhanceParams, EnhanceResult } from '../utils/enhanceChain';
-import { casPeak } from '../utils/enhanceOps';
+import { casPeak, effectiveEnhanceKernels } from '../utils/enhanceOps';
 import { computeGlobalEdgeMax } from '../utils/enhanceOps';
 import { basicAdjUniforms, exposureUniforms, shadowsHighlightsUniforms, highlightRecoveryUniforms, gainsUniforms, colorBalanceUniforms, vignetteUniforms } from './uniforms';
 import type { ShadowsHighlightsUniformParams } from './uniforms';
@@ -1050,7 +1050,7 @@ export class GpuPreviewPipeline {
    * y0/max(conv,eps) and the 12-iteration accumulation carry full float32 — matching the CPU
    * Float32Array reference to within the self-test epsilon (per-tap rounding order only).
    */
-  runEnhanceChain(rgba: Float32Array, width: number, height: number, params: EnhanceParams): EnhanceResult | null {
+  runEnhanceChain(rgba: Float32Array, width: number, height: number, params: EnhanceParams, kernelScale = 1): EnhanceResult | null {
     const gl = this.gl;
     if (!gl) return null;
 
@@ -1073,11 +1073,19 @@ export class GpuPreviewPipeline {
     if (w > maxDim || h > maxDim || dw > maxDim || dh > maxDim) return null;
     if (dw * dh > MAX_GPU_ENHANCE_OUTPUT_PIXELS) return null;
 
+    // v1.36.0 C5 (WYSIWYG kernels): the pass's processing/native ratio scales the sharpen
+    // kernels — SAME single source as the CPU chain (effectiveEnhanceKernels), so the two
+    // routes derive identical σ_eff / CAS gain and can never drift. Default 1 = native
+    // semantics (EnhanceService's bake develops run at native and never pass a scale).
+    const eff = effectiveEnhanceKernels(params.psfSigma, params.hpSigma, kernelScale);
+
     // Kernel-radius guards: the shaders have constant loop bounds, so a radius past them
     // would silently under-sample vs the CPU — decline instead (CPU handles it exactly).
+    // Radii derive from the EFFECTIVE sigmas — the radius actually sampled below.
+    // Gate on the RAW psfSigma (like the CPU chain) so run conditions match at every scale.
     const runRL = params.rlIters > 0 && params.psfSigma > 0;
-    const psfRadius = runRL ? Math.max(1, Math.ceil(params.psfSigma * 3)) : 0;
-    const hpRadius = Math.max(1, Math.ceil(params.hpSigma * 3));
+    const psfRadius = runRL ? Math.max(1, Math.ceil(eff.psfSigma * 3)) : 0;
+    const hpRadius = Math.max(1, Math.ceil(eff.hpSigma * 3));
     const chromaRadius = Math.max(1, Math.ceil(1.2 * 3));   // cleanChroma sigma 1.2
     const edgeBlurRadius = Math.max(1, Math.ceil(2.0 * 3)); // edgeMask blur sigma 2.0
     if (Math.max(psfRadius, hpRadius, chromaRadius, edgeBlurRadius) > ENH_GAUSS_MAXR) return null;
@@ -1166,7 +1174,7 @@ export class GpuPreviewPipeline {
       const yccTex = running.tex;
 
       if (runRL) {
-        const twoPsf2 = 2 * params.psfSigma * params.psfSigma;
+        const twoPsf2 = 2 * eff.psfSigma * eff.psfSigma;
         const estA = allocFbo(w, h), estB = allocFbo(w, h);
         const b1 = allocFbo(w, h), b2 = allocFbo(w, h);
         let curEst = yccTex; // iter-0 estimate = original luma (.r)
@@ -1200,8 +1208,8 @@ export class GpuPreviewPipeline {
         gauss(em3, w, h, em2.tex, false, edgeBlurRadius, 2 * 2.0 * 2.0);
         freeRes(em2);
 
-        // highpass(restored, hpSigma): lowpass = gauss(restored)
-        const twoHp2 = 2 * params.hpSigma * params.hpSigma;
+        // highpass(restored, hpSigma): lowpass = gauss(restored) — C5: effective (scaled) sigma.
+        const twoHp2 = 2 * eff.hpSigma * eff.hpSigma;
         const hp1 = allocFbo(w, h);
         gauss(hp1, w, h, curEst, true, hpRadius, twoHp2);
         const hp2 = allocFbo(w, h);
@@ -1277,12 +1285,14 @@ export class GpuPreviewPipeline {
       // v1.36.0 C1/F2: peak comes from the SHARED enhanceOps.casPeak (lockstep with the CPU
       // chain — the GPU/CPU self-check would drift otherwise), and sharpness ≤ 0 skips the
       // enh_cas draw entirely, mirroring enhanceImage's gate (zero means off).
+      // C5: × eff.casGain — the 3×3 CAS window can't shrink below its pixel support, so a
+      // sub-native pass attenuates the peak amplitude instead (1 at native — exact no-op).
       let casTex = F.tex;
       if (params.sharpness > 0) {
         const Fcas = allocFbo(dw, dh);
         draw('enh_cas', Fcas, dw, dh, [{ tex: F.tex, sampler: 'u_image' }], (prog) => {
           gl.uniform2f(loc(prog, 'u_texel'), 1 / dw, 1 / dh);
-          gl.uniform1f(loc(prog, 'u_peak'), casPeak(params.sharpness));
+          gl.uniform1f(loc(prog, 'u_peak'), casPeak(params.sharpness) * eff.casGain);
         });
         casTex = Fcas.tex;
       }
