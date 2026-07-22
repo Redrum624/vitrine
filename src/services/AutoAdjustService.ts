@@ -177,6 +177,7 @@ class AutoAdjustService {
   autoBasicAdj(stats: ImageStats, opts: { standalone?: boolean } = {}): {
     black_point: number; exposure: number; contrast: number;
     brightness: number; saturation: number; vibrance: number;
+    highlights?: number; shadows?: number;
   } {
     const { name, profile } = this.pickProfile(stats);
     const s = !!opts.standalone;
@@ -216,8 +217,43 @@ class AutoAdjustService {
     // Black point: minimal
     const black_point = 0;
 
-    logger.info(`AutoBasicAdj[${name}${s ? ', standalone' : ''}]: lum=${stats.meanLum.toFixed(3)}, std=${stats.stdLum.toFixed(3)}, sat=${stats.meanSat.toFixed(3)} → exp=${exposure.toFixed(2)}, cont=${contrast.toFixed(2)}, sat=${saturation.toFixed(2)}`);
-    return { black_point, exposure, contrast, brightness, saturation, vibrance };
+    const base = { black_point, exposure, contrast, brightness, saturation, vibrance };
+
+    // Composed mode: NO highlights/shadows keys — Auto All folds its own
+    // autoShadowsHighlights() into these sliders (App.tsx, ×0.6) and its look
+    // is frozen; other composed callers (Auto Contrast) do partial setParams
+    // merges that must not clobber user-set sliders with zeros.
+    if (!s) {
+      logger.info(`AutoBasicAdj[${name}]: lum=${stats.meanLum.toFixed(3)}, std=${stats.stdLum.toFixed(3)}, sat=${stats.meanSat.toFixed(3)} → exp=${exposure.toFixed(2)}, cont=${contrast.toFixed(2)}, sat=${saturation.toFixed(2)}`);
+      return base;
+    }
+
+    // Highlights / Shadows (standalone only, v1.36.0): the card's ⚡ is the
+    // ONLY module running, so nothing else recovers a blown top end (user:
+    // "Auto doesn't touch exposure of highlights") — and its exposure can push
+    // +0.7 with nothing pulling the top back. Same neutral philosophy as the
+    // v1.34.1 exposure fix: a well-exposed frame stays near zero; only a
+    // genuinely bright/blown top end (p95 past T_HL) or genuinely crushed
+    // shadows (mean below T_SH, scaled by how much of the frame is dark) move.
+    // NOTE (task #29): the v1.37 Auto All rework adopts this bundle wholesale —
+    // these formulas become Auto All's S/H source, keep them here.
+    const T_HL = 0.87; // p95 above this = the top end needs pulling down
+    const K1 = 2.4;    // strength per unit of p95 excess (dominant term)
+    const K2 = 0.15;   // small area term: more hot pixels = a bit more recovery
+    const highlights = -clamp(
+      Math.max(0, stats.p95 - T_HL) * K1 + stats.highlightPixelRatio * K2,
+      0, 0.5
+    );
+
+    const T_SH = 0.10; // shadow-region mean below this = crushed
+    const K3 = 10;     // strength per unit of deficit, scaled by dark-area share
+    const shadows = clamp(
+      Math.max(0, T_SH - stats.shadowMeanLum) * K3 * stats.shadowPixelRatio,
+      0, 0.4
+    );
+
+    logger.info(`AutoBasicAdj[${name}, standalone]: lum=${stats.meanLum.toFixed(3)}, std=${stats.stdLum.toFixed(3)}, sat=${stats.meanSat.toFixed(3)} → exp=${exposure.toFixed(2)}, cont=${contrast.toFixed(2)}, sat=${saturation.toFixed(2)}, hl=${highlights.toFixed(2)}, sh=${shadows.toFixed(2)}`);
+    return { ...base, highlights, shadows };
   }
 
   // ── Shadows & Highlights ─────────────────────────────────────────────────
