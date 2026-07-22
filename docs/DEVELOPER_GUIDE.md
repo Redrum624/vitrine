@@ -106,11 +106,9 @@ photo_app/
 │   │   └── WebWorkerImageProcessor.ts   # Multi-threading
 │   │
 │   ├── shaders/             # GPU shaders (WebGL2)
-│   │   ├── ShaderManager.ts
-│   │   ├── GPUImageProcessor.ts
-│   │   ├── exposure.frag.ts
-│   │   ├── whitebalance.frag.ts
-│   │   └── ... (7 shader types)
+│   │   ├── GpuPreviewPipeline.ts   # Resident-texture preview pipeline
+│   │   ├── passDescriptors.ts      # Per-module GPU pass definitions
+│   │   └── ...
 │   │
 │   ├── utils/               # Utilities
 │   │   ├── LRUCache.ts      # Memory management
@@ -240,33 +238,24 @@ const denoised = advancedDenoisingService.denoiseSync(
 
 ### 4. GPU Processing System
 
-**Files:** `src/shaders/ShaderManager.ts`, `src/shaders/GPUImageProcessor.ts`
+**Files:** `src/shaders/GpuPreviewPipeline.ts`, `src/shaders/passDescriptors.ts`, `src/services/WebGLImageProcessor.ts`
 
-Hardware-accelerated processing using WebGL2.
+Hardware-accelerated processing using WebGL2: a resident-texture preview pipeline
+(the visible canvas renders straight from GPU passes defined per module in
+`passDescriptors.ts`) plus `WebGLImageProcessor` for standalone GPU passes
+(e.g. the tiled NLM denoiser used by exports). Gain/kernel math is shared with
+the CPU path — e.g. white-balance gains come from the single `computeWBGains`
+source and enhance kernels from `effectiveEnhanceKernels` — so GPU and CPU
+cannot drift; parity self-tests gate the GPU route at startup.
 
-**Shader Types:**
+**GPU-accelerated passes:**
 - Exposure adjustment
 - White balance
 - Tone curve application
 - Color balance
-- Denoise (bilateral filter)
+- Denoise (NLM, tiled for full-resolution exports)
 - Saturation/vibrance
 - Enhance (Richardson–Lucy deblur + FidelityFX CAS sharpening + Lanczos upscale)
-
-**Example:**
-```typescript
-import { gpuImageProcessor } from './shaders/GPUImageProcessor';
-
-await gpuImageProcessor.initialize();
-
-const result = await gpuImageProcessor.processExposure(
-  imageData,
-  width,
-  height,
-  1.0,  // exposure
-  0.0   // black point
-);
-```
 
 ### 5. ACES Color Science
 
