@@ -240,10 +240,16 @@ class AutoAdjustService {
     const T_HL = 0.87; // p95 above this = the top end needs pulling down
     const K1 = 2.4;    // strength per unit of p95 excess (dominant term)
     const K2 = 0.15;   // small area term: more hot pixels = a bit more recovery
-    const highlights = -clamp(
-      Math.max(0, stats.p95 - T_HL) * K1 + stats.highlightPixelRatio * K2,
+    // The K2 area term only counts once the top end is genuinely past T_HL:
+    // snow, high-key portraits and overcast skies put 40-80% of the frame
+    // above 0.75 lum with NOTHING blown (p95 ≤ T_HL) — bright-but-healthy is
+    // a look, not a defect, and must stay at exactly zero.
+    const hlExcess = Math.max(0, stats.p95 - T_HL);
+    const hlAmount = clamp(
+      hlExcess * K1 + (hlExcess > 0 ? stats.highlightPixelRatio * K2 : 0),
       0, 0.5
     );
+    const highlights = hlAmount > 0 ? -hlAmount : 0; // avoid -0
 
     const T_SH = 0.10; // shadow-region mean below this = crushed
     const K3 = 10;     // strength per unit of deficit, scaled by dark-area share

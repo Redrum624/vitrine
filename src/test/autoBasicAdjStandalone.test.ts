@@ -158,6 +158,20 @@ describe('autoBasicAdj standalone highlights/shadows (v1.36.0)', () => {
     expect(Math.abs(hl(out))).toBeLessThan(0.05);
   });
 
+  test('snow / high-key scene: lots of bright pixels but nothing blown → ZERO highlights', () => {
+    // Well-exposed snow: 55% of the frame above 0.75 lum, yet p95 sits BELOW
+    // the blown trigger (0.87). The bright-area term alone must not pull the
+    // top end down — bright-but-healthy is a look, not a defect.
+    const snow = {
+      ...testStats,
+      meanLum: 0.68, p50: 0.42, p95: 0.85, p99: 0.86,
+      highlightMeanLum: 0.82, highlightPixelRatio: 0.55,
+      shadowMeanLum: 0.16, shadowPixelRatio: 0.03,
+    } as unknown as Stats;
+    const out = autoAdjustService.autoBasicAdj(snow, { standalone: true }) as BAOut;
+    expect(hl(out)).toBe(0);
+  });
+
   test('interplay: dark image with blown windows → exposure UP and highlights DOWN together', () => {
     const darkBlown = {
       ...testStats,
