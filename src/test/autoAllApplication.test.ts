@@ -10,6 +10,7 @@
  * AutoAdjustService) without a full <App/> render — the R1 handoff seam.
  */
 import { applyAutoAll, type AutoAllDeps } from '../services/AutoAllService';
+import { checkpointService } from '../services/CheckpointService';
 import { autoAdjustService, CAMERA_MATCHED_AUTO_STRENGTH } from '../services/AutoAdjustService';
 import { imageProcessingPipeline } from '../services/ImageProcessingPipeline';
 import { imageService } from '../services/ImageService';
@@ -181,6 +182,25 @@ describe('applyAutoAll — composition (v1.37.0 D4)', () => {
     expect(deps.showSuccess).not.toHaveBeenCalled();
     expect(JSON.stringify(baMod.getParams())).toBe(before);
     useAppStore.getState().setDeveloping(false);
+  });
+
+  it('records ONE "Auto All" history checkpoint, and a repeat no-op click records nothing', () => {
+    mockCurrentImage();
+    const spy = jest.spyOn(checkpointService, 'recordLabeled');
+    const recorded = jest.spyOn(checkpointService, 'record');
+
+    applyAutoAll(makeDeps());
+
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy).toHaveBeenCalledWith('Auto All', undefined, true);
+    const cps = checkpointService.getCheckpoints();
+    expect(cps[cps.length - 1]?.label).toBe('Auto All');
+    expect(recorded).not.toHaveBeenCalled(); // no generic describeChange entry for the transaction
+
+    // Second click with identical resulting params → dedupe → no duplicate entry.
+    const countAfterFirst = cps.length;
+    applyAutoAll(makeDeps());
+    expect(checkpointService.getCheckpoints().length).toBe(countAfterFirst);
   });
 
   it('errors cleanly with no image', () => {

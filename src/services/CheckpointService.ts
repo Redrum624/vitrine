@@ -329,15 +329,18 @@ class CheckpointService {
     this.recordTimer = setTimeout(() => { this.recordTimer = null; this.record(label); }, RECORD_DEBOUNCE_MS);
   }
 
-  /** Record a checkpoint with a forced, verbatim label and an explicit bakeDepth.
-   *  Use this (instead of record) for machine-generated entries like "Enhanced ×2" where
-   *  describeChange must NOT run (it may return a generic summary that overwrites the label).
-   *  No state-identity dedupe — a bake changes pixels/dims that serialize() does NOT capture,
-   *  so two param-identical states are genuinely different milestones and must both be recorded. */
-  recordLabeled(label: string, bakeDepth: number): void {
+  /** Record a checkpoint with a forced, verbatim label. Use this (instead of record) for
+   *  machine-generated entries like "Enhanced ×2" or "Auto All" where describeChange must
+   *  NOT run (it would return a generic summary like "Multiple adjustments (8)").
+   *  `bakeDepth` defaults to the current bake depth (param-only callers omit it).
+   *  No state-identity dedupe by default — a bake changes pixels/dims that serialize() does
+   *  NOT capture, so two param-identical states are genuinely different milestones. Param-only
+   *  callers (Auto All) pass `dedupe: true` so a repeat no-op click records nothing. */
+  recordLabeled(label: string, bakeDepth: number = this.bakeBridge.getDepth(), dedupe = false): void {
     if (!imageService.getCurrentImage()) return;
     const state = editPersistenceService.serialize();
     const json = JSON.stringify(state);
+    if (dedupe && json === this.lastSnapshot) return;         // repeat no-op — nothing changed
     this.lastSnapshot = json;
     const parsed = JSON.parse(json) as EditState;
     this.lastState = parsed;

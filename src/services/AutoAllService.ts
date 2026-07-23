@@ -25,6 +25,7 @@ import { guardDeveloping } from '../utils/developingGuard';
 import { imageService } from './ImageService';
 import { imageProcessingPipeline } from './ImageProcessingPipeline';
 import { autoAdjustService, CAMERA_MATCHED_AUTO_STRENGTH } from './AutoAdjustService';
+import { checkpointService } from './CheckpointService';
 import { useAppStore } from '../stores/appStore';
 import type { CropPipelineModule } from '../modules/CropPipelineModule';
 
@@ -84,6 +85,11 @@ export function applyAutoAll(deps: AutoAllDeps): void {
   // Refresh the open module panel's sliders, then reprocess.
   useAppStore.getState().notifyExternalParamsChange();
   useAppStore.getState().triggerReprocessing();
+  // History: one "Auto All" entry for the whole transaction (WB + bundle + straighten).
+  // Recorded here so the label isn't the generic "Multiple adjustments (n)" the debounced
+  // describeChange would produce; the App's processingVersion record then dedupes against
+  // this snapshot. dedupe:true → a repeat no-op click adds no duplicate entry.
+  checkpointService.recordLabeled('Auto All', undefined, true);
   showSuccess(
     'Auto All',
     `Applied "${result.bucket}" auto adjustments${straightened ? ' + auto-straighten' : ''}${cameraMatched ? ' (softened — camera-matched base)' : ''}`,
