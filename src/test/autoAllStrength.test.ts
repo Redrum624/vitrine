@@ -42,19 +42,14 @@ describe('autoAll strength scaling', () => {
   it('default strength (1) is byte-identical to the unscaled bundle', () => {
     const explicit = autoAdjustService.autoAll(data, width, height, { strength: 1 });
     expect(explicit.exposure).toEqual(full.exposure);
-    expect(explicit.toneCurve).toEqual(full.toneCurve);
-    expect(explicit.colorBalance).toEqual(full.colorBalance);
+    expect(explicit.basicAdj).toEqual(full.basicAdj);
+    expect(explicit.shadowsHighlights).toEqual(full.shadowsHighlights);
   });
 
-  it('halves the numeric deltas (exposure, basic adjustments, color balance)', () => {
+  it('halves the numeric deltas (exposure, basic adjustments)', () => {
     expect(close(half.exposure.exposure, full.exposure.exposure * 0.5)).toBe(true);
     expect(close(half.basicAdj.contrast, full.basicAdj.contrast * 0.5)).toBe(true);
     expect(close(half.basicAdj.saturation, full.basicAdj.saturation * 0.5)).toBe(true);
-    const fullMid = (full.colorBalance as Record<string, Record<string, number>>).midtones;
-    const halfMid = (half.colorBalance as Record<string, Record<string, number>>).midtones;
-    for (const k of ['cyan_red', 'magenta_green', 'yellow_blue']) {
-      expect(close(halfMid[k], fullMid[k] * 0.5)).toBe(true);
-    }
   });
 
   it('lerps Shadows/Highlights around their 50 midpoint', () => {
@@ -64,23 +59,18 @@ describe('autoAll strength scaling', () => {
     expect(close(h.highlights, 50 + (f.highlights - 50) * 0.5)).toBe(true);
   });
 
-  it('lerps the tone curve toward the identity diagonal', () => {
-    const fc = (full.toneCurve as { baseCurve: Array<{ x: number; y: number }> }).baseCurve;
-    const hc = (half.toneCurve as { baseCurve: Array<{ x: number; y: number }> }).baseCurve;
-    // The synthetic image spans the full range, so the bucket curve (non-identity) applies.
-    expect(fc.some((pt) => Math.abs(pt.y - pt.x) > 0.01)).toBe(true);
-    for (let i = 0; i < fc.length; i++) {
-      expect(close(hc[i].y, fc[i].x + (fc[i].y - fc[i].x) * 0.5)).toBe(true);
-    }
-  });
-
-  it('strength 0 is a no-op grade (identity curve, zero deltas, neutral S/H)', () => {
+  it('strength 0 is a no-op grade (zero deltas, neutral S/H)', () => {
     expect(close(zero.exposure.exposure, 0)).toBe(true);
     expect(close(zero.basicAdj.contrast, 0)).toBe(true);
-    const zc = (zero.toneCurve as { baseCurve: Array<{ x: number; y: number }> }).baseCurve;
-    for (const pt of zc) expect(close(pt.y, pt.x)).toBe(true);
     const zsh = zero.shadowsHighlights as { shadows: number; highlights: number };
     expect(close(zsh.shadows, 50)).toBe(true);
     expect(close(zsh.highlights, 50)).toBe(true);
+  });
+
+  it('the scaled bundle carries NO toneCurve / colorBalance keys (v1.37.0 D1/D2)', () => {
+    for (const bundle of [half, zero] as unknown as Array<Record<string, unknown>>) {
+      expect('toneCurve' in bundle).toBe(false);
+      expect('colorBalance' in bundle).toBe(false);
+    }
   });
 });

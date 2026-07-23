@@ -2,10 +2,6 @@ import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { Settings, Zap } from 'lucide-react';
 import { ToneCurveModule, ToneCurveParams } from '../../modules/ToneCurveModule';
 import { logger } from '../../utils/Logger';
-import { autoAdjustService } from '../../services/AutoAdjustService';
-import { imageService } from '../../services/ImageService';
-import { notificationService } from '../../services/NotificationService';
-import { guardDeveloping } from '../../utils/developingGuard';
 import { SliderRow } from '../Controls/SliderRow';
 import { Segmented } from '../Controls/Segmented';
 import { ChipButton } from '../Controls/ChipButton';
@@ -302,24 +298,10 @@ export const ToneCurveModuleComponent: React.FC<ToneCurveModuleComponentProps> =
     onParamsChange(updatedParams);
   }, [module, onParamsChange]);
 
-  // Image-aware auto tone curve — lifted verbatim from the old inner-header ⚡
-  // button so the card header's Auto keeps identical semantics (Task 2).
-  const handleAuto = useCallback(() => {
-    // Reads currentImage pixels directly — during the progressive-open developing window
-    // that's the graded preview, not the neutral full-res base (L3 review round 2).
-    if (guardDeveloping(notificationService.info.bind(notificationService), 'Auto Tone Curve')) return;
-    const img = imageService.getCurrentImage();
-    if (!img) return;
-    const stats = autoAdjustService.analyse(img.data, img.width, img.height);
-    const computed = autoAdjustService.autoToneCurve(stats);
-    module.setParams(computed as ToneCurveParams);
-    const newParams = module.getParams();
-    setParams(newParams);
-    onParamsChange(newParams);
-  }, [module, onParamsChange]);
-
-  // Reset ↺ keeps its original per-active-channel semantics (resetCurve).
-  useRegisterModuleCardActions(onRegisterActions, { auto: handleAuto, reset: resetCurve });
+  // v1.37.0 D1: the card's ⚡ Auto (style-profile curve) is removed — Reset only.
+  // The panel's Auto Levels button/checkboxes below are a DISTINCT surviving
+  // feature (histogram stretch via ToneCurveModule params, not the style curve).
+  useRegisterModuleCardActions(onRegisterActions, { reset: resetCurve });
 
   return (
     <div className="flex flex-col" style={{ gap: 14 }}>

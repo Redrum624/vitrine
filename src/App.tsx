@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { MenuBar } from './components/Layout/MenuBar';
 import { Toolbar } from './components/Layout/Toolbar';
 import { IconSidebar } from './components/Layout/IconSidebar';
@@ -649,24 +649,9 @@ function App() {
   const handleFlipVertical = useCallback(() => flipCurrentImageVertical({ showInfo, showSuccess }), [showInfo, showSuccess]);
 
   // ─── Auto adjustments ─────────────────────────────────────────────────
-  const handleAutoLevels = useCallback(() => {
-    if (guardDeveloping(showInfo, 'Auto Levels')) return;
-    const img = imageService.getCurrentImage();
-    if (!img) return;
-    const stats = autoAdjustService.analyse(img.data, img.width, img.height);
-    // Apply via tone curve (stretches histogram range per-channel)
-    const tcPipe = imageProcessingPipeline.getModule('tonecurve');
-    if (tcPipe) {
-      const p = autoAdjustService.autoToneCurve(stats);
-      const inner = (tcPipe as unknown as { getToneCurveModule?: () => { setParams: (p: Record<string, unknown>) => void } }).getToneCurveModule?.();
-      if (inner) inner.setParams(p);
-      imageProcessingPipeline.invalidateModuleCache('tonecurve');
-    }
-    useAppStore.getState().notifyExternalParamsChange();
-    useAppStore.getState().triggerReprocessing();
-    showSuccess('Auto Levels', 'Applied via tone curve');
-  }, [showSuccess, showInfo]);
-
+  // (v1.37.0 D1: the menu "Auto Levels" item is gone — it was mislabeled and
+  // applied the style-profile tone curve. The Tone Curve panel's real Auto
+  // Levels checkbox remains the way to get a histogram stretch.)
   const handleAutoContrast = useCallback(() => {
     if (guardDeveloping(showInfo, 'Auto Contrast')) return;
     const img = imageService.getCurrentImage();
@@ -684,28 +669,22 @@ function App() {
     showSuccess('Auto Contrast', 'Applied via basic adjustments');
   }, [showSuccess, showInfo]);
 
-  const handleAutoColor = useCallback(() => {
-    if (guardDeveloping(showInfo, 'Auto Color')) return;
+  // v1.37.0 D2: was "Auto Color" (auto-WB + auto-CB). The auto Color Balance
+  // half is removed; the surviving WB half is renamed honestly.
+  const handleAutoWhiteBalance = useCallback(() => {
+    if (guardDeveloping(showInfo, 'Auto White Balance')) return;
     const img = imageService.getCurrentImage();
     if (!img) return;
     const stats = autoAdjustService.analyse(img.data, img.width, img.height);
-    // Apply via white balance + color balance
     const wbMod = imageProcessingPipeline.getModule('temperature');
     if (wbMod) {
       const p = autoAdjustService.autoWhiteBalance(stats);
       (wbMod as unknown as { setParams: (p: Record<string, unknown>) => void }).setParams(p);
       imageProcessingPipeline.invalidateModuleCache('temperature');
     }
-    const cbPipe = imageProcessingPipeline.getModule('colorbalance');
-    if (cbPipe) {
-      const p = autoAdjustService.autoColorBalance(stats);
-      const inner = (cbPipe as unknown as { getColorBalanceModule?: () => { setParams: (p: Record<string, unknown>) => void } }).getColorBalanceModule?.();
-      if (inner) inner.setParams(p);
-      imageProcessingPipeline.invalidateModuleCache('colorbalance');
-    }
     useAppStore.getState().notifyExternalParamsChange();
     useAppStore.getState().triggerReprocessing();
-    showSuccess('Auto Color', 'Applied via white balance + color balance');
+    showSuccess('Auto White Balance', 'Applied via white balance');
   }, [showSuccess, showInfo]);
 
   // ─── Image resize ─────────────────────────────────────────────────────
@@ -713,35 +692,6 @@ function App() {
     (newWidth: number, newHeight: number) => resizeCurrentImage({ showInfo, showSuccess }, newWidth, newHeight),
     [showInfo, showSuccess]
   );
-
-  // ─── Style-grade indicator ─────────────────────────────────────────────
-  // "Styled" chip state: true when a style grade (Auto All / preset / pasted
-  // style) is sitting on top of the decode — detected live from the two
-  // signature params a grade always writes: a non-identity tone-curve base
-  // curve or non-zero Color Balance offsets. Live detection (not a persisted
-  // flag) so manually resetting those modules clears the chip automatically.
-  // externalParamsVersion bumps on every bulk apply, per-image restore, and
-  // reprocess trigger, which covers all the ways these params change.
-  const externalParamsVersion = useAppStore((s) => s.externalParamsVersion);
-  const styleGradeActive = useMemo(() => {
-    void externalParamsVersion; // dependency: recompute on any params change
-    const tcPipe = imageProcessingPipeline.getModule('tonecurve') as unknown as {
-      getToneCurveModule?: () => { getParams?: () => { baseCurve?: Array<{ x: number; y: number }> } };
-    } | undefined;
-    const baseCurve = tcPipe?.getToneCurveModule?.()?.getParams?.()?.baseCurve;
-    if (Array.isArray(baseCurve) && baseCurve.some((pt) => Math.abs(pt.y - pt.x) > 0.001)) return true;
-    const cbPipe = imageProcessingPipeline.getModule('colorbalance') as unknown as {
-      getColorBalanceModule?: () => { getParams?: () => Record<string, Record<string, number>> };
-    } | undefined;
-    const cb = cbPipe?.getColorBalanceModule?.()?.getParams?.();
-    if (cb) {
-      for (const zone of ['shadows', 'midtones', 'highlights']) {
-        const z = cb[zone];
-        if (z && Object.values(z).some((v) => typeof v === 'number' && Math.abs(v) > 0.0005)) return true;
-      }
-    }
-    return false;
-  }, [externalParamsVersion]);
 
   // ─── Auto All ──────────────────────────────────────────────────────────
   const handleAutoAll = useCallback(() => {
@@ -800,23 +750,10 @@ function App() {
       imageProcessingPipeline.invalidateModuleCache('basicadj');
     }
 
-    // Tone Curve
-    const tcPipeMod = imageProcessingPipeline.getModule('tonecurve');
-    if (tcPipeMod) {
-      const inner = (tcPipeMod as unknown as { getToneCurveModule?: () => { setParams: (p: Record<string, unknown>) => void } }).getToneCurveModule?.();
-      if (inner) inner.setParams(result.toneCurve);
-      imageProcessingPipeline.invalidateModuleCache('tonecurve');
-    }
-
-    // Color Balance
-    const cbPipeMod = imageProcessingPipeline.getModule('colorbalance');
-    if (cbPipeMod) {
-      const inner = (cbPipeMod as unknown as { getColorBalanceModule?: () => { setParams: (p: Record<string, unknown>) => void } }).getColorBalanceModule?.();
-      if (inner) inner.setParams(result.colorBalance);
-      imageProcessingPipeline.invalidateModuleCache('colorbalance');
-    }
-
     // (Shadows / Highlights are now applied via Basic Adjustments above.)
+    // (v1.37.0 D1/D2: Auto All no longer writes Tone Curve or Color Balance —
+    // the style-profile curve was the "'Tone Curve' auto apply sometimes"
+    // complaint. Presets / paste-style still write those params; user-initiated.)
 
     // Refresh the open module panel's sliders, then reprocess.
     useAppStore.getState().notifyExternalParamsChange();
@@ -1549,9 +1486,8 @@ function App() {
         onFlipHorizontal={handleFlipHorizontal}
         onFlipVertical={handleFlipVertical}
         // Adjust menu
-        onAutoLevels={handleAutoLevels}
         onAutoContrast={handleAutoContrast}
-        onAutoColor={handleAutoColor}
+        onAutoWhiteBalance={handleAutoWhiteBalance}
         onBrightnessContrast={() => handleToolSelect('basicadj')}
         onLevels={() => handleToolSelect('basicadj')}
         onCurves={() => handleToolSelect('tonecurve')}
@@ -1780,7 +1716,6 @@ function App() {
               onActualSize={handleActualSize}
               zoom={viewport.zoom}
               onAutoAll={handleAutoAll}
-              styleGradeActive={styleGradeActive}
               developing={developing}
               onCopyStyle={handleCopyStyle}
               onPasteStyle={handlePasteStyle}

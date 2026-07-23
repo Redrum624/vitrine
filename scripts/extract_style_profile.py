@@ -237,21 +237,6 @@ def build_profile_ts(buckets: dict[str, dict], portfolio_count: int,
             "b": round(mb / max(1e-6, avg_rgb), 4),
         }
 
-        # Tone curve: shape derived from this bucket's typical p25/p50/p75 landing positions.
-        # We assume input is "neutral" (p25=0.25, p50=0.5, p75=0.75 identity)
-        # and target is the bucket's measured medians.
-        tone_curve = [
-            {"x": 0.0,  "y": 0.0},
-            {"x": 0.25, "y": round(agg["p25"]["median"], 4)},
-            {"x": 0.50, "y": round(agg["p50"]["median"], 4)},
-            {"x": 0.75, "y": round(agg["p75"]["median"], 4)},
-            {"x": 1.0,  "y": 1.0},
-        ]
-        tone_curve_str = ",\n      ".join(
-            "{ x: " + str(pt["x"]) + ", y: " + str(pt["y"]) + " }"
-            for pt in tone_curve
-        )
-
         return f"""  {name}: {{
     sampleCount: {agg["__count__"]},
     targetMedianLum:            {m("p50")},
@@ -269,9 +254,6 @@ def build_profile_ts(buckets: dict[str, dict], portfolio_count: int,
     highlightPixelRatio:        {m("highlight_pixel_ratio")},
     rbRatio:                    {m("rb_ratio")},
     rgbBalance:                 {{ r: {rgb_balance["r"]}, g: {rgb_balance["g"]}, b: {rgb_balance["b"]} }},
-    toneCurveShape: [
-      {tone_curve_str}
-    ],
   }}"""
 
     bucket_blocks = ",\n".join(render_bucket(b, buckets.get(b, {})) for b in BUCKET_ORDER)
@@ -314,7 +296,6 @@ export interface StyleProfile {{
   highlightPixelRatio: number;
   rbRatio: number;
   rgbBalance: {{ r: number; g: number; b: number }};
-  toneCurveShape: Array<{{ x: number; y: number }}>;
 }}
 
 export interface BucketSelectorStats {{

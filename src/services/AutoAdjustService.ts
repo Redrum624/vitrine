@@ -290,79 +290,6 @@ class AutoAdjustService {
     };
   }
 
-  // ── Tone Curve ───────────────────────────────────────────────────────────
-
-  autoToneCurve(stats: ImageStats): Record<string, unknown> {
-    const { name, profile } = this.pickProfile(stats);
-    const tonalSpan = stats.p95 - stats.p5;
-
-    // For narrow-range images (uniform dark/bright), return identity curve — no modification.
-    if (tonalSpan < 0.15) {
-      logger.info(`AutoToneCurve[${name}]: narrow span=${tonalSpan.toFixed(3)}, returning identity`);
-      return {
-        baseCurve: [{ x: 0, y: 0 }, { x: 1, y: 1 }],
-        baseCurveNodes: 2,
-        baseCurveType: 1,
-        autoLevels: false,
-        autoContrast: false,
-      };
-    }
-
-    // Apply the user's bucket tone-curve shape directly (clone the points so the
-    // profile constant is never mutated downstream).
-    const baseCurve = profile.toneCurveShape.map(pt => ({ ...pt }));
-    logger.info(`AutoToneCurve[${name}]: applied profile curve (${baseCurve.length} nodes)`);
-    return {
-      baseCurve,
-      baseCurveNodes: baseCurve.length,
-      baseCurveType: 0,
-      autoLevels: false,
-      autoContrast: false,
-    };
-  }
-
-  // ── Color Balance ────────────────────────────────────────────────────────
-
-  autoColorBalance(stats: ImageStats): Record<string, unknown> {
-    // Goal: bias colour balance toward the user's TARGET RGB balance for this
-    // bucket (not absolute neutral). A "cast" is now the deviation from that
-    // target, so e.g. the warm bucket's intentional warmth is preserved.
-    const { name, profile } = this.pickProfile(stats);
-
-    const avgAll = (stats.meanR + stats.meanG + stats.meanB) / 3;
-    const { r: tgtR, g: tgtG, b: tgtB } = profile.rgbBalance;
-    const castR = (stats.meanR - avgAll) - (tgtR - 1) * avgAll;
-    const castG = (stats.meanG - avgAll) - (tgtG - 1) * avgAll;
-    const castB = (stats.meanB - avgAll) - (tgtB - 1) * avgAll;
-
-    // Apply stronger correction to midtones, lighter to shadows/highlights.
-    // Strengths and clamps are divided by 3: the Color Balance traditional-tab
-    // damping factor went 0.1 -> 0.3, so 1/3 the params keeps Auto results
-    // visually identical to what these strengths were originally tuned for.
-    const midStrength = 0.8 / 3;
-    const sideStrength = 0.4 / 3;
-    const lim = 0.5 / 3;
-
-    const shadows = {
-      cyan_red: clamp(-castR * sideStrength * 2, -lim, lim),
-      magenta_green: clamp(-castG * sideStrength * 2, -lim, lim),
-      yellow_blue: clamp(-castB * sideStrength * 2, -lim, lim),
-    };
-    const midtones = {
-      cyan_red: clamp(-castR * midStrength * 2, -lim, lim),
-      magenta_green: clamp(-castG * midStrength * 2, -lim, lim),
-      yellow_blue: clamp(-castB * midStrength * 2, -lim, lim),
-    };
-    const highlights = {
-      cyan_red: clamp(-castR * sideStrength * 2, -lim, lim),
-      magenta_green: clamp(-castG * sideStrength * 2, -lim, lim),
-      yellow_blue: clamp(-castB * sideStrength * 2, -lim, lim),
-    };
-
-    logger.info(`AutoColorBalance[${name}]: bias R=${castR.toFixed(3)}, G=${castG.toFixed(3)}, B=${castB.toFixed(3)}`);
-    return { shadows, midtones, highlights };
-  }
-
   // ── White Balance ────────────────────────────────────────────────────────
 
   autoWhiteBalance(stats: ImageStats): { temperature: number; tint: number } {
@@ -408,8 +335,6 @@ class AutoAdjustService {
     exposure: ReturnType<AutoAdjustService['autoExposure']>;
     basicAdj: ReturnType<AutoAdjustService['autoBasicAdj']>;
     shadowsHighlights: ReturnType<AutoAdjustService['autoShadowsHighlights']>;
-    toneCurve: ReturnType<AutoAdjustService['autoToneCurve']>;
-    colorBalance: ReturnType<AutoAdjustService['autoColorBalance']>;
     whiteBalance: ReturnType<AutoAdjustService['autoWhiteBalance']>;
   } {
     const stats = this.analyse(data, width, height);
@@ -422,8 +347,6 @@ class AutoAdjustService {
       exposure: this.autoExposure(stats),
       basicAdj: this.autoBasicAdj(stats),
       shadowsHighlights: this.autoShadowsHighlights(stats),
-      toneCurve: this.autoToneCurve(stats),
-      colorBalance: this.autoColorBalance(stats),
       whiteBalance: this.autoWhiteBalance(stats),
     };
     return strength >= 1 ? full : this.scaleTowardNeutral(full, strength);
@@ -431,10 +354,9 @@ class AutoAdjustService {
 
   /**
    * Lerp an autoAll bundle toward neutral by `s`: numeric deltas scale by s
-   * (their neutral is 0), Shadows/Highlights lerp around their 50 midpoint,
-   * and tone-curve points lerp toward the identity diagonal y=x. WhiteBalance
-   * is returned unscaled — the camera-matched caller skips auto-WB entirely
-   * (the matched base already carries the camera's WB intent).
+   * (their neutral is 0) and Shadows/Highlights lerp around their 50 midpoint.
+   * WhiteBalance is returned unscaled — the camera-matched caller skips auto-WB
+   * entirely (the matched base already carries the camera's WB intent).
    */
   private scaleTowardNeutral(
     full: ReturnType<AutoAdjustService['autoAll']>,
@@ -445,27 +367,15 @@ class AutoAdjustService {
       for (const k of keys) if (typeof out[k] === 'number') out[k] = (out[k] as number) * s;
       return out as T;
     };
-    const cbSide = (o: Record<string, unknown>) =>
-      scaleObj(o, ['cyan_red', 'magenta_green', 'yellow_blue']);
     const sh = { ...(full.shadowsHighlights as Record<string, unknown>) };
     for (const k of ['shadows', 'highlights']) {
       if (typeof sh[k] === 'number') sh[k] = 50 + ((sh[k] as number) - 50) * s;
     }
-    const tc = { ...(full.toneCurve as Record<string, unknown>) };
-    if (Array.isArray(tc.baseCurve)) {
-      tc.baseCurve = (tc.baseCurve as Array<{ x: number; y: number }>).map((pt) => ({
-        x: pt.x,
-        y: pt.x + (pt.y - pt.x) * s,
-      }));
-    }
-    const cb = full.colorBalance as Record<string, Record<string, unknown>>;
     return {
       ...full,
       exposure: scaleObj(full.exposure as unknown as Record<string, unknown>, ['exposure', 'black']) as unknown as ReturnType<AutoAdjustService['autoExposure']>,
       basicAdj: scaleObj(full.basicAdj as unknown as Record<string, unknown>, ['black_point', 'exposure', 'contrast', 'brightness', 'saturation', 'vibrance']) as unknown as ReturnType<AutoAdjustService['autoBasicAdj']>,
       shadowsHighlights: sh,
-      toneCurve: tc,
-      colorBalance: { ...cb, shadows: cbSide(cb.shadows), midtones: cbSide(cb.midtones), highlights: cbSide(cb.highlights) },
     };
   }
 }

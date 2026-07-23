@@ -9,8 +9,8 @@
  *
  * These tests cover the two seam types the round-2 fix touches:
  *   (a) a module component's own Auto handler — BasicAdjustmentsModuleComponent, representative
- *       of the five identically-shaped module-component sites (Exposure, ShadowsHighlights,
- *       ToneCurve, ColorBalance share the exact same guard call);
+ *       of the identically-shaped module-component sites (Exposure, ShadowsHighlights share the
+ *       exact same guard call; the ToneCurve/ColorBalance Auto handlers were removed in v1.37.0);
  *   (b) AdjustmentPanel's `handleAutoWhiteBalance` → `WhiteBalanceModule.autoDetectWhiteBalance`.
  *
  * Harness mirrors adjustmentPanelModuleActionsRemount.test.tsx: render the real AdjustmentPanel
