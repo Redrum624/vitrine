@@ -1369,6 +1369,7 @@ function App() {
       crop: 'Crop & Transform', basicadj: 'Basic Adjustments', whitebalance: 'White Balance',
       tonecurve: 'Tone Curve', colorbalance: 'Color Balance',
       lenscorrections: 'Lens Corrections', localadjustments: 'Local Adjustments',
+      enhance: 'Enhance', shadowshighlights: 'Shadows & Highlights',
     };
     const tool = useAppStore.getState().selectedTool;
     checkpointService.recordDebounced((tool && TOOL_LABELS[tool]) || 'Edit');
