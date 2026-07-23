@@ -781,7 +781,13 @@ function App() {
     try {
       let dataUrl: string | null = null;
       if (window.electronAPI?.readImageAsDataURL) {
-        dataUrl = await window.electronAPI.readImageAsDataURL(path);
+        // RAW references need pane resolution: without maxDim the IPC returns the
+        // 512px gallery-thumb box and the reference renders as a blurry postage
+        // stamp in a half-workspace pane. 2560 covers the pane at realistic window
+        // sizes while still sourcing the embedded JPEG (no full RAW decode) — and
+        // it's deliberately uncached in the main process (see rawThumbPolicy.cjs).
+        // Non-RAW paths ignore the option and return full-res bytes as before.
+        dataUrl = await window.electronAPI.readImageAsDataURL(path, { maxDim: 2560 });
       }
       if (!dataUrl) {
         // If the path is already a blob URL or data URL (web mode)

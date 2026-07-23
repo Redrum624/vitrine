@@ -17,7 +17,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // a fresh decode (fire-and-forget). Keyed by (path, decode options). See electron/baseCache.cjs.
   baseCacheRead: (filePath, options) => ipcRenderer.invoke('base-cache-read', filePath, options),
   baseCacheWrite: (filePath, options, payload) => ipcRenderer.invoke('base-cache-write', filePath, options, payload),
-  readImageAsDataURL: (filePath) => ipcRenderer.invoke('read-image-as-data-url', filePath),
+  readImageAsDataURL: (filePath, options) => ipcRenderer.invoke('read-image-as-data-url', filePath, options),
   writeFile: (filePath, data) => ipcRenderer.invoke('write-file', filePath, data),
   writeLog: (logEntry) => ipcRenderer.invoke('write-log', logEntry),
 

@@ -667,9 +667,13 @@ ipcMain.handle('get-folder-contents', async (event, folderPath) => {
 });
 
 // Read image as data URL for display in renderer (with thumbnail generation for RAW files)
-// Cache decoded RAW preview thumbnails (filePath -> data URL). The filmstrip re-requests
-// visible thumbnails on every scroll, and decoding a multi-MP embedded JPEG each time is
-// expensive — so memoise, bounded to avoid unbounded growth.
+// Cache decoded RAW preview thumbnails (size-aware key `${maxDim}:${filePath}` -> data URL).
+// The filmstrip re-requests visible thumbnails on every scroll, and decoding a multi-MP
+// embedded JPEG each time is expensive — so memoise, bounded to avoid unbounded growth.
+// The bound is COUNT-based and sized for ~100KB gallery thumbs, so larger-than-default
+// requests (the reference pane's maxDim 2560, ~1-3MB per data URL) are NOT cached —
+// see resolveRawThumbRequest in ./rawThumbPolicy.cjs for the policy.
+const { resolveRawThumbRequest } = require('./rawThumbPolicy.cjs');
 const rawThumbCache = new Map();
 const RAW_THUMB_CACHE_MAX = 2000;
 function cacheRawThumb(key, url) {
@@ -680,14 +684,17 @@ function cacheRawThumb(key, url) {
   return url;
 }
 
-ipcMain.handle('read-image-as-data-url', async (event, filePath) => {
+ipcMain.handle('read-image-as-data-url', async (event, filePath, options) => {
   try {
     const ext = path.extname(filePath).toLowerCase();
 
     // For RAW files, extract an embedded JPEG preview.
     if (RAW_FORMATS.includes(ext)) {
-      const cached = rawThumbCache.get(filePath);
-      if (cached) return cached;
+      const { maxDim, cacheable, cacheKey } = resolveRawThumbRequest(filePath, options);
+      if (cacheable) {
+        const cached = rawThumbCache.get(cacheKey);
+        if (cached) return cached;
+      }
 
       const sharp = require('sharp');
 
@@ -729,16 +736,18 @@ ipcMain.handle('read-image-as-data-url', async (event, filePath) => {
               } else if (containerOrientation > 1) {
                 pipe = applyExifOrientation(pipe, containerOrientation);
               }
-              // 512px box (was 300x200): gallery tiles run 420px+ wide, and the
-              // old cap left RAW tiles visibly soft — portrait previews were
+              // maxDim box (default 512, was 300x200): gallery tiles run 420px+ wide,
+              // and the old cap left RAW tiles visibly soft — portrait previews were
               // squeezed to 150x200 and upscaled ~3x. 512 keeps a ~2000-entry
               // worst-case cache in the tens of MB while covering both surfaces.
+              // The reference pane requests maxDim 2560 (uncached — see rawThumbPolicy.cjs).
               const out = await pipe
-                .resize(512, 512, { fit: 'inside', withoutEnlargement: true })
+                .resize(maxDim, maxDim, { fit: 'inside', withoutEnlargement: true })
                 .jpeg({ quality: 80 })
                 .toBuffer();
               if (out && out.length > 100) {
-                return cacheRawThumb(filePath, `data:image/jpeg;base64,${out.toString('base64')}`);
+                const url = `data:image/jpeg;base64,${out.toString('base64')}`;
+                return cacheable ? cacheRawThumb(cacheKey, url) : url;
               }
             } catch (jpegError) {
               void jpegError; // try the next embedded JPEG
@@ -756,11 +765,12 @@ ipcMain.handle('read-image-as-data-url', async (event, filePath) => {
       try {
         const out = await sharp(filePath, { failOn: 'none' })
           .rotate()
-          .resize(512, 512, { fit: 'inside', withoutEnlargement: true })
+          .resize(maxDim, maxDim, { fit: 'inside', withoutEnlargement: true })
           .jpeg({ quality: 80 })
           .toBuffer();
         if (out && out.length > 100) {
-          return cacheRawThumb(filePath, `data:image/jpeg;base64,${out.toString('base64')}`);
+          const url = `data:image/jpeg;base64,${out.toString('base64')}`;
+          return cacheable ? cacheRawThumb(cacheKey, url) : url;
         }
       } catch (sharpError) {
         void sharpError; // proprietary RAW libvips can't decode — expected, no usable preview

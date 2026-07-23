@@ -139,7 +139,11 @@ export interface ElectronAPI {
     options: RawDecodeOptions | undefined,
     payload: { data: ArrayBuffer; width: number; height: number; channels?: number; bitDepth?: number },
   ) => Promise<boolean>;
-  readImageAsDataURL: (filePath: string) => Promise<string>;
+  /** Data URL for display. RAW files return the embedded JPEG preview resized into a
+   *  `maxDim` box (default 512 — gallery-thumb size); pass a larger `maxDim` for
+   *  pane-resolution loads (the reference pane uses 2560). Non-RAW ignores options
+   *  and returns the full-res file bytes. */
+  readImageAsDataURL: (filePath: string, options?: { maxDim?: number }) => Promise<string>;
   writeFile: (filePath: string, data: Buffer | string) => Promise<boolean>;
   writeLog: (logEntry: Record<string, unknown>) => Promise<boolean>;
   getLogFile: () => Promise<string>;
