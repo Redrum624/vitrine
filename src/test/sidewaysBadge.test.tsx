@@ -135,13 +135,20 @@ describe('SidewaysHintService — per-image hint state', () => {
     expect(useAppStore.getState().sidewaysHint).toBeNull();
   });
 
-  test('accept composes with an existing quarter-turn (delta, not overwrite)', () => {
-    getAdapter().getCropModule().setParams({ orientation: 90 });
+  test('STALE hint (orientation set between compute and click) → discarded, nothing applied', () => {
+    // A hint is only ever born at orientation 0 (the compute gate). If a
+    // persisted orientation restores between compute and click, applying the
+    // delta would land 180° on an already-fixed photo — the click must
+    // discard the hint instead.
     useAppStore.getState().setSidewaysHint({ imageId: 'img-a', rotate: 90 });
+    getAdapter().getCropModule().setParams({ orientation: 90, enabled: true });
+    const pv = useAppStore.getState().processingVersion;
 
     acceptSidewaysHint();
 
-    expect(getAdapter().getCropModule().normalizedOrientation()).toBe(180);
+    expect(getAdapter().getCropModule().normalizedOrientation()).toBe(90); // untouched
+    expect(useAppStore.getState().sidewaysHint).toBeNull();                // discarded
+    expect(useAppStore.getState().processingVersion).toBe(pv);             // no reprocess
   });
 
   test('dismiss hides the hint for that photo for the session (recompute stays hidden)', () => {

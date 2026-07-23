@@ -705,10 +705,13 @@ function App() {
   );
 
   // ─── "May be sideways?" suggestion badge (v1.37.0 R2 Part C) ───────────
-  // Per-image, recomputed on image OPEN only — never on reprocess. The
-  // trigger is `originalSnapshotVersion`: ImageService bumps it exactly once
-  // per fresh open, AFTER its currentImage holds the new base, and no
-  // reprocess ever touches it. The compute itself verifies the base's path
+  // Per-image, recomputed on BASE changes only — never on reprocess. The
+  // trigger is `originalSnapshotVersion`: ImageService bumps it whenever a
+  // new pre-edit base is recorded — every fresh open, plus the progressive
+  // full-decode swap, enhance bakes and RAW re-decodes — always AFTER its
+  // currentImage holds that base, and no ordinary reprocess ever touches it.
+  // Re-running on those base swaps is the coherent semantic (the pixels the
+  // hint describes changed); the compute itself verifies the base's path
   // matches the opened image (a bump-before-decode ordering just retries on
   // the next bump) — no one-shot markers, no processedImageData identity
   // races (the v1 wiring starved on exactly that; see the R2 report). The

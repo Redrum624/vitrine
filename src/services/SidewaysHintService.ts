@@ -95,8 +95,11 @@ export function computeSidewaysHintForImage(imageId: string, expectedPath?: stri
 
 /**
  * Apply the suggested lossless quarter-turn (badge click) and clear the hint.
- * Composes with any existing orientation as a delta — the hint was computed
- * from the pixels as currently rendered.
+ * A hint is only ever born at orientation 0 (the compute gate above), so a
+ * non-zero orientation at CLICK time means the hint went stale — a persisted
+ * per-image orientation restored between compute and click, and applying the
+ * suggested turn on top would land 180° on an already-fixed photo. Stale
+ * hints are discarded: clear the badge, apply nothing.
  */
 export function acceptSidewaysHint(): void {
   const hint = useAppStore.getState().sidewaysHint;
@@ -104,7 +107,12 @@ export function acceptSidewaysHint(): void {
   const adapter = imageProcessingPipeline.getModule<CropPipelineModule>('crop');
   if (!adapter) return;
   const inner = adapter.getCropModule();
-  const next = (inner.normalizedOrientation() + hint.rotate) % 360;
+  if (inner.normalizedOrientation() !== 0) {
+    logger.info('Sideways hint discarded at click: an orientation is already applied (stale hint)');
+    useAppStore.getState().setSidewaysHint(null);
+    return;
+  }
+  const next = hint.rotate;
   // v1.34.0 programmatic crop-write recipe — orientation only.
   inner.setParams({ orientation: next, enabled: true });
   adapter.setEnabled(true);
