@@ -193,3 +193,122 @@ describe('applyAutoAll — composition (v1.37.0 D4)', () => {
     expect(deps.showSuccess).not.toHaveBeenCalled();
   });
 });
+
+// ─── Part B: headless auto-straighten inside Auto All (D4) ──────────────────
+// Auto All runs CropModule.autoStraighten on the CURRENT preview pixels ONLY
+// for a fresh-photo crop state (no crop rect, no orientation, no angle) —
+// already-rotated pixels would double-correct, and Auto All must never fight
+// user framing. On detection it applies angle + the SHARED wedge-free crop
+// patch via the v1.34.0 programmatic recipe (inner setParams enabled +
+// adapter setEnabled + invalidateModuleCache).
+
+import { CropPipelineModule } from '../modules/CropPipelineModule';
+
+describe('applyAutoAll — auto-straighten (Part B)', () => {
+  const getAdapter = () => imageProcessingPipeline.getModule<CropPipelineModule>('crop')!;
+
+  beforeEach(() => {
+    useAppStore.getState().setDeveloping(false);
+    useAppStore.getState().setRawDecodeOptions({ ...DEFAULT_RAW_DECODE_OPTIONS, cameraMatch: false });
+    getAdapter().reset();
+    (imageProcessingPipeline.getModule('basicadj') as unknown as ParamModule | undefined)?.reset?.();
+    // Preview pixels available in the store (what autoStraighten analyses).
+    useAppStore.getState().setProcessedImageData({
+      data: img.data, width: img.width, height: img.height,
+    } as unknown as Parameters<ReturnType<typeof useAppStore.getState>['setProcessedImageData']>[0]);
+    mockCurrentImage();
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+    useAppStore.getState().setProcessedImageData(null);
+    getAdapter().reset();
+  });
+
+  /** Simulate a 2° detection the way the real autoStraighten applies it. */
+  function mockDetection(angle = 2): jest.SpyInstance {
+    const inner = getAdapter().getCropModule();
+    return jest.spyOn(inner, 'autoStraighten').mockImplementation(() => {
+      const auto = inner.calculateAutoCropForRotation(img.width, img.height, angle);
+      inner.setParams({ angle, enabled: true, expandCanvas: true, ...auto });
+      return true;
+    });
+  }
+
+  it('fresh photo + detected angle → angle + wedge-free crop + adapter-enable mirror', () => {
+    const spy = mockDetection(2);
+
+    applyAutoAll(makeDeps());
+
+    const inner = getAdapter().getCropModule();
+    expect(spy).toHaveBeenCalledTimes(1);
+    // Channels detected from the preview buffer, like the crop card does.
+    expect(spy.mock.calls[0][1]).toEqual({ width: img.width, height: img.height, channels: 4 });
+
+    const p = inner.getParams();
+    const expected = inner.calculateAutoCropForRotation(img.width, img.height, 2);
+    expect(p.angle).toBe(2);
+    expect(p.enabled).toBe(true);
+    expect(p.x).toBeCloseTo(expected.x, 10);
+    expect(p.y).toBeCloseTo(expected.y, 10);
+    expect(p.width).toBeCloseTo(expected.width, 10);
+    expect(p.height).toBeCloseTo(expected.height, 10);
+    expect(getAdapter().getEnabled()).toBe(true); // the v1.34.0 mirror
+  });
+
+  it('SKIPS silently when a crop rect exists (never fights user framing)', () => {
+    getAdapter().getCropModule().setParams({ x: 0.1, y: 0.1, width: 0.7, height: 0.7, enabled: true });
+    const spy = mockDetection();
+    const before = getAdapter().getCropModule().getParams();
+
+    applyAutoAll(makeDeps());
+
+    expect(spy).not.toHaveBeenCalled();
+    expect(getAdapter().getCropModule().getParams()).toEqual(before);
+  });
+
+  it('SKIPS silently when an orientation quarter-turn exists', () => {
+    getAdapter().getCropModule().setParams({ orientation: 90, enabled: true });
+    const spy = mockDetection();
+
+    applyAutoAll(makeDeps());
+
+    expect(spy).not.toHaveBeenCalled();
+    expect(getAdapter().getCropModule().getParams().angle).toBe(0);
+  });
+
+  it('SKIPS silently when a straighten angle exists already', () => {
+    getAdapter().getCropModule().setParams({ angle: 1.5, enabled: true });
+    const spy = mockDetection();
+
+    applyAutoAll(makeDeps());
+
+    expect(spy).not.toHaveBeenCalled();
+    expect(getAdapter().getCropModule().getParams().angle).toBe(1.5);
+  });
+
+  it('SKIPS when no preview pixels are available — the rest of Auto All still applies', () => {
+    useAppStore.getState().setProcessedImageData(null);
+    const spy = mockDetection();
+    const deps = makeDeps();
+
+    applyAutoAll(deps);
+
+    expect(spy).not.toHaveBeenCalled();
+    expect(deps.showSuccess).toHaveBeenCalled();
+    const written = (imageProcessingPipeline.getModule('basicadj') as unknown as ParamModule).getParams() as Record<string, number>;
+    expect(written.exposure).toBeGreaterThan(0); // adjustments landed regardless
+  });
+
+  it('leaves crop untouched when detection finds nothing (already straight)', () => {
+    const inner = getAdapter().getCropModule();
+    const spy = jest.spyOn(inner, 'autoStraighten').mockReturnValue(false);
+    const before = inner.getParams();
+
+    applyAutoAll(makeDeps());
+
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(inner.getParams()).toEqual(before);
+    expect(getAdapter().getEnabled()).toBe(false); // reset() left it disabled; no write = no enable
+  });
+});

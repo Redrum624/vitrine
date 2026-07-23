@@ -223,6 +223,7 @@ const ANALYSIS_PRIMITIVES = [
   /\.autoDetectWhiteBalance\s*\(/, // WhiteBalanceModule.autoDetectWhiteBalance — gray-candidate WB
   /\.copyStyle\s*\(/,             // StyleAnalysisService.copyStyle — reads pixels into a fingerprint
   /\.pasteStyle\s*\(/,            // StyleAnalysisService.pasteStyle — reads target pixels to match
+  /\.autoStraighten\s*\(/,        // CropModule.autoStraighten — bakes a pixel-derived angle+crop (v1.37.0 R2)
 ];
 const READ_SITES = ANALYSIS_PRIMITIVES.flatMap((p) => findSites(p));
 
@@ -266,7 +267,29 @@ const READ_ALLOWLIST: Allow[] = [
     contains: 'const stats = this.analyse(data, width, height)',
     why:
       'Service-internal: autoAll() re-analyses its own caller-supplied buffer. Every autoAll() ' +
-      'call site is itself gated (App.handleAutoAll).',
+      'call site is itself gated (AutoAllService.applyAutoAll since v1.37.0 R2).',
+  },
+  {
+    base: 'CropModuleComponent.tsx',
+    contains: 'const success = module.autoStraighten(imgData.data, context)',
+    why:
+      'The crop card\'s ⚡ reads the PROCESSED PREVIEW buffer (store processedImageData), never ' +
+      'base pixels. Tilt geometry is identical between the embedded preview and the full decode, ' +
+      'so an angle baked during developing stays valid after the swap.',
+  },
+  {
+    base: 'TransformModuleComponent.tsx',
+    contains: 'const success = module.autoStraighten(imageData, context)',
+    why:
+      'Archived component (src/components/Modules/archive) — not rendered anywhere; kept only as ' +
+      'reference source. No runtime path reaches it.',
+  },
+  {
+    base: 'TransformPipelineModule.ts',
+    contains: 'const success = this.transformModule.autoStraighten(input, transformContext)',
+    why:
+      'Archived module (src/modules/archive) — never registered in the pipeline. No runtime path ' +
+      'reaches it.',
   },
 ];
 
@@ -283,7 +306,10 @@ describe('developing-guard tripwire — base-pixel actions must gate during prog
   test('found the expected call surfaces (scan sanity — patterns still match reality)', () => {
     // If these drop to 0 the scan silently stopped enforcing anything (renamed API, moved files).
     expect(WRITE_SITES.length).toBeGreaterThanOrEqual(9);
-    expect(READ_SITES.length).toBeGreaterThanOrEqual(9);
+    // v1.37.0 R2: 6 analyse + 1 autoAll + 2 autoDetectWB + 2 copy/pasteStyle
+    // + 4 autoStraighten (crop card, 2 archived, AutoAllService) = 15. Update
+    // this floor CONSCIOUSLY when adding/removing a primitive call site.
+    expect(READ_SITES.length).toBeGreaterThanOrEqual(15);
   });
 
   test('every base WRITE (updateCurrentImageData) is guarded or consciously allow-listed', () => {

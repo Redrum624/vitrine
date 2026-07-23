@@ -17,6 +17,8 @@
  *     camera's WB decision.
  *  3. Camera-matched softening: the bundle is scaled toward neutral by
  *     CAMERA_MATCHED_AUTO_STRENGTH so it nudges instead of double-grading.
+ *  4. Auto Crop (D4 Part B): headless auto-straighten on the current preview
+ *     pixels, ONLY for a fresh-photo crop state — see applyAutoStraighten.
  */
 import { logger } from '../utils/Logger';
 import { guardDeveloping } from '../utils/developingGuard';
@@ -24,6 +26,7 @@ import { imageService } from './ImageService';
 import { imageProcessingPipeline } from './ImageProcessingPipeline';
 import { autoAdjustService, CAMERA_MATCHED_AUTO_STRENGTH } from './AutoAdjustService';
 import { useAppStore } from '../stores/appStore';
+import type { CropPipelineModule } from '../modules/CropPipelineModule';
 
 export interface AutoAllDeps {
   showSuccess: (title: string, message: string) => void;
@@ -75,12 +78,85 @@ export function applyAutoAll(deps: AutoAllDeps): void {
     imageProcessingPipeline.invalidateModuleCache('basicadj');
   }
 
+  // Auto Crop (Part B): headless auto-straighten — fresh-photo only.
+  const straightened = applyAutoStraighten(img, showInfo);
+
   // Refresh the open module panel's sliders, then reprocess.
   useAppStore.getState().notifyExternalParamsChange();
   useAppStore.getState().triggerReprocessing();
   showSuccess(
     'Auto All',
-    `Applied "${result.bucket}" auto adjustments${cameraMatched ? ' (softened — camera-matched base)' : ''}`,
+    `Applied "${result.bucket}" auto adjustments${straightened ? ' + auto-straighten' : ''}${cameraMatched ? ' (softened — camera-matched base)' : ''}`,
   );
-  logger.info(`Auto All: standalone bundle + auto-WB applied (bucket=${result.bucket})`);
+  logger.info(`Auto All: standalone bundle + auto-WB applied (bucket=${result.bucket}, straightened=${straightened})`);
+}
+
+/**
+ * Headless auto-straighten inside Auto All (v1.37.0 R2 Part B, user decision
+ * D4: "add the Auto Crop if it can auto find the right orientation ... and
+ * auto straighten").
+ *
+ * Runs the inner CropModule.autoStraighten — 6-line analysis, ≥0.1° and ≤5°
+ * by its own contract — on the CURRENT preview pixels, channels-detected the
+ * same way the crop card's ⚡ does — but ONLY when the photo is in the
+ * fresh-photo crop state: no crop rect, no orientation quarter-turn, no
+ * straighten angle. Already-rotated pixels would double-correct, and Auto All
+ * must NEVER fight user framing — any existing crop/rotation means silent skip.
+ *
+ * On detection it applies the angle plus the SHARED wedge-free crop patch
+ * (CropModule.wedgeFreeCropPatch — one source with the crop card) via the
+ * v1.34.0 programmatic recipe: inner setParams({...patch, enabled:true}) +
+ * adapter setEnabled(true) + invalidateModuleCache('crop'). The caller emits
+ * the single notifyExternalParamsChange + triggerReprocessing for the whole
+ * Auto All transaction.
+ */
+function applyAutoStraighten(
+  img: { width: number; height: number },
+  showInfo: AutoAllDeps['showInfo'],
+): boolean {
+  // Defense-in-depth: applyAutoAll already gates the developing window before
+  // any pixels are read; this inner gate keeps the straighten path honest if a
+  // future caller reaches it directly (it bakes preview-derived crop params).
+  if (guardDeveloping(showInfo, 'Auto All')) return false;
+
+  const adapter = imageProcessingPipeline.getModule<CropPipelineModule>('crop');
+  if (!adapter) return false;
+  const inner = adapter.getCropModule();
+  const p = inner.getParams();
+
+  const hasCropRect = p.x !== 0 || p.y !== 0 || p.width !== 1.0 || p.height !== 1.0;
+  const hasOrientation = inner.normalizedOrientation() !== 0;
+  const hasAngle = Math.abs(p.angle) >= 0.01;
+  if (hasCropRect || hasOrientation || hasAngle) {
+    logger.debug('Auto All: auto-straighten skipped — photo already has crop/rotation');
+    return false;
+  }
+
+  // The preview the user is looking at (same source as the crop card's ⚡).
+  const pd = useAppStore.getState().processedImageData;
+  const preview = pd && typeof pd === 'object' && 'data' in pd
+    ? (pd as { data: Float32Array; width: number; height: number })
+    : null;
+  if (!preview || !preview.data || preview.width <= 0 || preview.height <= 0) return false;
+
+  const channels = Math.round(preview.data.length / (preview.width * preview.height));
+  if (channels !== 3 && channels !== 4) {
+    logger.warn(`Auto All: auto-straighten skipped — unexpected channel count ${channels}`);
+    return false;
+  }
+
+  const detected = inner.autoStraighten(preview.data, {
+    width: preview.width, height: preview.height, channels,
+  });
+  if (!detected) return false;
+
+  const angle = inner.getParams().angle;
+  // Frame dims for the inscribed-rect math: the BASE image dims, exactly what
+  // the crop card passes (the patch is normalized, so only aspect matters).
+  const patch = inner.wedgeFreeCropPatch(angle, img.width, img.height);
+  inner.setParams({ ...patch, enabled: true });
+  adapter.setEnabled(true); // v1.34.0 adapter-enable mirror
+  imageProcessingPipeline.invalidateModuleCache('crop');
+  logger.info(`Auto All: auto-straighten applied ${angle.toFixed(2)}° with wedge-free crop`);
+  return true;
 }

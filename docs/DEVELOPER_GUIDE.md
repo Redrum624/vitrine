@@ -102,7 +102,6 @@ photo_app/
 │   │   ├── ImageProcessingPipeline.ts    # Main pipeline
 │   │   ├── AdvancedDenoisingService.ts  # Denoising algorithms
 │   │   ├── ACESColorService.ts          # ACES color science
-│   │   ├── AutoStraightenService.ts     # Auto-straighten
 │   │   └── WebWorkerImageProcessor.ts   # Multi-threading
 │   │
 │   ├── shaders/             # GPU shaders (WebGL2)
@@ -286,32 +285,27 @@ const processedImage = acesColorService.processImage(
 );
 ```
 
-### 6. Auto-Straighten Service
+### 6. Auto-Straighten (CropModule)
 
-**File:** `src/services/AutoStraightenService.ts`
+**File:** `src/modules/CropModule.ts`
 
-Automatic horizon detection using computer vision.
+Automatic straightening lives on the crop module itself (the standalone
+AutoStraightenService was dead code and removed in v1.37.0).
 
-**Algorithms:**
-- Canny edge detection (5-stage pipeline)
-- Hough line transform
-- Horizon line detection
-- Vertical line detection
-- Gradient-based fallback
+**Algorithm:** 6-line scan (3 vertical + 3 horizontal strips at 25/50/75%),
+gradient-angle voting per strip, outlier-filtered average, clamped to ±5°.
+Angles below 0.1° are treated as already straight.
 
 **Example:**
 ```typescript
-import { autoStraightenService } from './services/AutoStraightenService';
-
-const result = await autoStraightenService.detectRotation(
-  imageData,
-  width,
-  height
-);
-
-console.log(`Detected angle: ${result.angle}°`);
-console.log(`Confidence: ${result.confidence}`);
-console.log(`Method used: ${result.method}`);
+const crop = imageProcessingPipeline.getModule<CropPipelineModule>('crop')!;
+const inner = crop.getCropModule();
+const detected = inner.autoStraighten(pixels, { width, height, channels });
+if (detected) {
+  // Land wedge-free: inscribed auto-crop (or intersect an existing crop).
+  inner.setParams({ ...inner.wedgeFreeCropPatch(inner.getParams().angle, width, height), enabled: true });
+  crop.setEnabled(true);
+}
 ```
 
 ---
