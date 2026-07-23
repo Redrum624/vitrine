@@ -53,7 +53,8 @@ import {
   resizeImage, FilterContext
 } from './utils/ImageFilters';
 import { styleAnalysisService } from './services/StyleAnalysisService';
-import { autoAdjustService, CAMERA_MATCHED_AUTO_STRENGTH } from './services/AutoAdjustService';
+import { autoAdjustService } from './services/AutoAdjustService';
+import { applyAutoAll } from './services/AutoAllService';
 import { imageProcessingPipeline } from './services/ImageProcessingPipeline';
 import type { CropPipelineModule } from './modules/CropPipelineModule';
 import { PrintDialog } from './components/Dialogs/PrintDialog';
@@ -694,76 +695,13 @@ function App() {
   );
 
   // ─── Auto All ──────────────────────────────────────────────────────────
-  const handleAutoAll = useCallback(() => {
-    if (guardDeveloping(showInfo, 'Auto All')) return;
-    const img = imageService.getCurrentImage();
-    if (!img) { showError('Auto All', 'No image loaded'); return; }
-
-    useAppStore.getState().setIsProcessing(true); // canvas spinner while applying
-
-    // Camera-matched base → soften the style grade (half strength) and keep the
-    // camera's WB. The profile targets are absolute and were tuned for the
-    // neutral decode; at full strength on a matched base they double-grade
-    // (camera tone mapping + full portfolio pull = crushed bright scenes).
-    const cameraMatched = !!img.isRaw && !!useAppStore.getState().rawDecodeOptions.cameraMatch;
-
-    // Single coordinator call: analyses once, picks the user-style bucket, and
-    // returns the bundled params for every module.
-    const result = autoAdjustService.autoAll(img.data, img.width, img.height, {
-      strength: cameraMatched ? CAMERA_MATCHED_AUTO_STRENGTH : 1,
-    });
-    logger.info(`Auto All: bucket=${result.bucket} (${result.stats.meanLum.toFixed(3)} lum, cameraMatched=${cameraMatched})`);
-
-    // Exposure
-    const exposureMod = imageProcessingPipeline.getModule('exposure');
-    if (exposureMod) {
-      (exposureMod as unknown as { setCurrentParams: (p: Record<string, unknown>) => void }).setCurrentParams(result.exposure);
-      imageProcessingPipeline.invalidateModuleCache('exposure');
-    }
-
-    // White Balance — gray-candidate estimation + damped correction, the SAME engine
-    // as the WB "Auto" button: estimate the illuminant from near-neutral samples
-    // (median cast, inverting the module's own gain model), then apply a partial
-    // correction that cleans the cast while retaining some of the scene's warmth.
-    // Skipped on a camera-matched base: the match already reproduces the camera's
-    // WB decision, and a gray-world pull on top of it fights that intent.
-    const wbMod = cameraMatched ? null : imageProcessingPipeline.getModule('temperature');
-    if (wbMod) {
-      const wbChannels = Math.max(3, Math.round(img.data.length / (img.width * img.height)));
-      (wbMod as unknown as { autoDetectWhiteBalance: (d: Float32Array, ctx: { width: number; height: number; channels: number }) => void })
-        .autoDetectWhiteBalance(img.data, { width: img.width, height: img.height, channels: wbChannels });
-      imageProcessingPipeline.invalidateModuleCache('temperature');
-    }
-
-    // Basic Adjustments (autoBasicAdj already returns exposure: 0). Fold the auto
-    // shadows/highlights into the new Basic Adjustments sliders, since the
-    // standalone Shadows & Highlights module was replaced by them.
-    const baMod = imageProcessingPipeline.getModule('basicadj');
-    if (baMod) {
-      const sh = result.shadowsHighlights as { shadows?: number; highlights?: number } | undefined;
-      const baParams: Record<string, unknown> = { ...result.basicAdj };
-      if (sh) {
-        baParams.shadows = (((sh.shadows ?? 50) - 50) / 50) * 0.6;        // +lift shadows
-        baParams.highlights = -(((sh.highlights ?? 50) - 50) / 50) * 0.6; // -recover highlights
-      }
-      (baMod as unknown as { setParams: (p: Record<string, unknown>) => void }).setParams(baParams);
-      imageProcessingPipeline.invalidateModuleCache('basicadj');
-    }
-
-    // (Shadows / Highlights are now applied via Basic Adjustments above.)
-    // (v1.37.0 D1/D2: Auto All no longer writes Tone Curve or Color Balance —
-    // the style-profile curve was the "'Tone Curve' auto apply sometimes"
-    // complaint. Presets / paste-style still write those params; user-initiated.)
-
-    // Refresh the open module panel's sliders, then reprocess.
-    useAppStore.getState().notifyExternalParamsChange();
-    useAppStore.getState().triggerReprocessing();
-    showSuccess(
-      'Auto All',
-      `Applied "${result.bucket}" style profile${cameraMatched ? ' (softened — camera-matched base)' : ''}`,
-    );
-    logger.info(`Auto All: all modules adjusted from user style profile (bucket=${result.bucket})`);
-  }, [showSuccess, showError, showInfo]);
+  // v1.37.0 R2: the whole application flow lives in services/AutoAllService
+  // (dependency-injected seam, unit-tested against the real pipeline) — this
+  // wrapper only binds the App's toast callbacks.
+  const handleAutoAll = useCallback(
+    () => applyAutoAll({ showSuccess, showError, showInfo }),
+    [showSuccess, showError, showInfo],
+  );
 
   // ─── Print ─────────────────────────────────────────────────────────────
   const handlePrint = useCallback(() => {

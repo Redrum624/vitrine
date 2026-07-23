@@ -228,14 +228,8 @@ def build_profile_ts(buckets: dict[str, dict], portfolio_count: int,
         def m(field: str) -> str:
             return _f(agg[field]["median"])
 
-        # Color balance: aim toward median R/G/B of this bucket.
-        mr, mg, mb = agg["mean_r"]["median"], agg["mean_g"]["median"], agg["mean_b"]["median"]
-        avg_rgb = (mr + mg + mb) / 3
-        rgb_balance = {
-            "r": round(mr / max(1e-6, avg_rgb), 4),
-            "g": round(mg / max(1e-6, avg_rgb), 4),
-            "b": round(mb / max(1e-6, avg_rgb), 4),
-        }
+        # (rgbBalance was dropped in v1.37.0 R2 — its last reader, the Auto
+        # Color Balance path, was removed in R1 and the field went unread.)
 
         return f"""  {name}: {{
     sampleCount: {agg["__count__"]},
@@ -253,7 +247,6 @@ def build_profile_ts(buckets: dict[str, dict], portfolio_count: int,
     shadowPixelRatio:           {m("shadow_pixel_ratio")},
     highlightPixelRatio:        {m("highlight_pixel_ratio")},
     rbRatio:                    {m("rb_ratio")},
-    rgbBalance:                 {{ r: {rgb_balance["r"]}, g: {rgb_balance["g"]}, b: {rgb_balance["b"]} }},
   }}"""
 
     bucket_blocks = ",\n".join(render_bucket(b, buckets.get(b, {})) for b in BUCKET_ORDER)
@@ -295,7 +288,6 @@ export interface StyleProfile {{
   shadowPixelRatio: number;
   highlightPixelRatio: number;
   rbRatio: number;
-  rgbBalance: {{ r: number; g: number; b: number }};
 }}
 
 export interface BucketSelectorStats {{

@@ -53,11 +53,8 @@ describe('D1/D2 — AutoAdjustService surface (no tone-curve / color-balance aut
     const result = autoAdjustService.autoAll(data, W, H) as unknown as Record<string, unknown>;
     expect('toneCurve' in result).toBe(false);
     expect('colorBalance' in result).toBe(false);
-    // The surviving components still compose a working bundle.
-    expect(result.exposure).toBeDefined();
+    // The surviving composition (v1.37.0 R2): ONE standalone Basic-Adj bundle.
     expect(result.basicAdj).toBeDefined();
-    expect(result.shadowsHighlights).toBeDefined();
-    expect(result.whiteBalance).toBeDefined();
   });
 
   it('autoAll bundle carries NO toneCurve / colorBalance keys (scaled strength path)', () => {
