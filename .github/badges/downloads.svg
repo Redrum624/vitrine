@@ -5,7 +5,7 @@
   <line x1="64" y1="144.0" x2="776" y2="144.0" stroke="#8b949e" stroke-opacity="0.25"/><text x="56" y="144.0" dy="4" text-anchor="end" class="t">20</text>
   <line x1="64" y1="86.0" x2="776" y2="86.0" stroke="#8b949e" stroke-opacity="0.25"/><text x="56" y="86.0" dy="4" text-anchor="end" class="t">30</text>
   <line x1="64" y1="28.0" x2="776" y2="28.0" stroke="#8b949e" stroke-opacity="0.25"/><text x="56" y="28.0" dy="4" text-anchor="end" class="t">40</text>
-  <polyline points="64.0,260.0 128.7,248.4 193.5,225.2 258.2,225.2 322.9,149.8 387.6,103.4 452.4,80.2 517.1,74.4 581.8,51.2 646.5,51.2 711.3,28.0 776.0,28.0" fill="none" stroke="#58a6ff" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
+  <polyline points="64.0,260.0 128.7,260.0 193.5,260.0 258.2,260.0 322.9,260.0 387.6,260.0 452.4,260.0 517.1,260.0 581.8,260.0 646.5,260.0 711.3,260.0 776.0,28.0" fill="none" stroke="#58a6ff" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
   <circle cx="776.0" cy="28.0" r="4" fill="#58a6ff"/>
   <text x="64" y="288" class="t">2026-07-12</text>
   <text x="776" y="288" text-anchor="end" class="t">2026-07-23</text>
