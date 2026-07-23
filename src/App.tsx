@@ -441,7 +441,7 @@ export function resizeCurrentImage(toasts: TransformToasts, newWidth: number, ne
 }
 
 function App() {
-  const { setViewport, resetZoom, viewport, processedImageData, setSelectedTool: storeSetSelectedTool, showGrid, showRulers, showOriginal, toggleGrid, toggleRulers, toggleOriginal, referenceMode, referenceImageUrl, referenceImageName, toggleReferenceMode, setReferenceImage, lastProcessingTimeMs, modulesActive, modulesTotal, alignmentAxisX, setAlignmentAxisX, viewMode, selectedImageIds, developing, sidewaysHint } = useAppStore();
+  const { setViewport, resetZoom, viewport, processedImageData, setSelectedTool: storeSetSelectedTool, showGrid, showRulers, showOriginal, toggleGrid, toggleRulers, toggleOriginal, referenceMode, referenceImageUrl, referenceImageName, toggleReferenceMode, setReferenceImage, lastProcessingTimeMs, modulesActive, modulesTotal, alignmentAxisX, setAlignmentAxisX, viewMode, selectedImageIds, developing, sidewaysHint, originalSnapshotVersion } = useAppStore();
   const [selectedTool, setSelectedToolLocal] = useState<string | null>('file-explorer'); // Default to file explorer
 
   // Wrapper to update both local state and store
@@ -705,30 +705,23 @@ function App() {
   );
 
   // ─── "May be sideways?" suggestion badge (v1.37.0 R2 Part C) ───────────
-  // Per-image, recomputed on image OPEN only — never on reprocess. Opening a
-  // photo queues ONE computation that runs when its FIRST preview pixels land:
-  // at switch time `processedImageData` still holds the PREVIOUS photo's
-  // pixels (the reprocess hasn't run yet), so the baseline reference recorded
-  // at the switch gates the compute until a genuinely new buffer arrives.
-  // The scan itself runs off a setTimeout on a ≤64px grid — it can never
-  // delay the first paint (TTFI).
-  const sidewaysPendingRef = useRef<{ id: string; baseline: unknown } | null>(null);
+  // Per-image, recomputed on image OPEN only — never on reprocess. The
+  // trigger is `originalSnapshotVersion`: ImageService bumps it exactly once
+  // per fresh open, AFTER its currentImage holds the new base, and no
+  // reprocess ever touches it. The compute itself verifies the base's path
+  // matches the opened image (a bump-before-decode ordering just retries on
+  // the next bump) — no one-shot markers, no processedImageData identity
+  // races (the v1 wiring starved on exactly that; see the R2 report). The
+  // scan runs off a setTimeout on a strided ≤64px grid — it never delays the
+  // first paint (TTFI).
   useEffect(() => {
     useAppStore.getState().setSidewaysHint(null); // no stale badge across switches
-    sidewaysPendingRef.current = currentImage?.id
-      ? { id: currentImage.id, baseline: useAppStore.getState().processedImageData }
-      : null;
-  }, [currentImage?.id]);
-
-  useEffect(() => {
-    const pending = sidewaysPendingRef.current;
     const id = currentImage?.id;
-    if (!id || !pending || pending.id !== id) return;
-    if (!processedImageData || typeof processedImageData !== 'object' || !('data' in processedImageData)) return;
-    if (processedImageData === pending.baseline) return; // still the previous photo's pixels
-    sidewaysPendingRef.current = null; // one computation per open
-    window.setTimeout(() => computeSidewaysHintForImage(id), 0);
-  }, [currentImage?.id, processedImageData]);
+    const path = currentImage?.path;
+    if (!id || !path) return;
+    const timer = window.setTimeout(() => computeSidewaysHintForImage(id, path), 0);
+    return () => window.clearTimeout(timer);
+  }, [currentImage?.id, currentImage?.path, originalSnapshotVersion]);
 
   const handleSidewaysRotate = useCallback(() => acceptSidewaysHint(), []);
   const handleSidewaysDismiss = useCallback(() => dismissCurrentSidewaysHint(), []);

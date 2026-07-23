@@ -15,6 +15,7 @@ import {
   dismissCurrentSidewaysHint,
 } from '../services/SidewaysHintService';
 import { imageProcessingPipeline } from '../services/ImageProcessingPipeline';
+import { imageService } from '../services/ImageService';
 import { CropPipelineModule } from '../modules/CropPipelineModule';
 import { useAppStore } from '../stores/appStore';
 
@@ -54,7 +55,14 @@ function uprightPreview(): { data: Float32Array; width: number; height: number }
 
 const getAdapter = () => imageProcessingPipeline.getModule<CropPipelineModule>('crop')!;
 
-type PDArg = Parameters<ReturnType<typeof useAppStore.getState>['setProcessedImageData']>[0];
+/** Mock the ImageService BASE image (the compute's pixel source since the
+ *  wiring fix — the processed preview is cleared/re-published asynchronously
+ *  around opens and raced the original design; see the R2 report). */
+function mockBase(img: { data: Float32Array; width: number; height: number } | null, filePath = 'C:/img/base.jpg') {
+  jest.spyOn(imageService, 'getCurrentImage').mockReturnValue(
+    (img ? { ...img, fileName: 'base.jpg', filePath } : null) as unknown as ReturnType<typeof imageService.getCurrentImage>,
+  );
+}
 
 describe('SidewaysHintService — per-image hint state', () => {
   beforeEach(() => {
@@ -62,27 +70,47 @@ describe('SidewaysHintService — per-image hint state', () => {
     const st = useAppStore.getState();
     st.setSidewaysHint(null);
     st.clearSidewaysDismissals();
-    st.setProcessedImageData(sidewaysPreview() as unknown as PDArg);
+    mockBase(sidewaysPreview());
   });
 
   afterEach(() => {
-    useAppStore.getState().setProcessedImageData(null);
+    jest.restoreAllMocks();
     getAdapter().reset();
   });
 
-  test('sideways preview → hint set for that image with the computed direction', () => {
+  test('sideways base → hint set for that image with the computed direction', () => {
     computeSidewaysHintForImage('img-a');
     expect(useAppStore.getState().sidewaysHint).toEqual({ imageId: 'img-a', rotate: 90 });
   });
 
-  test('upright preview → no hint', () => {
-    useAppStore.getState().setProcessedImageData(uprightPreview() as unknown as PDArg);
+  test('upright base → no hint', () => {
+    mockBase(uprightPreview());
     computeSidewaysHintForImage('img-a');
     expect(useAppStore.getState().sidewaysHint).toBeNull();
   });
 
-  test('no preview pixels → no hint (and never throws)', () => {
-    useAppStore.getState().setProcessedImageData(null);
+  test('no base pixels → no hint (and never throws)', () => {
+    mockBase(null);
+    computeSidewaysHintForImage('img-a');
+    expect(useAppStore.getState().sidewaysHint).toBeNull();
+  });
+
+  test('path mismatch (decode not landed) → hint untouched, no wrong-photo analysis', () => {
+    mockBase(sidewaysPreview(), 'C:/img/PREVIOUS.jpg');
+    computeSidewaysHintForImage('img-b', 'C:/img/base.jpg');
+    // The previous photo's base must NOT produce a hint for the new image;
+    // the follow-up snapshot bump (with the right base) retries.
+    expect(useAppStore.getState().sidewaysHint).toBeNull();
+  });
+
+  test('path match → computes normally', () => {
+    mockBase(sidewaysPreview(), 'C:/img/base.jpg');
+    computeSidewaysHintForImage('img-b', 'C:/img/base.jpg');
+    expect(useAppStore.getState().sidewaysHint).toEqual({ imageId: 'img-b', rotate: 90 });
+  });
+
+  test('an already-applied quarter-turn suppresses the hint (base pixels predate it)', () => {
+    getAdapter().getCropModule().setParams({ orientation: 90, enabled: true });
     computeSidewaysHintForImage('img-a');
     expect(useAppStore.getState().sidewaysHint).toBeNull();
   });

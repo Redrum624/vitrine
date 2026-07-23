@@ -50,17 +50,30 @@ function luminance(r: number, g: number, b: number): number {
   return r * 0.2126 + g * 0.7152 + b * 0.0722;
 }
 
+/** Raw signal measurements — exposed so callers can LOG reality (the thresholds
+ *  were calibrated against these values measured on in-app preview buffers,
+ *  which carry the full module chain incl. sharpening — see the R2 report). */
+export interface SidewaysSignals {
+  /** Sobel |gx| / |gy| energy ratio (vertical-edge dominance). */
+  edgeRatio: number;
+  /** Mean-luminance delta, left half − right half. */
+  lateralDelta: number;
+  /** Mean-luminance delta, top half − bottom half. */
+  verticalDelta: number;
+  /** Mean per-cell gradient energy (featureless-frame floor input). */
+  meanEdgeEnergy: number;
+}
+
 /**
- * Analyse a pixel buffer (3 or 4 channels, 0..1 floats) and report whether it
- * looks sideways, and in which direction to rotate. Returns null when either
- * signal declines — the badge shows only on a dual-signal hit.
+ * Measure the raw signals on a pixel buffer (3 or 4 channels, 0..1 floats).
+ * Returns null for degenerate inputs (tiny frames, wrong channel counts).
  */
-export function detectSideways(
+export function measureSidewaysSignals(
   data: Float32Array,
   width: number,
   height: number,
   channels: number,
-): SidewaysHit | null {
+): SidewaysSignals | null {
   if (width < 8 || height < 8 || (channels !== 3 && channels !== 4)) return null;
   if (data.length < width * height * channels) return null;
 
@@ -94,9 +107,7 @@ export function detectSideways(
   const interior = (gw - 2) * (gh - 2);
   if (interior <= 0) return null;
   const meanEdgeEnergy = (sumGx + sumGy) / interior;
-  const verticalEdgesDominate =
-    meanEdgeEnergy >= MIN_EDGE_ENERGY && sumGx >= EDGE_DOMINANCE_RATIO * sumGy;
-  if (!verticalEdgesDominate) return null;
+  const edgeRatio = sumGx / Math.max(1e-9, sumGy);
 
   // ── Signal 2: lateral luminance gradient (sky-side detection) ────────────
   const halfW = Math.floor(gw / 2);
@@ -112,11 +123,33 @@ export function detectSideways(
   }
   const lateralDelta = leftSum / Math.max(1, leftN) - rightSum / Math.max(1, rightN);
   const verticalDelta = topSum / Math.max(1, topN) - bottomSum / Math.max(1, bottomN);
+
+  return { edgeRatio, lateralDelta, verticalDelta, meanEdgeEnergy };
+}
+
+/**
+ * Analyse a pixel buffer (3 or 4 channels, 0..1 floats) and report whether it
+ * looks sideways, and in which direction to rotate. Returns null when either
+ * signal declines — the badge shows only on a dual-signal hit.
+ */
+export function detectSideways(
+  data: Float32Array,
+  width: number,
+  height: number,
+  channels: number,
+): SidewaysHit | null {
+  const s = measureSidewaysSignals(data, width, height, channels);
+  if (!s) return null;
+
+  const verticalEdgesDominate =
+    s.meanEdgeEnergy >= MIN_EDGE_ENERGY && s.edgeRatio >= EDGE_DOMINANCE_RATIO;
+  if (!verticalEdgesDominate) return null;
+
   const lateralDominates =
-    Math.abs(lateralDelta) >= MIN_LATERAL_DELTA &&
-    Math.abs(lateralDelta) >= LATERAL_DOMINANCE_RATIO * Math.abs(verticalDelta);
+    Math.abs(s.lateralDelta) >= MIN_LATERAL_DELTA &&
+    Math.abs(s.lateralDelta) >= LATERAL_DOMINANCE_RATIO * Math.abs(s.verticalDelta);
   if (!lateralDominates) return null;
 
   // Brighter LEFT side → 90° CW puts it on top; brighter RIGHT side → 270°.
-  return { rotate: lateralDelta > 0 ? 90 : 270 };
+  return { rotate: s.lateralDelta > 0 ? 90 : 270 };
 }
