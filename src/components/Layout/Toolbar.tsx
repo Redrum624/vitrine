@@ -31,6 +31,13 @@ interface ToolbarProps {
    *  silently no-ops (L3 review round 1 added it for Auto All; round 6 P8 extended the same
    *  reactive store read to the other three developing-unsafe actions). */
   developing?: boolean;
+  /** True when the sideways heuristic fired for the CURRENT photo — shows the
+   *  dismissible "Photo may be sideways — rotate?" chip (v1.37.0 R2 Part C).
+   *  The chip NEVER auto-rotates: click applies the suggested lossless
+   *  quarter-turn, × dismisses it for that photo for the session. */
+  sidewaysHint?: boolean;
+  onSidewaysRotate?: () => void;
+  onSidewaysDismiss?: () => void;
   onCopyStyle?: () => void;
   onPasteStyle?: () => void;
   hasStyleClipboard?: boolean;
@@ -202,7 +209,7 @@ function ToolbarOverflowMenu({ items }: { items: OverflowItem[] }) {
   );
 }
 
-export function Toolbar({ onExport, onPrint, onBatchProcess, onUndo: _onUndo, onRedo: _onRedo, canUndo: _canUndo = false, canRedo: _canRedo = false, onZoomIn, onZoomOut, onFitWindow, onActualSize, zoom = 1, onAutoAll, developing = false, onCopyStyle, onPasteStyle, hasStyleClipboard = false, hasImage = false, onToggleOriginal, showOriginal = false, onToggleReference, referenceMode = false, onOpenFolder, onExportSelected }: ToolbarProps) {
+export function Toolbar({ onExport, onPrint, onBatchProcess, onUndo: _onUndo, onRedo: _onRedo, canUndo: _canUndo = false, canRedo: _canRedo = false, onZoomIn, onZoomOut, onFitWindow, onActualSize, zoom = 1, onAutoAll, developing = false, sidewaysHint = false, onSidewaysRotate, onSidewaysDismiss, onCopyStyle, onPasteStyle, hasStyleClipboard = false, hasImage = false, onToggleOriginal, showOriginal = false, onToggleReference, referenceMode = false, onOpenFolder, onExportSelected }: ToolbarProps) {
   const { viewMode, setViewMode, selectedImageIds, gallerySortAscending, toggleGallerySortDirection, alignmentAxisX } = useAppStore();
 
   // Responsive collapse + clamp (Develop pill only, G5 review). Two mechanisms
@@ -363,6 +370,41 @@ export function Toolbar({ onExport, onPrint, onBatchProcess, onUndo: _onUndo, on
         </svg>
         Auto All
       </button>
+      {/* "May be sideways?" suggestion chip (v1.37.0 R2 Part C) — occupies the
+          old Styled chip's slot next to Auto All. NON-DESTRUCTIVE: clicking it
+          applies the suggested lossless quarter-turn (the heuristic never
+          rotates by itself); × hides it for this photo for the session. */}
+      {sidewaysHint && hasImage && (
+        <span className="flex items-center" style={{ gap: 0 }}>
+          <button
+            onClick={onSidewaysRotate}
+            className="glass-pill-btn"
+            style={{
+              ...pillBtn,
+              padding: '0 10px',
+              fontSize: 11.5,
+              fontWeight: 600,
+              color: 'var(--accent)',
+            }}
+            title="A dual-signal analysis suggests this photo is lying on its side. Click to apply a lossless quarter-turn in the detected direction — nothing is ever rotated automatically."
+          >
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M2 8a6 6 0 1 1 1.76 4.24" />
+              <path d="M2 12.5V8h4.5" />
+            </svg>
+            Photo may be sideways — rotate?
+          </button>
+          <button
+            onClick={onSidewaysDismiss}
+            aria-label="Dismiss sideways suggestion"
+            className="glass-pill-btn"
+            style={{ ...pillBtn, padding: '0 6px', fontSize: 13, color: 'var(--glass-text-chrome-secondary, var(--glass-text-chrome-primary))' }}
+            title="Hide this suggestion for this photo (this session)"
+          >
+            ×
+          </button>
+        </span>
+      )}
       <div style={divider} />
 
       {/* Copy/Paste Style — secondary; move to the overflow menu when collapsed. */}

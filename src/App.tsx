@@ -55,6 +55,7 @@ import {
 import { styleAnalysisService } from './services/StyleAnalysisService';
 import { autoAdjustService } from './services/AutoAdjustService';
 import { applyAutoAll } from './services/AutoAllService';
+import { computeSidewaysHintForImage, acceptSidewaysHint, dismissCurrentSidewaysHint } from './services/SidewaysHintService';
 import { imageProcessingPipeline } from './services/ImageProcessingPipeline';
 import type { CropPipelineModule } from './modules/CropPipelineModule';
 import { PrintDialog } from './components/Dialogs/PrintDialog';
@@ -440,7 +441,7 @@ export function resizeCurrentImage(toasts: TransformToasts, newWidth: number, ne
 }
 
 function App() {
-  const { setViewport, resetZoom, viewport, processedImageData, setSelectedTool: storeSetSelectedTool, showGrid, showRulers, showOriginal, toggleGrid, toggleRulers, toggleOriginal, referenceMode, referenceImageUrl, referenceImageName, toggleReferenceMode, setReferenceImage, lastProcessingTimeMs, modulesActive, modulesTotal, alignmentAxisX, setAlignmentAxisX, viewMode, selectedImageIds, developing } = useAppStore();
+  const { setViewport, resetZoom, viewport, processedImageData, setSelectedTool: storeSetSelectedTool, showGrid, showRulers, showOriginal, toggleGrid, toggleRulers, toggleOriginal, referenceMode, referenceImageUrl, referenceImageName, toggleReferenceMode, setReferenceImage, lastProcessingTimeMs, modulesActive, modulesTotal, alignmentAxisX, setAlignmentAxisX, viewMode, selectedImageIds, developing, sidewaysHint } = useAppStore();
   const [selectedTool, setSelectedToolLocal] = useState<string | null>('file-explorer'); // Default to file explorer
 
   // Wrapper to update both local state and store
@@ -702,6 +703,35 @@ function App() {
     () => applyAutoAll({ showSuccess, showError, showInfo }),
     [showSuccess, showError, showInfo],
   );
+
+  // ─── "May be sideways?" suggestion badge (v1.37.0 R2 Part C) ───────────
+  // Per-image, recomputed on image OPEN only — never on reprocess. Opening a
+  // photo queues ONE computation that runs when its FIRST preview pixels land:
+  // at switch time `processedImageData` still holds the PREVIOUS photo's
+  // pixels (the reprocess hasn't run yet), so the baseline reference recorded
+  // at the switch gates the compute until a genuinely new buffer arrives.
+  // The scan itself runs off a setTimeout on a ≤64px grid — it can never
+  // delay the first paint (TTFI).
+  const sidewaysPendingRef = useRef<{ id: string; baseline: unknown } | null>(null);
+  useEffect(() => {
+    useAppStore.getState().setSidewaysHint(null); // no stale badge across switches
+    sidewaysPendingRef.current = currentImage?.id
+      ? { id: currentImage.id, baseline: useAppStore.getState().processedImageData }
+      : null;
+  }, [currentImage?.id]);
+
+  useEffect(() => {
+    const pending = sidewaysPendingRef.current;
+    const id = currentImage?.id;
+    if (!id || !pending || pending.id !== id) return;
+    if (!processedImageData || typeof processedImageData !== 'object' || !('data' in processedImageData)) return;
+    if (processedImageData === pending.baseline) return; // still the previous photo's pixels
+    sidewaysPendingRef.current = null; // one computation per open
+    window.setTimeout(() => computeSidewaysHintForImage(id), 0);
+  }, [currentImage?.id, processedImageData]);
+
+  const handleSidewaysRotate = useCallback(() => acceptSidewaysHint(), []);
+  const handleSidewaysDismiss = useCallback(() => dismissCurrentSidewaysHint(), []);
 
   // ─── Print ─────────────────────────────────────────────────────────────
   const handlePrint = useCallback(() => {
@@ -1655,6 +1685,9 @@ function App() {
               zoom={viewport.zoom}
               onAutoAll={handleAutoAll}
               developing={developing}
+              sidewaysHint={!!sidewaysHint && sidewaysHint.imageId === currentImage?.id}
+              onSidewaysRotate={handleSidewaysRotate}
+              onSidewaysDismiss={handleSidewaysDismiss}
               onCopyStyle={handleCopyStyle}
               onPasteStyle={handlePasteStyle}
               hasStyleClipboard={hasStyleClipboard}
