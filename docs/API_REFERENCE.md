@@ -20,7 +20,8 @@ crop, exposure, whitebalance, basicadj, tonecurve, colorbalance, shadowshighligh
 - processImage() - Apply ACES pipeline
 - sRGBToACES() - Color space conversion
 
-## AutoStraightenService
-- detectRotation() - Auto-detect horizon
+## CropModule (auto-straighten)
+- autoStraighten() - 6-line scan angle detection + apply
+- wedgeFreeCropPatch() - inscribed/intersected crop patch for a straighten angle
 
 See DEVELOPER_GUIDE.md for full documentation.

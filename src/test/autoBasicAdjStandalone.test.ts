@@ -208,6 +208,63 @@ describe('autoBasicAdj standalone highlights/shadows (v1.36.0)', () => {
   });
 });
 
+// ─── v1.37.0 R2: black_point port + softened highlight onset ────────────────
+// Auto All no longer writes the ExposureModule, so the composed autoExposure's
+// black clip-lift (black 0.003 when p1 < 0.005) needs a standalone equivalent.
+// BasicAdj applies max(0, v − black_point×0.1), so black_point 0.03 reproduces
+// the same 0.003 pedestal subtraction. Composed mode stays frozen at 0.
+
+describe('autoBasicAdj standalone black_point (v1.37.0 R2 — composed clip-lift port)', () => {
+  test('severely clipped blacks (p1 < 0.005) → black_point 0.03 (≡ ExposureModule black 0.003)', () => {
+    const clipped = { ...testStats, p1: 0.001 } as unknown as Stats;
+    const out = autoAdjustService.autoBasicAdj(clipped, { standalone: true });
+    expect(out.black_point).toBeCloseTo(0.03, 6);
+  });
+
+  test('healthy blacks (p1 ≥ 0.005) → black_point stays 0', () => {
+    const healthy = { ...testStats, p1: 0.02 } as unknown as Stats;
+    const out = autoAdjustService.autoBasicAdj(healthy, { standalone: true });
+    expect(out.black_point).toBe(0);
+  });
+
+  test('composed mode NEVER writes a black_point (frozen — Auto Contrast still calls it)', () => {
+    const clipped = { ...testStats, p1: 0.001 } as unknown as Stats;
+    expect(autoAdjustService.autoBasicAdj(clipped).black_point).toBe(0);
+  });
+});
+
+// R2 #8 (C3 carry-over): at p95≈0.90 the K1 term alone recovered −0.072 on a
+// correct-by-intent scene. The onset now ramps in via smoothstep over
+// [T_HL, T_HL+0.06] so borderline p95 lands near −0.03..−0.04 while genuinely
+// blown (p95 ≥ 0.93) keeps the exact pre-ramp strength. No existing C3 case
+// sits inside the ramp window (0.87..0.93), so only these NEW pins change.
+
+describe('standalone highlights onset ramp (v1.37.0 R2)', () => {
+  test('borderline top end (p95 = 0.90) gets a whisper −0.03..−0.045, not −0.07', () => {
+    const borderline = {
+      ...testStats,
+      meanLum: 0.50, p50: 0.42, p95: 0.90, p99: 0.94,
+      highlightMeanLum: 0.85, highlightPixelRatio: 0.05,
+      shadowMeanLum: 0.15, shadowPixelRatio: 0.05,
+    } as unknown as Stats;
+    const out = autoAdjustService.autoBasicAdj(borderline, { standalone: true }) as BAOut;
+    expect(hl(out)).toBeLessThanOrEqual(-0.03);
+    expect(hl(out)).toBeGreaterThanOrEqual(-0.045);
+  });
+
+  test('genuinely blown (p95 = 0.99) keeps the exact full-strength recovery', () => {
+    const blown = {
+      ...testStats,
+      meanLum: 0.60, p50: 0.42, p95: 0.99, p99: 1.0,
+      highlightMeanLum: 0.97, highlightPixelRatio: 0.35,
+      shadowMeanLum: 0.15, shadowPixelRatio: 0.05,
+    } as unknown as Stats;
+    const out = autoAdjustService.autoBasicAdj(blown, { standalone: true }) as BAOut;
+    // 0.12×2.4 + 0.35×0.15 = 0.3405 — ramp fully open, pre-ramp value preserved.
+    expect(hl(out)).toBeCloseTo(-0.3405, 4);
+  });
+});
+
 // ─── Visual sanity: full module pass on a synthetic blown-sky image ─────────
 // Brief requirement: p99 must drop measurably after standalone Auto; midtones
 // must not shift more than exposure accounts for (exposure is 0 here — the

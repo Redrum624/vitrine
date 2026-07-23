@@ -4,6 +4,20 @@ All notable changes to **Vitrine** (formerly Photo Editor Pro) are documented in
 this file. The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.37.0] - 2026-07-22
+
+### Changed
+- **Auto Tone Curve and Auto Color Balance are gone — Auto All is now a pure corrector.** Why: the style-profile tone curve applied itself "sometimes" (it skipped low-contrast images), and the Adjust-menu "Auto Levels" item was mislabeled — it actually applied that same curve. Removed: the Tone Curve card's ⚡ Auto, the Color Balance card's ⚡ Auto, the "Auto Levels" menu item, the Auto All curve/color-balance components, and the now-signal-less "Styled" toolbar chip. The "Auto Color" menu item became "Auto White Balance" (that's all it still does). The Tone Curve panel's histogram-stretch Auto Levels/Contrast options are unaffected. Affects: `src/services/AutoAdjustService.ts`, `src/App.tsx`, module components.
+- **Auto All rebuilt: real corrections plus Auto Crop.** It now composes the standalone Basic Adjustments auto (neutral-target exposure, highlights recovery, shadow lift, black-point clip-lift) with Auto White Balance — and on a photo you haven't cropped or rotated yet, it also auto-straightens (wedge-free, using the same inscribed-crop math as the Crop panel). Your existing framing is never touched. History records it as a single "Auto All" entry. Affects: `src/services/AutoAllService.ts` (new), `src/services/AutoAdjustService.ts`.
+
+### Added
+- **"May be sideways?" hint.** When a photo's content strongly suggests it's rotated 90° (dominant lines running the wrong way AND the bright sky-side sitting left or right — both signals must agree), a small dismissible chip offers a one-click lossless quarter-turn in the detected direction. It never rotates on its own, and photos with EXIF orientation are already auto-oriented at load as before. Affects: `src/services/SidewaysHintService.ts` (new), `src/App.tsx`.
+- **History now tells you what was edited.** Entries read "Exposure +0.35", "Temperature 6500 → 4800", "Rotate 90°", "Straighten +2.0° ", "Crop 84%", "Noise Reduction on", "Basic Adjustments: 3 changes" — with old→new values, per-module counts, and curve/toggle edits no longer collapsing to a bare module name. Cause of the old vagueness: the label formatter discarded the previous value, showed only the first changed control, and skipped non-numeric changes entirely. Affects: `src/services/CheckpointService.ts`, `src/components/Panels/HistoryPanel.tsx`.
+
+### Fixed
+- **The filmstrip keeps the active photo centered.** Arrow keys, chevrons, and clicks now center the selected thumbnail (instant during rapid navigation, smooth otherwise); wheel-panning the strip never snaps back. Cause: the old scroll logic only acted when the thumb had fully left the visible strip. Affects: `src/components/Panels/ThumbnailPanel.tsx`.
+- **A RAW photo used as reference now renders at pane resolution.** Cause: the reference pane loaded through the gallery-thumbnail path, which caps RAW embedded previews at a 512px box — a postage stamp in a half-window pane. The reference now requests up to 2560px from the embedded preview (sharp, correctly oriented); JPEG references are unchanged. Affects: `electron/main.cjs`, `electron/rawThumbPolicy.cjs` (new), `src/App.tsx`.
+
 ## [1.36.0] - 2026-07-20
 
 ### Fixed

@@ -228,29 +228,8 @@ def build_profile_ts(buckets: dict[str, dict], portfolio_count: int,
         def m(field: str) -> str:
             return _f(agg[field]["median"])
 
-        # Color balance: aim toward median R/G/B of this bucket.
-        mr, mg, mb = agg["mean_r"]["median"], agg["mean_g"]["median"], agg["mean_b"]["median"]
-        avg_rgb = (mr + mg + mb) / 3
-        rgb_balance = {
-            "r": round(mr / max(1e-6, avg_rgb), 4),
-            "g": round(mg / max(1e-6, avg_rgb), 4),
-            "b": round(mb / max(1e-6, avg_rgb), 4),
-        }
-
-        # Tone curve: shape derived from this bucket's typical p25/p50/p75 landing positions.
-        # We assume input is "neutral" (p25=0.25, p50=0.5, p75=0.75 identity)
-        # and target is the bucket's measured medians.
-        tone_curve = [
-            {"x": 0.0,  "y": 0.0},
-            {"x": 0.25, "y": round(agg["p25"]["median"], 4)},
-            {"x": 0.50, "y": round(agg["p50"]["median"], 4)},
-            {"x": 0.75, "y": round(agg["p75"]["median"], 4)},
-            {"x": 1.0,  "y": 1.0},
-        ]
-        tone_curve_str = ",\n      ".join(
-            "{ x: " + str(pt["x"]) + ", y: " + str(pt["y"]) + " }"
-            for pt in tone_curve
-        )
+        # (rgbBalance was dropped in v1.37.0 R2 — its last reader, the Auto
+        # Color Balance path, was removed in R1 and the field went unread.)
 
         return f"""  {name}: {{
     sampleCount: {agg["__count__"]},
@@ -268,10 +247,6 @@ def build_profile_ts(buckets: dict[str, dict], portfolio_count: int,
     shadowPixelRatio:           {m("shadow_pixel_ratio")},
     highlightPixelRatio:        {m("highlight_pixel_ratio")},
     rbRatio:                    {m("rb_ratio")},
-    rgbBalance:                 {{ r: {rgb_balance["r"]}, g: {rgb_balance["g"]}, b: {rgb_balance["b"]} }},
-    toneCurveShape: [
-      {tone_curve_str}
-    ],
   }}"""
 
     bucket_blocks = ",\n".join(render_bucket(b, buckets.get(b, {})) for b in BUCKET_ORDER)
@@ -313,8 +288,6 @@ export interface StyleProfile {{
   shadowPixelRatio: number;
   highlightPixelRatio: number;
   rbRatio: number;
-  rgbBalance: {{ r: number; g: number; b: number }};
-  toneCurveShape: Array<{{ x: number; y: number }}>;
 }}
 
 export interface BucketSelectorStats {{

@@ -29,9 +29,8 @@ interface MenuBarProps {
   onFlipHorizontal?: () => void;
   onFlipVertical?: () => void;
   // Adjust menu
-  onAutoLevels?: () => void;
   onAutoContrast?: () => void;
-  onAutoColor?: () => void;
+  onAutoWhiteBalance?: () => void;
   onBrightnessContrast?: () => void;
   onLevels?: () => void;
   onCurves?: () => void;
@@ -83,9 +82,8 @@ export function MenuBar({
   onRotateCCW,
   onFlipHorizontal,
   onFlipVertical,
-  onAutoLevels,
   onAutoContrast,
-  onAutoColor,
+  onAutoWhiteBalance,
   onBrightnessContrast,
   onLevels,
   onCurves,
@@ -357,21 +355,15 @@ export function MenuBar({
           <div className="absolute top-full left-0 mt-0.5 border min-w-[180px] py-1 z-50" style={{backgroundColor: 'var(--gray-800)', borderColor: 'var(--border)', boxShadow: 'var(--shadow-lg)', borderRadius: '0'}}>
             <button
               className={`w-full text-left px-4 py-1.5 text-xs bg-transparent border-0 cursor-pointer ${hasImage ? 'text-dark-200 hover:bg-dark-700' : 'text-dark-500 cursor-not-allowed'}`}
-              onClick={() => hasImage && handleMenuItemClick(onAutoLevels)}
-            >
-              Auto Levels
-            </button>
-            <button
-              className={`w-full text-left px-4 py-1.5 text-xs bg-transparent border-0 cursor-pointer ${hasImage ? 'text-dark-200 hover:bg-dark-700' : 'text-dark-500 cursor-not-allowed'}`}
               onClick={() => hasImage && handleMenuItemClick(onAutoContrast)}
             >
               Auto Contrast
             </button>
             <button
               className={`w-full text-left px-4 py-1.5 text-xs bg-transparent border-0 cursor-pointer ${hasImage ? 'text-dark-200 hover:bg-dark-700' : 'text-dark-500 cursor-not-allowed'}`}
-              onClick={() => hasImage && handleMenuItemClick(onAutoColor)}
+              onClick={() => hasImage && handleMenuItemClick(onAutoWhiteBalance)}
             >
-              Auto Color
+              Auto White Balance
             </button>
             <div className="h-px bg-dark-700 my-1"></div>
             <button

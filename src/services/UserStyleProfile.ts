@@ -35,8 +35,6 @@ export interface StyleProfile {
   shadowPixelRatio: number;
   highlightPixelRatio: number;
   rbRatio: number;
-  rgbBalance: { r: number; g: number; b: number };
-  toneCurveShape: Array<{ x: number; y: number }>;
 }
 
 export interface BucketSelectorStats {
@@ -73,14 +71,6 @@ export const userStyleProfile: Record<BucketName, StyleProfile> = {
     shadowPixelRatio:           0.2887,
     highlightPixelRatio:        0.1476,
     rbRatio:                    1.0388,
-    rgbBalance:                 { r: 0.9985, g: 1.0508, b: 0.9507 },
-    toneCurveShape: [
-      { x: 0.0, y: 0.0 },
-      { x: 0.25, y: 0.2232 },
-      { x: 0.5, y: 0.4166 },
-      { x: 0.75, y: 0.6577 },
-      { x: 1.0, y: 1.0 }
-    ],
   },
   warm: {
     sampleCount: 101,
@@ -98,14 +88,6 @@ export const userStyleProfile: Record<BucketName, StyleProfile> = {
     shadowPixelRatio:           0.3682,
     highlightPixelRatio:        0.0471,
     rbRatio:                    1.5275,
-    rgbBalance:                 { r: 1.1977, g: 1.006, b: 0.7963 },
-    toneCurveShape: [
-      { x: 0.0, y: 0.0 },
-      { x: 0.25, y: 0.1844 },
-      { x: 0.5, y: 0.3308 },
-      { x: 0.75, y: 0.5225 },
-      { x: 1.0, y: 1.0 }
-    ],
   },
   cool: {
     sampleCount: 9,
@@ -123,14 +105,6 @@ export const userStyleProfile: Record<BucketName, StyleProfile> = {
     shadowPixelRatio:           0.1829,
     highlightPixelRatio:        0.1308,
     rbRatio:                    0.6522,
-    rgbBalance:                 { r: 0.7686, g: 1.0456, b: 1.1858 },
-    toneCurveShape: [
-      { x: 0.0, y: 0.0 },
-      { x: 0.25, y: 0.3095 },
-      { x: 0.5, y: 0.4423 },
-      { x: 0.75, y: 0.6292 },
-      { x: 1.0, y: 1.0 }
-    ],
   },
   low_light: {
     sampleCount: 14,
@@ -148,14 +122,6 @@ export const userStyleProfile: Record<BucketName, StyleProfile> = {
     shadowPixelRatio:           0.8115,
     highlightPixelRatio:        0.0107,
     rbRatio:                    2.0302,
-    rgbBalance:                 { r: 1.3958, g: 0.9405, b: 0.6637 },
-    toneCurveShape: [
-      { x: 0.0, y: 0.0 },
-      { x: 0.25, y: 0.0254 },
-      { x: 0.5, y: 0.0655 },
-      { x: 0.75, y: 0.2038 },
-      { x: 1.0, y: 1.0 }
-    ],
   },
   high_key: {
     sampleCount: 11,
@@ -173,13 +139,5 @@ export const userStyleProfile: Record<BucketName, StyleProfile> = {
     shadowPixelRatio:           0.003,
     highlightPixelRatio:        0.8277,
     rbRatio:                    1.0399,
-    rgbBalance:                 { r: 1.021, g: 1.0059, b: 0.9731 },
-    toneCurveShape: [
-      { x: 0.0, y: 0.0 },
-      { x: 0.25, y: 0.873 },
-      { x: 0.5, y: 0.9163 },
-      { x: 0.75, y: 0.9356 },
-      { x: 1.0, y: 1.0 }
-    ],
   }
 } as const;

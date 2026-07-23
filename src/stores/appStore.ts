@@ -173,6 +173,14 @@ interface AppStore extends AppState {
    * genuinely different image LIST (see App.tsx's handleFolderSelected), so a
    * new folder never shows a stale dimension carried over under a REUSED id. */
   clearImageDimensions: () => void;
+  // "May be sideways?" suggestion badge (v1.37.0 R2 Part C). Per-image,
+  // recomputed on image open only (SidewaysHintService) — NEVER auto-rotates.
+  sidewaysHint: { imageId: string; rotate: 90 | 270 } | null;
+  setSidewaysHint: (hint: { imageId: string; rotate: 90 | 270 } | null) => void;
+  // Session-scoped dismissals: a dismissed photo stays hidden until app restart.
+  sidewaysDismissed: Record<string, true>;
+  dismissSidewaysHint: (imageId: string) => void;
+  clearSidewaysDismissals: () => void;
   // Export progress
   exportProgress: { current: number; total: number; currentName: string; cancelRequested: boolean } | null;
   startExportProgress: (total: number) => void;
@@ -229,6 +237,17 @@ export const useAppStore = create<AppStore>((set) => ({
   selectionAnchorId: null,
   exportProgress: null,
   imageDimensions: {},
+  sidewaysHint: null,
+  sidewaysDismissed: {},
+
+  setSidewaysHint: (hint) => set({ sidewaysHint: hint }),
+
+  dismissSidewaysHint: (imageId) => set((state) => ({
+    sidewaysDismissed: { ...state.sidewaysDismissed, [imageId]: true },
+    sidewaysHint: state.sidewaysHint?.imageId === imageId ? null : state.sidewaysHint,
+  })),
+
+  clearSidewaysDismissals: () => set({ sidewaysDismissed: {} }),
 
   triggerReprocessing: () => set((state) => ({
     processingVersion: state.processingVersion + 1

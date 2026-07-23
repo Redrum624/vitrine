@@ -36,6 +36,7 @@ const MODULE_NAMES: Record<string, string> = {
   tonecurve: 'Tone Curve', colorbalance: 'Color Balance', 'noise-reduction': 'Noise Reduction',
   shadowshighlights: 'Shadows & Highlights', lenscorrections: 'Lens Corrections',
   localadjustments: 'Local Adjustments', huecurves: 'Hue Curves', crop: 'Crop & Transform',
+  enhance: 'Enhance', highlightrecovery: 'Highlight Recovery',
 };
 const PARAM_LABELS: Record<string, string> = {
   temperature: 'Temperature', tint: 'Tint', exposure: 'Exposure', contrast: 'Contrast',
@@ -43,42 +44,189 @@ const PARAM_LABELS: Record<string, string> = {
   saturation: 'Saturation', vibrance: 'Vibrance', dehaze: 'Dehaze', barrel: 'Barrel', scale: 'Scale',
   amount: 'Amount', midpoint: 'Midpoint', roundness: 'Roundness', feather: 'Feather', strength: 'Strength',
   redCyan: 'Red/Cyan', blueMagenta: 'Blue/Magenta', horizontal: 'Horizontal', vertical: 'Vertical', masterBlend: 'Master',
+  // Crop & Transform (v1.37.0 R5)
+  x: 'Left', y: 'Top', width: 'Width', height: 'Height', angle: 'Angle', orientation: 'Orientation',
+  // White balance / basic (snake_case keys the generic prettifier would mangle)
+  black_point: 'Black Point',
+  // Color balance wheels
+  cyan_red: 'Cyan/Red', magenta_green: 'Magenta/Green', yellow_blue: 'Yellow/Blue',
+  // Enhance (labels from the panel's own slider names)
+  denoiseStrength: 'Noise Reduction', sharpness: 'Sharpen', alpha: 'Detail Amount',
+  hpSigma: 'Detail Radius', psfSigma: 'Deblur Radius', rlIters: 'Deblur Iterations',
+  // Noise Reduction module
+  chromaStrength: 'Chroma Noise', lumaStrength: 'Luma Noise', preserveDetail: 'Preserve Detail',
 };
-const labelParam = (k: string) => PARAM_LABELS[k] || k.replace(/([A-Z])/g, ' $1').replace(/^./, (c) => c.toUpperCase());
+// Prettify unknown keys: snake_case AND camelCase → Title Case ("red_saturation" → "Red Saturation").
+const labelParam = (k: string) => PARAM_LABELS[k] || k
+  .replace(/_/g, ' ')
+  .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+  .replace(/(^|\s)[a-z]/g, (c) => c.toUpperCase());
 const fmtNum = (v: number) => {
   if (Number.isInteger(v) && Math.abs(v) >= 10) return String(v); // 6500, -45
   const s = v.toFixed(2);
   return v > 0 ? `+${s}` : s; // +0.30, -4.00
 };
+// Unsigned value for the absolute "old → new" arrow form.
+const fmtVal = (v: number) => (Number.isInteger(v) ? String(v) : Math.abs(v) >= 10 ? v.toFixed(1) : v.toFixed(2));
 
-// Collect changed numeric leaves (one path each) between two param trees.
-function diffLeaves(prev: unknown, next: unknown, path: string[], out: { path: string[]; value: number }[]): void {
+// Zero-centered params (default 0) read best as a signed DELTA ("Exposure +0.35");
+// everything else uses the always-correct arrow form ("Temperature 6500 → 4800").
+// Curated per the modules' actual defaults — when a key is not listed, arrow form wins.
+const ZERO_CENTERED_PATHS = new Set([
+  'basicadj.black_point', 'basicadj.exposure', 'basicadj.contrast', 'basicadj.brightness',
+  'basicadj.saturation', 'basicadj.vibrance', 'basicadj.dehaze', 'basicadj.highlights', 'basicadj.shadows',
+  'temperature.tint',
+  'exposure.exposure', 'exposure.black',
+  'crop.angle',
+  'shadowshighlights.whitePoint', 'shadowshighlights.blackPoint',
+]);
+// Lens corrections nest under BOTH `lensCorrections` (live) and `lensCorrectionsParams`
+// (adapter copy) in the serialized tree — match on the meaningful path tail instead.
+const ZERO_CENTERED_LENS_TAILS = [
+  'vignetting.amount', 'vignetting.roundness', 'distortion.barrel',
+  'perspective.horizontal', 'perspective.vertical',
+  'chromaticAberration.redCyan', 'chromaticAberration.blueMagenta',
+];
+function isZeroCentered(path: string[]): boolean {
+  const joined = path.join('.');
+  if (ZERO_CENTERED_PATHS.has(joined)) return true;
+  const leaf = path[path.length - 1];
+  if (path[0] === 'colorbalance') {
+    return /^(cyan_red|magenta_green|yellow_blue)$/.test(leaf) || /_(hue|saturation|luminance)$/.test(leaf);
+  }
+  if (path[0] === 'lenscorrections') return ZERO_CENTERED_LENS_TAILS.some((t) => joined.endsWith(`.${t}`));
+  return false;
+}
+
+// One changed leaf between two param trees. `prev` is kept (R5) so labels can show
+// deltas/arrows; non-numeric leaves (booleans, strings, curve-point arrays) are now
+// collected too instead of being silently skipped.
+interface LeafChange { path: string[]; prev: unknown; next: unknown; numeric: boolean; }
+
+function diffLeaves(prev: unknown, next: unknown, path: string[], out: LeafChange[]): void {
   if (!next || typeof next !== 'object' || Array.isArray(next)) return;
-  const p = (prev && typeof prev === 'object' ? prev : {}) as Record<string, unknown>;
+  const p = (prev && typeof prev === 'object' && !Array.isArray(prev) ? prev : {}) as Record<string, unknown>;
   for (const [k, nv] of Object.entries(next as Record<string, unknown>)) {
-    if (k === 'enabled' || k === 'auto') continue;
+    if (k === 'auto') continue; // meta flag — auto-WB writes temperature/tint anyway
     const pv = p[k];
     if (typeof nv === 'number') {
-      if (typeof pv !== 'number' || Math.abs(nv - pv) > 1e-6) out.push({ path: [...path, k], value: nv });
+      if (typeof pv !== 'number' || Math.abs(nv - pv) > 1e-6) {
+        out.push({ path: [...path, k], prev: typeof pv === 'number' ? pv : undefined, next: nv, numeric: true });
+      }
     } else if (nv && typeof nv === 'object' && !Array.isArray(nv)) {
       diffLeaves(pv, nv, [...path, k], out);
+    } else if (JSON.stringify(pv) !== JSON.stringify(nv)) {
+      out.push({ path: [...path, k], prev: pv, next: nv, numeric: false });
     }
   }
 }
 
-// Describe what changed between two edit states, e.g. "White Balance — Tint -4.00".
+// True when a path names a curve payload (baseCurve, rgbCurve.red, baseCurveNodes, …).
+// path[0] (the module id, e.g. 'tonecurve') is excluded so it doesn't match everything.
+const isCurvePath = (path: string[]) => path.slice(1).some((seg) => /curve/i.test(seg));
+
+const CROP_RECT_KEYS = new Set(['x', 'y', 'width', 'height']);
+
+// Crop gestures get their own vocabulary: quarter-turns, straighten, rect drags.
+// Returns null when the change mix doesn't match a known gesture (generic rules apply).
+function describeCropChange(changes: LeafChange[], next: EditState): string | null {
+  const top = (key: string) => changes.find((c) => c.path.length === 2 && c.path[1] === key);
+  const orientation = top('orientation');
+  const angle = top('angle');
+  const rect = changes.filter((c) => c.path.length === 2 && CROP_RECT_KEYS.has(c.path[1]));
+  // Riders that legitimately accompany these gestures without changing their meaning:
+  // the rect (straighten runs ensureWedgeFreeCrop), enabled, and the aspect-ratio lock.
+  const others = changes.filter((c) => !(
+    c.path.length === 2 &&
+    (CROP_RECT_KEYS.has(c.path[1]) || ['enabled', 'aspectRatio', 'orientation', 'angle'].includes(c.path[1]))
+  ));
+  if (others.length > 0) return null;
+  if (orientation && !angle && typeof orientation.next === 'number') {
+    const from = typeof orientation.prev === 'number' ? orientation.prev : 0;
+    const d = (((orientation.next as number) - from) % 360 + 360) % 360;
+    if (d === 90) return 'Rotate 90°';
+    if (d === 180) return 'Rotate 180°';
+    if (d === 270) return 'Rotate 90° CCW';
+    return null;
+  }
+  if (angle && !orientation && typeof angle.next === 'number') {
+    const d = (angle.next as number) - (typeof angle.prev === 'number' ? angle.prev : 0);
+    return `Straighten ${d >= 0 ? '+' : ''}${d.toFixed(1)}°`;
+  }
+  if (rect.length > 0 && !angle && !orientation) {
+    const cp = (next.modules?.crop || {}) as Record<string, unknown>;
+    const w = typeof cp.width === 'number' ? cp.width : 1;
+    const h = typeof cp.height === 'number' ? cp.height : 1;
+    return `Crop ${Math.round(w * h * 100)}%`;
+  }
+  return null;
+}
+
+// One changed leaf → one specific label.
+function describeSingleChange(name: string, c: LeafChange): string {
+  const leaf = c.path[c.path.length - 1];
+  if (leaf === 'enabled' && typeof c.next === 'boolean') {
+    // Module-level flip → "Noise Reduction on"; nested section → "Lens Corrections — Vignetting on".
+    const scope = c.path.length > 2 ? `${name} — ${labelParam(c.path[c.path.length - 2])}` : name;
+    return `${scope} ${c.next ? 'on' : 'off'}`;
+  }
+  if (c.numeric) {
+    const nv = c.next as number;
+    // "Exposure — Exposure +0.35" reads doubled when the sole param carries the
+    // module's own name — collapse to the module name alone.
+    const prefix = labelParam(leaf) === name ? name : `${name} — ${labelParam(leaf)}`;
+    if (typeof c.prev === 'number') {
+      if (isZeroCentered(c.path)) return `${prefix} ${fmtNum(nv - c.prev)}`;
+      return `${prefix} ${fmtVal(c.prev)} → ${fmtVal(nv)}`;
+    }
+    return `${prefix} ${fmtNum(nv)}`; // prev unknown (old saved state) — absolute
+  }
+  if (isCurvePath(c.path)) return `${name} curve edited`;
+  if (typeof c.next === 'boolean') return `${name} — ${labelParam(leaf)} ${c.next ? 'on' : 'off'}`;
+  if (typeof c.next === 'string' && typeof c.prev === 'string') return `${name} — ${labelParam(leaf)} ${c.prev} → ${c.next}`;
+  return `${name} adjusted`;
+}
+
+// All of one module's changed leaves → one label.
+function describeModuleChange(mod: string, changes: LeafChange[], next: EditState): string {
+  const name = MODULE_NAMES[mod] || mod;
+  if (mod === 'crop') {
+    const label = describeCropChange(changes, next);
+    if (label) return label;
+  }
+  // A curve drag writes the node array plus its bookkeeping (node count/type) — one edit.
+  if (changes.every((c) => isCurvePath(c.path))) return `${name} curve edited`;
+  if (changes.length === 1) return describeSingleChange(name, changes[0]);
+  return `${name}: ${changes.length} changes`;
+}
+
+// Describe what changed between two edit states, e.g. "White Balance — Tint -4.00",
+// "Temperature 6500 → 4800", "Crop 81%", "Multiple adjustments (12)".
 function describeChange(prev: EditState | null, next: EditState): string | null {
   if (!prev) return null;
-  const out: { path: string[]; value: number }[] = [];
-  for (const mod of Object.keys(next.modules || {})) diffLeaves((prev.modules || {})[mod], next.modules[mod], [mod], out);
-  if (out.length === 0) {
-    return JSON.stringify(prev.localAdjustments) !== JSON.stringify(next.localAdjustments) ? 'Local Adjustments' : null;
+  const all: LeafChange[] = [];
+  for (const mod of Object.keys(next.modules || {})) diffLeaves((prev.modules || {})[mod], next.modules[mod], [mod], all);
+  // Local adjustments serialize separately (layer list) — count them as one change.
+  if (JSON.stringify(prev.localAdjustments) !== JSON.stringify(next.localAdjustments)) {
+    all.push({ path: ['localadjustments', 'layers'], prev: undefined, next: undefined, numeric: false });
   }
-  if (out.length > 3) return 'Multiple adjustments';
-  const c = out[0];
-  const mod = c.path[0];
-  const leaf = c.path[c.path.length - 1];
-  return `${MODULE_NAMES[mod] || mod} — ${labelParam(leaf)} ${fmtNum(c.value)}`;
+  if (all.length === 0) return null;
+
+  const byModule = new Map<string, LeafChange[]>();
+  for (const c of all) {
+    const list = byModule.get(c.path[0]);
+    if (list) list.push(c); else byModule.set(c.path[0], [c]);
+  }
+  // Drop `enabled` flips that ride along with real edits in the same module — panels set
+  // enabled:true with the first drag, and the flip is implied by the edit itself.
+  for (const [mod, list] of byModule) {
+    const pruned = list.filter((c) => c.path[c.path.length - 1] !== 'enabled');
+    if (pruned.length > 0 && pruned.length < list.length) byModule.set(mod, pruned);
+  }
+  const changes = [...byModule.values()].flat();
+  if (byModule.size > 1) return `Multiple adjustments (${changes.length})`;
+  const [mod] = byModule.keys();
+  return describeModuleChange(mod, byModule.get(mod)!, next);
 }
 
 /**
@@ -181,15 +329,18 @@ class CheckpointService {
     this.recordTimer = setTimeout(() => { this.recordTimer = null; this.record(label); }, RECORD_DEBOUNCE_MS);
   }
 
-  /** Record a checkpoint with a forced, verbatim label and an explicit bakeDepth.
-   *  Use this (instead of record) for machine-generated entries like "Enhanced ×2" where
-   *  describeChange must NOT run (it may return a generic summary that overwrites the label).
-   *  No state-identity dedupe — a bake changes pixels/dims that serialize() does NOT capture,
-   *  so two param-identical states are genuinely different milestones and must both be recorded. */
-  recordLabeled(label: string, bakeDepth: number): void {
+  /** Record a checkpoint with a forced, verbatim label. Use this (instead of record) for
+   *  machine-generated entries like "Enhanced ×2" or "Auto All" where describeChange must
+   *  NOT run (it would return a generic summary like "Multiple adjustments (8)").
+   *  `bakeDepth` defaults to the current bake depth (param-only callers omit it).
+   *  No state-identity dedupe by default — a bake changes pixels/dims that serialize() does
+   *  NOT capture, so two param-identical states are genuinely different milestones. Param-only
+   *  callers (Auto All) pass `dedupe: true` so a repeat no-op click records nothing. */
+  recordLabeled(label: string, bakeDepth: number = this.bakeBridge.getDepth(), dedupe = false): void {
     if (!imageService.getCurrentImage()) return;
     const state = editPersistenceService.serialize();
     const json = JSON.stringify(state);
+    if (dedupe && json === this.lastSnapshot) return;         // repeat no-op — nothing changed
     this.lastSnapshot = json;
     const parsed = JSON.parse(json) as EditState;
     this.lastState = parsed;

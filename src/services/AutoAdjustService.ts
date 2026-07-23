@@ -166,13 +166,13 @@ class AutoAdjustService {
   // ── Basic Adjustments ────────────────────────────────────────────────────
 
   /**
-   * @param opts.standalone TRUE when invoked by the Basic Adjustments card's
-   * own ⚡ Auto (v1.33.0, user: "changes are too small"). Standalone mode
-   * corrects EXPOSURE here (in Auto All the ExposureModule owns it — but the
-   * card's Auto never touches that module, so images stayed under/over-exposed)
-   * and uses stronger gains/clamps. Auto All keeps the original gentler
-   * numbers untouched — its composed look (incl. the camera-match softening)
-   * was tuned as a whole in v1.27.0.
+   * @param opts.standalone TRUE for the Basic Adjustments card's own ⚡ Auto
+   * (v1.33.0, user: "changes are too small") AND — since v1.37.0 R2 (user
+   * decision D4) — for Auto All, which adopts this bundle wholesale: exposure
+   * toward neutral, highlights/shadows recovery and the black_point clip-lift
+   * all live here now. Composed mode (standalone:false) remains ONLY for
+   * partial-merge callers like Auto Contrast, with its original gentler
+   * numbers frozen (its setParams merges must not clobber user sliders).
    */
   autoBasicAdj(stats: ImageStats, opts: { standalone?: boolean } = {}): {
     black_point: number; exposure: number; contrast: number;
@@ -185,11 +185,11 @@ class AutoAdjustService {
     // Exposure (standalone only): correct the median toward NEUTRAL — not the
     // style bucket. The bucket medians are post-edit PORTFOLIO statistics (the
     // dark bucket sits at ~0.07): targeting them here pulled a well-exposed
-    // kitchen shot down −0.5 stops (user report, histogram receipts). Style
-    // grading belongs to Auto All; this ⚡ is an exposure CORRECTOR. Asymmetric
-    // clamp: strong lifts for dark shots (the original "too small" complaint),
-    // cautious darkening for bright ones. Composed mode stays zero — the
-    // ExposureModule owns exposure inside Auto All.
+    // kitchen shot down −0.5 stops (user report, histogram receipts). This
+    // bundle is an exposure CORRECTOR — and since v1.37.0 R2 it is Auto All's
+    // exposure too (D4). Asymmetric clamp: strong lifts for dark shots (the
+    // original "too small" complaint), cautious darkening for bright ones.
+    // Composed mode stays zero (frozen partial-merge bundle).
     let exposure = 0;
     if (s) {
       const NEUTRAL_TARGET_MEDIAN = 0.40;
@@ -214,29 +214,33 @@ class AutoAdjustService {
     // Vibrance: proportional to saturation correction
     const vibrance = clamp(saturation * (s ? 0.6 : 0.4), s ? -0.15 : -0.1, s ? 0.25 : 0.15);
 
-    // Black point: minimal
-    const black_point = 0;
+    // Black point (standalone only, v1.37.0 R2): port of the composed
+    // autoExposure's black clip-lift — Auto All no longer writes the
+    // ExposureModule, so severely clipped blacks need their pedestal handled
+    // here. ExposureModule applied max(0, v − black) with black = 0.003 when
+    // p1 < 0.005; BasicAdj applies max(0, v − black_point × 0.1), so 0.03
+    // reproduces exactly the same 0.003 subtraction. Composed mode stays 0
+    // (frozen — Auto Contrast still merges this bundle).
+    const black_point = s && stats.p1 < 0.005 ? 0.03 : 0;
 
     const base = { black_point, exposure, contrast, brightness, saturation, vibrance };
 
-    // Composed mode: NO highlights/shadows keys — Auto All folds its own
-    // autoShadowsHighlights() into these sliders (App.tsx, ×0.6) and its look
-    // is frozen; other composed callers (Auto Contrast) do partial setParams
-    // merges that must not clobber user-set sliders with zeros.
+    // Composed mode: NO highlights/shadows keys — composed callers (Auto
+    // Contrast) do partial setParams merges that must not clobber user-set
+    // sliders with zeros, and the composed numbers are frozen.
     if (!s) {
       logger.info(`AutoBasicAdj[${name}]: lum=${stats.meanLum.toFixed(3)}, std=${stats.stdLum.toFixed(3)}, sat=${stats.meanSat.toFixed(3)} → exp=${exposure.toFixed(2)}, cont=${contrast.toFixed(2)}, sat=${saturation.toFixed(2)}`);
       return base;
     }
 
-    // Highlights / Shadows (standalone only, v1.36.0): the card's ⚡ is the
-    // ONLY module running, so nothing else recovers a blown top end (user:
-    // "Auto doesn't touch exposure of highlights") — and its exposure can push
-    // +0.7 with nothing pulling the top back. Same neutral philosophy as the
+    // Highlights / Shadows (standalone only, v1.36.0): this bundle is the
+    // ONLY recovery running (the S/H module is untouched by any auto since
+    // v1.37.0 R2), so nothing else pulls back a blown top end (user: "Auto
+    // doesn't touch exposure of highlights") — and its exposure can push +0.7
+    // with nothing pulling the top back. Same neutral philosophy as the
     // v1.34.1 exposure fix: a well-exposed frame stays near zero; only a
     // genuinely bright/blown top end (p95 past T_HL) or genuinely crushed
     // shadows (mean below T_SH, scaled by how much of the frame is dark) move.
-    // NOTE (task #29): the v1.37 Auto All rework adopts this bundle wholesale —
-    // these formulas become Auto All's S/H source, keep them here.
     const T_HL = 0.87; // p95 above this = the top end needs pulling down
     const K1 = 2.4;    // strength per unit of p95 excess (dominant term)
     const K2 = 0.15;   // small area term: more hot pixels = a bit more recovery
@@ -244,9 +248,16 @@ class AutoAdjustService {
     // snow, high-key portraits and overcast skies put 40-80% of the frame
     // above 0.75 lum with NOTHING blown (p95 ≤ T_HL) — bright-but-healthy is
     // a look, not a defect, and must stay at exactly zero.
+    // Onset ramp (v1.37.0 R2 #8): a hard T_HL threshold made borderline scenes
+    // (p95 ≈ 0.90 — bright-but-intentional snow) lose −0.07+ the moment they
+    // crossed it. smoothstep over [T_HL, T_HL + HL_RAMP] eases the recovery in:
+    // p95 0.90 lands near −0.03..−0.04; p95 ≥ 0.93 keeps full pre-ramp strength.
+    const HL_RAMP = 0.06;
     const hlExcess = Math.max(0, stats.p95 - T_HL);
+    const rampT = Math.min(1, hlExcess / HL_RAMP);
+    const hlOnset = rampT * rampT * (3 - 2 * rampT); // smoothstep(0..1)
     const hlAmount = clamp(
-      hlExcess * K1 + (hlExcess > 0 ? stats.highlightPixelRatio * K2 : 0),
+      (hlExcess * K1 + (hlExcess > 0 ? stats.highlightPixelRatio * K2 : 0)) * hlOnset,
       0, 0.5
     );
     const highlights = hlAmount > 0 ? -hlAmount : 0; // avoid -0
@@ -290,79 +301,6 @@ class AutoAdjustService {
     };
   }
 
-  // ── Tone Curve ───────────────────────────────────────────────────────────
-
-  autoToneCurve(stats: ImageStats): Record<string, unknown> {
-    const { name, profile } = this.pickProfile(stats);
-    const tonalSpan = stats.p95 - stats.p5;
-
-    // For narrow-range images (uniform dark/bright), return identity curve — no modification.
-    if (tonalSpan < 0.15) {
-      logger.info(`AutoToneCurve[${name}]: narrow span=${tonalSpan.toFixed(3)}, returning identity`);
-      return {
-        baseCurve: [{ x: 0, y: 0 }, { x: 1, y: 1 }],
-        baseCurveNodes: 2,
-        baseCurveType: 1,
-        autoLevels: false,
-        autoContrast: false,
-      };
-    }
-
-    // Apply the user's bucket tone-curve shape directly (clone the points so the
-    // profile constant is never mutated downstream).
-    const baseCurve = profile.toneCurveShape.map(pt => ({ ...pt }));
-    logger.info(`AutoToneCurve[${name}]: applied profile curve (${baseCurve.length} nodes)`);
-    return {
-      baseCurve,
-      baseCurveNodes: baseCurve.length,
-      baseCurveType: 0,
-      autoLevels: false,
-      autoContrast: false,
-    };
-  }
-
-  // ── Color Balance ────────────────────────────────────────────────────────
-
-  autoColorBalance(stats: ImageStats): Record<string, unknown> {
-    // Goal: bias colour balance toward the user's TARGET RGB balance for this
-    // bucket (not absolute neutral). A "cast" is now the deviation from that
-    // target, so e.g. the warm bucket's intentional warmth is preserved.
-    const { name, profile } = this.pickProfile(stats);
-
-    const avgAll = (stats.meanR + stats.meanG + stats.meanB) / 3;
-    const { r: tgtR, g: tgtG, b: tgtB } = profile.rgbBalance;
-    const castR = (stats.meanR - avgAll) - (tgtR - 1) * avgAll;
-    const castG = (stats.meanG - avgAll) - (tgtG - 1) * avgAll;
-    const castB = (stats.meanB - avgAll) - (tgtB - 1) * avgAll;
-
-    // Apply stronger correction to midtones, lighter to shadows/highlights.
-    // Strengths and clamps are divided by 3: the Color Balance traditional-tab
-    // damping factor went 0.1 -> 0.3, so 1/3 the params keeps Auto results
-    // visually identical to what these strengths were originally tuned for.
-    const midStrength = 0.8 / 3;
-    const sideStrength = 0.4 / 3;
-    const lim = 0.5 / 3;
-
-    const shadows = {
-      cyan_red: clamp(-castR * sideStrength * 2, -lim, lim),
-      magenta_green: clamp(-castG * sideStrength * 2, -lim, lim),
-      yellow_blue: clamp(-castB * sideStrength * 2, -lim, lim),
-    };
-    const midtones = {
-      cyan_red: clamp(-castR * midStrength * 2, -lim, lim),
-      magenta_green: clamp(-castG * midStrength * 2, -lim, lim),
-      yellow_blue: clamp(-castB * midStrength * 2, -lim, lim),
-    };
-    const highlights = {
-      cyan_red: clamp(-castR * sideStrength * 2, -lim, lim),
-      magenta_green: clamp(-castG * sideStrength * 2, -lim, lim),
-      yellow_blue: clamp(-castB * sideStrength * 2, -lim, lim),
-    };
-
-    logger.info(`AutoColorBalance[${name}]: bias R=${castR.toFixed(3)}, G=${castG.toFixed(3)}, B=${castB.toFixed(3)}`);
-    return { shadows, midtones, highlights };
-  }
-
   // ── White Balance ────────────────────────────────────────────────────────
 
   autoWhiteBalance(stats: ImageStats): { temperature: number; tint: number } {
@@ -389,28 +327,23 @@ class AutoAdjustService {
   // ── Auto All (coordinator) ─────────────────────────────────────────────────
 
   /**
-   * Run every auto adjustment in pipeline order and return the bundle of params
-   * the UI should dispatch into each module. Caller decides whether to apply
-   * them as a single transaction (preferred) or piecewise.
+   * v1.37.0 R2 (user decision D4): Auto All IS the standalone Basic-Adjustments
+   * bundle — one shared bundle with the card's ⚡ Auto (exposure toward
+   * neutral, highlights/shadows recovery, black_point clip-lift, stronger
+   * gains). The only Auto All extras live in the CALLER (AutoAllService):
+   * the pixel auto-WB (skipped on a camera-matched base), the camera-matched
+   * strength scaling below, and auto-straighten.
    *
    * `strength` (0..1, default 1) scales every adjustment toward its neutral
-   * value. The style profile's targets are ABSOLUTE (e.g. the warm bucket's
-   * median-luminance target is 0.33), which is correct on Vitrine's neutral
-   * decode but double-grades a camera-matched base — the camera already applied
-   * its own tone mapping, so a full-strength pull to the portfolio look crushes
-   * bright scenes (verified live: a camera-matched garden portrait rendered
-   * dark-muddy under the full warm bucket). Callers pass
+   * value (0). A camera-matched base already carries the camera's own tone
+   * mapping — a full-strength grade on top of it double-grades (verified live:
+   * a camera-matched garden portrait rendered dark-muddy). Callers pass
    * CAMERA_MATCHED_AUTO_STRENGTH when the base is camera-matched.
    */
   autoAll(data: Float32Array, width: number, height: number, opts?: { strength?: number }): {
     bucket: BucketName;
     stats: ImageStats;
-    exposure: ReturnType<AutoAdjustService['autoExposure']>;
     basicAdj: ReturnType<AutoAdjustService['autoBasicAdj']>;
-    shadowsHighlights: ReturnType<AutoAdjustService['autoShadowsHighlights']>;
-    toneCurve: ReturnType<AutoAdjustService['autoToneCurve']>;
-    colorBalance: ReturnType<AutoAdjustService['autoColorBalance']>;
-    whiteBalance: ReturnType<AutoAdjustService['autoWhiteBalance']>;
   } {
     const stats = this.analyse(data, width, height);
     const { name: bucket } = this.pickProfile(stats);
@@ -419,54 +352,28 @@ class AutoAdjustService {
     const full = {
       bucket,
       stats,
-      exposure: this.autoExposure(stats),
-      basicAdj: this.autoBasicAdj(stats),
-      shadowsHighlights: this.autoShadowsHighlights(stats),
-      toneCurve: this.autoToneCurve(stats),
-      colorBalance: this.autoColorBalance(stats),
-      whiteBalance: this.autoWhiteBalance(stats),
+      basicAdj: this.autoBasicAdj(stats, { standalone: true }),
     };
     return strength >= 1 ? full : this.scaleTowardNeutral(full, strength);
   }
 
   /**
-   * Lerp an autoAll bundle toward neutral by `s`: numeric deltas scale by s
-   * (their neutral is 0), Shadows/Highlights lerp around their 50 midpoint,
-   * and tone-curve points lerp toward the identity diagonal y=x. WhiteBalance
-   * is returned unscaled — the camera-matched caller skips auto-WB entirely
-   * (the matched base already carries the camera's WB intent).
+   * Lerp an autoAll bundle toward neutral by `s`. Every key in the standalone
+   * bundle is 0-neutral (the BasicAdj highlights/shadows sliders are ±, not
+   * the S/H module's 50-midpoint scale), so a plain multiply is the lerp.
+   * The key list is deliberate (R2 #5): it MUST cover every numeric the
+   * standalone bundle can emit — a new bundle key that isn't scaled here would
+   * hit camera-matched bases at full strength.
    */
   private scaleTowardNeutral(
     full: ReturnType<AutoAdjustService['autoAll']>,
     s: number,
   ): ReturnType<AutoAdjustService['autoAll']> {
-    const scaleObj = <T extends Record<string, unknown>>(o: T, keys: string[]): T => {
-      const out: Record<string, unknown> = { ...o };
-      for (const k of keys) if (typeof out[k] === 'number') out[k] = (out[k] as number) * s;
-      return out as T;
-    };
-    const cbSide = (o: Record<string, unknown>) =>
-      scaleObj(o, ['cyan_red', 'magenta_green', 'yellow_blue']);
-    const sh = { ...(full.shadowsHighlights as Record<string, unknown>) };
-    for (const k of ['shadows', 'highlights']) {
-      if (typeof sh[k] === 'number') sh[k] = 50 + ((sh[k] as number) - 50) * s;
+    const scaled: Record<string, unknown> = { ...full.basicAdj };
+    for (const k of ['black_point', 'exposure', 'contrast', 'brightness', 'saturation', 'vibrance', 'highlights', 'shadows']) {
+      if (typeof scaled[k] === 'number') scaled[k] = (scaled[k] as number) * s;
     }
-    const tc = { ...(full.toneCurve as Record<string, unknown>) };
-    if (Array.isArray(tc.baseCurve)) {
-      tc.baseCurve = (tc.baseCurve as Array<{ x: number; y: number }>).map((pt) => ({
-        x: pt.x,
-        y: pt.x + (pt.y - pt.x) * s,
-      }));
-    }
-    const cb = full.colorBalance as Record<string, Record<string, unknown>>;
-    return {
-      ...full,
-      exposure: scaleObj(full.exposure as unknown as Record<string, unknown>, ['exposure', 'black']) as unknown as ReturnType<AutoAdjustService['autoExposure']>,
-      basicAdj: scaleObj(full.basicAdj as unknown as Record<string, unknown>, ['black_point', 'exposure', 'contrast', 'brightness', 'saturation', 'vibrance']) as unknown as ReturnType<AutoAdjustService['autoBasicAdj']>,
-      shadowsHighlights: sh,
-      toneCurve: tc,
-      colorBalance: { ...cb, shadows: cbSide(cb.shadows), midtones: cbSide(cb.midtones), highlights: cbSide(cb.highlights) },
-    };
+    return { ...full, basicAdj: scaled as ReturnType<AutoAdjustService['autoBasicAdj']> };
   }
 }
 

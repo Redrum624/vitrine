@@ -78,7 +78,7 @@ export function HistoryPanel({ onRegisterActions }: HistoryPanelProps = {}) {
                   borderStyle: 'solid',
                   borderColor: isActive ? 'var(--accent-ring)' : 'rgba(255,255,255,.1)',
                 }}
-                title={`${isActive ? 'Current state' : 'Restore this checkpoint'} — ${timeAgo(cp.at, now)}`}
+                title={`${cp.label} — ${isActive ? 'current state' : 'restore this checkpoint'} — ${timeAgo(cp.at, now)}`}
               >
                 <div className="flex items-center" style={{ gap: 8, minWidth: 0 }}>
                   <span
@@ -91,7 +91,9 @@ export function HistoryPanel({ onRegisterActions }: HistoryPanelProps = {}) {
                   >
                     {clockTime(cp.at)}
                   </span>
-                  <span style={{ fontSize: 11.5, color: isActive ? 'var(--accent)' : 'var(--glass-text-label)' }}>{cp.label}</span>
+                  {/* R5: labels are richer/longer now ("Shadows & Highlights — Highlights Radius 50 → 70") —
+                      truncate with ellipsis; the button title carries the full label. */}
+                  <span className="truncate" style={{ fontSize: 11.5, color: isActive ? 'var(--accent)' : 'var(--glass-text-label)' }}>{cp.label}</span>
                 </div>
                 {isActive
                   ? <span style={{ fontSize: 10.5, color: 'var(--accent)' }}>current</span>

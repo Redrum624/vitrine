@@ -270,45 +270,6 @@ export function applyAutoContrast(
   return output;
 }
 
-// ─── Auto Color ──────────────────────────────────────────────────────────────
-
-export function applyAutoColor(
-  input: Float32Array,
-  ctx: FilterContext
-): Float32Array {
-  const { channels } = ctx;
-  const pixelCount = input.length / channels;
-  const output = new Float32Array(input.length);
-
-  // Calculate average color
-  let avgR = 0, avgG = 0, avgB = 0;
-  for (let i = 0; i < input.length; i += channels) {
-    avgR += input[i];
-    avgG += input[i + 1];
-    avgB += input[i + 2];
-  }
-  avgR /= pixelCount;
-  avgG /= pixelCount;
-  avgB /= pixelCount;
-
-  // Target: neutral gray at the average luminance
-  const avgLum = avgR * 0.2126 + avgG * 0.7152 + avgB * 0.0722;
-
-  // Compute correction factors to neutralize color cast
-  const corrR = avgR > 0.001 ? avgLum / avgR : 1;
-  const corrG = avgG > 0.001 ? avgLum / avgG : 1;
-  const corrB = avgB > 0.001 ? avgLum / avgB : 1;
-
-  for (let i = 0; i < input.length; i += channels) {
-    output[i] = Math.max(0, Math.min(1, input[i] * corrR));
-    output[i + 1] = Math.max(0, Math.min(1, input[i + 1] * corrG));
-    output[i + 2] = Math.max(0, Math.min(1, input[i + 2] * corrB));
-    output[i + 3] = input[i + 3];
-  }
-
-  return output;
-}
-
 // ─── Image Rotation (90° increments) ─────────────────────────────────────────
 
 export function rotateImage90CW(

@@ -344,16 +344,6 @@ describe('ToneCurveModule', () => {
     });
   });
 
-  describe('Auto tone curve', () => {
-    it('should return auto-adjusted parameters', () => {
-      const autoParams = module.autoToneCurve();
-
-      expect(autoParams.baseCurve.length).toBe(4);
-      expect(autoParams.autoLevels).toBe(true);
-      expect(autoParams.autoContrast).toBe(true);
-    });
-  });
-
   describe('Auto levels', () => {
     it('should apply auto levels when enabled', () => {
       const width = 8;

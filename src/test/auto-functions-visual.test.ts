@@ -15,8 +15,6 @@ import { selectBucket, userStyleProfile, type BucketName } from '../services/Use
 import { WhiteBalanceModule } from '../modules/WhiteBalanceModule';
 import { ExposureModule } from '../modules/ExposureModule';
 import { BasicAdjustmentsModule } from '../modules/BasicAdjustmentsModule';
-import { ToneCurveModule } from '../modules/ToneCurveModule';
-import { ColorBalanceModule } from '../modules/ColorBalanceModule';
 import { ShadowsHighlightsModule } from '../modules/ShadowsHighlightsModule';
 import { NoiseReductionModule } from '../modules/NoiseReductionModule';
 import { LensCorrectionsModule } from '../modules/LensCorrectionsModule';
@@ -451,135 +449,9 @@ describe('autoBasicAdj', () => {
   });
 });
 
-// ─── 6. autoToneCurve ───────────────────────────────────────────────────────
-
-describe('autoToneCurve', () => {
-  it('should return valid curve starting at (0,0) and ending at (1,1)', () => {
-    const stats = autoAdjustService.analyse(createNeutralImage(), W, H);
-    const result = autoAdjustService.autoToneCurve(stats) as {
-      baseCurve: Array<{ x: number; y: number }>;
-      baseCurveNodes: number;
-      autoLevels: boolean;
-      autoContrast: boolean;
-    };
-
-    expect(result.baseCurve).toBeDefined();
-    expect(Array.isArray(result.baseCurve)).toBe(true);
-    expect(result.baseCurve.length).toBeGreaterThanOrEqual(2);
-    expect(result.baseCurve[0]).toEqual({ x: 0, y: 0 });
-    expect(result.baseCurve[result.baseCurve.length - 1]).toEqual({ x: 1, y: 1 });
-    expect(result.autoLevels).toBe(false);
-    expect(result.autoContrast).toBe(false);
-    logVisual('autoToneCurve on neutral', result as unknown as Record<string, unknown>);
-  });
-
-  it('should produce stronger S-curve for flat image', () => {
-    const flatStats = autoAdjustService.analyse(createFlatImage(), W, H);
-    const flatResult = autoAdjustService.autoToneCurve(flatStats) as { baseCurve: Array<{ x: number; y: number }> };
-
-    const gradientStats = autoAdjustService.analyse(createGradientImage(W, H), W, H);
-    const gradientResult = autoAdjustService.autoToneCurve(gradientStats) as { baseCurve: Array<{ x: number; y: number }> };
-
-    // Flat image should have bigger deviation from linear in curve midpoints
-    // Check y at the 25% x-point: stronger S-curve pushes it further from linear
-    const flatMidLow = flatResult.baseCurve.find(p => p.x > 0.1 && p.x < 0.4);
-    const gradientMidLow = gradientResult.baseCurve.find(p => p.x > 0.1 && p.x < 0.4);
-
-    if (flatMidLow && gradientMidLow) {
-      // For S-curve, shadows are pushed down → lower y value means stronger curve
-      console.log(`\n  ── S-curve strength comparison ──`);
-      console.log(`  Flat image curve @~25%: y=${flatMidLow.y.toFixed(4)}`);
-      console.log(`  Gradient curve @~25%: y=${gradientMidLow.y.toFixed(4)}`);
-    }
-  });
-
-  it('should process image and produce valid output', () => {
-    const img = createGradientImage(W, H);
-    const stats = autoAdjustService.analyse(img, W, H);
-    const result = autoAdjustService.autoToneCurve(stats);
-
-    const tc = new ToneCurveModule();
-    tc.setParams(result as Record<string, unknown>);
-    const output = tc.process({ width: W, height: H, data: img, channels: 4 });
-
-    expect(isValidImageData(output.data)).toBe(true);
-    logVisual('autoToneCurve processed gradient', result as unknown as Record<string, unknown>,
-      calculateAveragePixel(img), calculateAveragePixel(output.data));
-  });
-
-  it('should produce all curve points with x in [0,1] and y in [0,1]', () => {
-    for (const img of [createDarkImage(), createBrightImage(), createFlatImage()]) {
-      const stats = autoAdjustService.analyse(img, W, H);
-      const result = autoAdjustService.autoToneCurve(stats) as { baseCurve: Array<{ x: number; y: number }> };
-      for (const point of result.baseCurve) {
-        expect(point.x).toBeGreaterThanOrEqual(0);
-        expect(point.x).toBeLessThanOrEqual(1);
-        expect(point.y).toBeGreaterThanOrEqual(0);
-        expect(point.y).toBeLessThanOrEqual(1);
-      }
-    }
-  });
-});
-
-// ─── 7. autoColorBalance ────────────────────────────────────────────────────
-
-describe('autoColorBalance', () => {
-  it('should return near-zero corrections for neutral image', () => {
-    const stats = autoAdjustService.analyse(createNeutralImage(), W, H);
-    const result = autoAdjustService.autoColorBalance(stats) as {
-      shadows: { cyan_red: number; magenta_green: number; yellow_blue: number };
-      midtones: { cyan_red: number; magenta_green: number; yellow_blue: number };
-      highlights: { cyan_red: number; magenta_green: number; yellow_blue: number };
-    };
-
-    expect(Math.abs(result.midtones.cyan_red)).toBeLessThan(0.05);
-    expect(Math.abs(result.midtones.magenta_green)).toBeLessThan(0.05);
-    expect(Math.abs(result.midtones.yellow_blue)).toBeLessThan(0.05);
-    logVisual('autoColorBalance on neutral', result as unknown as Record<string, unknown>);
-  });
-
-  it('should push cyan to counteract warm (red-excess) image', () => {
-    const stats = autoAdjustService.analyse(createWarmImage(), W, H);
-    const result = autoAdjustService.autoColorBalance(stats) as {
-      midtones: { cyan_red: number; magenta_green: number; yellow_blue: number };
-    };
-
-    // Red excess → correction pushes cyan (negative cyan_red)
-    expect(result.midtones.cyan_red).toBeLessThan(0);
-    logVisual('autoColorBalance on warm', result as unknown as Record<string, unknown>);
-  });
-
-  it('should push yellow to counteract cool (blue-excess) image', () => {
-    const stats = autoAdjustService.analyse(createCoolImage(), W, H);
-    const result = autoAdjustService.autoColorBalance(stats) as {
-      midtones: { cyan_red: number; magenta_green: number; yellow_blue: number };
-    };
-
-    // Blue excess → correction pushes yellow (negative yellow_blue)
-    expect(result.midtones.yellow_blue).toBeLessThan(0);
-    logVisual('autoColorBalance on cool', result as unknown as Record<string, unknown>);
-  });
-
-  it('should keep all corrections within [-0.5, 0.5]', () => {
-    for (const img of [createDarkImage(), createWarmImage(), createCoolImage(), createBrightImage()]) {
-      const stats = autoAdjustService.analyse(img, W, H);
-      const result = autoAdjustService.autoColorBalance(stats) as {
-        shadows: { cyan_red: number; magenta_green: number; yellow_blue: number };
-        midtones: { cyan_red: number; magenta_green: number; yellow_blue: number };
-        highlights: { cyan_red: number; magenta_green: number; yellow_blue: number };
-      };
-
-      for (const zone of [result.shadows, result.midtones, result.highlights]) {
-        expect(zone.cyan_red).toBeGreaterThanOrEqual(-0.5);
-        expect(zone.cyan_red).toBeLessThanOrEqual(0.5);
-        expect(zone.magenta_green).toBeGreaterThanOrEqual(-0.5);
-        expect(zone.magenta_green).toBeLessThanOrEqual(0.5);
-        expect(zone.yellow_blue).toBeGreaterThanOrEqual(-0.5);
-        expect(zone.yellow_blue).toBeLessThanOrEqual(0.5);
-      }
-    }
-  });
-});
+// ─── 6/7. autoToneCurve + autoColorBalance — REMOVED (v1.37.0 D1/D2) ────────
+// Their describes were deleted with the features; the absence of both methods
+// and of the autoAll bundle keys is pinned in autoRemovals.test.tsx.
 
 // ─── 8. autoShadowsHighlights ──────────────────────────────────────────────
 
@@ -796,58 +668,34 @@ describe('LensCorrectionsModule.autoDetectVignetting', () => {
 });
 
 // ─── 12. Full Auto Simulation ───────────────────────────────────────────────
+// Mirrors the v1.37.0 R2 Auto All composition (D4): the module's pixel auto-WB
+// + ONE standalone Basic-Adjustments bundle (exposure toward neutral, S/H
+// recovery and black_point clip-lift all live in that bundle now — no separate
+// ExposureModule or ShadowsHighlights legs).
 
 describe('Full Auto simulation', () => {
   function runFullAuto(inputImage: Float32Array) {
     const stats = autoAdjustService.analyse(inputImage, W, H);
 
-    // Exposure
-    const exposureParams = autoAdjustService.autoExposure(stats);
-    const exposureMod = new ExposureModule();
-    exposureMod.setCurrentParams(exposureParams);
-    let current = exposureMod.process(inputImage, CTX);
-
-    // White Balance
-    const wbParams = autoAdjustService.autoWhiteBalance(stats);
+    // White Balance — the same gray-candidate pixel path Auto All uses
     const wbMod = new WhiteBalanceModule();
-    wbMod.setParams(wbParams);
-    current = wbMod.process(current, CTX);
+    wbMod.autoDetectWhiteBalance(inputImage, CTX);
+    let current = wbMod.process(inputImage, CTX);
 
-    // Basic Adjustments (zero out exposure — ExposureModule already handles it)
-    const baParams = autoAdjustService.autoBasicAdj(stats);
-    baParams.exposure = 0;
+    // The standalone Basic-Adj bundle (Auto All's single adjustments writer)
+    const baParams = autoAdjustService.autoBasicAdj(stats, { standalone: true });
     const baMod = new BasicAdjustmentsModule();
     baMod.setParams(baParams);
     current = baMod.process(current, CTX);
 
-    // Tone Curve
-    const tcParams = autoAdjustService.autoToneCurve(stats);
-    const tcMod = new ToneCurveModule();
-    tcMod.setParams(tcParams as Record<string, unknown>);
-    const tcOutput = tcMod.process({ width: W, height: H, data: current, channels: 4 });
-    current = tcOutput.data;
-
-    // Color Balance
-    const cbParams = autoAdjustService.autoColorBalance(stats);
-    const cbMod = new ColorBalanceModule();
-    cbMod.setParams(cbParams as Record<string, unknown>);
-    current = cbMod.process(current, CTX);
-
-    // Shadows/Highlights
-    const shParams = autoAdjustService.autoShadowsHighlights(stats);
-    const shMod = new ShadowsHighlightsModule();
-    shMod.setParams(shParams);
-    const shOutput = shMod.process({ width: W, height: H, data: current, channels: 4 });
-    current = shOutput.data;
-
     return {
       output: current,
-      params: { exposureParams, wbParams, baParams, tcParams, cbParams, shParams },
+      params: { wbParams: wbMod.getParams(), baParams },
       stats,
     };
   }
 
-  it('should produce valid output for dark image', () => {
+  it('should lift a dark image toward neutral (D4: Auto All is an exposure corrector now)', () => {
     const img = createDarkImage();
     const beforeAvg = calculateAveragePixel(img);
     const { output } = runFullAuto(img);
@@ -860,9 +708,10 @@ describe('Full Auto simulation', () => {
 
     console.log(`\n  ── Full Auto on dark ──`);
     console.log(`  Before lum: ${beforeLum.toFixed(4)}, After lum: ${afterLum.toFixed(4)}`);
-    // low_light profile grades dark images darker (median 0.0655), so Full Auto
-    // must not brighten a dark image (was: expected brightening toward 0.45).
-    expect(afterLum).toBeLessThanOrEqual(beforeLum + 1e-3);
+    // v1.37.0 R2: the standalone bundle corrects a 0.15 median toward the
+    // NEUTRAL 0.40 target (v1.34.1 philosophy) — the dark frame gets lifted.
+    // (The pre-R2 composition kept it dark via the low_light bucket target.)
+    expect(afterLum).toBeGreaterThan(beforeLum);
     logVisual('Full Auto dark', {}, beforeAvg, afterAvg);
   });
 
@@ -921,40 +770,17 @@ describe('Full Auto idempotency', () => {
   function runFullAutoPass(inputImage: Float32Array) {
     const stats = autoAdjustService.analyse(inputImage, W, H);
 
-    const exposureParams = autoAdjustService.autoExposure(stats);
-    const exposureMod = new ExposureModule();
-    exposureMod.setCurrentParams(exposureParams);
-    let current = exposureMod.process(inputImage, CTX);
-
-    const wbParams = autoAdjustService.autoWhiteBalance(stats);
+    // v1.37.0 R2 composition: pixel auto-WB + the standalone Basic-Adj bundle.
     const wbMod = new WhiteBalanceModule();
-    wbMod.setParams(wbParams);
-    current = wbMod.process(current, CTX);
+    wbMod.autoDetectWhiteBalance(inputImage, CTX);
+    let current = wbMod.process(inputImage, CTX);
 
-    const baParams = autoAdjustService.autoBasicAdj(stats);
-    baParams.exposure = 0; // ExposureModule already handles exposure
+    const baParams = autoAdjustService.autoBasicAdj(stats, { standalone: true });
     const baMod = new BasicAdjustmentsModule();
     baMod.setParams(baParams);
     current = baMod.process(current, CTX);
 
-    const tcParams = autoAdjustService.autoToneCurve(stats);
-    const tcMod = new ToneCurveModule();
-    tcMod.setParams(tcParams as Record<string, unknown>);
-    const tcOut = tcMod.process({ width: W, height: H, data: current, channels: 4 });
-    current = tcOut.data;
-
-    const cbParams = autoAdjustService.autoColorBalance(stats);
-    const cbMod = new ColorBalanceModule();
-    cbMod.setParams(cbParams as Record<string, unknown>);
-    current = cbMod.process(current, CTX);
-
-    const shParams = autoAdjustService.autoShadowsHighlights(stats);
-    const shMod = new ShadowsHighlightsModule();
-    shMod.setParams(shParams);
-    const shOut = shMod.process({ width: W, height: H, data: current, channels: 4 });
-    current = shOut.data;
-
-    return { output: current, exposureParams, wbParams, baParams };
+    return { output: current, wbParams: wbMod.getParams(), baParams };
   }
 
   it('should converge after 2 passes on dark warm image', () => {
@@ -970,11 +796,11 @@ describe('Full Auto idempotency', () => {
     const pass2 = runFullAutoPass(pass1.output);
 
     console.log(`\n  ── Full Auto Idempotency (dark warm) ──`);
-    console.log(`  Pass 1: exposure=${pass1.exposureParams.exposure.toFixed(3)}, wb_temp=${pass1.wbParams.temperature}K`);
-    console.log(`  Pass 2: exposure=${pass2.exposureParams.exposure.toFixed(3)}, wb_temp=${pass2.wbParams.temperature}K`);
+    console.log(`  Pass 1: exposure=${pass1.baParams.exposure.toFixed(3)}, wb_temp=${pass1.wbParams.temperature}K`);
+    console.log(`  Pass 2: exposure=${pass2.baParams.exposure.toFixed(3)}, wb_temp=${pass2.wbParams.temperature}K`);
 
-    const expDelta1 = Math.abs(pass1.exposureParams.exposure);
-    const expDelta2 = Math.abs(pass2.exposureParams.exposure);
+    const expDelta1 = Math.abs(pass1.baParams.exposure);
+    const expDelta2 = Math.abs(pass2.baParams.exposure);
 
     console.log(`  Exposure magnitude: pass1=${expDelta1.toFixed(3)}, pass2=${expDelta2.toFixed(3)}`);
     console.log(`  Converging? ${expDelta2 < expDelta1 ? 'YES' : 'NO'}`);
@@ -1087,21 +913,25 @@ describe('autoExposure uses per-bucket profile targets (not the old 0.45)', () =
 });
 
 describe('autoAll()', () => {
-  it('warm scene → warm bucket, negative exposure, full bundle', () => {
+  it('warm scene → warm bucket, ONE standalone Basic-Adj bundle (v1.37.0 R2)', () => {
     const result = autoAdjustService.autoAll(createWarmImage(), W, H);
     expect(result.bucket).toBe('warm');
-    expect(result.exposure.exposure).toBeLessThan(0);
     expect(result.basicAdj).toBeDefined();
-    expect(result.shadowsHighlights).toBeDefined();
-    expect(result.toneCurve).toBeDefined();
-    expect(result.colorBalance).toBeDefined();
-    expect(result.whiteBalance).toBeDefined();
+    // D4: the bundle IS the standalone card's bundle — exposure lives in it
+    // (warm 0.482 lum sits above the neutral 0.40 target → slight pull down).
+    expect(result.basicAdj.exposure).toBeLessThan(0);
+    expect('exposure' in result).toBe(false);          // no ExposureModule leg
+    expect('shadowsHighlights' in result).toBe(false); // no S/H fold leg
+    expect('whiteBalance' in result).toBe(false);      // WB is the module's pixel path
+    expect('toneCurve' in result).toBe(false);
+    expect('colorBalance' in result).toBe(false);
     expect(result.stats.meanLum).toBeGreaterThan(0);
   });
 
-  it('white balance targets the bucket R/B ratio and stays in range', () => {
+  it('standalone bundle carries the highlights/shadows keys Auto All now applies', () => {
     const result = autoAdjustService.autoAll(createWarmImage(), W, H);
-    expect(result.whiteBalance.temperature).toBeGreaterThan(2000);
-    expect(result.whiteBalance.temperature).toBeLessThan(12000);
+    expect('highlights' in result.basicAdj).toBe(true);
+    expect('shadows' in result.basicAdj).toBe(true);
+    expect('black_point' in result.basicAdj).toBe(true);
   });
 });

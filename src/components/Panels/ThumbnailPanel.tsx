@@ -85,6 +85,20 @@ export function dockThumbWidth(aspect: number | undefined): number {
   return Math.max(DOCK_THUMB_WIDTH_MIN, Math.min(DOCK_THUMB_WIDTH_MAX, Math.round(DOCK_THUMB_HEIGHT * aspect)));
 }
 
+/** Selection changes arriving closer together than this jump instantly
+ * (`behavior:'auto'`) instead of smooth-scrolling. A held arrow key repeats
+ * every ~33ms while a Chromium smooth scroll animates for ~300ms — perpetually
+ * re-targeted animations never finish, so the centered position would trail
+ * the selection by several tiles. Isolated changes keep the smooth glide. */
+export const RAPID_NAV_MS = 250;
+
+/** Trailing idle window after the last wheel tick during which selection-driven
+ * centering stays suppressed — the user's "put the active photo in the middle
+ * EXCEPT when using the mouse's wheel to navigate". Protects against an
+ * externally-arriving selection change (e.g. a rating-filter change
+ * re-selecting) yanking the strip away mid-wheel-pan. */
+export const WHEEL_IDLE_MS = 250;
+
 // Base layout for the dock's chevron buttons — interactive :hover/:disabled states
 // come from .glass-pill-btn in index.css (same idiom as Toolbar.tsx / IconSidebar.tsx).
 const chevronBtn: CSSProperties = {
@@ -126,6 +140,14 @@ export function ThumbnailPanel({
   const ratingsFetchedRef = useRef<Set<string>>(new Set());
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const selectedImageRef = useRef<HTMLDivElement>(null);
+  // Wheel-pan ownership of the strip: set on every wheel tick, cleared after a
+  // WHEEL_IDLE_MS trailing timeout. While set, the selection-centering effect
+  // leaves the strip alone (see that effect for why).
+  const wheelingRef = useRef(false);
+  const wheelIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Timestamp of the last selection-driven centering — drives the smooth/auto
+  // hybrid (RAPID_NAV_MS) for held-arrow-key navigation.
+  const lastCenterAtRef = useRef(0);
   // Per-field selectors (not a whole-store `useAppStore()` subscription) — the dock
   // only re-renders when one of ITS OWN fields actually changes, not on every store
   // update elsewhere (e.g. Develop-only fields like rawDecodeOptions/viewport).
@@ -286,19 +308,34 @@ export function ThumbnailPanel({
     return () => cancelAnimationFrame(raf);
   }, [images, visible, loadVisibleThumbnails]);
 
-  // Scroll to selected image
+  // Keep the ACTIVE photo centered in the strip (v1.37.0, user request: "the
+  // thumbnail strip needs to put the active photo in the middle except when
+  // using the mouse's wheel to navigate"). The old effect only scrolled when
+  // the selected tile was fully OUTSIDE the container, so arrow/chevron/click
+  // navigation left the active thumb riding the strip's edge. Manual math
+  // instead of scrollIntoView: its vertical `block` default can scroll
+  // ANCESTORS of this horizontal strip, and offsetLeft/offsetWidth naturally
+  // handle the variable aspect-based tile widths (dockThumbWidth 56-132). The
+  // math requires the scroll container to be the tiles' offsetParent — see
+  // `position: relative` on the strip div below.
   useEffect(() => {
-    if (selectedImage && selectedImageRef.current && scrollContainerRef.current) {
-      const container = scrollContainerRef.current;
-      const element = selectedImageRef.current;
-
-      const containerRect = container.getBoundingClientRect();
-      const elementRect = element.getBoundingClientRect();
-
-      if (elementRect.left < containerRect.left || elementRect.right > containerRect.right) {
-        element.scrollIntoView({ behavior: 'smooth', inline: 'center' });
-      }
-    }
+    const container = scrollContainerRef.current;
+    const el = selectedImageRef.current;
+    if (!selectedImage || !container || !el) return;
+    // "…except when using the wheel": while the user is wheel-panning, an
+    // externally-arriving selection change must not yank the strip back.
+    if (wheelingRef.current) return;
+    // Hybrid behavior: rapid successive changes (held arrow key) jump
+    // instantly; isolated changes glide. See RAPID_NAV_MS for why.
+    const now = Date.now();
+    const behavior = now - lastCenterAtRef.current < RAPID_NAV_MS ? ('auto' as const) : ('smooth' as const);
+    lastCenterAtRef.current = now;
+    // Optional call: jsdom has no Element.scrollTo (same idiom as the
+    // scrollIntoView?. in the filter-anchor effect below).
+    container.scrollTo?.({
+      left: el.offsetLeft - (container.clientWidth - el.offsetWidth) / 2,
+      behavior,
+    });
   }, [selectedImage]);
 
   // Keep the strip anchored on the CURRENT picture when the rating filter
@@ -345,9 +382,24 @@ export function ThumbnailPanel({
       if (delta === 0) return;
       e.preventDefault();
       el.scrollLeft += delta;
+      // Mark the strip as wheel-owned so the selection-centering effect leaves
+      // it alone until the wheel has been idle for WHEEL_IDLE_MS.
+      wheelingRef.current = true;
+      if (wheelIdleTimerRef.current) clearTimeout(wheelIdleTimerRef.current);
+      wheelIdleTimerRef.current = setTimeout(() => {
+        wheelingRef.current = false;
+        wheelIdleTimerRef.current = null;
+      }, WHEEL_IDLE_MS);
     };
     el.addEventListener('wheel', onWheel, { passive: false });
-    return () => el.removeEventListener('wheel', onWheel);
+    return () => {
+      el.removeEventListener('wheel', onWheel);
+      if (wheelIdleTimerRef.current) {
+        clearTimeout(wheelIdleTimerRef.current);
+        wheelIdleTimerRef.current = null;
+      }
+      wheelingRef.current = false;
+    };
   }, [visible]);
 
   // Navigate with arrow keys
@@ -470,6 +522,10 @@ export function ThumbnailPanel({
         className="flex overflow-x-auto overflow-y-hidden"
         onScroll={handleScroll}
         style={{
+          // The selection-centering effect's offsetLeft math needs THIS div to
+          // be the tiles' offsetParent — otherwise offsets resolve against the
+          // absolute dock wrapper and include the chevron/padding widths.
+          position: 'relative',
           scrollbarWidth: 'thin',
           scrollbarColor: 'var(--gray-700) transparent',
           maxWidth: '640px',

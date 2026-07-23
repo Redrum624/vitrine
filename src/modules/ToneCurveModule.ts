@@ -590,21 +590,4 @@ export class ToneCurveModule implements ImageProcessingModule {
 
     logger.info(`Loaded tone curve preset: ${preset}`);
   }
-
-  // Auto tone curve adjustment method for UI
-  autoToneCurve(): ToneCurveParams {
-    // Apply a moderate contrast curve automatically
-    return {
-      ...this.params,
-      baseCurve: [
-        { x: 0.0, y: 0.0 },
-        { x: 0.25, y: 0.20 },
-        { x: 0.75, y: 0.80 },
-        { x: 1.0, y: 1.0 }
-      ],
-      baseCurveNodes: 4,
-      autoLevels: true,
-      autoContrast: true
-    };
-  }
 }

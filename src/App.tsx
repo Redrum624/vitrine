@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { MenuBar } from './components/Layout/MenuBar';
 import { Toolbar } from './components/Layout/Toolbar';
 import { IconSidebar } from './components/Layout/IconSidebar';
@@ -53,7 +53,9 @@ import {
   resizeImage, FilterContext
 } from './utils/ImageFilters';
 import { styleAnalysisService } from './services/StyleAnalysisService';
-import { autoAdjustService, CAMERA_MATCHED_AUTO_STRENGTH } from './services/AutoAdjustService';
+import { autoAdjustService } from './services/AutoAdjustService';
+import { applyAutoAll } from './services/AutoAllService';
+import { computeSidewaysHintForImage, acceptSidewaysHint, dismissCurrentSidewaysHint } from './services/SidewaysHintService';
 import { imageProcessingPipeline } from './services/ImageProcessingPipeline';
 import type { CropPipelineModule } from './modules/CropPipelineModule';
 import { PrintDialog } from './components/Dialogs/PrintDialog';
@@ -439,7 +441,7 @@ export function resizeCurrentImage(toasts: TransformToasts, newWidth: number, ne
 }
 
 function App() {
-  const { setViewport, resetZoom, viewport, processedImageData, setSelectedTool: storeSetSelectedTool, showGrid, showRulers, showOriginal, toggleGrid, toggleRulers, toggleOriginal, referenceMode, referenceImageUrl, referenceImageName, toggleReferenceMode, setReferenceImage, lastProcessingTimeMs, modulesActive, modulesTotal, alignmentAxisX, setAlignmentAxisX, viewMode, selectedImageIds, developing } = useAppStore();
+  const { setViewport, resetZoom, viewport, processedImageData, setSelectedTool: storeSetSelectedTool, showGrid, showRulers, showOriginal, toggleGrid, toggleRulers, toggleOriginal, referenceMode, referenceImageUrl, referenceImageName, toggleReferenceMode, setReferenceImage, lastProcessingTimeMs, modulesActive, modulesTotal, alignmentAxisX, setAlignmentAxisX, viewMode, selectedImageIds, developing, sidewaysHint, originalSnapshotVersion } = useAppStore();
   const [selectedTool, setSelectedToolLocal] = useState<string | null>('file-explorer'); // Default to file explorer
 
   // Wrapper to update both local state and store
@@ -649,24 +651,9 @@ function App() {
   const handleFlipVertical = useCallback(() => flipCurrentImageVertical({ showInfo, showSuccess }), [showInfo, showSuccess]);
 
   // ─── Auto adjustments ─────────────────────────────────────────────────
-  const handleAutoLevels = useCallback(() => {
-    if (guardDeveloping(showInfo, 'Auto Levels')) return;
-    const img = imageService.getCurrentImage();
-    if (!img) return;
-    const stats = autoAdjustService.analyse(img.data, img.width, img.height);
-    // Apply via tone curve (stretches histogram range per-channel)
-    const tcPipe = imageProcessingPipeline.getModule('tonecurve');
-    if (tcPipe) {
-      const p = autoAdjustService.autoToneCurve(stats);
-      const inner = (tcPipe as unknown as { getToneCurveModule?: () => { setParams: (p: Record<string, unknown>) => void } }).getToneCurveModule?.();
-      if (inner) inner.setParams(p);
-      imageProcessingPipeline.invalidateModuleCache('tonecurve');
-    }
-    useAppStore.getState().notifyExternalParamsChange();
-    useAppStore.getState().triggerReprocessing();
-    showSuccess('Auto Levels', 'Applied via tone curve');
-  }, [showSuccess, showInfo]);
-
+  // (v1.37.0 D1: the menu "Auto Levels" item is gone — it was mislabeled and
+  // applied the style-profile tone curve. The Tone Curve panel's real Auto
+  // Levels checkbox remains the way to get a histogram stretch.)
   const handleAutoContrast = useCallback(() => {
     if (guardDeveloping(showInfo, 'Auto Contrast')) return;
     const img = imageService.getCurrentImage();
@@ -684,28 +671,22 @@ function App() {
     showSuccess('Auto Contrast', 'Applied via basic adjustments');
   }, [showSuccess, showInfo]);
 
-  const handleAutoColor = useCallback(() => {
-    if (guardDeveloping(showInfo, 'Auto Color')) return;
+  // v1.37.0 D2: was "Auto Color" (auto-WB + auto-CB). The auto Color Balance
+  // half is removed; the surviving WB half is renamed honestly.
+  const handleAutoWhiteBalance = useCallback(() => {
+    if (guardDeveloping(showInfo, 'Auto White Balance')) return;
     const img = imageService.getCurrentImage();
     if (!img) return;
     const stats = autoAdjustService.analyse(img.data, img.width, img.height);
-    // Apply via white balance + color balance
     const wbMod = imageProcessingPipeline.getModule('temperature');
     if (wbMod) {
       const p = autoAdjustService.autoWhiteBalance(stats);
       (wbMod as unknown as { setParams: (p: Record<string, unknown>) => void }).setParams(p);
       imageProcessingPipeline.invalidateModuleCache('temperature');
     }
-    const cbPipe = imageProcessingPipeline.getModule('colorbalance');
-    if (cbPipe) {
-      const p = autoAdjustService.autoColorBalance(stats);
-      const inner = (cbPipe as unknown as { getColorBalanceModule?: () => { setParams: (p: Record<string, unknown>) => void } }).getColorBalanceModule?.();
-      if (inner) inner.setParams(p);
-      imageProcessingPipeline.invalidateModuleCache('colorbalance');
-    }
     useAppStore.getState().notifyExternalParamsChange();
     useAppStore.getState().triggerReprocessing();
-    showSuccess('Auto Color', 'Applied via white balance + color balance');
+    showSuccess('Auto White Balance', 'Applied via white balance');
   }, [showSuccess, showInfo]);
 
   // ─── Image resize ─────────────────────────────────────────────────────
@@ -714,119 +695,39 @@ function App() {
     [showInfo, showSuccess]
   );
 
-  // ─── Style-grade indicator ─────────────────────────────────────────────
-  // "Styled" chip state: true when a style grade (Auto All / preset / pasted
-  // style) is sitting on top of the decode — detected live from the two
-  // signature params a grade always writes: a non-identity tone-curve base
-  // curve or non-zero Color Balance offsets. Live detection (not a persisted
-  // flag) so manually resetting those modules clears the chip automatically.
-  // externalParamsVersion bumps on every bulk apply, per-image restore, and
-  // reprocess trigger, which covers all the ways these params change.
-  const externalParamsVersion = useAppStore((s) => s.externalParamsVersion);
-  const styleGradeActive = useMemo(() => {
-    void externalParamsVersion; // dependency: recompute on any params change
-    const tcPipe = imageProcessingPipeline.getModule('tonecurve') as unknown as {
-      getToneCurveModule?: () => { getParams?: () => { baseCurve?: Array<{ x: number; y: number }> } };
-    } | undefined;
-    const baseCurve = tcPipe?.getToneCurveModule?.()?.getParams?.()?.baseCurve;
-    if (Array.isArray(baseCurve) && baseCurve.some((pt) => Math.abs(pt.y - pt.x) > 0.001)) return true;
-    const cbPipe = imageProcessingPipeline.getModule('colorbalance') as unknown as {
-      getColorBalanceModule?: () => { getParams?: () => Record<string, Record<string, number>> };
-    } | undefined;
-    const cb = cbPipe?.getColorBalanceModule?.()?.getParams?.();
-    if (cb) {
-      for (const zone of ['shadows', 'midtones', 'highlights']) {
-        const z = cb[zone];
-        if (z && Object.values(z).some((v) => typeof v === 'number' && Math.abs(v) > 0.0005)) return true;
-      }
-    }
-    return false;
-  }, [externalParamsVersion]);
-
   // ─── Auto All ──────────────────────────────────────────────────────────
-  const handleAutoAll = useCallback(() => {
-    if (guardDeveloping(showInfo, 'Auto All')) return;
-    const img = imageService.getCurrentImage();
-    if (!img) { showError('Auto All', 'No image loaded'); return; }
+  // v1.37.0 R2: the whole application flow lives in services/AutoAllService
+  // (dependency-injected seam, unit-tested against the real pipeline) — this
+  // wrapper only binds the App's toast callbacks.
+  const handleAutoAll = useCallback(
+    () => applyAutoAll({ showSuccess, showError, showInfo }),
+    [showSuccess, showError, showInfo],
+  );
 
-    useAppStore.getState().setIsProcessing(true); // canvas spinner while applying
+  // ─── "May be sideways?" suggestion badge (v1.37.0 R2 Part C) ───────────
+  // Per-image, recomputed on BASE changes only — never on reprocess. The
+  // trigger is `originalSnapshotVersion`: ImageService bumps it whenever a
+  // new pre-edit base is recorded — every fresh open, plus the progressive
+  // full-decode swap, enhance bakes and RAW re-decodes — always AFTER its
+  // currentImage holds that base, and no ordinary reprocess ever touches it.
+  // Re-running on those base swaps is the coherent semantic (the pixels the
+  // hint describes changed); the compute itself verifies the base's path
+  // matches the opened image (a bump-before-decode ordering just retries on
+  // the next bump) — no one-shot markers, no processedImageData identity
+  // races (the v1 wiring starved on exactly that; see the R2 report). The
+  // scan runs off a setTimeout on a strided ≤64px grid — it never delays the
+  // first paint (TTFI).
+  useEffect(() => {
+    useAppStore.getState().setSidewaysHint(null); // no stale badge across switches
+    const id = currentImage?.id;
+    const path = currentImage?.path;
+    if (!id || !path) return;
+    const timer = window.setTimeout(() => computeSidewaysHintForImage(id, path), 0);
+    return () => window.clearTimeout(timer);
+  }, [currentImage?.id, currentImage?.path, originalSnapshotVersion]);
 
-    // Camera-matched base → soften the style grade (half strength) and keep the
-    // camera's WB. The profile targets are absolute and were tuned for the
-    // neutral decode; at full strength on a matched base they double-grade
-    // (camera tone mapping + full portfolio pull = crushed bright scenes).
-    const cameraMatched = !!img.isRaw && !!useAppStore.getState().rawDecodeOptions.cameraMatch;
-
-    // Single coordinator call: analyses once, picks the user-style bucket, and
-    // returns the bundled params for every module.
-    const result = autoAdjustService.autoAll(img.data, img.width, img.height, {
-      strength: cameraMatched ? CAMERA_MATCHED_AUTO_STRENGTH : 1,
-    });
-    logger.info(`Auto All: bucket=${result.bucket} (${result.stats.meanLum.toFixed(3)} lum, cameraMatched=${cameraMatched})`);
-
-    // Exposure
-    const exposureMod = imageProcessingPipeline.getModule('exposure');
-    if (exposureMod) {
-      (exposureMod as unknown as { setCurrentParams: (p: Record<string, unknown>) => void }).setCurrentParams(result.exposure);
-      imageProcessingPipeline.invalidateModuleCache('exposure');
-    }
-
-    // White Balance — gray-candidate estimation + damped correction, the SAME engine
-    // as the WB "Auto" button: estimate the illuminant from near-neutral samples
-    // (median cast, inverting the module's own gain model), then apply a partial
-    // correction that cleans the cast while retaining some of the scene's warmth.
-    // Skipped on a camera-matched base: the match already reproduces the camera's
-    // WB decision, and a gray-world pull on top of it fights that intent.
-    const wbMod = cameraMatched ? null : imageProcessingPipeline.getModule('temperature');
-    if (wbMod) {
-      const wbChannels = Math.max(3, Math.round(img.data.length / (img.width * img.height)));
-      (wbMod as unknown as { autoDetectWhiteBalance: (d: Float32Array, ctx: { width: number; height: number; channels: number }) => void })
-        .autoDetectWhiteBalance(img.data, { width: img.width, height: img.height, channels: wbChannels });
-      imageProcessingPipeline.invalidateModuleCache('temperature');
-    }
-
-    // Basic Adjustments (autoBasicAdj already returns exposure: 0). Fold the auto
-    // shadows/highlights into the new Basic Adjustments sliders, since the
-    // standalone Shadows & Highlights module was replaced by them.
-    const baMod = imageProcessingPipeline.getModule('basicadj');
-    if (baMod) {
-      const sh = result.shadowsHighlights as { shadows?: number; highlights?: number } | undefined;
-      const baParams: Record<string, unknown> = { ...result.basicAdj };
-      if (sh) {
-        baParams.shadows = (((sh.shadows ?? 50) - 50) / 50) * 0.6;        // +lift shadows
-        baParams.highlights = -(((sh.highlights ?? 50) - 50) / 50) * 0.6; // -recover highlights
-      }
-      (baMod as unknown as { setParams: (p: Record<string, unknown>) => void }).setParams(baParams);
-      imageProcessingPipeline.invalidateModuleCache('basicadj');
-    }
-
-    // Tone Curve
-    const tcPipeMod = imageProcessingPipeline.getModule('tonecurve');
-    if (tcPipeMod) {
-      const inner = (tcPipeMod as unknown as { getToneCurveModule?: () => { setParams: (p: Record<string, unknown>) => void } }).getToneCurveModule?.();
-      if (inner) inner.setParams(result.toneCurve);
-      imageProcessingPipeline.invalidateModuleCache('tonecurve');
-    }
-
-    // Color Balance
-    const cbPipeMod = imageProcessingPipeline.getModule('colorbalance');
-    if (cbPipeMod) {
-      const inner = (cbPipeMod as unknown as { getColorBalanceModule?: () => { setParams: (p: Record<string, unknown>) => void } }).getColorBalanceModule?.();
-      if (inner) inner.setParams(result.colorBalance);
-      imageProcessingPipeline.invalidateModuleCache('colorbalance');
-    }
-
-    // (Shadows / Highlights are now applied via Basic Adjustments above.)
-
-    // Refresh the open module panel's sliders, then reprocess.
-    useAppStore.getState().notifyExternalParamsChange();
-    useAppStore.getState().triggerReprocessing();
-    showSuccess(
-      'Auto All',
-      `Applied "${result.bucket}" style profile${cameraMatched ? ' (softened — camera-matched base)' : ''}`,
-    );
-    logger.info(`Auto All: all modules adjusted from user style profile (bucket=${result.bucket})`);
-  }, [showSuccess, showError, showInfo]);
+  const handleSidewaysRotate = useCallback(() => acceptSidewaysHint(), []);
+  const handleSidewaysDismiss = useCallback(() => dismissCurrentSidewaysHint(), []);
 
   // ─── Print ─────────────────────────────────────────────────────────────
   const handlePrint = useCallback(() => {
@@ -880,7 +781,13 @@ function App() {
     try {
       let dataUrl: string | null = null;
       if (window.electronAPI?.readImageAsDataURL) {
-        dataUrl = await window.electronAPI.readImageAsDataURL(path);
+        // RAW references need pane resolution: without maxDim the IPC returns the
+        // 512px gallery-thumb box and the reference renders as a blurry postage
+        // stamp in a half-workspace pane. 2560 covers the pane at realistic window
+        // sizes while still sourcing the embedded JPEG (no full RAW decode) — and
+        // it's deliberately uncached in the main process (see rawThumbPolicy.cjs).
+        // Non-RAW paths ignore the option and return full-res bytes as before.
+        dataUrl = await window.electronAPI.readImageAsDataURL(path, { maxDim: 2560 });
       }
       if (!dataUrl) {
         // If the path is already a blob URL or data URL (web mode)
@@ -1462,6 +1369,7 @@ function App() {
       crop: 'Crop & Transform', basicadj: 'Basic Adjustments', whitebalance: 'White Balance',
       tonecurve: 'Tone Curve', colorbalance: 'Color Balance',
       lenscorrections: 'Lens Corrections', localadjustments: 'Local Adjustments',
+      enhance: 'Enhance', shadowshighlights: 'Shadows & Highlights',
     };
     const tool = useAppStore.getState().selectedTool;
     checkpointService.recordDebounced((tool && TOOL_LABELS[tool]) || 'Edit');
@@ -1549,9 +1457,8 @@ function App() {
         onFlipHorizontal={handleFlipHorizontal}
         onFlipVertical={handleFlipVertical}
         // Adjust menu
-        onAutoLevels={handleAutoLevels}
         onAutoContrast={handleAutoContrast}
-        onAutoColor={handleAutoColor}
+        onAutoWhiteBalance={handleAutoWhiteBalance}
         onBrightnessContrast={() => handleToolSelect('basicadj')}
         onLevels={() => handleToolSelect('basicadj')}
         onCurves={() => handleToolSelect('tonecurve')}
@@ -1780,8 +1687,10 @@ function App() {
               onActualSize={handleActualSize}
               zoom={viewport.zoom}
               onAutoAll={handleAutoAll}
-              styleGradeActive={styleGradeActive}
               developing={developing}
+              sidewaysHint={!!sidewaysHint && sidewaysHint.imageId === currentImage?.id}
+              onSidewaysRotate={handleSidewaysRotate}
+              onSidewaysDismiss={handleSidewaysDismiss}
               onCopyStyle={handleCopyStyle}
               onPasteStyle={handlePasteStyle}
               hasStyleClipboard={hasStyleClipboard}

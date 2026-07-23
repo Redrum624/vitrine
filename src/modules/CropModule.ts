@@ -987,6 +987,52 @@ export class CropModule {
     };
   }
 
+  /**
+   * The params patch that makes a straighten angle land WEDGE-FREE (v1.37.0 R2,
+   * extracted pure from CropModuleComponent.ensureWedgeFreeCrop / v1.34.2 so the
+   * component AND Auto All's headless auto-straighten share one source):
+   *  - no user crop  → the largest inscribed auto-crop for the angle
+   *  - existing crop → INTERSECT it with the inscribed rect (keeps the user's
+   *    framing, removes any wedge overlap)
+   *  - |angle| < 0.01 → nothing to inscribe; keep an existing crop, else reset
+   * Orientation-aware: the inscribed-rect math needs the ROTATED frame's dims.
+   * Reads this.params for the existing-crop state; mutates nothing — the caller
+   * applies the returned patch (component: updateParams; Auto All: setParams +
+   * adapter-enable mirror).
+   */
+  wedgeFreeCropPatch(angle: number, imageWidth: number, imageHeight: number): Partial<CropParams> {
+    const p = this.params;
+    const hasExistingCrop = p.x !== 0 || p.y !== 0 || p.width !== 1.0 || p.height !== 1.0;
+
+    if (Math.abs(angle) < 0.01) {
+      return hasExistingCrop
+        ? { angle: 0, enabled: true }
+        : { x: 0, y: 0, width: 1.0, height: 1.0, angle: 0, enabled: true };
+    }
+    if (imageWidth <= 0 || imageHeight <= 0) {
+      return { angle, enabled: true };
+    }
+
+    const swapped = this.normalizedOrientation() === 90 || this.normalizedOrientation() === 270;
+    const frameW = swapped ? imageHeight : imageWidth;
+    const frameH = swapped ? imageWidth : imageHeight;
+    const auto = this.calculateAutoCropForRotation(frameW, frameH, angle);
+
+    if (!hasExistingCrop) {
+      return { angle, enabled: true, ...auto };
+    }
+    const x1 = Math.max(p.x, auto.x);
+    const y1 = Math.max(p.y, auto.y);
+    const x2 = Math.min(p.x + p.width, auto.x + auto.width);
+    const y2 = Math.min(p.y + p.height, auto.y + auto.height);
+    return {
+      angle, enabled: true,
+      x: x1, y: y1,
+      width: Math.max(0.05, x2 - x1),
+      height: Math.max(0.05, y2 - y1),
+    };
+  }
+
   // Calculate the largest crop rectangle that fits inside a rotated image
   // This removes black borders created by rotation
   // IMPORTANT: Returns normalized coordinates (0-1) relative to the EXPANDED canvas

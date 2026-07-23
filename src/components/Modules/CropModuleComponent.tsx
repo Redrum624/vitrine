@@ -179,46 +179,13 @@ export const CropModuleComponent: React.FC<CropModuleComponentProps> = ({
 
   // Straightening must ALWAYS end wedge-free (v1.34.2, user report: rotating
   // left the exposed non-photo corners visible). One helper for every entry
-  // point (slider release, ±2°/±5° chips, Auto-Straighten):
-  //  - no user crop  → apply the largest inscribed auto-crop
-  //  - existing crop → INTERSECT it with the inscribed rect (keeps the user's
-  //    framing, removes any wedge overlap)
-  // Orientation-aware: the inscribed-rect math needs the ROTATED frame's dims.
+  // point (slider release, ±2°/±5° chips, Auto-Straighten) — and since
+  // v1.37.0 R2 the MATH lives in CropModule.wedgeFreeCropPatch so Auto All's
+  // headless auto-straighten shares the exact same source (no logic fork).
+  // The module's params are in lock-step with paramsRef (updateParams writes
+  // both), so the patch computed from module state matches the ref state.
   const ensureWedgeFreeCrop = useCallback((angle: number, extra: Partial<CropParams> = {}) => {
-    const p = paramsRef.current;
-    const hasExistingCrop = p.x !== 0 || p.y !== 0 || p.width !== 1.0 || p.height !== 1.0;
-
-    if (Math.abs(angle) < 0.01) {
-      // No straighten angle: nothing to inscribe. Keep the user's crop if any.
-      if (hasExistingCrop) updateParams({ angle: 0, enabled: true, ...extra });
-      else updateParams({ x: 0, y: 0, width: 1.0, height: 1.0, angle: 0, enabled: true, ...extra });
-      return;
-    }
-    if (imageWidth <= 0 || imageHeight <= 0) {
-      updateParams({ angle, enabled: true, ...extra });
-      return;
-    }
-
-    const swapped = module.normalizedOrientation() === 90 || module.normalizedOrientation() === 270;
-    const frameW = swapped ? imageHeight : imageWidth;
-    const frameH = swapped ? imageWidth : imageHeight;
-    const auto = module.calculateAutoCropForRotation(frameW, frameH, angle);
-
-    if (!hasExistingCrop) {
-      updateParams({ angle, enabled: true, ...auto, ...extra });
-    } else {
-      const x1 = Math.max(p.x, auto.x);
-      const y1 = Math.max(p.y, auto.y);
-      const x2 = Math.min(p.x + p.width, auto.x + auto.width);
-      const y2 = Math.min(p.y + p.height, auto.y + auto.height);
-      updateParams({
-        angle, enabled: true,
-        x: x1, y: y1,
-        width: Math.max(0.05, x2 - x1),
-        height: Math.max(0.05, y2 - y1),
-        ...extra,
-      });
-    }
+    updateParams({ ...module.wedgeFreeCropPatch(angle, imageWidth, imageHeight), ...extra });
   }, [module, imageWidth, imageHeight, updateParams]);
 
   const handleRotationChange = useCallback((newAngle: number) => {
