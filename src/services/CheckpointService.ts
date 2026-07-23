@@ -172,11 +172,14 @@ function describeSingleChange(name: string, c: LeafChange): string {
   }
   if (c.numeric) {
     const nv = c.next as number;
+    // "Exposure — Exposure +0.35" reads doubled when the sole param carries the
+    // module's own name — collapse to the module name alone.
+    const prefix = labelParam(leaf) === name ? name : `${name} — ${labelParam(leaf)}`;
     if (typeof c.prev === 'number') {
-      if (isZeroCentered(c.path)) return `${name} — ${labelParam(leaf)} ${fmtNum(nv - c.prev)}`;
-      return `${name} — ${labelParam(leaf)} ${fmtVal(c.prev)} → ${fmtVal(nv)}`;
+      if (isZeroCentered(c.path)) return `${prefix} ${fmtNum(nv - c.prev)}`;
+      return `${prefix} ${fmtVal(c.prev)} → ${fmtVal(nv)}`;
     }
-    return `${name} — ${labelParam(leaf)} ${fmtNum(nv)}`; // prev unknown (old saved state) — absolute
+    return `${prefix} ${fmtNum(nv)}`; // prev unknown (old saved state) — absolute
   }
   if (isCurvePath(c.path)) return `${name} curve edited`;
   if (typeof c.next === 'boolean') return `${name} — ${labelParam(leaf)} ${c.next ? 'on' : 'off'}`;
