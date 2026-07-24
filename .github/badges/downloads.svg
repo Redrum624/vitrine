@@ -1,13 +1,13 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="800" height="300" viewBox="0 0 800 300" role="img" aria-label="Downloads over time">
   <style>.t{font:12px -apple-system,'Segoe UI',sans-serif;fill:#8b949e}.title{font:600 14px -apple-system,'Segoe UI',sans-serif;fill:#8b949e}</style>
   <line x1="64" y1="260.0" x2="776" y2="260.0" stroke="#8b949e" stroke-opacity="0.25"/><text x="56" y="260.0" dy="4" text-anchor="end" class="t">0</text>
-  <line x1="64" y1="202.0" x2="776" y2="202.0" stroke="#8b949e" stroke-opacity="0.25"/><text x="56" y="202.0" dy="4" text-anchor="end" class="t">10</text>
-  <line x1="64" y1="144.0" x2="776" y2="144.0" stroke="#8b949e" stroke-opacity="0.25"/><text x="56" y="144.0" dy="4" text-anchor="end" class="t">20</text>
-  <line x1="64" y1="86.0" x2="776" y2="86.0" stroke="#8b949e" stroke-opacity="0.25"/><text x="56" y="86.0" dy="4" text-anchor="end" class="t">30</text>
-  <line x1="64" y1="28.0" x2="776" y2="28.0" stroke="#8b949e" stroke-opacity="0.25"/><text x="56" y="28.0" dy="4" text-anchor="end" class="t">40</text>
-  <polyline points="64.0,260.0 128.7,260.0 193.5,260.0 258.2,260.0 322.9,260.0 387.6,260.0 452.4,260.0 517.1,260.0 581.8,260.0 646.5,260.0 711.3,260.0 776.0,28.0" fill="none" stroke="#58a6ff" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
+  <line x1="64" y1="202.0" x2="776" y2="202.0" stroke="#8b949e" stroke-opacity="0.25"/><text x="56" y="202.0" dy="4" text-anchor="end" class="t">13</text>
+  <line x1="64" y1="144.0" x2="776" y2="144.0" stroke="#8b949e" stroke-opacity="0.25"/><text x="56" y="144.0" dy="4" text-anchor="end" class="t">25</text>
+  <line x1="64" y1="86.0" x2="776" y2="86.0" stroke="#8b949e" stroke-opacity="0.25"/><text x="56" y="86.0" dy="4" text-anchor="end" class="t">38</text>
+  <line x1="64" y1="28.0" x2="776" y2="28.0" stroke="#8b949e" stroke-opacity="0.25"/><text x="56" y="28.0" dy="4" text-anchor="end" class="t">50</text>
+  <polyline points="64.0,260.0 123.3,260.0 182.7,260.0 242.0,260.0 301.3,260.0 360.7,260.0 420.0,260.0 479.3,260.0 538.7,260.0 598.0,260.0 657.3,260.0 716.7,74.4 776.0,28.0" fill="none" stroke="#58a6ff" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
   <circle cx="776.0" cy="28.0" r="4" fill="#58a6ff"/>
   <text x="64" y="288" class="t">2026-07-12</text>
-  <text x="776" y="288" text-anchor="end" class="t">2026-07-23</text>
-  <text x="776" y="20" text-anchor="end" class="title">Total downloads: 40</text>
+  <text x="776" y="288" text-anchor="end" class="t">2026-07-24</text>
+  <text x="776" y="20" text-anchor="end" class="title">Total downloads: 50</text>
 </svg>
