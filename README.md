@@ -7,26 +7,19 @@
 ![Lint](https://img.shields.io/badge/Lint-clean-brightgreen)
 ![GPU](https://img.shields.io/badge/GPU-WebGL2_accelerated-success)
 
-![Electron](https://img.shields.io/badge/Electron_43-191970?logo=electron&logoColor=white)
-![React](https://img.shields.io/badge/React_19-20232A?logo=react&logoColor=61DAFB)
-![TypeScript](https://img.shields.io/badge/TypeScript_5.9-3178C6?logo=typescript&logoColor=white)
-![Vite](https://img.shields.io/badge/Vite_7-646CFF?logo=vite&logoColor=white)
-![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS_4-06B6D4?logo=tailwindcss&logoColor=white)
-![WebGL2](https://img.shields.io/badge/WebGL2-GPU_pipeline-990000)
-
 ![Vitrine](docs/screenshot.png)
 
 > **Vitrine** — *the darkroom, behind glass.*
 
-**Vitrine is a free RAW photo editor for Windows.** Open a photo straight off your
-camera — Olympus, Canon, Nikon, Sony, Panasonic, or Adobe DNG — and develop it
-non-destructively: exposure and colour, tone curves, local masks, lens fixes, AI
-denoise and upscaling, then export in the format and colour space you need. Every
-edit is saved per photo and re-applied when you reopen it; your original file is
-never touched.
+**Vitrine is a free RAW photo editor for Windows — a simpler, local alternative to Lightroom and darktable, with no subscription and no account.**
+Open a photo straight off your camera — Olympus, Canon, Nikon, Sony, Panasonic, or
+Adobe DNG — and develop it non-destructively: exposure and colour, tone curves, local
+masks, lens fixes, GPU denoise, AI upscaling and motion deblur, then export in the
+format and colour space you need. Every edit is saved per photo and re-applied when
+you reopen it; your original file is never touched.
 
-It's a lightweight, no-subscription alternative to Lightroom and darktable, with a
-clean full-screen **glass workspace** that keeps every tool one click away.
+Everything runs on your machine — no cloud, no upload, no sign-in — inside a clean
+full-screen **glass workspace** that keeps every tool one click away.
 
 ### Why Vitrine
 
@@ -35,6 +28,23 @@ clean full-screen **glass workspace** that keeps every tool one click away.
 - ✨ **AI where it counts** — Real-ESRGAN ×2/×4 super-resolution and NAFNet motion-deblur run on your GPU, alongside classic denoise, sharpen, and dehaze.
 - 🎨 **Truly non-destructive** — adjustments are stored per image and replayed on reopen; the source file is never modified.
 - 🆓 **Free, no account** — download the installer and start editing. No sign-up, no subscription.
+
+### Is Vitrine for you?
+
+**Try Vitrine if you want:**
+
+- a free Lightroom alternative for Windows — no subscription, no account;
+- to open and develop RAW files (CR2/CR3, NEF, ARW, ORF, DNG, RW2, PEF…), not just retouch JPEGs;
+- a simpler workflow than darktable: open, develop, export;
+- non-destructive editing that never modifies your originals;
+- local, offline processing — nothing leaves your machine;
+- GPU-accelerated adjustments, with AI upscaling and motion deblur when you need them.
+
+**Vitrine is probably not for you if you need:**
+
+- macOS or Linux — Vitrine is Windows-only (10/11, 64-bit);
+- Lightroom's catalog and cloud sync, or a full asset-management library — Vitrine gives you a folder gallery with ratings and filters, not a catalog;
+- Photoshop round-tripping or a plugin ecosystem.
 
 ## Installation
 
@@ -105,7 +115,7 @@ the versioned `Setup …​.exe` and `… portable.exe`, their `SHA256SUMS.txt`,
 | | |
 |:--:|:--:|
 | ![Basic Adjustments](docs/shots/basic-adjustments.png) | ![Enhance](docs/shots/enhance.png) |
-| **Basic Adjustments** — exposure, tone & colour, with mask tools | **Enhance** — AI denoise, sharpen, upscale & motion-deblur |
+| **Basic Adjustments** — exposure, tone & colour, with mask tools | **Enhance** — GPU denoise, sharpen, AI upscale & motion-deblur |
 | ![Tone Curve](docs/shots/tone-curve.png) | ![Color Balance](docs/shots/color-balance.png) |
 | **Tone Curve** — master + per-channel RGB | **Color Balance** — 8-channel HSL grading |
 | ![White Balance](docs/shots/white-balance.png) | ![Crop & Transform](docs/shots/crop-transform.png) |
@@ -160,6 +170,14 @@ the versioned `Setup …​.exe` and `… portable.exe`, their `SHA256SUMS.txt`,
 ## Architecture
 
 ### Technology stack
+
+![Electron](https://img.shields.io/badge/Electron_43-191970?logo=electron&logoColor=white)
+![React](https://img.shields.io/badge/React_19-20232A?logo=react&logoColor=61DAFB)
+![TypeScript](https://img.shields.io/badge/TypeScript_5.9-3178C6?logo=typescript&logoColor=white)
+![Vite](https://img.shields.io/badge/Vite_7-646CFF?logo=vite&logoColor=white)
+![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS_4-06B6D4?logo=tailwindcss&logoColor=white)
+![WebGL2](https://img.shields.io/badge/WebGL2-GPU_pipeline-990000)
+
 - **Desktop**: Electron 43
 - **Frontend**: React 19 + TypeScript 5.9 + Vite 7 + Zustand 5
 - **Styling**: Tailwind CSS 4
