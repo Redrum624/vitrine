@@ -10,6 +10,9 @@ permissions:
 
 jobs:
   sample-and-render:
+    # Only the public repo has real download counts; the private mirror would
+    # sample zeros and push pointless bot commits.
+    if: github.repository == 'Redrum624/Vitrine'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
