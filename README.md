@@ -1,7 +1,7 @@
 # Vitrine
 
-[![Downloads](.github/badges/downloads-badge.svg)](https://github.com/Redrum624/Vitrine/releases)
-[![Latest release](.github/badges/latest-badge.svg)](https://github.com/Redrum624/Vitrine/releases/latest)
+[![Downloads](.github/badges/downloads-badge.svg)](https://github.com/Redrum624/vitrine/releases)
+[![Latest release](.github/badges/latest-badge.svg)](https://github.com/Redrum624/vitrine/releases/latest)
 
 ![Tests](https://img.shields.io/badge/Tests-2231_passing-brightgreen)
 ![Lint](https://img.shields.io/badge/Lint-clean-brightgreen)
@@ -51,7 +51,7 @@ full-screen **glass workspace** that keeps every tool one click away.
 ### Download (recommended)
 
 **Just want to use Vitrine?** Download the latest **`Vitrine Setup X.Y.Z.exe`** from the
-[**Releases**](https://github.com/Redrum624/Vitrine/releases) page and run it — no other
+[**Releases**](https://github.com/Redrum624/vitrine/releases) page and run it — no other
 software required. The installer adds a desktop shortcut and a Start Menu entry.
 
 **Prefer not to install anything?** Grab **`Vitrine X.Y.Z portable.exe`** instead — a single
@@ -74,7 +74,7 @@ For development, or to build your own installer. Requires **Node.js 18+** (the r
 **pnpm**; npm also works). Windows is the supported target.
 
 ```bash
-git clone https://github.com/Redrum624/Vitrine.git
+git clone https://github.com/Redrum624/vitrine.git
 cd Vitrine
 pnpm install            # or: npm install
 pnpm run electron-dev   # Vite dev server + Electron (opens automatically on port 3005)

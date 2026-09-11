@@ -4,14 +4,14 @@
 
 Vitrine is an actively developed desktop application. Security fixes target the
 **latest released version** only. Please make sure you're on the newest
-[release](https://github.com/Redrum624/Vitrine/releases/latest) before reporting.
+[release](https://github.com/Redrum624/vitrine/releases/latest) before reporting.
 
 ## Reporting a vulnerability
 
 **Please do not open a public issue for security vulnerabilities.**
 
 Instead, report privately through GitHub's
-[**Report a vulnerability**](https://github.com/Redrum624/Vitrine/security/advisories/new)
+[**Report a vulnerability**](https://github.com/Redrum624/vitrine/security/advisories/new)
 form (Security → Advisories). This keeps the details private until a fix is available.
 
 Please include:
