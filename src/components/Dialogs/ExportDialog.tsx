@@ -670,7 +670,7 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
         <span style={{ fontSize: 11.5, color: 'var(--glass-text-muted)' }}>Output:</span>
         <span
           className="flex-1 truncate"
-          style={{ fontSize: 11, fontFamily: 'ui-monospace, monospace', color: 'var(--glass-text-label)' }}
+          style={{ fontSize: 12, color: 'var(--glass-text-label)' }}
         >
           {outputDirectory || 'Same folder as original'}
         </span>

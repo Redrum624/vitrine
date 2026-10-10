@@ -13,12 +13,13 @@ import type { CSSProperties } from 'react';
  *  of an identical object in sync. */
 export const inputStyle: CSSProperties = {
   width: '100%',
+  height: 28,
   fontSize: 12,
-  padding: '6px 8px',
-  borderRadius: 8,
-  border: '1px solid rgba(255,255,255,.1)',
-  background: 'rgba(255,255,255,.04)',
-  color: 'var(--glass-text-label)',
+  padding: '0 8px',
+  borderRadius: 6,
+  border: '1px solid var(--vt-line)',
+  background: 'var(--vt-field)',
+  color: 'var(--vt-text)',
 };
 
 export const selectStyle: CSSProperties = inputStyle;
@@ -28,9 +29,9 @@ export const selectStyle: CSSProperties = inputStyle;
  *  call sites that name it after "stat" rather than "info". */
 export const infoBoxStyle: CSSProperties = {
   padding: 12,
-  borderRadius: 10,
-  background: 'rgba(0,0,0,.3)',
-  border: '1px solid var(--glass-border)',
+  borderRadius: 8,
+  background: 'var(--vt-field)',
+  border: '1px solid var(--vt-line-soft)',
 };
 
 export const statBoxStyle: CSSProperties = infoBoxStyle;

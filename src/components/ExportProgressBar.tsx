@@ -19,8 +19,8 @@ export function ExportProgressBar() {
 
   return (
     <div
-      className="glass-chrome dc-rise absolute top-4 left-4 z-50 w-72"
-      style={{ borderRadius: 14, padding: '10px 12px' }}
+      className="glass-chrome vt-pop-in absolute top-4 left-4 z-50 w-72"
+      style={{ borderRadius: 10, padding: '10px 12px', transformOrigin: 'top left' }}
     >
       <div className="flex items-center justify-between mb-1.5">
         <span style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--glass-text-title)' }}>

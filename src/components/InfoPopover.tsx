@@ -114,12 +114,13 @@ export function InfoPopover({ image, anchorRef, onClose }: InfoPopoverProps) {
       role="dialog"
       aria-label="Image information"
       data-testid="info-popover"
-      className="glass-chrome dc-rise"
+      className="glass-chrome vt-pop-in"
       style={{
         position: 'fixed',
         left: pos.left,
         top: pos.top,
-        borderRadius: '12px',
+        borderRadius: '10px',
+        transformOrigin: 'top left',
         padding: '12px 14px',
         minWidth: '244px',
         maxWidth: '340px',

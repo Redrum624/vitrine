@@ -422,15 +422,14 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
     display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
     padding: '10px 6px',
     borderRadius: 9,
-    border: `1px solid ${active ? 'var(--accent-ring)' : 'rgba(255,255,255,.1)'}`,
-    background: active ? 'var(--accent-soft)' : 'rgba(255,255,255,.04)',
-    color: active ? 'var(--accent)' : 'var(--glass-text-secondary)',
+    border: `1px solid ${active ? '#4b4b53' : 'var(--vt-line)'}`,
+    background: active ? '#323237' : 'var(--vt-field)',
+    color: active ? 'var(--vt-text)' : 'var(--glass-text-secondary)',
     fontSize: 11.5, fontWeight: 500, cursor: 'pointer',
   });
   const modeDotStyle = (active: boolean): CSSProperties => ({
     width: 8, height: 8, borderRadius: '50%',
     background: active ? 'var(--accent)' : 'rgba(255,255,255,.2)',
-    boxShadow: active ? '0 0 0 3px var(--accent-soft)' : undefined,
   });
 
   return (
@@ -689,12 +688,11 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
         disabled={busy || developing || selectedScaleInfeasible}
         title={developing ? 'Available when full quality finishes developing' : undefined}
         style={{
-          width: '100%', padding: 11, borderRadius: 11,
-          border: '1px solid var(--accent-ring)',
-          background: 'var(--accent)', color: '#0b0b0c', fontSize: 12.5, fontWeight: 700,
-          cursor: busy ? 'wait' : developing || selectedScaleInfeasible ? 'not-allowed' : 'pointer',
-          opacity: busy || developing || selectedScaleInfeasible ? 0.6 : 1,
-          boxShadow: busy || developing || selectedScaleInfeasible ? 'none' : '0 2px 18px var(--accent-ring)',
+          width: '100%', height: 32, padding: '0 12px', borderRadius: 6,
+          border: '1px solid transparent',
+          background: 'var(--accent)', color: 'var(--accent-ink)', fontSize: 12.5, fontWeight: 600,
+          cursor: busy ? 'wait' : undefined,
+          opacity: busy || developing || selectedScaleInfeasible ? 0.5 : 1,
           display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
         }}
         onClick={handleApply}

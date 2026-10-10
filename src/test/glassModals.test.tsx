@@ -50,13 +50,13 @@ describe('GlassModal', () => {
     expect(container.querySelector('[data-testid="glass-modal-footer"]')).not.toBeInTheDocument();
   });
 
-  it('carries the dc-rise entrance class on the card', () => {
+  it('carries the pop-in entrance class on the card (scales up from .97 on the spring)', () => {
     const { container } = render(
       <GlassModal isOpen title="Export Image" onClose={() => {}}>
         <div>body</div>
       </GlassModal>
     );
-    expect(container.querySelector('.dc-rise')).toBeInTheDocument();
+    expect(container.querySelector('[role="dialog"].vt-pop-in')).toBeInTheDocument();
   });
 
   it('renders a close chip that fires onClose when clicked', () => {

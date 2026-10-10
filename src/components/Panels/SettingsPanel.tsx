@@ -17,7 +17,7 @@ export function SettingsPanel() {
     <div className="flex flex-col h-full" style={{ backgroundColor: 'var(--gray-900)' }}>
       {/* Header */}
       <div className="px-5 py-4 border-b" style={{ borderBottomColor: 'var(--border)' }}>
-        <h2 className="text-sm font-semibold" style={{ color: 'var(--white)' }}>
+        <h2 style={{ fontSize: 13, fontWeight: 600, color: 'var(--glass-text-title)' }}>
           Settings
         </h2>
       </div>
@@ -27,7 +27,7 @@ export function SettingsPanel() {
         <div className="space-y-6">
           {/* Appearance Section */}
           <div className="space-y-3">
-            <h3 className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--gray-500)' }}>
+            <h3 style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--glass-text-muted)' }}>
               Appearance
             </h3>
             <div className="space-y-2">
@@ -45,7 +45,7 @@ export function SettingsPanel() {
 
           {/* Performance Section */}
           <div className="space-y-3">
-            <h3 className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--gray-500)' }}>
+            <h3 style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--glass-text-muted)' }}>
               Performance
             </h3>
             <div className="space-y-2">
@@ -72,7 +72,7 @@ export function SettingsPanel() {
 
           {/* Image Processing Section */}
           <div className="space-y-3">
-            <h3 className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--gray-500)' }}>
+            <h3 style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--glass-text-muted)' }}>
               Image Processing
             </h3>
             <div className="space-y-2">
@@ -112,7 +112,7 @@ export function SettingsPanel() {
 
           {/* Cache Section */}
           <div className="space-y-3">
-            <h3 className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--gray-500)' }}>
+            <h3 style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--glass-text-muted)' }}>
               Cache & Storage
             </h3>
             <div className="space-y-2">
@@ -144,7 +144,7 @@ export function SettingsPanel() {
 
           {/* About Section */}
           <div className="space-y-3 pb-4">
-            <h3 className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--gray-500)' }}>
+            <h3 style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--glass-text-muted)' }}>
               About
             </h3>
             <div className="space-y-1 text-xs" style={{ color: 'var(--gray-400)' }}>
