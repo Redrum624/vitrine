@@ -390,37 +390,55 @@ function sweepStaleRawTmpDirs({ baseDir = os.tmpdir(), maxAgeMs = 24 * 60 * 60 *
  * @param {object} [log]     logger (defaults to console)
  * @param {object} [options] { demosaic, highlightMode } — defaults to DEFAULT_RAW_DECODE_OPTIONS
  */
-async function decodeRawFile(filePath, log = console, options) {
+async function decodeRawFile(filePath, log = console, options, rungs = {}) {
   const resolvedOpts = options || DEFAULT_RAW_DECODE_OPTIONS;
+  // `rungs` lets tests stand in for the engines; production always uses the real ones.
+  const native = rungs.decodeNative || decodeNative;
+  const wasm = rungs.decodeWasm || decodeWasm;
+  const embedded = rungs.decodeEmbeddedJpeg || decodeEmbeddedJpeg;
 
   // Camera match post-pass: applied to the true-demosaic rungs only. The
   // embedded-JPEG fallback rung already IS the camera render — matching it to
   // itself would be a no-op at best. Fail-open: any camera-match failure
-  // returns the unmatched decode (see cameraMatch.cjs).
+  // returns the unmatched decode (see cameraMatch.cjs), and the result says so
+  // via `cameraMatched` so the renderer never caches a failed match as a match.
   const maybeMatch = async (decoded) => {
     if (!resolvedOpts.cameraMatch) return decoded;
     try {
       const { applyCameraMatch } = require('./cameraMatch.cjs');
       const orfBuf = await fs.promises.readFile(filePath);
-      return await applyCameraMatch(decoded, orfBuf, log);
+      const matched = await applyCameraMatch(decoded, orfBuf, log);
+      // applyCameraMatch hands back the SAME object when it skipped or failed.
+      return matched === decoded ? { ...decoded, cameraMatched: false } : { ...matched, cameraMatched: true };
     } catch (err) {
       // Fail-open at this level too: a camera-match hiccup (e.g. the source
       // file vanished between decode and re-read) must not discard a decode
       // that already succeeded, and must not cascade to the next rung.
       log.warn(`camera-match post-pass failed (${err.message}) — using unmatched decode`);
-      return decoded;
+      return { ...decoded, cameraMatched: false };
     }
   };
 
   try {
-    return await maybeMatch(await decodeNative(filePath, log, resolvedOpts));
+    const matched = await maybeMatch(await native(filePath, log, resolvedOpts));
+    if (resolvedOpts.cameraMatch && !matched.cameraMatched) {
+      // The native rung decodes WITHOUT auto-brighten (-W) when matching, because the
+      // match is what sets the final tone. Unmatched, that base is far too dark (a PEN-F
+      // ORF averaged 0.32 vs 0.40 brightened, with crushed midtones) — so a failed match
+      // re-decodes the normal, auto-brightened way instead of showing the dark base.
+      log.warn('camera match unavailable — re-decoding with auto-brighten');
+      return { ...(await native(filePath, log, { ...resolvedOpts, cameraMatch: false })), cameraMatched: false };
+    }
+    return matched;
   } catch (nativeError) {
     log.warn(`Native dcraw_emu decode failed (${nativeError.message}); trying libraw-wasm/Node`);
     try {
-      return await maybeMatch(await decodeWasm(filePath, log, resolvedOpts));
+      // libraw-wasm never disables auto-brighten, so an unmatched wasm base is already
+      // correctly exposed — no re-decode needed when the match fails.
+      return await maybeMatch(await wasm(filePath, log, resolvedOpts));
     } catch (wasmError) {
       log.warn(`libraw-wasm/Node decode failed (${wasmError.message}); falling back to embedded JPEG`);
-      return await decodeEmbeddedJpeg(filePath, log);
+      return await embedded(filePath, log);
     }
   }
 }

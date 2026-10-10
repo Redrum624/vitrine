@@ -181,7 +181,7 @@ describe('Canvas.loadImage — mid-flight setRawDecodeOptions race (pre-decode)'
     (checkpointService.getCheckpoints as jest.Mock).mockReturnValue([{ id: 1 }]);
   });
 
-  it("does not let a superseded image's saved decode options land after a newer image already set its own", async () => {
+  it("bails a superseded load before it decodes, and persisted per-photo decode options never reach the store", async () => {
     // Decode options now arrive as part of the single full-edit-state read (getSavedEditState).
     const stateFor = (opts: RawDecodeOptions) => ({ version: 1, modules: {}, rawDecodeOptions: opts });
     let resolveA: (state: unknown) => void = () => {};
@@ -208,18 +208,19 @@ describe('Canvas.loadImage — mid-flight setRawDecodeOptions race (pre-decode)'
     await Promise.resolve();
     rerender(<Canvas onFitWindow={() => {}} onActualSize={() => {}} onZoomIn={() => {}} onZoomOut={() => {}} zoom={1} currentImage={IMG_B} />);
 
-    // Flush B's (fast) load through to completion — B's saved options land in the store.
+    // Flush B's (fast) load through to completion. Every RAW decodes one fixed way now, so B's
+    // persisted options (from an older build) are ignored — the store holds the defaults.
     await new Promise((r) => setTimeout(r, 0));
     await new Promise((r) => setTimeout(r, 0));
-    expect(useAppStore.getState().rawDecodeOptions).toEqual(B_OPTIONS);
+    expect(useAppStore.getState().rawDecodeOptions).toEqual(DEFAULT_RAW_DECODE_OPTIONS);
 
     // Now resolve A's stale getSavedEditState call.
     resolveA(stateFor(A_OPTIONS));
     await new Promise((r) => setTimeout(r, 0));
     await new Promise((r) => setTimeout(r, 0));
 
-    // A's (stale) options must NOT have overwritten B's — the guard bails before the write.
-    expect(useAppStore.getState().rawDecodeOptions).toEqual(B_OPTIONS);
+    // A's stale resolution changes nothing — the guard bails before any write.
+    expect(useAppStore.getState().rawDecodeOptions).toEqual(DEFAULT_RAW_DECODE_OPTIONS);
     // And A's decode must never even have been requested — the guard returns before
     // reaching imageService.loadImage at all.
     expect((imageService.loadImage as jest.Mock).mock.calls.map((c) => c[0])).not.toContain(IMG_A.path);

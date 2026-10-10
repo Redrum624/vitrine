@@ -115,8 +115,9 @@ describe('Canvas.loadImage — persisted edits apply before the first pass', () 
     // Restore is seeded with the fetched state at the decoded dimensions.
     expect(editPersistenceService.restoreState).toHaveBeenCalledWith(EDIT_STATE, 4000, 3000, IMG_A.path);
 
-    // Decode options came from the same single read.
-    expect(useAppStore.getState().rawDecodeOptions).toEqual(AHD_RECON);
+    // Persisted per-photo decode options (from an older build) are ignored: every RAW decodes
+    // one fixed way.
+    expect(useAppStore.getState().rawDecodeOptions).toEqual(DEFAULT_RAW_DECODE_OPTIONS);
 
     // No redundant second pass: the post-load triggerReprocessing is gone.
     expect(useAppStore.getState().processingVersion).toBe(0);

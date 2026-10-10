@@ -1,16 +1,16 @@
 /**
- * Q3 item 1: a batch run must decode each RAW with ITS OWN persisted decode options, not the
- * STORE's current options (which belong to whatever image the user has open). BatchProcessingService
- * now decodes via ImageService.decodeForExport (side-effect-free, per-image option resolution) rather
- * than loadImage (store options). This test drives a real two-image batch job through the public API
- * and spies the decode IPC to prove each path decoded with its own options.
+ * A batch run decodes every RAW the one fixed way the editor does (the RAW Decode panel and
+ * per-photo decode options were removed). Options an older build persisted per photo must be
+ * ignored, so a batch export can never disagree with what the editor shows. BatchProcessingService
+ * decodes via ImageService.decodeForExport (side-effect-free). This test drives a real two-image
+ * batch job through the public API and spies the decode IPC.
  */
 import { batchProcessingService, BatchProcessingSettings } from '../services/BatchProcessingService';
 import { exportService } from '../services/ExportService';
 import { editPersistenceService } from '../services/EditPersistenceService';
 import { imageService } from '../services/ImageService';
 import { ImageFileInfo } from '../services/FileSystemService';
-import { RawDecodeOptions } from '../types/electron';
+import { DEFAULT_RAW_DECODE_OPTIONS, RawDecodeOptions } from '../types/electron';
 
 const OPTS_A: RawDecodeOptions = { demosaic: 'ahd', highlightMode: 'off' };
 const OPTS_B: RawDecodeOptions = { demosaic: 'dcb', highlightMode: 'reconstruct' };
@@ -50,7 +50,7 @@ beforeEach(() => {
     storeGet: jest.fn(),
     storeSet: jest.fn(),
   };
-  // No image open → decodeForExport resolves BOTH files via their persisted per-image options.
+  // No image open, and each file carries options an older build persisted — to be ignored.
   jest.spyOn(imageService, 'getCurrentImage').mockReturnValue(null);
   jest.spyOn(editPersistenceService, 'getSavedRawDecodeOptions').mockImplementation(
     async (path: string) => (path === '/a.orf' ? OPTS_A : OPTS_B),
@@ -66,8 +66,8 @@ afterEach(() => {
   jest.restoreAllMocks();
 });
 
-describe('BatchProcessingService — per-image RAW decode options', () => {
-  it('decodes each batch image with its OWN persisted options (not the store options)', async () => {
+describe('BatchProcessingService — fixed RAW decode', () => {
+  it('decodes every batch image with the default options, ignoring persisted per-photo options', async () => {
     const jobId = batchProcessingService.createBatchJob(
       'per-image-opts',
       [rawImage('/a.orf', 'a.orf'), rawImage('/b.orf', 'b.orf')],
@@ -77,10 +77,8 @@ describe('BatchProcessingService — per-image RAW decode options', () => {
 
     await batchProcessingService.startBatchJob(jobId);
 
-    // Each path hit the decode IPC with ITS OWN options — proof the batch no longer smears one
-    // image's options across the whole run.
-    expect(decodeApi()).toHaveBeenCalledWith('/a.orf', OPTS_A);
-    expect(decodeApi()).toHaveBeenCalledWith('/b.orf', OPTS_B);
+    expect(decodeApi()).toHaveBeenCalledWith('/a.orf', DEFAULT_RAW_DECODE_OPTIONS);
+    expect(decodeApi()).toHaveBeenCalledWith('/b.orf', DEFAULT_RAW_DECODE_OPTIONS);
 
     // And the job completed cleanly (both images exported).
     const job = batchProcessingService.getJobs().find((j) => j.id === jobId);

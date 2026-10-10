@@ -18,7 +18,7 @@ import { CropModuleComponent } from '../Modules/CropModuleComponent';
 import { LocalAdjustmentsModuleComponent } from '../Modules/LocalAdjustmentsModuleComponent';
 import { LensCorrectionsModuleComponent } from '../Modules/LensCorrectionsModuleComponent';
 import { HistoryPanel } from './HistoryPanel';
-import { RawDecodePanel } from './RawDecodePanel';
+import { HighlightRecoveryControl } from './HighlightRecoveryControl';
 import EnhanceModuleComponent from '../Modules/EnhanceModuleComponent';
 import { ModuleCardHeader } from '../Controls/ModuleCardHeader';
 import type { ModuleCardActions } from '../Controls/moduleCardActions';
@@ -44,7 +44,7 @@ import { choosePreviewPath } from '../../services/previewRouting';
 interface AdjustmentPanelProps {
   selectedModule?: string | null;
   // Required so tsc guarantees App threads its live selection down to the
-  // RAW Decode panel (which self-gates to RAW files). null = no image open.
+  // Highlight recovery control (which self-gates to RAW files). null = no image open.
   currentImage: ImageFileInfo | null;
 }
 
@@ -729,10 +729,6 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
           module scrolls inside this body, never clipped. */}
       <div className="flex-1 overflow-y-auto" style={{ padding: '0' }}>
 
-        {/* RAW Decode — pinned above the module card; self-gates to RAW images only,
-            so it's a no-op render for non-RAW files. */}
-        <RawDecodePanel currentImage={currentImage} />
-
         {/* Unified module card (Glass · Sectioned §4): header chrome + body.
             Entrance stagger (§5): the module card rises +70ms after the histogram
             card (0ms). This div lives OUTSIDE the per-module remount key
@@ -781,6 +777,8 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
               onParamsChange={(params) => handleModuleParamsChange('basicadj', params)}
               onRegisterActions={setModuleActions}
             />
+            {/* RAW only (self-gated): post-decode highlight reconstruction. */}
+            <HighlightRecoveryControl currentImage={currentImage} />
           </div>
         )}
 

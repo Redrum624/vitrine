@@ -16,7 +16,6 @@ import { imageCacheService } from './ImageCacheService';
 import { editPersistenceService } from './EditPersistenceService';
 import { useAppStore } from '../stores/appStore';
 import { type RawDecodeOptions } from '../types/electron';
-import { saveRawDecodeDefaults } from '../utils/rawDecodeDefaultsStorage';
 import { RAW_EXTENSIONS_DOTTED } from '../utils/rawExtensions';
 
 export interface RawImageData {
@@ -224,11 +223,6 @@ export class RawImageService {
       // (scheduleSave writes serialize(), which embeds rawDecodeOptions into the edit state).
       store.setRawDecodeOptions(options);
       editPersistenceService.scheduleSave();
-      // A successful user-initiated re-decode is the commit point for the
-      // SESSION-CROSSING default too: RAW files with no saved per-image options
-      // will now open with these settings (utils/rawDecodeDefaultsStorage.ts).
-      saveRawDecodeDefaults(options);
-
       // Clear cached module results (base changed) and reprocess so the existing edits re-apply.
       imageProcessingPipeline.clearCache();
       store.triggerReprocessing();
@@ -260,7 +254,7 @@ export class RawImageService {
         // This is the L2 tier behind the in-memory L1 base cache (ImageCacheService), which
         // ImageService.loadImage already checked first — read order is L1 → L2 → LibRaw. The
         // progressive PREVIEW never routes through here, so it is never disk-cached.
-        let result: { data: ArrayBuffer; width: number; height: number; channels?: number; bitDepth?: number } | null = null;
+        let result: { data: ArrayBuffer; width: number; height: number; channels?: number; bitDepth?: number; cameraMatched?: boolean } | null = null;
         let fromDiskCache = false;
         if (window.electronAPI.baseCacheRead) {
           try {
@@ -299,7 +293,10 @@ export class RawImageService {
         // INTERACTIVE only: a batch export of 50 RAWs (or an export decode) must not churn the
         // ~2GB disk LRU with one-shot decodes it will never reopen. Disk READS stay enabled for
         // everyone (above) — a coherent, free win — but only the Canvas open path WRITES through.
-        if (interactive && !fromDiskCache && result.bitDepth === 16 && window.electronAPI.baseCacheWrite) {
+        // A requested-but-failed camera match is a transient degradation too: persisting it under
+        // the matched key would serve the unmatched look on every later open instead of retrying.
+        const matchFailed = !!decodeOptions?.cameraMatch && result.cameraMatched === false;
+        if (interactive && !fromDiskCache && !matchFailed && result.bitDepth === 16 && window.electronAPI.baseCacheWrite) {
           try {
             void window.electronAPI.baseCacheWrite(filePath, decodeOptions, {
               data: result.data,

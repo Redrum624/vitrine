@@ -125,7 +125,9 @@ export interface ElectronAPI {
 
   // File system
   readFile: (filePath: string) => Promise<Buffer>;
-  decodeRawFile: (filePath: string, options?: RawDecodeOptions) => Promise<{ data: ArrayBuffer; width: number; height: number; channels: number; bitDepth?: number }>;
+  /** `cameraMatched` is false when camera match was requested but could not be applied (the
+   *  base is then the plain auto-brightened decode — never cached under the matched key). */
+  decodeRawFile: (filePath: string, options?: RawDecodeOptions) => Promise<{ data: ArrayBuffer; width: number; height: number; channels: number; bitDepth?: number; cameraMatched?: boolean }>;
   /** Fast progressive-open preview: the embedded JPEG, oriented + downscaled to fit maxDim
    *  (8-bit RGB). Rejects when no embedded preview exists. See ImageService progressive open. */
   decodeRawPreview: (filePath: string, maxDim?: number) => Promise<{ data: ArrayBuffer; width: number; height: number; channels: number; bitDepth?: number }>;

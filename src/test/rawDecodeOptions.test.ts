@@ -6,7 +6,6 @@ import { checkpointService } from '../services/CheckpointService';
 import { imageProcessingPipeline } from '../services/ImageProcessingPipeline';
 import { imageCacheService } from '../services/ImageCacheService';
 import { DEFAULT_RAW_DECODE_OPTIONS, RawDecodeOptions } from '../types/electron';
-import { saveRawDecodeDefaults } from '../utils/rawDecodeDefaultsStorage';
 import type { ImageData as ServiceImageData } from '../services/ImageService';
 
 const AHD_RECON: RawDecodeOptions = { demosaic: 'ahd', highlightMode: 'reconstruct' };
@@ -213,7 +212,7 @@ describe('RawImageService.reDecode', () => {
   });
 });
 
-describe('ImageService.decodeForExport — per-file RAW decode options', () => {
+describe('ImageService.decodeForExport — one fixed RAW decode', () => {
   const px = new Uint16Array(4 * 2 * 3).fill(32768); // 3ch 16-bit native decode payload
 
   beforeEach(() => {
@@ -234,52 +233,27 @@ describe('ImageService.decodeForExport — per-file RAW decode options', () => {
 
   const api = () => (window as unknown as { electronAPI: { decodeRawFile: jest.Mock } }).electronAPI;
 
-  it('uses the store options when exporting the CURRENT image', async () => {
+  // The RAW Decode panel and per-photo decode options were removed: every RAW decodes one fixed
+  // way, so an export can never disagree with what the editor shows.
+  it('decodes the CURRENT image with the default options even if the store holds others', async () => {
     jest.spyOn(imageService, 'getCurrentImage').mockReturnValue({
       width: 4, height: 2, data: new Float32Array(4 * 2 * 4),
       fileName: 'photo.orf', filePath: '/photo.orf', isRaw: true,
     });
     useAppStore.getState().setRawDecodeOptions(AHD_RECON);
-    const getSaved = jest.spyOn(editPersistenceService, 'getSavedRawDecodeOptions');
 
     await imageService.decodeForExport('/photo.orf');
 
-    expect(api().decodeRawFile).toHaveBeenCalledWith('/photo.orf', AHD_RECON);
-    expect(getSaved).not.toHaveBeenCalled();
+    expect(api().decodeRawFile).toHaveBeenCalledWith('/photo.orf', DEFAULT_RAW_DECODE_OPTIONS);
   });
 
-  it('uses the persisted per-image options when exporting a NON-current file', async () => {
-    jest.spyOn(imageService, 'getCurrentImage').mockReturnValue({
-      width: 4, height: 2, data: new Float32Array(4 * 2 * 4),
-      fileName: 'photo.orf', filePath: '/photo.orf', isRaw: true,
-    });
-    jest.spyOn(editPersistenceService, 'getSavedRawDecodeOptions').mockResolvedValue(AHD_RECON);
-
-    await imageService.decodeForExport('/other.orf');
-
-    expect(api().decodeRawFile).toHaveBeenCalledWith('/other.orf', AHD_RECON);
-  });
-
-  it('falls back to the USER decode defaults for a non-current file with nothing persisted', async () => {
-    // v1.31.0: the fallback is the user's saved decode defaults (main-process
-    // durable store), not the factory constants. Wire the storeGet/storeSet
-    // mocks to a real in-memory map so a save round-trips.
-    const mem: Record<string, unknown> = {};
-    const eapi = (window as unknown as { electronAPI: Record<string, jest.Mock> }).electronAPI;
-    eapi.storeGet = jest.fn(async (k: string) => (k in mem ? mem[k] : null));
-    eapi.storeSet = jest.fn(async (k: string, v: unknown) => { mem[k] = v; return true; });
+  it('ignores options an older build persisted for a NON-current file', async () => {
     jest.spyOn(imageService, 'getCurrentImage').mockReturnValue(null);
-    jest.spyOn(editPersistenceService, 'getSavedRawDecodeOptions').mockResolvedValue(null);
+    const getSaved = jest.spyOn(editPersistenceService, 'getSavedRawDecodeOptions').mockResolvedValue(AHD_RECON);
 
     await imageService.decodeForExport('/other.orf');
+
     expect(api().decodeRawFile).toHaveBeenCalledWith('/other.orf', DEFAULT_RAW_DECODE_OPTIONS);
-
-    saveRawDecodeDefaults(AHD_RECON);
-    await Promise.resolve(); // fire-and-forget storeSet lands
-    await imageService.decodeForExport('/other.orf');
-    expect(api().decodeRawFile).toHaveBeenLastCalledWith(
-      '/other.orf',
-      { ...AHD_RECON, cameraMatch: !!AHD_RECON.cameraMatch },
-    );
+    expect(getSaved).not.toHaveBeenCalled();
   });
 });
