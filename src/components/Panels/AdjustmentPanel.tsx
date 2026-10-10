@@ -752,7 +752,7 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
               18px bottom padding (design spec card body: 14 16 18) lives HERE,
               once, so the last control never sits flush against the card edge —
               applied on the shared container instead of 10 individual wrappers. */}
-          <div className="pb-[18px]">
+          <div key={selectedModule ?? 'none'} className="pb-[18px] vt-fade-in">
 
         {/* Crop Module */}
         {cropModule && selectedModule === 'crop' && (() => {

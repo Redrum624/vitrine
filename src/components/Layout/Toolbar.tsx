@@ -117,6 +117,9 @@ const toggleActive: CSSProperties = {
  */
 const COLLAPSE_INNERWIDTH_FALLBACK = 1745;
 
+/** Width the filename label keeps before the bar's secondary actions fold away. */
+const LEADING_RESERVE = 240;
+
 interface OverflowItem {
   label: string;
   onClick?: () => void;
@@ -243,13 +246,23 @@ export function Toolbar({ onExport, onPrint, onBatchProcess, onUndo: _onUndo, on
         return;
       }
       if (!collapsed) fullWidthRef.current = actions.scrollWidth; // cache only the expanded width
-      const leadingWidth = leadingRef.current?.getBoundingClientRect().width ?? 0;
-      const available = barWidth - leadingWidth - 32; // bar padding + breathing room
+      // The leading label shrinks (and ellipsizes) under pressure, so measure its
+      // NATURAL width — and give it up to LEADING_RESERVE px before the actions
+      // fold: secondary actions go into "⋯" before the filename truncates.
+      const leadingEl = leadingRef.current;
+      const leadingChild = leadingEl?.firstElementChild as HTMLElement | null | undefined;
+      const leadingNatural = Math.max(leadingEl?.scrollWidth ?? 0, leadingChild?.scrollWidth ?? 0);
+      const available = barWidth - Math.min(leadingNatural, LEADING_RESERVE) - 32; // bar padding + breathing room
       setCollapsed((fullWidthRef.current || actions.scrollWidth) > available);
     };
     measure();
+    // Re-measure when the bar resizes AND when its contents change size (the
+    // filename label appears after an image opens; actions grow/shrink with
+    // the sideways hint) — neither changes the bar's own size.
     const ro = new ResizeObserver(measure);
-    if (barRef.current) ro.observe(barRef.current);
+    for (const el of [barRef.current, leadingRef.current, actionsRef.current]) {
+      if (el) ro.observe(el);
+    }
     window.addEventListener('resize', measure);
     return () => {
       ro.disconnect();
