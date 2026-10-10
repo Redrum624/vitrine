@@ -1,27 +1,25 @@
 /**
- * Unit tests for the filmstrip dock thumbnail selection frame (blue intensity
- * hierarchy, ported to the Glass · Sectioned dock in Task 6).
+ * Unit tests for the filmstrip thumbnail selection frame (Safelight).
  *
- * One visual language: the current canvas image gets a strong 2px accent border
- * + an 18px accent glow; other multi-selected images get a dimmed blue border
- * (no glow); unselected thumbnails get a faint rgba(255,255,255,.09) border of
- * the SAME width so nothing shifts size. The old white border / white top-right
- * dot / blue check badge are gone.
+ * One neutral visual language: the current canvas image gets a solid 2px
+ * near-white ring; other multi-selected images a half-strength ring; unselected
+ * thumbnails a faint rgba(255,255,255,.09) border of the SAME width so nothing
+ * shifts size. No glows anywhere — the photos carry the colour.
  */
 import { getThumbFrameStyle } from '../components/Panels/ThumbnailPanel';
 
 describe('getThumbFrameStyle', () => {
-  it('current canvas image → strong accent border + 18px glow', () => {
+  it('current canvas image → solid near-white ring, no glow', () => {
     const s = getThumbFrameStyle(true, false);
     expect(s.borderWidth).toBe('2px');
-    expect(s.borderColor).toBe('#3b82f6');
-    expect(s.boxShadow).toBe('0 0 18px rgba(59, 130, 246, 0.45)');
+    expect(s.borderColor).toBe('#ececef');
+    expect(s.boxShadow).toBe('none');
   });
 
-  it('in multi-select but not current → dimmed blue border, no glow', () => {
+  it('in multi-select but not current → half-strength ring, no glow', () => {
     const s = getThumbFrameStyle(false, true);
     expect(s.borderWidth).toBe('2px');
-    expect(s.borderColor).toBe('rgba(59, 130, 246, 0.45)');
+    expect(s.borderColor).toBe('rgba(236, 236, 239, 0.45)');
     expect(s.boxShadow).toBe('none');
   });
 

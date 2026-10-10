@@ -1,8 +1,9 @@
 /**
- * Glass · Sectioned — App shell (Task 5): full-bleed workspace, floating chrome,
- * alignment axis. jsdom-friendly unit coverage for the pieces that don't need a
- * live layout: the axis store field, the derived photo-region insets, the
- * filename-chip composer, and the Toolbar's Auto All primary.
+ * Safelight — docked App shell: title bar, command bar, canvas, docked
+ * inspector + tool strip, filmstrip and status bar. jsdom-friendly unit
+ * coverage for the pieces that don't need a live layout: the axis store field,
+ * the photo-region insets, the filename label composers, and the command
+ * bar's Auto All primary + responsive collapse.
  */
 import { render, screen, fireEvent, within } from '@testing-library/react';
 import { useAppStore } from '../stores/appStore';
@@ -10,16 +11,13 @@ import { Toolbar } from '../components/Layout/Toolbar';
 import { electronService } from '../services/ElectronService';
 import {
   formatFilenameChip,
+  formatFilenameLabel,
+  INSPECTOR_WIDTH,
   PHOTO_INSET_LEFT,
   PHOTO_INSET_RIGHT,
-  PHOTO_INSET_RIGHT_NO_COLUMN,
   PHOTO_INSET_TOP,
   PHOTO_INSET_BOTTOM,
-  PHOTO_RAIL_CLEARANCE,
-  RAIL_BOX_WIDTH,
-  RAIL_OFFSET,
-  RIGHT_COLUMN_OFFSET,
-  RIGHT_COLUMN_WIDTH,
+  TOOL_STRIP_WIDTH,
   getPhotoInsetRight,
 } from '../layout/photoRegion';
 
@@ -39,43 +37,28 @@ describe('alignment axis store field', () => {
   });
 });
 
-describe('photo-region insets', () => {
-  it('are positive and leave a photo region wider than it is inset on the left', () => {
+describe('photo-region insets (docked shell)', () => {
+  it('are positive and equal on every side — the chrome is docked, so the photo only needs breathing room', () => {
     for (const inset of [PHOTO_INSET_LEFT, PHOTO_INSET_RIGHT, PHOTO_INSET_TOP, PHOTO_INSET_BOTTOM]) {
       expect(inset).toBeGreaterThan(0);
+      expect(inset).toBe(PHOTO_INSET_LEFT);
     }
-    // At the 1920px reference the region stays comfortably wide.
-    expect(1920 - PHOTO_INSET_LEFT - PHOTO_INSET_RIGHT).toBeGreaterThan(600);
   });
 
-  it('derive the right inset so it fully clears the floating right column', () => {
-    // Column offset (88) + width (392) + 8px clearance = 488: the photo region's
-    // right edge stays LEFT of the column's left edge at every window width, so a
-    // width-filling photo never sits under the column (spec §3 "nothing overlaps").
-    expect(PHOTO_INSET_RIGHT).toBe(RIGHT_COLUMN_OFFSET + RIGHT_COLUMN_WIDTH + 8);
-    expect(PHOTO_INSET_RIGHT).toBeGreaterThan(RIGHT_COLUMN_OFFSET + RIGHT_COLUMN_WIDTH);
+  it('leave a wide photo region at 1920px even with the inspector and tool strip docked open', () => {
+    const canvasWidth = 1920 - INSPECTOR_WIDTH - TOOL_STRIP_WIDTH;
+    expect(canvasWidth - PHOTO_INSET_LEFT - PHOTO_INSET_RIGHT).toBeGreaterThan(1200);
   });
 
-  describe('getPhotoInsetRight (Task 4/R4 — recenters when the right column closes)', () => {
-    it('uses the full column-clearing inset when the column is visible', () => {
-      expect(getPhotoInsetRight(true)).toBe(PHOTO_INSET_RIGHT);
-    });
+  it('getPhotoInsetRight is the same whether or not the inspector is open (it is outside the canvas area)', () => {
+    expect(getPhotoInsetRight(true)).toBe(PHOTO_INSET_RIGHT);
+    expect(getPhotoInsetRight(false)).toBe(PHOTO_INSET_RIGHT);
+  });
+});
 
-    it('shrinks to the rail-clearing inset when the column is hidden', () => {
-      expect(getPhotoInsetRight(false)).toBe(PHOTO_INSET_RIGHT_NO_COLUMN);
-      // Strictly smaller than the column-clearing inset — the photo recenters
-      // (more of the workspace becomes photo region) once the column closes.
-      expect(PHOTO_INSET_RIGHT_NO_COLUMN).toBeLessThan(PHOTO_INSET_RIGHT);
-    });
-
-    it('the no-column inset still fully clears the floating icon rail (no overlap)', () => {
-      // Rail's left edge sits RAIL_OFFSET + RAIL_BOX_WIDTH from the workspace's
-      // right edge; the photo's right edge (PHOTO_INSET_RIGHT_NO_COLUMN) must sit
-      // AT LEAST that far in, plus PHOTO_RAIL_CLEARANCE of breathing room.
-      expect(PHOTO_INSET_RIGHT_NO_COLUMN).toBe(RAIL_OFFSET + RAIL_BOX_WIDTH + PHOTO_RAIL_CLEARANCE);
-      const railLeftEdge = RAIL_OFFSET + RAIL_BOX_WIDTH;
-      expect(PHOTO_INSET_RIGHT_NO_COLUMN - railLeftEdge).toBeGreaterThanOrEqual(18);
-    });
+describe('formatFilenameLabel', () => {
+  it('composes `name · i of N` (zoom lives in the command bar\'s zoom cluster)', () => {
+    expect(formatFilenameLabel({ name: 'download.png', current: 1, total: 2 })).toBe('download.png · 1 of 2');
   });
 });
 
@@ -93,7 +76,7 @@ describe('formatFilenameChip', () => {
   });
 });
 
-describe('Toolbar (floating pill)', () => {
+describe('Toolbar (docked command bar)', () => {
   beforeEach(() => {
     jest.spyOn(electronService, 'isElectron').mockReturnValue(true);
   });
@@ -107,7 +90,7 @@ describe('Toolbar (floating pill)', () => {
     const autoAll = screen.getByRole('button', { name: /auto all/i });
     expect(autoAll).toHaveClass('glass-pill-primary');
     // Solid accent fill + dark glyph text = the primary treatment.
-    expect(autoAll).toHaveStyle({ background: 'var(--accent)', color: '#0b0b0c' });
+    expect(autoAll).toHaveStyle({ background: 'var(--accent)', color: 'var(--accent-ink)' });
   });
 
   it('keeps the zoom cluster readout in sync with the zoom prop', () => {
@@ -176,7 +159,7 @@ describe('Toolbar (floating pill)', () => {
   });
 });
 
-describe('Toolbar responsive collapse (Develop pill overflow menu)', () => {
+describe('Toolbar responsive collapse (Develop command bar overflow menu)', () => {
   beforeEach(() => {
     jest.spyOn(electronService, 'isElectron').mockReturnValue(true);
     useAppStore.setState({ viewMode: 'develop' });

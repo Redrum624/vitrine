@@ -137,14 +137,14 @@ describe('AdjustmentPanel module-card chrome', () => {
 });
 
 // ── Histogram glass card ─────────────────────────────────────────────────────
-describe('HistogramPanel glass card', () => {
+describe('HistogramPanel inspector section', () => {
   afterEach(cleanup);
 
-  it('renders the HISTOGRAM header with inline R · G · B averages', () => {
-    const { container } = render(<HistogramPanel />);
-    expect(screen.getByText('HISTOGRAM')).toBeInTheDocument();
+  it('renders the Histogram header with inline R · G · B averages', () => {
+    render(<HistogramPanel />);
+    expect(screen.getByText('Histogram')).toBeInTheDocument();
     expect(screen.getByTestId('histogram-averages')).toBeInTheDocument();
-    // Restyled as a glass card (radius 20 surface).
-    expect(container.querySelector('.glass-card')).not.toBeNull();
+    // A flat, docked inspector section (hairline below), not a floating card.
+    expect(screen.getByRole('region', { name: 'Histogram' })).toBeInTheDocument();
   });
 });

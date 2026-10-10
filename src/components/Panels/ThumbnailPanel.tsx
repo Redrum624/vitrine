@@ -5,7 +5,6 @@ import { ImageFileInfo } from '../../services/FileSystemService';
 import { useAppStore } from '../../stores/appStore';
 import { logger } from '../../utils/Logger';
 import { ChipButton } from '../Controls/ChipButton';
-import { DOCK_BOTTOM } from '../../layout/photoRegion';
 import { filterImagesByRating, handleImageClick, isRawImage } from '../../utils/gallerySelection';
 import { getDisplayFormat } from '../../utils/imageFormat';
 import { keyboardEventBlocked } from '../../utils/keyboardScope';
@@ -40,25 +39,24 @@ export function evictOldestThumbnails(map: Map<string, string>, max = MAX_THUMBN
 }
 
 /**
- * Selection frame for a dock thumbnail — ONE visual language (blue intensity
- * hierarchy). The current canvas image gets the strongest treatment (2px accent
- * outline + an 18px accent glow, per the Glass · Sectioned dock spec); other
- * multi-selected images a dimmed blue border; the rest a faint
- * rgba(255,255,255,.09) border — all the SAME width so thumbnails never shift
- * size (their width already differs by selection state; see ThumbnailPanel).
+ * Selection frame for a filmstrip thumbnail — one neutral language: the photo
+ * on the canvas gets a solid near-white ring, other multi-selected photos a
+ * half-strength ring, the rest a faint rgba(255,255,255,.09) edge. No glow —
+ * the photos carry the colour. All the SAME width so thumbnails never shift
+ * size (their width already differs by aspect; see ThumbnailPanel).
  */
 export function getThumbFrameStyle(isCurrent: boolean, inSelection: boolean): React.CSSProperties {
   if (isCurrent) {
     return {
       borderWidth: '2px',
-      borderColor: '#3b82f6',
-      boxShadow: '0 0 18px rgba(59, 130, 246, 0.45)',
+      borderColor: '#ececef',
+      boxShadow: 'none',
     };
   }
   if (inSelection) {
     return {
       borderWidth: '2px',
-      borderColor: 'rgba(59, 130, 246, 0.45)',
+      borderColor: 'rgba(236, 236, 239, 0.45)',
       boxShadow: 'none',
     };
   }
@@ -74,10 +72,10 @@ export function getThumbFrameStyle(isCurrent: boolean, inSelection: boolean): Re
  * 66/114×88 tiles + object-cover cropped portraits to a horizontal band and
  * landscapes (when current) to a sliver. Until a thumb loads and reports its
  * aspect, tiles use the neutral fallback width. */
-const DOCK_THUMB_HEIGHT = 88;
-const DOCK_THUMB_WIDTH_FALLBACK = 114;
-const DOCK_THUMB_WIDTH_MIN = 56;
-const DOCK_THUMB_WIDTH_MAX = 132;
+const DOCK_THUMB_HEIGHT = 64;
+const DOCK_THUMB_WIDTH_FALLBACK = 86;
+const DOCK_THUMB_WIDTH_MIN = 40;
+const DOCK_THUMB_WIDTH_MAX = 96;
 
 /** Aspect-derived tile width, clamped so extreme panoramas/verticals stay usable. */
 export function dockThumbWidth(aspect: number | undefined): number {
@@ -102,16 +100,15 @@ export const WHEEL_IDLE_MS = 250;
 // Base layout for the dock's chevron buttons — interactive :hover/:disabled states
 // come from .glass-pill-btn in index.css (same idiom as Toolbar.tsx / IconSidebar.tsx).
 const chevronBtn: CSSProperties = {
-  width: '30px',
-  height: '30px',
+  width: '28px',
+  height: '28px',
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
-  borderRadius: '9px',
+  borderRadius: '5px',
   border: '1px solid transparent',
   background: 'transparent',
   color: 'var(--glass-text-chrome-idle)',
-  cursor: 'pointer',
   flexShrink: 0,
 };
 
@@ -157,7 +154,6 @@ export function ThumbnailPanel({
   const setSelection = useAppStore((s) => s.setSelection);
   const toggleImageSelection = useAppStore((s) => s.toggleImageSelection);
   const ratingFilterRaw = useAppStore((s) => s.ratingFilter);
-  const alignmentAxisX = useAppStore((s) => s.alignmentAxisX);
   const setViewMode = useAppStore((s) => s.setViewMode);
   const setImageDimensions = useAppStore((s) => s.setImageDimensions);
   // The rating filter now lives in the store (shared with the footer's segmented
@@ -482,26 +478,22 @@ export function ThumbnailPanel({
 
   return (
     <div
-      className="absolute no-select"
+      className="no-select"
+      data-testid="filmstrip"
       style={{
-        bottom: DOCK_BOTTOM,
-        left: alignmentAxisX ?? '50%',
-        transform: 'translateX(-50%)',
-        zIndex: 30,
-        maxWidth: 'calc(100% - 48px)',
+        flex: 'none',
+        minWidth: 0,
+        background: 'var(--vt-chrome)',
+        borderTop: '1px solid var(--vt-line-soft)',
       }}
     >
-    {/* Inner surface carries the entrance rise (§5: dock +120ms). It is a SEPARATE
-        node from the axis-centering wrapper above because dcRise animates
-        `transform` (translateY 10→0) and, filling both, would otherwise clobber and
-        freeze the outer translateX(-50%) centering. */}
+    {/* Docked filmstrip: chevrons, a scrolling strip that fills the width, the
+        multi-export action and the Gallery shortcut + position count. */}
     <div
-      className="glass-chrome dc-rise flex items-center no-select"
+      className="vt-fade-in flex items-center no-select"
       style={{
-        borderRadius: 'var(--radius-dock)',
-        padding: '10px 14px',
-        gap: '10px',
-        animationDelay: '120ms',
+        padding: '8px 10px',
+        gap: '8px',
       }}
     >
       {/* Chevron: previous image */}
@@ -526,12 +518,12 @@ export function ThumbnailPanel({
           // be the tiles' offsetParent — otherwise offsets resolve against the
           // absolute dock wrapper and include the chevron/padding widths.
           position: 'relative',
-          scrollbarWidth: 'thin',
-          scrollbarColor: 'var(--gray-700) transparent',
-          maxWidth: '640px',
+          scrollbarWidth: 'none',
+          flex: '1 1 auto',
+          minWidth: 0,
         }}
       >
-        <div className="flex" style={{ gap: '8px' }}>
+        <div className="flex" style={{ gap: '6px', padding: '2px 0' }}>
           {filteredImages.map((image) => {
             const isSelected = selectedImage?.id === image.id;
             const inSelection = selectedSet.has(image.id);
@@ -552,8 +544,8 @@ export function ThumbnailPanel({
                 style={{
                   width: dockThumbWidth(thumbAspects.get(image.id)),
                   height: DOCK_THUMB_HEIGHT,
-                  borderRadius: '10px',
-                  backgroundColor: 'var(--gray-800)',
+                  borderRadius: '5px',
+                  backgroundColor: 'var(--vt-field)',
                   borderStyle: 'solid',
                   ...getThumbFrameStyle(isSelected, inSelection)
                 }}
@@ -576,7 +568,7 @@ export function ThumbnailPanel({
                     src={thumbnail}
                     alt={image.name}
                     className="w-full h-full object-cover rounded"
-                    style={{ borderRadius: '9px' }}
+                    style={{ borderRadius: '3px' }}
                     draggable={false}
                     onLoad={(e) => {
                       // Free byproduct of the decode the browser already performs to
@@ -636,7 +628,7 @@ export function ThumbnailPanel({
                     className="absolute"
                     style={{
                       bottom: '2px', left: '4px', pointerEvents: 'none',
-                      fontSize: '9px', letterSpacing: '1px', color: '#f5c518',
+                      fontSize: '9px', letterSpacing: '1px', color: 'var(--accent)',
                       textShadow: '0 1px 2px rgba(0,0,0,0.9)', lineHeight: '12px',
                     }}
                   >
@@ -664,16 +656,16 @@ export function ThumbnailPanel({
       {selectedCount >= 2 && (
         <button
           onClick={() => onExportSelected?.()}
-          className="flex items-center gap-1 whitespace-nowrap"
+          className="glass-pill-primary flex items-center gap-1 whitespace-nowrap"
           style={{
-            padding: '7px 11px',
-            borderRadius: 9,
-            fontSize: 11.5,
+            height: 28,
+            padding: '0 11px',
+            borderRadius: 5,
+            fontSize: 12,
             fontWeight: 600,
             background: 'var(--accent)',
-            color: '#0b0b0c',
+            color: 'var(--accent-ink)',
             border: '1px solid transparent',
-            cursor: 'pointer',
             flexShrink: 0,
           }}
           title="Export the selected images with the same settings"
@@ -683,11 +675,11 @@ export function ThumbnailPanel({
         </button>
       )}
 
-      <div style={{ width: '1px', height: `${DOCK_THUMB_HEIGHT - 12}px`, background: 'var(--glass-border)', flexShrink: 0 }} />
+      <div style={{ width: '1px', height: `${DOCK_THUMB_HEIGHT - 16}px`, background: 'var(--vt-line-soft)', flexShrink: 0 }} />
 
       {/* Gallery button — switches to the library grid (Task 7) — stacked above the "i / N" count. */}
       <div className="flex flex-col items-stretch" style={{ gap: '6px' }}>
-        <ChipButton dashed radius={10} onClick={() => setViewMode('gallery')} title="Open the gallery grid">
+        <ChipButton dashed onClick={() => setViewMode('gallery')} title="Open the gallery grid">
           <LayoutGrid className="w-3.5 h-3.5" style={{ marginRight: 6 }} />
           Gallery
         </ChipButton>
@@ -695,13 +687,9 @@ export function ThumbnailPanel({
           <div
             className="text-center"
             style={{
-              fontFamily: 'ui-monospace, monospace',
-              fontSize: 11,
-              padding: '5px 10px',
-              borderRadius: 6,
-              background: 'rgba(255,255,255,.04)',
-              border: '1px solid rgba(255,255,255,.1)',
-              color: 'var(--glass-text-secondary)',
+              fontSize: 11.5,
+              fontVariantNumeric: 'tabular-nums',
+              color: 'var(--glass-text-muted)',
             }}
           >
             {currentIndex + 1} / {filteredImages.length}

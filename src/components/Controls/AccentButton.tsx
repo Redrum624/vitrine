@@ -14,11 +14,11 @@ interface AccentButtonProps {
 }
 
 /**
- * Glass · Sectioned solid-accent primary action: bg var(--accent), text
- * #0b0b0c, 12.5px/700, radius 11, glow 0 2px 18px var(--accent-ring). This is
- * the modal-footer primary (Export, Apply, Create and Start Batch Job, ...) —
- * hover (translateY(-1px) + brightness) / press (scale .98) / disabled states
- * live in `.glass-modal-btn-primary` (src/index.css) so call sites don't each
+ * Safelight primary action: solid safelight amber, `--accent-ink` text,
+ * 30px tall, 12.5px/600, radius 6 — no glow, no lift. One per surface: the
+ * modal-footer primary (Export, Apply, Create and Start Batch Job, ...).
+ * Hover (brightness) / press (scale .98) / disabled states live in
+ * `.glass-modal-btn-primary` (src/index.css) so call sites don't each
  * restate bespoke JS hover state.
  */
 export function AccentButton({
@@ -39,11 +39,11 @@ export function AccentButton({
       disabled={disabled}
       className={`glass-modal-btn-primary inline-flex items-center justify-center gap-2 ${fullWidth ? 'w-full' : ''} ${className}`}
       style={{
-        padding: '9px 18px',
-        borderRadius: 11,
+        height: 30,
+        padding: '0 16px',
+        borderRadius: 6,
         fontSize: 12.5,
-        fontWeight: 700,
-        cursor: disabled ? 'not-allowed' : 'pointer',
+        fontWeight: 600,
         ...style,
       }}
     >

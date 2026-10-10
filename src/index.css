@@ -39,63 +39,129 @@
   --transition-normal: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   --transition-slow: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 
-  /* "Glass · Sectioned" redesign tokens (the Glass UI design spec, §2).
-     Accent derives from --primary-500 so it stays swappable; soft/ring are
-     the accent at 14%/35% alpha. Existing gray scale above stays untouched
-     for legacy surfaces until each module is ported. */
-  --accent: var(--primary-500);
-  --accent-soft: rgba(59, 130, 246, 0.14);
-  --accent-ring: rgba(59, 130, 246, 0.35);
+  /* ── Safelight ─────────────────────────────────────────────────────────
+     The docked, native-feeling UI. Neutral graphite surfaces separated by
+     hairlines (no blur, no glow, no floating cards) so the photo is the only
+     colour on screen, plus ONE warm accent — a darkroom safelight amber —
+     reserved for what you changed, the primary action, ratings and focus.
+     Surfaces step up in lightness: canvas → chrome → panel → raised. */
+  --vt-canvas: #121214;      /* photo surround */
+  --vt-chrome: #19191b;      /* title bar, toolbars, filmstrip, status bar */
+  --vt-panel: #1d1d20;       /* docked inspector, sidebars */
+  --vt-raised: #27272b;      /* buttons, selected rows */
+  --vt-popover: #232327;     /* menus, popovers, dialogs */
+  --vt-field: #141416;       /* inputs, segmented wells */
+  --vt-line: #2d2d32;        /* control borders */
+  --vt-line-soft: #242428;   /* panel dividers */
+  --vt-hover: rgba(255, 255, 255, 0.055);
+  --vt-press: rgba(255, 255, 255, 0.09);
+  --vt-text: #ececef;        /* 14.6:1 on panel */
+  --vt-text-2: #b4b4bb;      /* labels, 8.6:1 on panel */
+  --vt-text-3: #8c8c94;      /* meta, 5.0:1 on panel */
 
-  /* Glass surfaces: cards (module/histogram panels) vs. chrome (toolbar,
-     icon rail, filmstrip dock — smaller floating pills). */
-  --glass-bg: rgba(15, 15, 19, 0.78);
-  --glass-bg-chrome: rgba(16, 16, 20, 0.72);
-  --glass-border: rgba(255, 255, 255, 0.08);
-  --glass-blur: 28px;
-  --glass-blur-chrome: 24px;
-  --glass-shadow: 0 32px 90px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.06);
-  --glass-shadow-chrome: 0 16px 48px rgba(0, 0, 0, 0.5);
-  --canvas-bg: radial-gradient(1400px 800px at 42% 45%, #121216, #08080a);
+  --accent: #f0a640;
+  --accent-ink: #1f1405;     /* text on a solid accent fill, 8.7:1 */
+  --accent-soft: rgba(240, 166, 64, 0.14);
+  --accent-ring: rgba(240, 166, 64, 0.4);
 
-  /* Glass text scale: title / control label / secondary / muted-subtitle,
-     plus the chrome idle/primary pair used by toolbar/rail text. */
-  --glass-text-title: #f0f0f2;
-  --glass-text-label: #c2c2ca;
-  --glass-text-secondary: #a8a8b0;
-  --glass-text-muted: #7a7a82;
-  --glass-text-chrome-idle: #8a8a92;
-  --glass-text-chrome-primary: #d8d8de;
+  --font-ui: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  --font-mono: "Cascadia Mono", ui-monospace, Consolas, monospace;
 
-  /* Radii scale: 20 card · 16 dock/rail · 9-11 controls · 6-7 chips (the
-     control/chip ranges are applied per-component per the anatomy spec). */
-  --radius-card: 20px;
-  --radius-dock: 16px;
+  /* Motion: a spring for things that travel (indicators, rings, panels),
+     a plain ease-out for fades. Hover/press colour changes stay ~90-120ms. */
+  --ease-spring: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  /* Legacy "Glass · Sectioned" names, re-pointed at the docked Safelight
+     surfaces so every existing consumer picks up the new look. */
+  --glass-bg: var(--vt-panel);
+  --glass-bg-chrome: var(--vt-chrome);
+  --glass-border: var(--vt-line-soft);
+  --glass-blur: 0px;
+  --glass-blur-chrome: 0px;
+  --glass-shadow: none;
+  --glass-shadow-chrome: 0 0 0 1px rgba(255, 255, 255, 0.07), 0 14px 40px rgba(0, 0, 0, 0.5);
+  --canvas-bg: var(--vt-canvas);
+
+  --glass-text-title: var(--vt-text);
+  --glass-text-label: var(--vt-text-2);
+  --glass-text-secondary: #a6a6ad;
+  --glass-text-muted: var(--vt-text-3);
+  --glass-text-chrome-idle: #9a9aa2;
+  --glass-text-chrome-primary: var(--vt-text);
+
+  --radius-card: 10px;
+  --radius-dock: 8px;
+
+  --border: var(--vt-line-soft);
+  --border-light: var(--vt-line);
 }
 
-/* Global font smoothing for crisp text */
+html,
+body {
+  font-family: var(--font-ui);
+  background: var(--vt-canvas);
+  color: var(--vt-text);
+}
+
+/* Native feel: crisp text, no text selection on chrome (inputs stay
+   selectable), and the arrow cursor on controls — Windows apps don't turn
+   buttons into links. */
 body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
-/* Prestigious Studio Scrollbars - Refined */
+input,
+textarea,
+[contenteditable='true'] {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+button,
+[role='button'],
+[role='tab'],
+[role='menuitem'],
+[role='option'] {
+  cursor: default !important;
+}
+
+:focus {
+  outline: none;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* Thin overlay-style scrollbars */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 10px;
+  height: 10px;
 }
 
 ::-webkit-scrollbar-track {
-  background: var(--gray-900);
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--gray-700);
-  border-radius: 3px;
+  background: #3a3a40;
+  border-radius: 5px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--gray-600);
+  background: #4a4a52;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 /* Prevent text selection on UI elements */
@@ -249,301 +315,303 @@ body {
 .animate-slide-in-right {
   animation: slide-in-right 0.3s ease-out forwards;
 }
-
 /* ---------------------------------------------------------------------- */
-/* "Glass · Sectioned" redesign — shared surfaces + entrance motion.       */
-/* Tokens above (§2); utilities below are consumed by src/components/     */
-/* Controls/* and, later, the module cards / floating chrome (Tasks 2-7). */
+/* Safelight surfaces, controls and motion. Class names keep their legacy  */
+/* "glass-" prefix so existing consumers keep working, but nothing here is */
+/* glass any more: surfaces are flat and docked, and depth is a hairline.  */
+/* Only popovers and menus cast a shadow — they really do float.           */
 /* ---------------------------------------------------------------------- */
 
+/* A flat section inside a docked panel or a dialog. */
 .glass-card {
-  background: var(--glass-bg);
-  border: 1px solid var(--glass-border);
+  background: var(--vt-panel);
+  border: 1px solid var(--vt-line-soft);
   border-radius: var(--radius-card);
-  backdrop-filter: blur(var(--glass-blur));
-  -webkit-backdrop-filter: blur(var(--glass-blur));
-  box-shadow: var(--glass-shadow);
 }
 
-/* Floating chrome surface. Unlike .glass-card (which bakes --radius-card), this
-   carries NO border-radius: each floating element sets its own per the anatomy
-   spec — toolbar pill 14, icon rail / filmstrip dock 16 (--radius-dock),
-   overflow menu 10. */
+/* Popovers and menus. Each one sets its own radius (menus 8, popovers 10). */
 .glass-chrome {
-  background: var(--glass-bg-chrome);
-  border: 1px solid var(--glass-border);
-  backdrop-filter: blur(var(--glass-blur-chrome));
-  -webkit-backdrop-filter: blur(var(--glass-blur-chrome));
+  background: var(--vt-popover);
   box-shadow: var(--glass-shadow-chrome);
 }
 
-/* Card/chrome entrance: opacity 0→1, translateY 10px→0, 380ms. Apply once
-   per mount (stagger via animation-delay on the consumer), not per re-render. */
+/* Entrance: a short fade with a 6px settle. Apply once per mount (stagger
+   with animation-delay on the consumer), never per re-render. */
 @keyframes dcRise {
   from {
     opacity: 0;
-    transform: translateY(10px);
+    transform: translateY(6px);
   }
   to {
     opacity: 1;
-    transform: translateY(0);
+    transform: none;
   }
 }
 
 .dc-rise {
-  animation: dcRise 380ms cubic-bezier(0.2, 0.7, 0.3, 1) both;
+  animation: dcRise 260ms var(--ease-out) both;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .dc-rise {
-    animation: none;
+/* Popover/menu entrance: scales up from its anchor on the spring. */
+@keyframes vtPopIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: none;
   }
 }
 
-/* SliderRow thumb (src/components/Controls/SliderRow.tsx): 14px white circle,
-   1px dark border; hover scale(1.28) + 4px accent ring; drag scale(1.18);
-   edited state (.is-edited) carries a static 3px accent-ring glow. */
+.vt-pop-in {
+  animation: vtPopIn 240ms var(--ease-spring) both;
+}
+
+@keyframes vtFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.vt-fade-in {
+  animation: vtFadeIn 220ms var(--ease-out) both;
+}
+
+/* Slider input (SliderRow). The track, centre detent and edited fill are
+   drawn by the component; the native input only supplies the thumb, so it
+   stays keyboard- and screen-reader-accessible. 12px white thumb, grows a
+   little under the pointer, focus ring on keyboard focus only. */
 .glass-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
   width: 100%;
-  height: 5px;
+  height: 18px;
   background: transparent;
-  cursor: grab;
   margin: 0;
+  cursor: default;
 }
 
-.glass-slider-thumb:active {
-  cursor: grabbing;
+.glass-slider-thumb:focus-visible {
+  outline: none;
+}
+
+.glass-slider-thumb::-webkit-slider-runnable-track {
+  height: 18px;
+  background: transparent;
 }
 
 .glass-slider-thumb::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  width: 14px;
-  height: 14px;
+  width: 12px;
+  height: 12px;
+  margin-top: 3px;
+  border: 0;
   border-radius: 50%;
-  background: #ffffff;
-  border: 1px solid rgba(0, 0, 0, 0.5);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
-  cursor: grab;
-  transition: transform 150ms ease, box-shadow 150ms ease;
+  background: #e9e9ec;
+  box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.7), 0 1px 3px rgba(0, 0, 0, 0.5);
+  transition: transform 200ms var(--ease-spring), background-color 120ms ease;
 }
 
 .glass-slider-thumb:hover::-webkit-slider-thumb {
-  transform: scale(1.28);
-  box-shadow: 0 0 0 4px var(--accent-ring);
+  transform: scale(1.17);
 }
 
 .glass-slider-thumb:active::-webkit-slider-thumb {
-  cursor: grabbing;
-  transform: scale(1.18);
+  transform: scale(1.33);
+  background: #ffffff;
 }
 
-.glass-slider-thumb.is-edited::-webkit-slider-thumb {
-  box-shadow: 0 0 0 3px var(--accent-ring);
+.glass-slider-thumb:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 2px var(--vt-panel), 0 0 0 4px var(--accent);
 }
 
-.glass-slider-thumb.is-edited:hover::-webkit-slider-thumb {
-  box-shadow: 0 0 0 4px var(--accent-ring);
+.glass-slider-thumb:disabled::-webkit-slider-thumb {
+  background: #77777e;
+  transform: none;
+}
+
+.glass-slider-thumb::-moz-range-track {
+  height: 18px;
+  background: transparent;
 }
 
 .glass-slider-thumb::-moz-range-thumb {
-  width: 14px;
-  height: 14px;
+  width: 12px;
+  height: 12px;
+  border: 0;
   border-radius: 50%;
-  background: #ffffff;
-  border: 1px solid rgba(0, 0, 0, 0.5);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
-  cursor: grab;
-  transition: transform 150ms ease, box-shadow 150ms ease;
+  background: #e9e9ec;
+  box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.7), 0 1px 3px rgba(0, 0, 0, 0.5);
+  transition: transform 200ms var(--ease-spring);
 }
 
 .glass-slider-thumb:hover::-moz-range-thumb {
-  transform: scale(1.28);
-  box-shadow: 0 0 0 4px var(--accent-ring);
+  transform: scale(1.17);
 }
 
 .glass-slider-thumb:active::-moz-range-thumb {
-  cursor: grabbing;
-  transform: scale(1.18);
+  transform: scale(1.33);
 }
 
-.glass-slider-thumb.is-edited::-moz-range-thumb {
-  box-shadow: 0 0 0 3px var(--accent-ring);
+/* SliderRow value: plain tabular text that shows a field outline on hover,
+   hinting it can be clicked to type a number. */
+.vt-value-text:hover:not(:disabled) {
+  border-color: var(--vt-line) !important;
 }
 
-.glass-slider-thumb.is-edited:hover::-moz-range-thumb {
-  box-shadow: 0 0 0 4px var(--accent-ring);
-}
-
-/* ---------------------------------------------------------------------- */
-/* Floating chrome interactions (Task 5): toolbar pill + icon rail.        */
-/* :hover/:disabled can't be expressed inline, so the layout stays inline  */
-/* on each button and the interactive states live here.                    */
-/* ---------------------------------------------------------------------- */
-
-/* Toolbar pill buttons (idle text buttons + zoom cluster). §5: 150ms ease
-   hover (bg → rgba(255,255,255,.07), text → white); press scale(.97). */
+/* Toolbar / command-bar buttons: a quiet hover fill, a darker press. No
+   lifts, no glows, no scaling. */
 .glass-pill-btn {
-  transition: background-color 150ms ease, color 150ms ease, transform 150ms ease;
+  transition: background-color 90ms ease, color 90ms ease;
 }
 .glass-pill-btn:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.07);
-  color: var(--glass-text-title);
+  background: var(--vt-hover);
+  color: var(--vt-text);
 }
 .glass-pill-btn:active:not(:disabled) {
-  transform: scale(0.97);
+  background: var(--vt-press);
 }
 .glass-pill-btn:disabled {
-  opacity: 0.3;
-  cursor: not-allowed;
+  opacity: 0.35;
 }
 
-/* Auto All / Batch primary — solid accent with a soft glow (mirrors Enhance's
-   Apply). The base glow lives here (not inline) so the :hover rule can widen it —
-   an inline box-shadow out-specifies a :hover selector and would freeze the glow.
-   §5: hover translateY(-1px) + brightness(1.08) + wider glow; press scale(.98). */
+/* Windows caption buttons in the title bar: 46px wide, red close on hover. */
+.vt-caption-btn {
+  width: 46px;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: transparent;
+  color: var(--glass-text-label);
+  transition: background-color 90ms ease, color 90ms ease;
+}
+.vt-caption-btn:hover {
+  background: var(--vt-hover);
+  color: var(--vt-text);
+}
+.vt-caption-btn.is-close:hover {
+  background: #c42b1c;
+  color: #ffffff;
+}
+
+/* Solid-accent primary (Auto All, Batch Process). */
 .glass-pill-primary {
-  box-shadow: 0 0 0 1px var(--accent-ring), 0 6px 20px rgba(59, 130, 246, 0.35);
-  transition: transform 150ms ease, filter 150ms ease, box-shadow 150ms ease;
+  transition: filter 120ms ease, transform 140ms var(--ease-out);
 }
 .glass-pill-primary:hover:not(:disabled) {
-  filter: brightness(1.08);
-  transform: translateY(-1px);
-  box-shadow: 0 0 0 1px var(--accent-ring), 0 8px 28px rgba(59, 130, 246, 0.5);
+  filter: brightness(1.07);
 }
 .glass-pill-primary:active:not(:disabled) {
   transform: scale(0.98);
+  filter: brightness(0.96);
 }
 .glass-pill-primary:disabled {
   opacity: 0.4;
-  cursor: not-allowed;
 }
 
-/* Icon-rail tiles: 42px, radius 12, hover scale 1.06 (no edge-bar). Active
-   state (accent-soft tile + ring + glyph + glow) is applied inline. */
+/* Tool strip tiles (IconSidebar). The active tile is drawn inline. */
 .glass-rail-btn {
-  transition: transform 150ms ease, background-color 150ms ease, color 150ms ease, box-shadow 150ms ease;
-}
-.glass-rail-btn:hover {
-  transform: scale(1.06);
+  transition: background-color 90ms ease, color 90ms ease;
 }
 .glass-rail-btn:hover:not(.is-active) {
-  background: rgba(255, 255, 255, 0.05);
-  color: var(--glass-text-chrome-primary);
+  background: var(--vt-hover);
+  color: var(--vt-text);
 }
-/* §5: rail buttons take the same press scale as the toolbar pill. */
-.glass-rail-btn:active {
-  transform: scale(0.98);
+.glass-rail-btn:active:not(.is-active) {
+  background: var(--vt-press);
 }
 
-/* ---------------------------------------------------------------------- */
-/* Filmstrip dock (Task 6): thumbnail hover lift + border brighten.        */
-/* Selected (.is-current) and multi-selected (.is-in-selection) thumbs     */
-/* keep their accent treatment on hover — only the plain/idle thumbs       */
-/* brighten their border, per spec.                                       */
-/* ---------------------------------------------------------------------- */
+/* Filmstrip + gallery tiles: the border brightens on hover. Selected and
+   multi-selected tiles keep their selection ring. Nothing lifts. */
 .glass-dock-thumb {
-  transition: transform 180ms ease, border-color 180ms ease;
-}
-.glass-dock-thumb:hover {
-  transform: translateY(-3px);
+  transition: border-color 160ms ease, opacity 160ms ease;
 }
 .glass-dock-thumb:hover:not(.is-current):not(.is-in-selection) {
-  border-color: rgba(255, 255, 255, 0.25);
+  border-color: rgba(255, 255, 255, 0.28);
 }
 
-/* ---------------------------------------------------------------------- */
-/* Gallery grid (Task 7): tile hover lift + border brighten. Selected tiles */
-/* keep their accent outline/glow on hover (same rule the dock uses).       */
-/* ---------------------------------------------------------------------- */
 .glass-gallery-tile {
-  transition: transform 180ms ease, border-color 180ms ease;
-}
-.glass-gallery-tile:hover {
-  transform: translateY(-3px);
+  transition: border-color 160ms ease, box-shadow 200ms var(--ease-out);
 }
 .glass-gallery-tile:hover:not(.is-selected) {
-  border-color: rgba(255, 255, 255, 0.25);
+  border-color: rgba(255, 255, 255, 0.22);
 }
 
-/* ---------------------------------------------------------------------- */
-/* Glass modals (Dialogs/GlassModal + ported dialogs). Plain :hover/         */
-/* [data-active] CSS so consumers never need bespoke inline JS hover         */
-/* handlers for these idioms.                                               */
-/* ---------------------------------------------------------------------- */
-
-/* Sidebar tab nav (Export/Batch dialogs): idle text button, accent-soft when
-   the active tab, plain hover brighten otherwise. */
+/* Dialog sidebar tabs (Export / Batch). Active = a raised neutral row, the
+   way Windows settings pages mark the current section. */
 .glass-modal-tab {
-  transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
+  transition: background-color 90ms ease, border-color 90ms ease, color 90ms ease;
 }
 .glass-modal-tab:hover:not([data-active]) {
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--glass-text-title);
+  background: var(--vt-hover);
+  color: var(--vt-text);
 }
 .glass-modal-tab[data-active] {
-  background: var(--accent-soft);
-  border: 1px solid var(--accent-ring);
-  color: var(--accent);
+  background: var(--vt-raised);
+  border: 1px solid var(--vt-line);
+  color: var(--vt-text);
 }
 
-/* Larger selectable cards (format/preset/resize-mode/bit-depth choices):
-   idle .04 fill / .1 border, accent-soft + accent-ring when active, plain
-   hover brighten otherwise. */
+/* Larger selectable cards (format / preset / resize mode / bit depth). */
 .glass-modal-card-btn {
-  transition: background-color 150ms ease, border-color 150ms ease;
+  transition: background-color 90ms ease, border-color 120ms ease;
 }
 .glass-modal-card-btn:hover:not([data-active]):not(:disabled) {
-  background: rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.06);
   border-color: rgba(255, 255, 255, 0.16);
 }
 .glass-modal-card-btn[data-active] {
-  background: var(--accent-soft);
-  border-color: var(--accent-ring);
+  background: var(--vt-raised);
+  border-color: var(--accent);
 }
 
-/* Secondary footer button (Cancel, ...): plain hover, no active state. */
+/* Secondary dialog button (Cancel, …). */
 .glass-modal-btn-secondary {
-  transition: background-color 150ms ease, color 150ms ease, border-color 150ms ease;
+  transition: background-color 90ms ease, color 90ms ease;
 }
 .glass-modal-btn-secondary:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--glass-text-title);
+  background: var(--vt-hover);
+  color: var(--vt-text);
 }
 
-/* Primary footer button (Export, Apply, Create and Start Batch Job, ...):
-   solid accent with a 0 2px 18px glow — smaller/tighter than the toolbar's
-   .glass-pill-primary since this sits inside a modal footer, not the floating
-   chrome. Base glow lives here (not inline) so :hover can widen it. Backs
-   src/components/Controls/AccentButton.tsx. */
+/* Primary dialog button (Export, Apply, …) — backs Controls/AccentButton. */
 .glass-modal-btn-primary {
   background: var(--accent);
-  color: #0b0b0c;
-  border: 1px solid var(--accent-ring);
-  box-shadow: 0 2px 18px var(--accent-ring);
-  transition: transform 150ms ease, filter 150ms ease, box-shadow 150ms ease;
+  color: var(--accent-ink);
+  border: 1px solid transparent;
+  transition: filter 120ms ease, transform 140ms var(--ease-out);
 }
 .glass-modal-btn-primary:hover:not(:disabled) {
-  filter: brightness(1.08);
-  transform: translateY(-1px);
-  box-shadow: 0 2px 22px var(--accent-ring);
+  filter: brightness(1.07);
 }
 .glass-modal-btn-primary:active:not(:disabled) {
   transform: scale(0.98);
+  filter: brightness(0.96);
 }
 .glass-modal-btn-primary:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-  box-shadow: none;
+  opacity: 0.45;
 }
 
-/* Segmented control (src/components/Controls/Segmented.tsx): keyboard-only
-   focus ring on the roving-tabindex tab stop. :focus-visible keeps mouse
-   clicks ring-free (matches the existing "click just selects" feel) while
-   Tab/Arrow/Home/End navigation gets a clear accent ring. */
+/* Segmented control: keyboard-only focus ring on the roving tab stop. */
 .segmented-tab:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px var(--accent-ring);
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+/* Respect the OS "reduce motion" setting everywhere. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-delay: 0ms !important;
+    transition-duration: 1ms !important;
+  }
 }
