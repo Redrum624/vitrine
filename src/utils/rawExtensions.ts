@@ -2,7 +2,7 @@
  * Canonical RAW file-extension lists — single source of truth for both RAW
  * *detection* (does this file look like a RAW photo, for UI purposes: the
  * gallery/filmstrip RAW badge, the RAW count in the gallery footer, the
- * RawDecodePanel visibility gate) and RAW *decode routing* (should this file
+ * Highlight recovery control gate) and RAW *decode routing* (should this file
  * be sent through `RawImageService`'s LibRaw decode pipeline in
  * `ImageService.loadImage`, vs. treated as a regular sharp/browser-decodable
  * image).

@@ -154,29 +154,50 @@ describe('HistoryPanel — glass port', () => {
   });
 });
 
-// ── RAW Decode ───────────────────────────────────────────────────────────────
+// ── Highlight recovery (RAW) ─────────────────────────────────────────────────
+// The RAW Decode panel was removed (every RAW decodes one fixed way); its post-decode
+// Highlight recovery slider moved under Basic Adjustments for RAW photos.
 jest.mock('../services/RawImageService', () => ({
-  rawImageService: { isRawFile: jest.fn(() => true), reDecode: jest.fn(async () => {}) },
+  rawImageService: {
+    isRawFile: jest.fn((p: string) => /\.(orf|cr2|cr3|nef|arw|dng|raf|rw2)$/i.test(p)),
+    reDecode: jest.fn(async () => {}),
+  },
 }));
 jest.mock('../services/NotificationService', () => ({ notificationService: { error: jest.fn() } }));
-import { RawDecodePanel } from '../components/Panels/RawDecodePanel';
-import { useAppStore } from '../stores/appStore';
-import { DEFAULT_RAW_DECODE_OPTIONS } from '../types/electron';
+import { HighlightRecoveryControl } from '../components/Panels/HighlightRecoveryControl';
+import { rawImageService } from '../services/RawImageService';
+import { imageProcessingPipeline } from '../services/ImageProcessingPipeline';
 import type { ImageFileInfo } from '../services/FileSystemService';
 
 const RAW_IMAGE: ImageFileInfo = {
   id: '1', name: 'photo.orf', path: '/photo.orf', size: 100,
   format: 'orf', type: 'image', lastModified: 0, dateModified: new Date(),
 };
+const JPEG_IMAGE: ImageFileInfo = { ...RAW_IMAGE, id: '2', name: 'photo.jpg', path: '/photo.jpg', format: 'jpg' };
+const hrModule = () =>
+  imageProcessingPipeline.getModule('highlightrecovery') as unknown as {
+    getParams: () => { strength: number }; setParams: (p: { strength: number }) => void;
+  };
 
-describe('RawDecodePanel — glass port', () => {
-  it('renders as a docked inspector section and keeps the Demosaic/Highlights selects labeled', () => {
-    useAppStore.setState({ rawDecodeOptions: DEFAULT_RAW_DECODE_OPTIONS, reDecoding: false });
-    render(<RawDecodePanel currentImage={RAW_IMAGE} />);
+describe('HighlightRecoveryControl', () => {
+  beforeEach(() => hrModule().setParams({ strength: 0 }));
 
-    expect(screen.getByRole('region', { name: 'RAW Decode' })).toBeInTheDocument();
-    fireEvent.click(screen.getByText('RAW Decode'));
-    expect(screen.getByLabelText('Demosaic')).toBeInTheDocument();
-    expect(screen.getByLabelText('Highlights')).toBeInTheDocument();
+  it('renders nothing for a non-RAW photo or with no photo open', () => {
+    const { container, rerender } = render(<HighlightRecoveryControl currentImage={JPEG_IMAGE} />);
+    expect(container).toBeEmptyDOMElement();
+    rerender(<HighlightRecoveryControl currentImage={null} />);
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it('is a shared SliderRow (default 0) for a RAW photo', () => {
+    render(<HighlightRecoveryControl currentImage={RAW_IMAGE} />);
+    expect(screen.getByRole('slider', { name: 'Highlight recovery' })).toHaveValue('0');
+  });
+
+  it('sets the module strength without re-decoding the file', () => {
+    render(<HighlightRecoveryControl currentImage={RAW_IMAGE} />);
+    fireEvent.change(screen.getByRole('slider', { name: 'Highlight recovery' }), { target: { value: '65' } });
+    expect(hrModule().getParams().strength).toBe(65);
+    expect(rawImageService.reDecode).not.toHaveBeenCalled();
   });
 });

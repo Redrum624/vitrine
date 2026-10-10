@@ -164,6 +164,7 @@
     "asarUnpack": [
       "electron/librawWasmWorker.cjs",
       "electron/librawWasmNode.cjs",
+      "electron/cameraMatchWorker.cjs",
       "**/node_modules/sharp/**",
       "**/node_modules/@img/**",
       "**/node_modules/onnxruntime-node/**"

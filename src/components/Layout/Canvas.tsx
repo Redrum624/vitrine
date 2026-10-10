@@ -17,7 +17,7 @@ import { LocalAdjustmentsPipelineModule } from '../../modules/LocalAdjustmentsPi
 import { LocalAdjustmentMaskOverlay } from '../Canvas/LocalAdjustmentMaskOverlay';
 import { notificationService } from '../../services/NotificationService';
 import { gpuPreviewPipeline } from '../../shaders/GpuPreviewPipeline';
-import { loadRawDecodeDefaults } from '../../utils/rawDecodeDefaultsStorage';
+import { DEFAULT_RAW_DECODE_OPTIONS } from '../../types/electron';
 import { PHOTO_SHADOW, CANVAS_SURROUND } from '../../layout/photoRegion';
 import { isRawImage } from '../../utils/gallerySelection';
 
@@ -760,12 +760,7 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
       // options + a second restoreForPath AFTER the load), where edits restored ~350ms after
       // the first pass — a visible unedited-image flash and a redundant second pass on every
       // edited photo.
-      // The user-defaults read rides the same suspension point (Promise.all) so
-      // the load-token check below still guards EVERY await before options land.
-      const [savedState, decodeDefaults] = await Promise.all([
-        editPersistenceService.getSavedEditState(image.path),
-        loadRawDecodeDefaults(),
-      ]);
+      const savedState = await editPersistenceService.getSavedEditState(image.path);
 
       // The user may have switched images while the above await was in flight (rapid
       // filmstrip/gallery clicks) — bail before writing decode options for a superseded
@@ -779,14 +774,10 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
         logger.info(`Image load of ${image.path} discarded: superseded before decode options resolved`);
         return;
       }
-      // Shape-validate the persisted options through EditPersistenceService's validator (the same
-      // guard getSavedRawDecodeOptions applies) BEFORE they reach the store/decoder — a corrupt
-      // out-of-enum value from an old/buggy build must not seed the decode. Uses the validator's
-      // sync variant so this reuses the single getSavedEditState read above (no second IPC).
-      const validatedOptions = editPersistenceService.validateSavedRawDecodeOptions(savedState?.rawDecodeOptions);
-      // No saved per-image options → the USER'S last-chosen defaults (memory
-      // across pictures and sessions, v1.31.0; factory defaults when unset).
-      useAppStore.getState().setRawDecodeOptions(validatedOptions ?? decodeDefaults);
+      // Every RAW decodes one fixed way (DCB + blended highlights + camera match). Per-photo
+      // decode options and user decode defaults were removed with the RAW Decode panel; options
+      // an older build persisted for this photo are ignored on purpose.
+      useAppStore.getState().setRawDecodeOptions(DEFAULT_RAW_DECODE_OPTIONS);
 
       // Load the image. The beforeNotify hook fires synchronously once the base is decoded
       // (real dimensions known) but BEFORE ImageService notifies its load listeners — the
@@ -824,7 +815,7 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
             ],
           );
           editPersistenceService.restoreState(savedState, decoded.width, decoded.height, image.path);
-          // Panels that MIRROR module params into local state (RawDecodePanel's Highlight
+          // Panels that MIRROR module params into local state (the Highlight
           // recovery slider, LA layer lists, …) may have already read their module before
           // this restore landed — their image-change effects fire on currentImage, which
           // updates before the async decode resolves. Bump the shared re-read signal so

@@ -54,7 +54,9 @@ function optionsHash(options) {
   // cameraMatch.cjs) are pixel provenance too, but are not part of this key. If
   // they ever change in a release, bump the `cm:` tag (e.g. `cm2:`) so stale
   // cached bases fitted with the old parameters miss instead of being served.
-  return crypto.createHash('sha1').update(`${demosaic}|${highlightMode}|cm:${cameraMatch ? 1 : 0}`).digest('hex').slice(0, 8);
+  // cm2: entries written before the failed-match fix could hold a dark, never-brightened base
+  // under the matched key — the bump makes them miss so the RAW decodes fresh.
+  return crypto.createHash('sha1').update(`${demosaic}|${highlightMode}|cm2:${cameraMatch ? 1 : 0}`).digest('hex').slice(0, 8);
 }
 
 /**
