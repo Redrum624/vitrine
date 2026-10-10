@@ -138,10 +138,11 @@ export function HistogramPanel() {
     };
   }, [histogram]);
 
-  // DOM-div bars (unchanged rendering) recoloured to the spec's RGB fills at 55%.
+  // DOM-div bars, screen-blended so overlapping channels add up towards white
+  // (where R, G and B coincide the histogram reads neutral grey/white).
   const renderChannel = (data: number[], color: string) => {
     return data.map((value, index) => {
-      const height = (value / maxValue) * 96; // scale into the 104px chart
+      const height = (value / maxValue) * 80; // scale into the 88px chart
       return (
         <div
           key={index}
@@ -151,7 +152,8 @@ export function HistogramPanel() {
             width: '0.4%',
             height: `${height}px`,
             backgroundColor: color,
-            opacity: 0.55,
+            opacity: 0.6,
+            mixBlendMode: 'screen',
           }}
         />
       );
@@ -159,27 +161,32 @@ export function HistogramPanel() {
   };
 
   return (
-    <div className="glass-card dc-rise" style={{ padding: 14, overflow: 'hidden' }}>
-      {/* Header row: HISTOGRAM + inline R · G · B mono averages */}
-      <div className="flex items-center justify-between" style={{ marginBottom: 10 }}>
-        <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '1.4px', color: 'var(--glass-text-muted)' }}>
-          HISTOGRAM
+    <section
+      aria-label="Histogram"
+      data-testid="histogram-panel"
+      className="vt-fade-in"
+      style={{ padding: '12px 14px 14px 16px', borderBottom: '1px solid var(--glass-border)' }}
+    >
+      {/* Header row: Histogram + inline R · G · B averages */}
+      <div className="flex items-center justify-between" style={{ marginBottom: 8 }}>
+        <span style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--glass-text-muted)' }}>
+          Histogram
         </span>
         <span
           data-testid="histogram-averages"
-          style={{ fontFamily: 'ui-monospace, monospace', fontSize: 10.5, letterSpacing: '.3px', color: 'var(--glass-text-muted)' }}
+          style={{ fontSize: 11.5, fontVariantNumeric: 'tabular-nums', color: 'var(--glass-text-muted)' }}
         >
           R {avgRGB.r} · G {avgRGB.g} · B {avgRGB.b}
         </span>
       </div>
 
-      {/* Chart: 104px tall, radius 12, near-black gradient */}
+      {/* Chart: 88px tall in a recessed well */}
       <div
         className="relative overflow-hidden"
         style={{
-          height: 104,
-          borderRadius: 12,
-          background: 'linear-gradient(180deg, #0d0d10 0%, #050506 100%)',
+          height: 88,
+          borderRadius: 5,
+          background: '#131315',
           border: '1px solid var(--glass-border)',
         }}
       >
@@ -187,6 +194,6 @@ export function HistogramPanel() {
         {renderChannel(histogram.green, '#4ade80')}
         {renderChannel(histogram.blue, '#60a5fa')}
       </div>
-    </div>
+    </section>
   );
 }

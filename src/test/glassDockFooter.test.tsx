@@ -71,17 +71,17 @@ describe('ThumbnailPanel dock — thumb frame geometry (aspect-adaptive)', () =>
   // Tile WIDTH now follows each photo's aspect ratio (dockThumbAspect.test.ts
   // covers the mapping) so portraits/landscapes display whole — the former
   // fixed 66/114×88 spec-§3 tiles cover-cropped them. Before a thumb loads and
-  // reports its aspect, every tile uses the neutral 114px fallback; selection
-  // is expressed by the frame alone.
-  it('pre-aspect, both thumbs use the fallback width; the current one carries the accent frame', () => {
+  // reports its aspect, every tile uses the neutral 86px fallback (64px tall in
+  // the docked filmstrip); selection is expressed by the frame alone.
+  it('pre-aspect, both thumbs use the fallback width; the current one carries the selection ring', () => {
     render(
       <ThumbnailPanel images={images} selectedImage={images[0]} onImageSelect={jest.fn()} onClose={jest.fn()} visible={true} />,
     );
     const current = document.querySelector('[data-image-id="img1"]') as HTMLElement;
     const other = document.querySelector('[data-image-id="img2"]') as HTMLElement;
 
-    expect(current).toHaveStyle({ width: '114px', height: '88px', borderColor: '#3b82f6' });
-    expect(other).toHaveStyle({ width: '114px', height: '88px', borderColor: 'rgba(255, 255, 255, 0.09)' });
+    expect(current).toHaveStyle({ width: '86px', height: '64px', borderColor: '#ececef' });
+    expect(other).toHaveStyle({ width: '86px', height: '64px', borderColor: 'rgba(255, 255, 255, 0.09)' });
   });
 
   it('shows a gold star strip on rated thumbs and none on unrated ones', () => {

@@ -37,9 +37,8 @@ const RATING_FILTER_OPTIONS: { value: RatingFilterValue; label: string }[] = [
   { value: '5', label: '≥5★' },
 ];
 
-/** Footer stars use a darker gold than the shared default (`#facc15`) per the
- * Glass · Sectioned design tokens ("Stars `#eab308`"). */
-const FOOTER_STAR_COLOR = '#eab308';
+/** Footer stars use the safelight accent (ratings are one of the accent's few jobs). */
+const FOOTER_STAR_COLOR = 'var(--accent)';
 
 /**
  * Real half-width of the footer's center rating cluster (Segmented 6-way
@@ -161,8 +160,8 @@ export function StatusBar({ currentImage, processingStats, images }: StatusBarPr
 
   return (
     <div
-      className="relative flex items-center justify-between px-4 text-xs no-select"
-      style={{ height: '32px', borderTop: '1px solid var(--border)', backgroundColor: 'var(--gray-850)', color: 'var(--gray-400)' }}
+      className="relative flex items-center justify-between no-select"
+      style={{ height: '32px', flex: 'none', padding: '0 14px', fontSize: 11.5, borderTop: '1px solid var(--vt-line-soft)', backgroundColor: 'var(--vt-chrome)', color: 'var(--glass-text-muted)' }}
     >
       {/* Left — file info (Develop) or folder summary (Gallery). `min-w-0` +
           `maxWidth`/`overflow:hidden` cap this group so it can shrink below its
@@ -196,6 +195,7 @@ export function StatusBar({ currentImage, processingStats, images }: StatusBarPr
           in Develop, window-centered in Gallery (see clusterLeft above). */}
       <div className="absolute flex items-center gap-3" style={{ left: clusterLeft, top: '50%', transform: 'translate(-50%, -50%)' }}>
         <Segmented<RatingFilterValue>
+          size="sm"
           options={RATING_FILTER_OPTIONS}
           value={String(ratingFilter ?? 0) as RatingFilterValue}
           onChange={(v) => setRatingFilter(Number(v))}
@@ -218,7 +218,7 @@ export function StatusBar({ currentImage, processingStats, images }: StatusBarPr
           stats (accent) then memory. Same width-budget guard as the left group. */}
       <div className="flex items-center space-x-3 min-w-0" style={{ maxWidth: rightGroupMaxWidth, overflow: 'hidden' }}>
         {isGallery ? (
-          <span className="truncate" style={{ color: 'var(--accent)', minWidth: 0 }}>{selectedImageIds?.length ?? 0} selected</span>
+          <span className="truncate" style={{ color: 'var(--glass-text-label)', minWidth: 0 }}>{selectedImageIds?.length ?? 0} selected</span>
         ) : (
           <>
             {/* Progressive open: while the fast embedded-JPEG preview is shown and the full
@@ -229,7 +229,7 @@ export function StatusBar({ currentImage, processingStats, images }: StatusBarPr
               </span>
             )}
             {processingStats && (
-              <span className="truncate" style={{ color: 'var(--accent)', minWidth: 0 }}>
+              <span className="truncate" style={{ minWidth: 0, fontVariantNumeric: 'tabular-nums' }}>
                 {processingStats.modulesActive}/{processingStats.totalModules} modules
                 {processingStats.processingTime > 0 ? ` · ${processingStats.processingTime.toFixed(1)} ms` : ''}
               </span>

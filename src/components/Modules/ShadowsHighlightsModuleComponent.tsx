@@ -650,7 +650,7 @@ export const ShadowsHighlightsModuleComponent: React.FC<ShadowsHighlightsModuleC
       {activeSection === 'advanced' && (
         <div className="space-y-3">
           <div className="flex items-center gap-1.5 mb-2">
-            <Settings className="w-4 h-4" style={{color: 'var(--primary-400)'}} />
+            <Settings className="w-4 h-4" style={{color: 'var(--glass-text-muted)'}} />
             <span className="text-sm font-medium" style={{color: 'var(--gray-300)'}}>Advanced Settings</span>
           </div>
 

@@ -725,8 +725,8 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
 
   return (
     <div className="flex flex-col h-full" style={{width: '100%', background: 'transparent'}}>
-      {/* Width-agnostic: the floating right column (App.tsx, Task 5) sets the 392px
-          slot width; the module card scrolls inside this body, never clipped. */}
+      {/* Width-agnostic: the docked inspector (App.tsx) sets the slot width; the
+          module scrolls inside this body, never clipped. */}
       <div className="flex-1 overflow-y-auto" style={{ padding: '0' }}>
 
         {/* RAW Decode — pinned above the module card; self-gates to RAW images only,
@@ -739,7 +739,7 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
             (`${id}-${paramSync}`, on the inner module components only), so the rise
             plays once per panel mount — switching modules or bumping
             externalParamsVersion re-keys the body, not this card, so it never replays. */}
-        <div className="glass-card dc-rise" style={{ overflow: 'hidden', animationDelay: '70ms' }}>
+        <div className="dc-rise" style={{ animationDelay: '40ms' }}>
           <ModuleCardHeader
             icon={getModuleIcon()}
             title={getModuleTitle()}

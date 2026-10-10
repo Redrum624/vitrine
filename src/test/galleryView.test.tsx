@@ -11,10 +11,11 @@
  */
 import fs from 'fs';
 import path from 'path';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
 import { useAppStore } from '../stores/appStore';
 import { GalleryView } from '../components/Gallery/GalleryView';
 import { Toolbar } from '../components/Layout/Toolbar';
+import { MenuBar } from '../components/Layout/MenuBar';
 import { electronService } from '../services/ElectronService';
 import type { ImageFileInfo } from '../services/FileSystemService';
 
@@ -340,13 +341,9 @@ describe('App onNumpadRating gallery guard (source-order regression)', () => {
   });
 });
 
-describe('Toolbar — Develop|Gallery segmented (Gallery toolbar variant only)', () => {
-  // Per the locked spec (§7's Gallery geometry table + the 4a-develop.png /
-  // 5a-gallery.png reference screenshots), the segmented lives in the GALLERY
-  // toolbar only — Develop's own toolbar geometry (§3) never lists one, and the
-  // dock's Gallery chip already covers the Develop -> Gallery direction. See
-  // task-7-report.md for why adding it to Develop too was tried and reverted
-  // (it overlapped the filename chip for longer filenames).
+describe('Toolbar — Gallery command bar (the Gallery|Develop switch lives in the title bar)', () => {
+  // The workspace switch moved to the title bar (MenuBar) so it is reachable from
+  // BOTH views; the command bar itself never renders it.
   beforeEach(() => {
     jest.spyOn(electronService, 'isElectron').mockReturnValue(true);
   });
@@ -354,16 +351,22 @@ describe('Toolbar — Develop|Gallery segmented (Gallery toolbar variant only)',
     jest.restoreAllMocks();
   });
 
-  it('does not render the Develop|Gallery segmented in the Develop toolbar', () => {
+  it('does not render a Develop|Gallery segmented in either command bar variant', () => {
     render(<Toolbar hasImage zoom={1} />);
     expect(screen.queryByRole('tab', { name: 'Gallery' })).not.toBeInTheDocument();
-  });
-
-  it('switches viewMode back to develop when the Develop tab is clicked from the Gallery toolbar', () => {
+    cleanup();
     useAppStore.setState({ viewMode: 'gallery' });
     render(<Toolbar hasImage zoom={1} onBatchProcess={jest.fn()} />);
+    expect(screen.queryByRole('tab', { name: 'Develop' })).not.toBeInTheDocument();
+  });
+
+  it('the title bar switch moves between Gallery and Develop in both directions', () => {
+    useAppStore.setState({ viewMode: 'gallery' });
+    render(<MenuBar />);
     fireEvent.click(screen.getByRole('tab', { name: 'Develop' }));
     expect(useAppStore.getState().viewMode).toBe('develop');
+    fireEvent.click(screen.getByRole('tab', { name: 'Gallery' }));
+    expect(useAppStore.getState().viewMode).toBe('gallery');
   });
 
   it('renders the Gallery toolbar variant (Open Folder / Sort / Batch Process) in gallery mode', () => {

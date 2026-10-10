@@ -14,11 +14,16 @@ import { SliderRow } from '../components/Controls/SliderRow';
 import { AccentButton } from '../components/Controls/AccentButton';
 
 describe('SectionLabel', () => {
-  it('renders the label text in accent color with the fading hairline', () => {
+  it('renders a quiet muted heading (never the accent) with a hairline', () => {
     render(<SectionLabel>Preset</SectionLabel>);
     const el = screen.getByText('Preset');
     expect(el).toBeInTheDocument();
-    expect(el).toHaveStyle({ color: 'var(--accent)' });
+    expect(el).toHaveStyle({ color: 'var(--glass-text-muted)' });
+  });
+
+  it('renders legacy ALL-CAPS labels in sentence case', () => {
+    render(<SectionLabel>HIGHLIGHT RECOVERY</SectionLabel>);
+    expect(screen.getByText('Highlight recovery')).toBeInTheDocument();
   });
 });
 
@@ -32,14 +37,14 @@ describe('ChipButton', () => {
     expect(onClick).toHaveBeenCalledTimes(1);
   });
 
-  it('shows the accent-soft/ring/text look when active', () => {
+  it('shows a raised neutral tile when active (the accent is reserved for edits)', () => {
     render(<ChipButton active>Cloudy</ChipButton>);
     const btn = screen.getByRole('button', { name: 'Cloudy' });
     expect(btn).toHaveAttribute('data-active', 'true');
     expect(btn).toHaveStyle({
-      background: 'var(--accent-soft)',
-      borderColor: 'var(--accent-ring)',
-      color: 'var(--accent)',
+      background: '#323237',
+      borderColor: '#4b4b53',
+      color: 'var(--vt-text)',
     });
   });
 
@@ -165,11 +170,14 @@ describe('SliderRow', () => {
     expect(screen.getByLabelText('Exposure')).toBeInTheDocument();
   });
 
-  it('shows the idle value chip when value equals default', () => {
-    render(<SliderRow label="Tint" value={0} defaultValue={0} min={-100} max={100} onChange={() => {}} />);
+  it('shows the idle value as muted text when value equals default', () => {
+    const { container } = render(<SliderRow label="Tint" value={0} defaultValue={0} min={-100} max={100} onChange={() => {}} />);
     const chip = screen.getByText('0');
     expect(chip).not.toHaveAttribute('data-edited');
-    expect(chip).toHaveStyle({ background: 'rgba(255,255,255,.04)' });
+    expect(chip).toHaveStyle({ color: 'var(--glass-text-muted)' });
+    // No edited fill on the track, and the edited dot is collapsed.
+    expect(container.querySelector('[data-edited-fill="true"]')).toBeNull();
+    expect(container.querySelector('[data-edited-dot="true"]')).toHaveStyle({ transform: 'scale(0)' });
   });
 
   it('shows the edited accent chip when the value diverges from default', () => {
@@ -187,7 +195,26 @@ describe('SliderRow', () => {
     );
     const chip = screen.getByText('+0.35');
     expect(chip).toHaveAttribute('data-edited', 'true');
-    expect(chip).toHaveStyle({ background: 'var(--accent-soft)' });
+    expect(chip).toHaveStyle({ color: 'var(--vt-text)' });
+  });
+
+  it('marks an edited value with the amber dot and a fill from the default to the value', () => {
+    const { container } = render(
+      <SliderRow label="Exposure" value={1} defaultValue={0} min={-2} max={2} step={0.05} onChange={() => {}} />
+    );
+    expect(container.querySelector('[data-edited-dot="true"]')).toHaveStyle({ transform: 'scale(1)' });
+    // Default 0 sits at 50%, value 1 at 75% → the fill spans 50%..75%.
+    const fill = container.querySelector('[data-edited-fill="true"]');
+    expect(fill).toHaveStyle({ left: '50%', width: '25%' });
+  });
+
+  it('resets to the default value on a double-click of the label too', () => {
+    const onChange = jest.fn();
+    render(
+      <SliderRow label="Exposure" value={0.8} defaultValue={0} min={-2} max={2} step={0.05} onChange={onChange} />
+    );
+    fireEvent.doubleClick(screen.getByText('Exposure'));
+    expect(onChange).toHaveBeenCalledWith(0);
   });
 
   it('fires onChange with a parsed number when the slider input changes', () => {
@@ -413,7 +440,7 @@ describe('AccentButton', () => {
     render(<AccentButton onClick={() => {}}>Apply</AccentButton>);
     const btn = screen.getByRole('button', { name: 'Apply' });
     expect(btn).toHaveClass('glass-modal-btn-primary');
-    expect(btn).toHaveStyle({ borderRadius: '11px', fontSize: '12.5px', fontWeight: '700' });
+    expect(btn).toHaveStyle({ borderRadius: '6px', fontSize: '12.5px', fontWeight: '600' });
   });
 
   it('is disabled and does not fire onClick when disabled is set', () => {

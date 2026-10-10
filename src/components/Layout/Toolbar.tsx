@@ -1,10 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { CSSProperties } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 import { electronService } from '../../services/ElectronService';
 import { useAppStore } from '../../stores/appStore';
-import { Segmented } from '../Controls/Segmented';
 import { ChipButton } from '../Controls/ChipButton';
-import { CHIP_LEFT } from '../../layout/photoRegion';
 
 interface ToolbarProps {
   onExport?: () => void;
@@ -52,63 +50,70 @@ interface ToolbarProps {
    * the filmstrip dock's "Export N" button triggers (that button itself only
    * appears at ≥2 selected; the Gallery toolbar's Export… routes here at ≥1). */
   onExportSelected?: () => void;
+  /** Left-hand content of the docked bar (the filename / folder label). */
+  leading?: ReactNode;
 }
 
-/**
- * Develop | Gallery segmented values. Shown ONLY in the Gallery toolbar variant
- * (per the locked spec's §7 Gallery geometry table and the 4a-develop.png/
- * 5a-gallery.png reference screenshots — 4a's own toolbar geometry (§3) doesn't
- * list one). The round-trip is still complete without it in Develop: the dock's
- * Gallery chip goes Develop -> Gallery, and this segmented's "Develop" tab goes
- * Gallery -> Develop. Adding it to the Develop toolbar too was tried and reverted
- * (see task-7-report.md) — it widens the pill enough to overlap the filename chip
- * for longer filenames at axis positions left of window-center.
- */
-type ViewModeValue = 'develop' | 'gallery';
-const VIEW_MODE_OPTIONS: { value: ViewModeValue; label: string }[] = [
-  { value: 'develop', label: 'Develop' },
-  { value: 'gallery', label: 'Gallery' },
-];
-
-// Base layout for an idle pill button — interactive :hover/:disabled states come
-// from .glass-pill-btn in index.css (inline styles can't express pseudo-classes).
+// Base layout for an idle command-bar button — interactive :hover/:active/:disabled
+// states come from .glass-pill-btn in index.css (inline styles can't express
+// pseudo-classes). Flat text buttons, like a native command bar.
 const pillBtn: CSSProperties = {
-  height: '30px',
+  height: '28px',
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
-  padding: '0 10px',
-  gap: '5px',
+  padding: '0 9px',
+  gap: '6px',
   fontSize: '12.5px',
-  borderRadius: '9px',
+  borderRadius: '5px',
   border: '1px solid transparent',
   background: 'transparent',
-  color: 'var(--glass-text-chrome-primary)',
-  cursor: 'pointer',
+  color: 'var(--glass-text-label)',
   whiteSpace: 'nowrap',
+  flex: 'none',
 };
 
-const pillIconBtn: CSSProperties = { ...pillBtn, width: '30px', padding: '0', fontSize: '15px' };
+const pillIconBtn: CSSProperties = { ...pillBtn, width: '28px', padding: '0', fontSize: '15px' };
 
-const divider: CSSProperties = { width: '1px', height: '18px', margin: '0 4px', background: 'var(--glass-border)' };
+const divider: CSSProperties = { width: '1px', height: '16px', margin: '0 6px', background: 'var(--vt-line)', flex: 'none' };
+
+// The docked bar itself (Develop and Gallery variants).
+const barStyle: CSSProperties = {
+  height: 44,
+  flex: 'none',
+  display: 'flex',
+  alignItems: 'center',
+  gap: 2,
+  padding: '0 8px 0 6px',
+  background: 'var(--vt-chrome)',
+  borderBottom: '1px solid var(--vt-line-soft)',
+  minWidth: 0,
+};
+
+const primaryBtn: CSSProperties = {
+  ...pillBtn,
+  padding: '0 12px',
+  fontWeight: 600,
+  color: 'var(--accent-ink)',
+  background: 'var(--accent)',
+};
 
 // Shared title copy for the four developing-gated actions (Auto All, Print, Copy Style,
 // Paste Style) — matches guardDeveloping's toast message exactly (utils/developingGuard.ts).
 const DEVELOPING_TITLE = 'Full quality still developing — try again in a moment';
 
-// A toggle that is "on" (Before/After, Reference) reads as an accent-soft tile.
+// A toggle that is "on" (Before/After, Reference) reads as a raised, pressed-in tile.
 const toggleActive: CSSProperties = {
-  background: 'var(--accent-soft)',
-  border: '1px solid var(--accent-ring)',
-  color: 'var(--accent)',
+  background: 'var(--vt-raised)',
+  border: '1px solid var(--vt-line)',
+  color: 'var(--vt-text)',
 };
 
 /**
- * innerWidth below which the Develop pill's secondary actions collapse into the
+ * innerWidth below which the Develop bar's secondary actions collapse into the
  * overflow menu when a live measurement isn't available yet (jsdom / first frame).
- * Derived from the measured collision: the full pill starts overlapping the
- * filename chip at ~1745px innerWidth (see task-8-report.md). The real app path
- * uses the geometric measurement below; this is only the unmeasured fallback.
+ * The real app path uses the bar's own measured width (see Toolbar below); this
+ * is only the unmeasured fallback.
  */
 const COLLAPSE_INNERWIDTH_FALLBACK = 1745;
 
@@ -172,12 +177,13 @@ function ToolbarOverflowMenu({ items }: { items: OverflowItem[] }) {
       {open && (
         <div
           role="menu"
-          className="glass-chrome"
+          className="glass-chrome vt-pop-in"
           style={{
             position: 'absolute',
             top: 'calc(100% + 8px)',
             right: 0,
-            borderRadius: '10px',
+            transformOrigin: 'top right',
+            borderRadius: '8px',
             padding: '5px',
             display: 'flex',
             flexDirection: 'column',
@@ -209,74 +215,62 @@ function ToolbarOverflowMenu({ items }: { items: OverflowItem[] }) {
   );
 }
 
-export function Toolbar({ onExport, onPrint, onBatchProcess, onUndo: _onUndo, onRedo: _onRedo, canUndo: _canUndo = false, canRedo: _canRedo = false, onZoomIn, onZoomOut, onFitWindow, onActualSize, zoom = 1, onAutoAll, developing = false, sidewaysHint = false, onSidewaysRotate, onSidewaysDismiss, onCopyStyle, onPasteStyle, hasStyleClipboard = false, hasImage = false, onToggleOriginal, showOriginal = false, onToggleReference, referenceMode = false, onOpenFolder, onExportSelected }: ToolbarProps) {
-  const { viewMode, setViewMode, selectedImageIds, gallerySortAscending, toggleGallerySortDirection, alignmentAxisX } = useAppStore();
+export function Toolbar({ onExport, onPrint, onBatchProcess, onUndo: _onUndo, onRedo: _onRedo, canUndo: _canUndo = false, canRedo: _canRedo = false, onZoomIn, onZoomOut, onFitWindow, onActualSize, zoom = 1, onAutoAll, developing = false, sidewaysHint = false, onSidewaysRotate, onSidewaysDismiss, onCopyStyle, onPasteStyle, hasStyleClipboard = false, hasImage = false, onToggleOriginal, showOriginal = false, onToggleReference, referenceMode = false, onOpenFolder, onExportSelected, leading }: ToolbarProps) {
+  const { viewMode, selectedImageIds, gallerySortAscending, toggleGallerySortDirection } = useAppStore();
 
-  // Responsive collapse + clamp (Develop pill only, G5 review). Two mechanisms
-  // guarantee the axis-centered pill never overlaps the filename chip at any width
-  // ≥ 1024 while staying on-axis wherever there is room:
-  //   1. COLLAPSE — when the FULL pill (on-axis) would overlap the chip, the
-  //      secondary actions (Print, Copy/Paste Style, Reference) fold into the
-  //      overflow menu, shrinking the pill so it fits on-axis in the mid range.
-  //   2. CLAMP — below the width where even the collapsed pill would overlap, the
-  //      pill is shifted right (translateX) so its left edge clears the chip. It
-  //      then reads slightly off-axis, but no-overlap is the hard constraint.
-  // The decision is derived from the STORE's alignmentAxisX (the actual centering
-  // source — App positions the pill at left:axis, translateX(-50%)), NOT the pill's
-  // measured left: that lags a frame behind the axis (a separate ResizeObserver
-  // drives it) and made the collapse mis-fire. Cached expanded width + axis-based
-  // math also prevent a collapse↔expand feedback loop. Unmeasured (jsdom / first
-  // frame) falls back to an innerWidth heuristic so the path stays unit-testable.
-  const containerRef = useRef<HTMLDivElement>(null);
+  // Responsive collapse (Develop bar). The bar is docked across the top of the
+  // canvas column; when its actions no longer fit beside the leading filename
+  // label, the secondary actions (Print, Copy/Paste Style, Reference) fold into
+  // the "⋯" overflow menu. The expanded actions width is cached so the decision
+  // doesn't oscillate (collapsing shrinks the very thing being measured).
+  // Unmeasured (jsdom / first frame) falls back to an innerWidth heuristic so
+  // the path stays unit-testable.
+  const barRef = useRef<HTMLDivElement>(null);
+  const leadingRef = useRef<HTMLDivElement>(null);
+  const actionsRef = useRef<HTMLDivElement>(null);
   const fullWidthRef = useRef(0);
   const [collapsed, setCollapsed] = useState(false);
-  const [shift, setShift] = useState(0);
-  const CHIP_CLEARANCE = 16;
 
   useLayoutEffect(() => {
-    if (viewMode !== 'develop') { setShift(0); return; }
+    if (viewMode !== 'develop') return;
     const measure = () => {
-      const el = containerRef.current;
-      if (!el) return;
-      const rect = el.getBoundingClientRect();
-      if (rect.width === 0) { // jsdom / not laid out yet
+      const bar = barRef.current;
+      const actions = actionsRef.current;
+      if (!bar || !actions) return;
+      const barWidth = bar.getBoundingClientRect().width;
+      if (barWidth === 0) { // jsdom / not laid out yet
         setCollapsed(window.innerWidth < COLLAPSE_INNERWIDTH_FALLBACK);
-        setShift(0);
         return;
       }
-      if (!collapsed) fullWidthRef.current = rect.width; // cache only the expanded width
-      const axis = alignmentAxisX ?? (rect.left + rect.width / 2 - shift);
-      const chip = document.querySelector('[data-testid="filename-chip"]') as HTMLElement | null;
-      const chipRight = chip ? chip.getBoundingClientRect().right : CHIP_LEFT;
-      const minLeft = chipRight + CHIP_CLEARANCE;
-      // Collapse if the FULL pill, centered on the axis, would cross the chip.
-      const fullLeft = axis - (fullWidthRef.current || rect.width) / 2;
-      setCollapsed(fullLeft < minLeft);
-      // Clamp: shift right by however much the CURRENT (possibly collapsed) pill's
-      // on-axis left edge falls short of the chip. axis & rect.width are both
-      // shift-invariant, so this converges without oscillating.
-      const onAxisLeft = axis - rect.width / 2;
-      setShift(Math.max(0, minLeft - onAxisLeft));
+      if (!collapsed) fullWidthRef.current = actions.scrollWidth; // cache only the expanded width
+      const leadingWidth = leadingRef.current?.getBoundingClientRect().width ?? 0;
+      const available = barWidth - leadingWidth - 32; // bar padding + breathing room
+      setCollapsed((fullWidthRef.current || actions.scrollWidth) > available);
     };
     measure();
     const ro = new ResizeObserver(measure);
-    if (containerRef.current) ro.observe(containerRef.current);
+    if (barRef.current) ro.observe(barRef.current);
     window.addEventListener('resize', measure);
     return () => {
       ro.disconnect();
       window.removeEventListener('resize', measure);
     };
-  }, [alignmentAxisX, collapsed, viewMode, shift]);
+  }, [collapsed, viewMode]);
 
   if (!electronService.isElectron()) return <div />;
+
+  const leadingSlot = (
+    <div ref={leadingRef} className="flex items-center" style={{ minWidth: 0, flex: '0 1 auto', overflow: 'hidden' }}>
+      {leading}
+    </div>
+  );
 
   if (viewMode === 'gallery') {
     const selectedCount = selectedImageIds?.length ?? 0;
     return (
-      <div
-        className="glass-chrome flex items-center no-select"
-        style={{ borderRadius: '14px', padding: '6px 8px', gap: '3px' }}
-      >
+      <div ref={barRef} className="no-select" style={barStyle} role="toolbar" aria-label="Gallery">
+        {leadingSlot}
+        <div style={{ flex: 1 }} />
         <button onClick={onOpenFolder} className="glass-pill-btn" style={pillBtn} title="Open Folder">
           Open Folder
         </button>
@@ -291,32 +285,19 @@ export function Toolbar({ onExport, onPrint, onBatchProcess, onUndo: _onUndo, on
 
         <div style={divider} />
 
-        <Segmented<ViewModeValue> options={VIEW_MODE_OPTIONS} value={viewMode} onChange={setViewMode} />
-
-        <div style={divider} />
-
         <ChipButton onClick={toggleGallerySortDirection} title="Sort the grid by capture time (file date fallback)">
           Sort: Capture time {gallerySortAscending ? '↑' : '↓'}
         </ChipButton>
 
         <div style={divider} />
 
-        {/* Batch Process — the solid-accent primary (mirrors Auto All / Enhance's Apply). */}
+        {/* Batch Process — the one solid-accent primary in this bar. */}
         <button
           onClick={onBatchProcess}
           className="glass-pill-primary"
-          style={{
-            ...pillBtn,
-            padding: '0 14px',
-            fontWeight: 600,
-            color: '#0b0b0c',
-            background: 'var(--accent)',
-          }}
+          style={primaryBtn}
           title="Batch process multiple images"
         >
-          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M8 2v2M8 12v2M2 8h2M12 8h2M4.2 4.2l1.4 1.4M10.4 10.4l1.4 1.4M4.2 11.8l1.4-1.4M10.4 5.6l1.4-1.4" />
-          </svg>
           Batch Process
         </button>
       </div>
@@ -324,170 +305,163 @@ export function Toolbar({ onExport, onPrint, onBatchProcess, onUndo: _onUndo, on
   }
 
   return (
-    <div
-      ref={containerRef}
-      className="glass-chrome flex items-center no-select"
-      style={{ borderRadius: '14px', padding: '6px 8px', gap: '3px', transform: shift ? `translateX(${shift}px)` : undefined }}
-    >
-      <button onClick={() => electronService.openFile()} className="glass-pill-btn" style={pillBtn} title="Open Image">
-        Open
-      </button>
-      <button onClick={onExport} className="glass-pill-btn" style={pillBtn} title="Export Image">
-        Export
-      </button>
-      {/* Print — secondary; moves to the overflow menu when collapsed. */}
-      {!collapsed && (
-        <button
-          onClick={onPrint}
-          disabled={!hasImage || developing}
-          className="glass-pill-btn"
-          style={pillBtn}
-          title={developing ? DEVELOPING_TITLE : 'Print'}
-        >
-          Print
+    <div ref={barRef} className="no-select" style={barStyle} role="toolbar" aria-label="Develop">
+      {leadingSlot}
+      <div style={{ flex: 1, minWidth: 8 }} />
+      <div ref={actionsRef} className="flex items-center" style={{ gap: 2, flex: 'none' }}>
+        <button onClick={() => electronService.openFile()} className="glass-pill-btn" style={pillBtn} title="Open Image">
+          Open
         </button>
-      )}
-
-      <div style={divider} />
-
-      {/* Auto All — the solid-accent primary (mirrors Enhance's Apply). Kept inline
-          at every width. */}
-      <button
-        onClick={onAutoAll}
-        disabled={!hasImage || developing}
-        className="glass-pill-primary"
-        style={{
-          ...pillBtn,
-          padding: '0 14px',
-          fontWeight: 600,
-          color: '#0b0b0c',
-          background: 'var(--accent)',
-        }}
-        title={developing ? DEVELOPING_TITLE : 'Auto-adjust all modules based on image analysis'}
-      >
-        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M8 2v2M8 12v2M2 8h2M12 8h2M4.2 4.2l1.4 1.4M10.4 10.4l1.4 1.4M4.2 11.8l1.4-1.4M10.4 5.6l1.4-1.4" />
-        </svg>
-        Auto All
-      </button>
-      {/* "May be sideways?" suggestion chip (v1.37.0 R2 Part C) — occupies the
-          old Styled chip's slot next to Auto All. NON-DESTRUCTIVE: clicking it
-          applies the suggested lossless quarter-turn (the heuristic never
-          rotates by itself); × hides it for this photo for the session. */}
-      {sidewaysHint && hasImage && (
-        <span className="flex items-center" style={{ gap: 0 }}>
+        <button onClick={onExport} className="glass-pill-btn" style={pillBtn} title="Export Image">
+          Export
+        </button>
+        {/* Print — secondary; moves to the overflow menu when collapsed. */}
+        {!collapsed && (
           <button
-            onClick={onSidewaysRotate}
-            className="glass-pill-btn"
-            style={{
-              ...pillBtn,
-              padding: '0 10px',
-              fontSize: 11.5,
-              fontWeight: 600,
-              color: 'var(--accent)',
-            }}
-            title="A dual-signal analysis suggests this photo is lying on its side. Click to apply a lossless quarter-turn in the detected direction — nothing is ever rotated automatically."
-          >
-            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M2 8a6 6 0 1 1 1.76 4.24" />
-              <path d="M2 12.5V8h4.5" />
-            </svg>
-            Photo may be sideways — rotate?
-          </button>
-          <button
-            onClick={onSidewaysDismiss}
-            aria-label="Dismiss sideways suggestion"
-            className="glass-pill-btn"
-            style={{ ...pillBtn, padding: '0 6px', fontSize: 13, color: 'var(--glass-text-chrome-secondary, var(--glass-text-chrome-primary))' }}
-            title="Hide this suggestion for this photo (this session)"
-          >
-            ×
-          </button>
-        </span>
-      )}
-      <div style={divider} />
-
-      {/* Copy/Paste Style — secondary; move to the overflow menu when collapsed. */}
-      {!collapsed && (
-        <>
-          <button
-            onClick={onCopyStyle}
+            onClick={onPrint}
             disabled={!hasImage || developing}
             className="glass-pill-btn"
             style={pillBtn}
-            title={developing ? DEVELOPING_TITLE : 'Analyse and copy the style of the current photo'}
+            title={developing ? DEVELOPING_TITLE : 'Print'}
           >
-            Copy Style
+            Print
           </button>
-          <button
-            onClick={onPasteStyle}
-            disabled={!hasImage || developing || !hasStyleClipboard}
-            className="glass-pill-btn"
-            style={pillBtn}
-            title={developing ? DEVELOPING_TITLE : hasStyleClipboard ? 'Apply the copied style to the current photo' : 'Copy a style first'}
-          >
-            Paste Style
-          </button>
-          <div style={divider} />
-        </>
-      )}
+        )}
 
-      {/* Before/After — kept inline (has the B shortcut and is a primary compare). */}
-      <button
-        onClick={onToggleOriginal}
-        disabled={!hasImage}
-        className="glass-pill-btn"
-        style={{ ...pillBtn, ...(showOriginal ? toggleActive : null) }}
-        title="Toggle before/after comparison (B)"
-      >
-        Before / After
-      </button>
-      {/* Reference — secondary; moves to the overflow menu when collapsed. */}
-      {!collapsed && (
+        <div style={divider} />
+
+        {/* Auto All — the bar's one solid-accent primary. Kept inline at every width. */}
         <button
-          onClick={onToggleReference}
-          disabled={!hasImage}
-          className="glass-pill-btn"
-          style={{ ...pillBtn, ...(referenceMode ? toggleActive : null) }}
-          title="Compare with a reference photo"
+          onClick={onAutoAll}
+          disabled={!hasImage || developing}
+          className="glass-pill-primary"
+          style={primaryBtn}
+          title={developing ? DEVELOPING_TITLE : 'Auto-adjust all modules based on image analysis'}
         >
-          Reference
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M8 2v2M8 12v2M2 8h2M12 8h2M4.2 4.2l1.4 1.4M10.4 10.4l1.4 1.4M4.2 11.8l1.4-1.4M10.4 5.6l1.4-1.4" />
+          </svg>
+          Auto All
         </button>
-      )}
+        {/* "May be sideways?" suggestion chip (v1.37.0 R2 Part C) — sits next to
+            Auto All. NON-DESTRUCTIVE: clicking it applies the suggested lossless
+            quarter-turn (the heuristic never rotates by itself); × hides it for
+            this photo for the session. */}
+        {sidewaysHint && hasImage && (
+          <span className="flex items-center vt-fade-in" style={{ gap: 0 }}>
+            <button
+              onClick={onSidewaysRotate}
+              className="glass-pill-btn"
+              style={{
+                ...pillBtn,
+                fontSize: 12,
+                fontWeight: 600,
+                color: 'var(--accent)',
+              }}
+              title="A dual-signal analysis suggests this photo is lying on its side. Click to apply a lossless quarter-turn in the detected direction — nothing is ever rotated automatically."
+            >
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M2 8a6 6 0 1 1 1.76 4.24" />
+                <path d="M2 12.5V8h4.5" />
+              </svg>
+              Photo may be sideways — rotate?
+            </button>
+            <button
+              onClick={onSidewaysDismiss}
+              aria-label="Dismiss sideways suggestion"
+              className="glass-pill-btn"
+              style={{ ...pillBtn, padding: '0 6px', fontSize: 13, color: 'var(--glass-text-muted)' }}
+              title="Hide this suggestion for this photo (this session)"
+            >
+              ×
+            </button>
+          </span>
+        )}
+        <div style={divider} />
 
-      <div style={divider} />
+        {/* Copy/Paste Style — secondary; move to the overflow menu when collapsed. */}
+        {!collapsed && (
+          <>
+            <button
+              onClick={onCopyStyle}
+              disabled={!hasImage || developing}
+              className="glass-pill-btn"
+              style={pillBtn}
+              title={developing ? DEVELOPING_TITLE : 'Analyse and copy the style of the current photo'}
+            >
+              Copy Style
+            </button>
+            <button
+              onClick={onPasteStyle}
+              disabled={!hasImage || developing || !hasStyleClipboard}
+              className="glass-pill-btn"
+              style={pillBtn}
+              title={developing ? DEVELOPING_TITLE : hasStyleClipboard ? 'Apply the copied style to the current photo' : 'Copy a style first'}
+            >
+              Paste Style
+            </button>
+            <div style={divider} />
+          </>
+        )}
 
-      {/* Zoom cluster at the right end. The % readout doubles as the 1:1 action
-          (click → Actual Size) — matches the reference pill (− 100% + Fit) while
-          keeping both the readout and the actual-size semantics. */}
-      <button onClick={onZoomOut} className="glass-pill-btn" style={pillIconBtn} title="Zoom Out">−</button>
-      <button
-        onClick={onActualSize}
-        className="glass-pill-btn font-mono"
-        style={{ ...pillBtn, padding: '0 6px', minWidth: '46px', fontSize: '11.5px', fontVariantNumeric: 'tabular-nums', color: 'var(--glass-text-chrome-idle)' }}
-        title="Actual Size — 100% (1:1)"
-      >
-        {Math.round(zoom * 100)}%
-      </button>
-      <button onClick={onZoomIn} className="glass-pill-btn" style={pillIconBtn} title="Zoom In">+</button>
-      <button onClick={onFitWindow} className="glass-pill-btn" style={pillBtn} title="Fit to Window">Fit</button>
+        {/* Before/After — kept inline (has the B shortcut and is a primary compare). */}
+        <button
+          onClick={onToggleOriginal}
+          disabled={!hasImage}
+          aria-pressed={showOriginal}
+          className="glass-pill-btn"
+          style={{ ...pillBtn, ...(showOriginal ? toggleActive : null) }}
+          title="Toggle before/after comparison (B)"
+        >
+          Before / After
+        </button>
+        {/* Reference — secondary; moves to the overflow menu when collapsed. */}
+        {!collapsed && (
+          <button
+            onClick={onToggleReference}
+            disabled={!hasImage}
+            aria-pressed={referenceMode}
+            className="glass-pill-btn"
+            style={{ ...pillBtn, ...(referenceMode ? toggleActive : null) }}
+            title="Compare with a reference photo"
+          >
+            Reference
+          </button>
+        )}
 
-      {/* Overflow "⋯" — only when collapsed; holds the secondary actions that were
-          pulled out of the pill. All keep working; none have a menu-bar home, so
-          this popover is the only place to reach them while collapsed. */}
-      {collapsed && (
-        <>
-          <div style={divider} />
-          <ToolbarOverflowMenu
-            items={[
-              { label: 'Print', onClick: onPrint, disabled: !hasImage || developing, title: developing ? DEVELOPING_TITLE : 'Print' },
-              { label: 'Copy Style', onClick: onCopyStyle, disabled: !hasImage || developing, title: developing ? DEVELOPING_TITLE : 'Analyse and copy the style of the current photo' },
-              { label: 'Paste Style', onClick: onPasteStyle, disabled: !hasImage || developing || !hasStyleClipboard, title: developing ? DEVELOPING_TITLE : hasStyleClipboard ? 'Apply the copied style to the current photo' : 'Copy a style first' },
-              { label: 'Reference', onClick: onToggleReference, disabled: !hasImage, active: referenceMode, title: 'Compare with a reference photo' },
-            ]}
-          />
-        </>
-      )}
+        <div style={divider} />
+
+        {/* Zoom cluster at the right end. The % readout doubles as the 1:1 action
+            (click → Actual Size). */}
+        <button onClick={onZoomOut} className="glass-pill-btn" style={pillIconBtn} title="Zoom Out" aria-label="Zoom Out">−</button>
+        <button
+          onClick={onActualSize}
+          className="glass-pill-btn"
+          style={{ ...pillBtn, padding: '0 4px', minWidth: '46px', fontSize: '12px', fontVariantNumeric: 'tabular-nums', color: 'var(--glass-text-secondary)' }}
+          title="Actual Size — 100% (1:1)"
+        >
+          {Math.round(zoom * 100)}%
+        </button>
+        <button onClick={onZoomIn} className="glass-pill-btn" style={pillIconBtn} title="Zoom In" aria-label="Zoom In">+</button>
+        <button onClick={onFitWindow} className="glass-pill-btn" style={pillBtn} title="Fit to Window">Fit</button>
+
+        {/* Overflow "⋯" — only when collapsed; holds the secondary actions that were
+            pulled out of the bar. All keep working; none have a menu-bar home, so
+            this popover is the only place to reach them while collapsed. */}
+        {collapsed && (
+          <>
+            <div style={divider} />
+            <ToolbarOverflowMenu
+              items={[
+                { label: 'Print', onClick: onPrint, disabled: !hasImage || developing, title: developing ? DEVELOPING_TITLE : 'Print' },
+                { label: 'Copy Style', onClick: onCopyStyle, disabled: !hasImage || developing, title: developing ? DEVELOPING_TITLE : 'Analyse and copy the style of the current photo' },
+                { label: 'Paste Style', onClick: onPasteStyle, disabled: !hasImage || developing || !hasStyleClipboard, title: developing ? DEVELOPING_TITLE : hasStyleClipboard ? 'Apply the copied style to the current photo' : 'Copy a style first' },
+                { label: 'Reference', onClick: onToggleReference, disabled: !hasImage, active: referenceMode, title: 'Compare with a reference photo' },
+              ]}
+            />
+          </>
+        )}
+      </div>
     </div>
   );
 }
