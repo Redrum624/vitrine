@@ -355,18 +355,18 @@ export const CropModuleComponent: React.FC<CropModuleComponentProps> = ({
       </div>
 
       {/* Output Info */}
-      <div className="flex flex-col" style={{ gap: 4, paddingTop: 12, borderTop: '1px solid var(--glass-border)', fontSize: 11 }}>
+      <div className="flex flex-col" style={{ gap: 4, paddingTop: 12, borderTop: '1px solid var(--glass-border)', fontSize: 11.5 }}>
         <div className="flex items-center justify-between">
           <span style={{ color: 'var(--glass-text-muted)' }}>Original Size</span>
-          <span style={{ color: 'var(--glass-text-secondary)', fontFamily: 'ui-monospace, monospace' }}>{imageWidth} × {imageHeight}</span>
+          <span style={{ color: 'var(--vt-text-2)', fontVariantNumeric: 'tabular-nums' }}>{imageWidth} × {imageHeight}</span>
         </div>
         <div className="flex items-center justify-between">
           <span style={{ color: 'var(--glass-text-muted)' }}>Output Size</span>
-          <span style={{ color: 'var(--glass-text-secondary)', fontFamily: 'ui-monospace, monospace' }}>{outputDims.width} × {outputDims.height}</span>
+          <span style={{ color: 'var(--vt-text-2)', fontVariantNumeric: 'tabular-nums' }}>{outputDims.width} × {outputDims.height}</span>
         </div>
         <div className="flex items-center justify-between">
           <span style={{ color: 'var(--glass-text-muted)' }}>Crop Area</span>
-          <span style={{ color: 'var(--accent)', fontFamily: 'ui-monospace, monospace' }}>{cropPercentage}%</span>
+          <span style={{ color: Number(cropPercentage) < 100 ? 'var(--accent)' : 'var(--vt-text-2)', fontVariantNumeric: 'tabular-nums' }}>{cropPercentage}%</span>
         </div>
       </div>
     </div>
