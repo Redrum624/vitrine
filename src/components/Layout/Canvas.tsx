@@ -18,7 +18,8 @@ import { LocalAdjustmentMaskOverlay } from '../Canvas/LocalAdjustmentMaskOverlay
 import { notificationService } from '../../services/NotificationService';
 import { gpuPreviewPipeline } from '../../shaders/GpuPreviewPipeline';
 import { loadRawDecodeDefaults } from '../../utils/rawDecodeDefaultsStorage';
-import { PHOTO_SHADOW } from '../../layout/photoRegion';
+import { PHOTO_SHADOW, CANVAS_SURROUND } from '../../layout/photoRegion';
+import { isRawImage } from '../../utils/gallerySelection';
 
 // Debug mode for canvas rendering - set to false for production
 const DEBUG_CANVAS = process.env.NODE_ENV === 'development';
@@ -233,36 +234,23 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
   }, [viewport]);
 
   const drawPlaceholder = useCallback((ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement) => {
-    // Fill background
-    ctx.fillStyle = '#0d0d0d';
+    ctx.fillStyle = CANVAS_SURROUND;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // Draw dot pattern
-    ctx.fillStyle = '#1a1a1a';
-    const dotSize = 1.5;
-    const spacing = 32;
-    for (let x = 0; x < canvas.width; x += spacing) {
-      for (let y = 0; y < canvas.height; y += spacing) {
-        ctx.beginPath();
-        ctx.arc(x, y, dotSize, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    }
-
-    // Draw placeholder text
     const centerX = canvas.width / 2;
     const centerY = canvas.height / 2;
+    const font = '"Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif';
 
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
 
-    ctx.fillStyle = '#555555';
-    ctx.font = '600 32px Inter, system-ui';
-    ctx.fillText('Vitrine', centerX, centerY - 30);
+    ctx.fillStyle = '#76767f'; // vt-text-3
+    ctx.font = `600 22px ${font}`;
+    ctx.fillText('No photo open', centerX, centerY - 14);
 
-    ctx.fillStyle = '#3a3a3a';
-    ctx.font = '400 15px Inter, system-ui';
-    ctx.fillText('Select an image from the browser to begin your editing session', centerX, centerY + 15);
+    ctx.fillStyle = '#5a5a62';
+    ctx.font = `400 13px ${font}`;
+    ctx.fillText('Open a photo or a folder to start editing', centerX, centerY + 14);
   }, []);
 
   // Performance optimization: cache canvas context and ImageData
@@ -448,10 +436,10 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
       return;
     }
 
-    // Clear canvas. Use the SAME colour as the surrounding container (bg-dark-900
-    // = #0d0d0d) so that when the image is zoomed out (drawn smaller than the
-    // canvas) the margin around it is seamless instead of a lighter-grey rectangle.
-    ctx.fillStyle = '#0d0d0d';
+    // Clear canvas. Use the SAME colour as the surround (--vt-canvas) so that when the
+    // image is zoomed out (drawn smaller than the canvas) the margin around it is
+    // seamless instead of a visible rectangle.
+    ctx.fillStyle = CANVAS_SURROUND;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     if (currentImageData && displayImage) {
@@ -1465,14 +1453,6 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
           </div>
         </div>
 
-        {/* Optional debug info - can be removed */}
-        {process.env.NODE_ENV === 'development' && (
-          <div className="absolute top-4 left-4 bg-dark-850/90 backdrop-blur-sm rounded-professional px-3 py-2 text-xs text-dark-300">
-            <div>Zoom: {Math.round(viewport.zoom * 100)}%</div>
-            <div>Pan: {Math.round(viewport.panX)}, {Math.round(viewport.panY)}</div>
-          </div>
-        )}
-
         {/* Image Navigation Arrows re-homed to the floating filmstrip dock's chevrons
             (Glass · Sectioned, Task 6) — ThumbnailPanel's handlePrevious/handleNext. */}
 
@@ -1482,25 +1462,28 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
         {/* Star Rating Overlay re-homed to the footer's rating cluster (Glass ·
             Sectioned, Task 6) — StatusBar.tsx shows the current photo's rating. */}
 
-        {/* Loading / Applying Indicator */}
+        {/* Loading / Applying Indicator — a quiet scrim and a small ring, not a modal. */}
         {(imageLoading || isProcessing) && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-dark-900/80 backdrop-blur-sm">
-            <div className="animate-spin rounded-full h-12 w-12 border-2 border-gray-600 border-t-white mb-4" />
-            <div className="text-white text-sm font-medium">
+          <div
+            className="absolute inset-0 flex flex-col items-center justify-center vt-fade-in"
+            style={{ background: 'color-mix(in srgb, var(--vt-canvas) 72%, transparent)', gap: 12 }}
+            role="status"
+            aria-live="polite"
+          >
+            <div
+              className="animate-spin rounded-full"
+              style={{ width: 28, height: 28, border: '2px solid var(--vt-line)', borderTopColor: 'var(--vt-text)' }}
+            />
+            <div style={{ textAlign: 'center', fontSize: 12.5, color: 'var(--vt-text)' }}>
               {isProcessing && !imageLoading ? (
                 'Applying…'
-              ) : currentImage?.format.toLowerCase() === 'orf' ||
-               currentImage?.format.toLowerCase() === 'cr2' ||
-               currentImage?.format.toLowerCase() === 'cr3' ||
-               currentImage?.format.toLowerCase() === 'nef' ||
-               currentImage?.format.toLowerCase() === 'arw' ||
-               currentImage?.format.toLowerCase() === 'dng' ? (
+              ) : currentImage && isRawImage(currentImage) ? (
                 <>
-                  <div className="mb-1">Processing RAW file...</div>
-                  <div className="text-xs text-gray-400">This may take a few moments</div>
+                  <div style={{ marginBottom: 2 }}>Developing RAW…</div>
+                  <div style={{ fontSize: 11.5, color: 'var(--vt-text-3)' }}>This can take a few seconds</div>
                 </>
               ) : (
-                'Loading image...'
+                'Loading…'
               )}
             </div>
           </div>
@@ -1508,9 +1491,9 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
 
         {/* Crosshair in center when no image */}
         {!displayImage && (
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <div className="w-px h-8 bg-dark-600"></div>
-            <div className="absolute w-8 h-px bg-dark-600"></div>
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none" aria-hidden="true">
+            <div style={{ width: 1, height: 32, background: 'var(--vt-line)' }} />
+            <div className="absolute" style={{ width: 32, height: 1, background: 'var(--vt-line)' }} />
           </div>
         )}
       </div>

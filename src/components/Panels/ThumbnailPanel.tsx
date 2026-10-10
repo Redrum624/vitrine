@@ -72,6 +72,38 @@ export function getThumbFrameStyle(isCurrent: boolean, inSelection: boolean): Re
  * 66/114×88 tiles + object-cover cropped portraits to a horizontal band and
  * landscapes (when current) to a sliver. Until a thumb loads and reports its
  * aspect, tiles use the neutral fallback width. */
+/** Short format label for a placeholder: the scanned format, else the file extension. */
+function formatLabel(image: ImageFileInfo, fallback: string): string {
+  return getDisplayFormat(image.format) || getDisplayFormat(image.name) || fallback;
+}
+
+/**
+ * Neutral placeholder for a photo the filmstrip can't preview — no embedded RAW preview, an
+ * unreadable file, or no Electron file access. A graphite tile with the format and a short
+ * reason, never a red block: a missing preview isn't an alarm (the photo may open fine).
+ */
+function placeholderThumbnail(format: string, note: string): string {
+  const canvas = document.createElement('canvas');
+  canvas.width = 150;
+  canvas.height = 100;
+  const ctx = canvas.getContext('2d');
+  if (ctx) {
+    const font = '"Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif';
+    ctx.fillStyle = '#202024';
+    ctx.fillRect(0, 0, 150, 100);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    // Sized for the 64px filmstrip (the 150px tile shows at ~0.6x there).
+    ctx.fillStyle = '#b4b4bb'; // vt-text-2
+    ctx.font = `600 26px ${font}`;
+    ctx.fillText(format, 75, 42);
+    ctx.fillStyle = '#8c8c94'; // vt-text-3
+    ctx.font = `16px ${font}`;
+    ctx.fillText(note, 75, 70);
+  }
+  return canvas.toDataURL();
+}
+
 const DOCK_THUMB_HEIGHT = 64;
 const DOCK_THUMB_WIDTH_FALLBACK = 86;
 const DOCK_THUMB_WIDTH_MIN = 40;
@@ -219,55 +251,16 @@ export function ThumbnailPanel({
         if (dataUrl) {
           storeThumbnail(dataUrl);
         } else {
-          // RAW file that couldn't be processed - create placeholder with filename
-          const canvas = document.createElement('canvas');
-          canvas.width = 150;
-          canvas.height = 100;
-          const ctx = canvas.getContext('2d');
-          if (ctx) {
-            ctx.fillStyle = '#1f2937';
-            ctx.fillRect(0, 0, 150, 100);
-            ctx.fillStyle = '#9CA3AF';
-            ctx.font = 'bold 10px sans-serif';
-            ctx.textAlign = 'center';
-            ctx.fillText(image.name.substring(0, 20), 75, 45);
-            ctx.font = '9px sans-serif';
-            ctx.fillText(getDisplayFormat(image.format) || 'RAW', 75, 60);
-          }
-          storeThumbnail(canvas.toDataURL());
+          // No embedded preview the main process could read (e.g. an unsupported RAW).
+          storeThumbnail(placeholderThumbnail(formatLabel(image, 'RAW'), 'No preview'));
         }
       } else {
-        // Browser fallback - create placeholder
-        const canvas = document.createElement('canvas');
-        canvas.width = 150;
-        canvas.height = 100;
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          ctx.fillStyle = '#374151';
-          ctx.fillRect(0, 0, 150, 100);
-          ctx.fillStyle = '#9CA3AF';
-          ctx.font = '12px sans-serif';
-          ctx.textAlign = 'center';
-          ctx.fillText(image.name, 75, 50);
-        }
-        storeThumbnail(canvas.toDataURL());
+        // Browser fallback (no Electron file access)
+        storeThumbnail(placeholderThumbnail(formatLabel(image, 'Image'), 'Preview unavailable'));
       }
     } catch (error) {
       logger.warn(`Failed to load thumbnail for ${image.name}:`, error);
-      // Create error placeholder
-      const canvas = document.createElement('canvas');
-      canvas.width = 150;
-      canvas.height = 100;
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        ctx.fillStyle = '#DC2626';
-        ctx.fillRect(0, 0, 150, 100);
-        ctx.fillStyle = '#FFFFFF';
-        ctx.font = '12px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText('Error', 75, 50);
-      }
-      storeThumbnail(canvas.toDataURL());
+      storeThumbnail(placeholderThumbnail(formatLabel(image, 'Image'), 'Can\u2019t preview'));
     } finally {
       loadingRef.current.delete(image.id);
       setLoadingThumbnails(prev => {
@@ -560,8 +553,8 @@ export function ThumbnailPanel({
                 title={`${image.name} (${getDisplayFormat(image.format)})`}
               >
                 {isLoading ? (
-                  <div className="w-full h-full rounded flex items-center justify-center" style={{backgroundColor: 'var(--gray-800)'}}>
-                    <div className="w-4 h-4 border-2 rounded-full animate-spin" style={{borderColor: 'var(--gray-600)', borderTopColor: 'var(--white)'}} />
+                  <div className="w-full h-full rounded flex items-center justify-center" style={{backgroundColor: 'var(--vt-field)'}}>
+                    <div className="w-4 h-4 border-2 rounded-full animate-spin" style={{borderColor: 'var(--vt-line)', borderTopColor: 'var(--vt-text-2)'}} />
                   </div>
                 ) : thumbnail ? (
                   <img
@@ -597,10 +590,10 @@ export function ThumbnailPanel({
                 ) : (
                   <div
                     className="w-full h-full rounded flex items-center justify-center"
-                    style={{backgroundColor: 'var(--gray-800)'}}
+                    style={{backgroundColor: 'var(--vt-field)'}}
                     onClick={() => loadThumbnail(image)}
                   >
-                    <span className="text-xs text-center px-1" style={{color: 'var(--gray-500)'}}>
+                    <span className="text-xs text-center px-1" style={{color: 'var(--vt-text-3)'}}>
                       {getDisplayFormat(image.format)}
                     </span>
                   </div>

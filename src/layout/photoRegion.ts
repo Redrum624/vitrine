@@ -45,6 +45,12 @@ export function getPhotoInsetRight(_columnVisible: boolean): number {
   return PHOTO_INSET_RIGHT;
 }
 
+/**
+ * The photo surround as a literal, for 2D-canvas fills that can't read CSS variables.
+ * Must equal `--vt-canvas` in src/index.css, or a zoomed-out photo sits in a visible box.
+ */
+export const CANVAS_SURROUND = '#121214';
+
 /** Soft separation between the photo and the graphite surround. */
 export const PHOTO_SHADOW = '0 1px 2px rgba(0, 0, 0, 0.45), 0 12px 36px rgba(0, 0, 0, 0.35)';
 

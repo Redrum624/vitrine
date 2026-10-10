@@ -1,4 +1,6 @@
 import { Component, ErrorInfo, ReactNode } from 'react';
+import { AlertTriangle } from 'lucide-react';
+import { AccentButton } from './Controls/AccentButton';
 import { logger } from '../utils/Logger';
 import { errorHandlingService } from '../services/ErrorHandlingService';
 import { canvasPoolService } from '../services/CanvasPoolService';
@@ -90,76 +92,70 @@ export class ErrorBoundary extends Component<Props, State> {
                            this.state.error?.name === 'OutOfMemoryError';
 
       return (
-        <div className="h-screen flex items-center justify-center bg-dark-900 text-dark-300">
-          <div className="text-center max-w-lg p-6">
-            <div className="mb-6">
-              <svg className="w-20 h-20 mx-auto text-gray-300" fill="currentColor" viewBox="0 0 20 20">
-                <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-              </svg>
+        <div
+          className="h-screen flex items-center justify-center"
+          style={{ background: 'var(--vt-canvas)', color: 'var(--vt-text)', fontFamily: 'var(--font-ui)' }}
+          role="alert"
+        >
+          <div
+            className="vt-pop-in"
+            style={{
+              width: 420, maxWidth: 'calc(100vw - 32px)', padding: 24, borderRadius: 'var(--radius-10)',
+              background: 'var(--vt-popover)', boxShadow: 'var(--shadow-popover)', border: '1px solid var(--vt-line-soft)',
+            }}
+          >
+            <div className="flex items-start" style={{ gap: 12, marginBottom: 18 }}>
+              <AlertTriangle size={20} strokeWidth={1.8} style={{ color: 'var(--accent)', flex: 'none', marginTop: 1 }} />
+              <div>
+                <h2 style={{ fontSize: 15, fontWeight: 600, margin: 0 }}>Vitrine ran into a problem</h2>
+                <p style={{ fontSize: 12.5, lineHeight: 1.5, color: 'var(--vt-text-2)', margin: '6px 0 0' }}>
+                  Your photos and saved edits are safe on disk. Try again, or reload the window.
+                  {this.state.retryCount > 0 && ` (Attempt ${this.state.retryCount + 1})`}
+                </p>
+              </div>
             </div>
 
-            <h2 className="text-2xl font-semibold mb-3">Application Error</h2>
-
-            <p className="text-dark-400 mb-6 leading-relaxed">
-              The application encountered an unexpected error and needs to recover.
-              {this.state.retryCount > 0 && ` (Attempt ${this.state.retryCount + 1})`}
-            </p>
-
-            {/* Error ID for support */}
-            {this.state.errorId && (
-              <div className="mb-4 text-xs text-dark-500">
-                Error ID: <code className="bg-dark-800 px-1 rounded">{this.state.errorId}</code>
-              </div>
-            )}
-
             {/* Recovery Actions */}
-            <div className="space-y-3 mb-6">
+            <div className="flex flex-col" style={{ gap: 8 }}>
               {canRetry && (
-                <button
-                  className="w-full px-4 py-3 bg-gray-800 hover:bg-gray-800 rounded-lg text-white font-medium transition-professional"
-                  onClick={this.handleRetry}
-                >
+                <AccentButton fullWidth onClick={this.handleRetry}>
                   Try Again {this.state.retryCount > 0 && `(${3 - this.state.retryCount} attempts left)`}
-                </button>
+                </AccentButton>
               )}
 
               {isMemoryError && (
-                <button
-                  className="w-full px-4 py-3 bg-gray-800 hover:bg-gray-800 rounded-lg text-white font-medium transition-professional"
-                  onClick={this.handleClearCache}
-                >
+                <button type="button" className="glass-modal-btn-secondary" style={{ width: '100%' }} onClick={this.handleClearCache}>
                   Clear Cache & Retry
                 </button>
               )}
 
-              <button
-                className="w-full px-4 py-2 bg-dark-700 hover:bg-dark-600 rounded-lg text-dark-200 transition-professional"
-                onClick={this.handleReload}
-              >
-                Reload Application
+              <button type="button" className="glass-modal-btn-secondary" style={{ width: '100%' }} onClick={this.handleReload}>
+                Reload Window
               </button>
             </div>
 
             {/* Error Details */}
             {this.state.error && (
-              <details className="text-left">
-                <summary className="cursor-pointer text-sm text-dark-400 hover:text-dark-300 mb-2">
-                  Technical Details
+              <details style={{ marginTop: 18 }}>
+                <summary style={{ fontSize: 12, color: 'var(--vt-text-3)' }}>
+                  Technical details{this.state.errorId ? ` · ${this.state.errorId}` : ''}
                 </summary>
-                <div className="bg-dark-800 rounded-lg p-3 text-xs">
-                  <div className="mb-2">
-                    <strong>Error:</strong> {this.state.error.name}
-                  </div>
-                  <div className="mb-2">
-                    <strong>Message:</strong> {this.state.error.message}
+                <div
+                  style={{
+                    marginTop: 8, padding: 10, borderRadius: 'var(--radius-6)', background: 'var(--vt-field)',
+                    border: '1px solid var(--vt-line-soft)', fontSize: 11.5, color: 'var(--vt-text-2)', userSelect: 'text',
+                  }}
+                >
+                  <div style={{ marginBottom: 4 }}>
+                    <strong style={{ color: 'var(--vt-text)' }}>{this.state.error.name}:</strong> {this.state.error.message}
                   </div>
                   {this.state.error.stack && (
-                    <div>
-                      <strong>Stack:</strong>
-                      <pre className="mt-1 text-dark-500 whitespace-pre-wrap overflow-auto max-h-32">
-                        {this.state.error.stack}
-                      </pre>
-                    </div>
+                    <pre
+                      className="whitespace-pre-wrap overflow-auto"
+                      style={{ maxHeight: 128, margin: 0, fontFamily: 'var(--font-mono)', fontSize: 10.5, color: 'var(--vt-text-3)' }}
+                    >
+                      {this.state.error.stack}
+                    </pre>
                   )}
                 </div>
               </details>
