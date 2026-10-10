@@ -7,7 +7,7 @@
     "start": "npm run build && electron .",
     "dev": "node scripts/dev.cjs",
     "dev-server-only": "vite",
-    "build": "tsc && vite build",
+    "build": "node scripts/sync-libraw-wasm.cjs && tsc && vite build",
     "preview": "vite preview",
     "electron": "electron electron/main.cjs",
     "electron-dev": "concurrently \"npm run dev-server-only\" \"wait-on http://localhost:3005 && electron electron/main.cjs\"",
@@ -29,7 +29,8 @@
     "test:coverage": "jest --coverage",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
-    "test:e2e:headed": "playwright test --headed"
+    "test:e2e:headed": "playwright test --headed",
+    "postinstall": "node scripts/sync-libraw-wasm.cjs"
   },
   "keywords": [],
   "author": "Redrum624",
