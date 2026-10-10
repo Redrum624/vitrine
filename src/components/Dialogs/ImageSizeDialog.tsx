@@ -79,10 +79,6 @@ export function ImageSizeDialog({
         type="button"
         onClick={onClose}
         className="glass-modal-btn-secondary"
-        style={{
-          padding: '9px 16px', borderRadius: 10, fontSize: 12, fontWeight: 500,
-          border: '1px solid rgba(255,255,255,.1)', background: 'transparent', color: 'var(--glass-text-secondary)',
-        }}
       >
         Cancel
       </button>

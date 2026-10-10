@@ -285,12 +285,12 @@ export function FileBrowser({ onImageSelected, onFolderSelected }: FileBrowserPr
           className="flex items-center px-2 py-1"
           style={{
             paddingLeft: `${8 + depth * 16}px`,
-            backgroundColor: selectedFolder === item.id ? 'var(--gray-700)' : 'transparent',
+            backgroundColor: selectedFolder === item.id ? 'var(--vt-raised)' : 'transparent',
             transition: 'var(--transition-fast)'
           }}
           onMouseEnter={(e) => {
             if (selectedFolder !== item.id) {
-              e.currentTarget.style.backgroundColor = 'var(--gray-800)';
+              e.currentTarget.style.backgroundColor = 'var(--vt-hover)';
             }
           }}
           onMouseLeave={(e) => {
@@ -303,17 +303,17 @@ export function FileBrowser({ onImageSelected, onFolderSelected }: FileBrowserPr
           <div
             className="flex items-center justify-center w-4 h-4 mr-1 cursor-pointer rounded"
             style={{transition: 'var(--transition-fast)'}}
-            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'var(--gray-700)'}
+            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'var(--vt-raised)'}
             onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
             onClick={(e) => handleArrowClick(e, item.id, item.path)}
           >
             {isLoading ? (
-              <div className="w-3 h-3 animate-spin rounded-full border border-dark-300 border-t-transparent" />
+              <div className="w-3 h-3 animate-spin rounded-full border border-(--vt-text-3) border-t-transparent" />
             ) : (
               isExpanded ? (
-                <ChevronDown className="w-3 h-3" style={{color: 'var(--gray-300)'}} />
+                <ChevronDown className="w-3 h-3" style={{color: 'var(--vt-text-2)'}} />
               ) : (
-                <ChevronRight className="w-3 h-3" style={{color: 'var(--gray-300)'}} />
+                <ChevronRight className="w-3 h-3" style={{color: 'var(--vt-text-2)'}} />
               )
             )}
           </div>
@@ -322,22 +322,22 @@ export function FileBrowser({ onImageSelected, onFolderSelected }: FileBrowserPr
           <div
             className="flex items-center flex-1 cursor-pointer rounded px-1"
             style={{transition: 'var(--transition-fast)'}}
-            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'var(--gray-750)'}
+            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'var(--vt-hover)'}
             onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
             onClick={(e) => handleFolderNameClick(e, item.id, item.path)}
           >
             {item.type === 'drive' ? (
-              <HardDrive className="w-4 h-4 mr-2" style={{color: 'var(--gray-300)'}} />
+              <HardDrive className="w-4 h-4 mr-2" style={{color: 'var(--vt-text-2)'}} />
             ) : isExpanded ? (
-              <FolderOpen className="w-4 h-4 mr-2" style={{color: 'var(--gray-300)'}} />
+              <FolderOpen className="w-4 h-4 mr-2" style={{color: 'var(--vt-text-2)'}} />
             ) : (
-              <Folder className="w-4 h-4 mr-2" style={{color: 'var(--gray-300)'}} />
+              <Folder className="w-4 h-4 mr-2" style={{color: 'var(--vt-text-2)'}} />
             )}
 
-            <span className="text-sm flex-1 truncate" style={{color: 'var(--gray-300)'}}>{item.name}</span>
+            <span className="flex-1 truncate" style={{color: 'var(--vt-text)', fontSize: 12.5}}>{item.name}</span>
 
             {hasImages && (
-              <span className="text-xs ml-2" style={{color: 'var(--gray-400)'}}>
+              <span className="text-xs ml-2" style={{color: 'var(--vt-text-3)'}}>
                 {contents.images.length} images
               </span>
             )}
@@ -359,16 +359,16 @@ export function FileBrowser({ onImageSelected, onFolderSelected }: FileBrowserPr
                   paddingLeft: `${8 + (depth + 1) * 16}px`,
                   transition: 'var(--transition-fast)'
                 }}
-                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'var(--gray-800)'}
+                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'var(--vt-hover)'}
                 onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
                 onClick={() => handleImageClick(image)}
               >
-                <Image className="w-4 h-4 mr-2" style={{color: 'var(--gray-400)'}} />
+                <Image className="w-4 h-4 mr-2" style={{color: 'var(--vt-text-3)'}} />
                 <div className="flex-1 min-w-0">
-                  <div className="text-xs truncate" style={{color: 'var(--gray-300)'}}>{image.name}</div>
-                  <div className="text-xs" style={{color: 'var(--gray-400)'}}>
+                  <div className="text-xs truncate" style={{color: 'var(--vt-text-2)'}}>{image.name}</div>
+                  <div className="text-xs" style={{color: 'var(--vt-text-3)'}}>
                     {image.dimensions ? `${image.dimensions.width}×${image.dimensions.height}` : getDisplayFormat(image.format || image.name)}
-                    {' • '}
+                    {' · '}
                     {fileSystemService.formatFileSize(image.size)}
                   </div>
                 </div>
@@ -393,12 +393,12 @@ export function FileBrowser({ onImageSelected, onFolderSelected }: FileBrowserPr
           className="flex items-center px-2 py-1"
           style={{
             paddingLeft: `${8 + depth * 16}px`,
-            backgroundColor: selectedFolder === folder.id ? 'var(--gray-700)' : 'transparent',
+            backgroundColor: selectedFolder === folder.id ? 'var(--vt-raised)' : 'transparent',
             transition: 'var(--transition-fast)'
           }}
           onMouseEnter={(e) => {
             if (selectedFolder !== folder.id) {
-              e.currentTarget.style.backgroundColor = 'var(--gray-800)';
+              e.currentTarget.style.backgroundColor = 'var(--vt-hover)';
             }
           }}
           onMouseLeave={(e) => {
@@ -411,17 +411,17 @@ export function FileBrowser({ onImageSelected, onFolderSelected }: FileBrowserPr
           <div
             className="flex items-center justify-center w-4 h-4 mr-1 cursor-pointer rounded"
             style={{transition: 'var(--transition-fast)'}}
-            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'var(--gray-700)'}
+            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'var(--vt-raised)'}
             onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
             onClick={(e) => handleArrowClick(e, folder.id, folder.path, depth > 1)}
           >
             {isLoading ? (
-              <div className="w-3 h-3 animate-spin rounded-full border border-dark-300 border-t-transparent" />
+              <div className="w-3 h-3 animate-spin rounded-full border border-(--vt-text-3) border-t-transparent" />
             ) : (
               isExpanded ? (
-                <ChevronDown className="w-3 h-3" style={{color: 'var(--gray-300)'}} />
+                <ChevronDown className="w-3 h-3" style={{color: 'var(--vt-text-2)'}} />
               ) : (
-                <ChevronRight className="w-3 h-3" style={{color: 'var(--gray-300)'}} />
+                <ChevronRight className="w-3 h-3" style={{color: 'var(--vt-text-2)'}} />
               )
             )}
           </div>
@@ -430,18 +430,18 @@ export function FileBrowser({ onImageSelected, onFolderSelected }: FileBrowserPr
           <div
             className="flex items-center flex-1 cursor-pointer rounded px-1"
             style={{transition: 'var(--transition-fast)'}}
-            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'var(--gray-750)'}
+            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'var(--vt-hover)'}
             onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
             onClick={(e) => handleFolderNameClick(e, folder.id, folder.path)}
           >
             {isExpanded ? (
-              <FolderOpen className="w-4 h-4 mr-2" style={{color: 'var(--gray-300)'}} />
+              <FolderOpen className="w-4 h-4 mr-2" style={{color: 'var(--vt-text-2)'}} />
             ) : (
-              <Folder className="w-4 h-4 mr-2" style={{color: 'var(--gray-300)'}} />
+              <Folder className="w-4 h-4 mr-2" style={{color: 'var(--vt-text-2)'}} />
             )}
-            <span className="text-sm flex-1 truncate" style={{color: 'var(--gray-300)'}}>{folder.name}</span>
+            <span className="flex-1 truncate" style={{color: 'var(--vt-text)', fontSize: 12.5}}>{folder.name}</span>
             {hasImages && (
-              <span className="text-xs ml-2" style={{color: 'var(--gray-400)'}}>
+              <span className="text-xs ml-2" style={{color: 'var(--vt-text-3)'}}>
                 {contents.images.length} images
               </span>
             )}
@@ -460,16 +460,16 @@ export function FileBrowser({ onImageSelected, onFolderSelected }: FileBrowserPr
                   paddingLeft: `${8 + (depth + 1) * 16}px`,
                   transition: 'var(--transition-fast)'
                 }}
-                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'var(--gray-800)'}
+                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'var(--vt-hover)'}
                 onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
                 onClick={() => handleImageClick(image)}
               >
-                <Image className="w-4 h-4 mr-2" style={{color: 'var(--gray-400)'}} />
+                <Image className="w-4 h-4 mr-2" style={{color: 'var(--vt-text-3)'}} />
                 <div className="flex-1 min-w-0">
-                  <div className="text-xs truncate" style={{color: 'var(--gray-300)'}}>{image.name}</div>
-                  <div className="text-xs" style={{color: 'var(--gray-400)'}}>
+                  <div className="text-xs truncate" style={{color: 'var(--vt-text-2)'}}>{image.name}</div>
+                  <div className="text-xs" style={{color: 'var(--vt-text-3)'}}>
                     {image.dimensions ? `${image.dimensions.width}×${image.dimensions.height}` : getDisplayFormat(image.format || image.name)}
-                    {' • '}
+                    {' · '}
                     {fileSystemService.formatFileSize(image.size)}
                   </div>
                 </div>
@@ -490,10 +490,10 @@ export function FileBrowser({ onImageSelected, onFolderSelected }: FileBrowserPr
     );
 
   return (
-    <div className="flex flex-col h-full" style={{backgroundColor: 'var(--gray-900)'}}>
+    <div className="flex flex-col h-full" style={{backgroundColor: 'var(--vt-panel)'}}>
       {/* Header */}
-      <div className="p-3 border-b" style={{borderBottomColor: 'var(--border)'}}>
-        <h2 className="text-sm font-medium flex items-center" style={{color: 'var(--gray-300)'}}>
+      <div className="flex items-center" style={{ height: 52, padding: '0 16px', borderBottom: '1px solid var(--vt-line-soft)' }}>
+        <h2 style={{ color: 'var(--vt-text)', fontSize: 13, fontWeight: 600, margin: 0 }}>
           File Explorer
         </h2>
       </div>
@@ -502,7 +502,7 @@ export function FileBrowser({ onImageSelected, onFolderSelected }: FileBrowserPr
       <div className="flex-1 overflow-y-auto p-2">
         {loading === 'drives' ? (
           <div className="flex items-center justify-center py-4">
-            <div className="animate-spin rounded-full h-6 w-6 border border-dark-300 border-t-transparent" />
+            <div className="animate-spin rounded-full h-6 w-6 border border-(--vt-text-3) border-t-transparent" />
           </div>
         ) : (
           drives.map(drive => renderDriveOrFolder(drive))
@@ -510,10 +510,10 @@ export function FileBrowser({ onImageSelected, onFolderSelected }: FileBrowserPr
       </div>
 
       {/* Status Bar */}
-      <div className="p-2 border-t text-xs" style={{borderTopColor: 'var(--border)', color: 'var(--gray-400)'}}>
+      <div style={{ padding: '8px 16px', borderTop: '1px solid var(--vt-line-soft)', fontSize: 11.5, color: 'var(--vt-text-3)' }}>
         {totalImages > 0 ? (
           <>
-            {totalImages} image{totalImages !== 1 ? 's' : ''} • {fileSystemService.formatFileSize(totalSize)}
+            {totalImages} image{totalImages !== 1 ? 's' : ''} · {fileSystemService.formatFileSize(totalSize)}
           </>
         ) : (
           'Select a folder to browse images'

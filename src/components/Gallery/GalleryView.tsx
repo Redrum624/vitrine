@@ -364,10 +364,14 @@ export function GalleryView({ images, onImageSelect, visible, onRequestRemove }:
                       />
                     ) : (
                       <div
-                        className="w-full h-full flex items-center justify-center"
+                        className="w-full h-full flex flex-col items-center justify-center"
+                        style={{ gap: 2 }}
                         onClick={() => loadThumbnail(image)}
                       >
-                        <span className="text-xs text-center px-2" style={{ color: 'var(--glass-text-muted)' }}>{getDisplayFormat(image.format)}</span>
+                        <span style={{ fontSize: 15, fontWeight: 600, color: 'var(--vt-text-2)' }}>
+                          {getDisplayFormat(image.format) || getDisplayFormat(image.name)}
+                        </span>
+                        <span style={{ fontSize: 11.5, color: 'var(--vt-text-3)' }}>No preview</span>
                       </div>
                     )}
 

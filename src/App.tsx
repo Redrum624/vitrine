@@ -33,7 +33,7 @@ import { imageService } from './services/ImageService';
 import { ImageFileInfo, fileSystemService } from './services/FileSystemService';
 import { useAppStore } from './stores/appStore';
 import {
-  INSPECTOR_WIDTH, PHOTO_INSET_LEFT, PHOTO_INSET_TOP, PHOTO_INSET_BOTTOM, getPhotoInsetRight,
+  INSPECTOR_WIDTH, PHOTO_INSET_LEFT, PHOTO_INSET_TOP, PHOTO_INSET_BOTTOM, getPhotoInsetRight, CANVAS_SURROUND,
 } from './layout/photoRegion';
 import { formatGalleryFolderChip } from './utils/gallerySelection';
 import { computeViewportGeometry } from './utils/viewportGeometry';
@@ -233,7 +233,7 @@ export function OriginalPane() {
 
     // Background (matches Canvas.tsx). Reset transform so fillRect covers the whole buffer.
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.fillStyle = '#0d0d0d';
+    ctx.fillStyle = CANVAS_SURROUND;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     // Draw the original at the viewport-relative content rect (buffer px), matching the

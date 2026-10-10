@@ -1,5 +1,22 @@
 @import 'tailwindcss';
 
+/* Legacy `dark-*` utilities. tailwind.config.js is not loaded under Tailwind v4, so these
+   used to compile to nothing (transparent panels, unstyled text). Mapped onto the Safelight
+   surfaces so the remaining users (dev-only PerformanceMonitor, old controls) stay legible. */
+@theme inline {
+  --color-dark-950: var(--vt-canvas);
+  --color-dark-900: var(--vt-canvas);
+  --color-dark-850: var(--vt-chrome);
+  --color-dark-800: var(--vt-panel);
+  --color-dark-700: var(--vt-raised);
+  --color-dark-600: var(--vt-line);
+  --color-dark-500: #5a5a62;
+  --color-dark-400: var(--vt-text-3);
+  --color-dark-300: var(--vt-text-2);
+  --color-dark-200: var(--vt-text);
+  --color-dark-100: var(--vt-text);
+}
+
 /* CSS Variables for Prestigious Studio Design */
 :root {
   --black: #000000;
@@ -92,6 +109,18 @@
 
   --radius-card: 10px;
   --radius-dock: 8px;
+
+  /* Radii grow with the size of the thing: value field 4 → buttons 5 → chips and
+     inputs 6 → segmented wells and tool tiles 7 → menus 8 → dialogs 10 → sheets 12. */
+  --radius-4: 4px;
+  --radius-5: 5px;
+  --radius-6: 6px;
+  --radius-7: 7px;
+  --radius-8: 8px;
+  --radius-10: 10px;
+  --radius-12: 12px;
+  /* Only things that really float (menus, popovers, dialogs, toasts) cast a shadow. */
+  --shadow-popover: var(--glass-shadow-chrome);
 
   --border: var(--vt-line-soft);
   --border-light: var(--vt-line);
@@ -583,13 +612,37 @@ button,
   box-shadow: inset 0 0 0 1px var(--accent);
 }
 
-/* Secondary dialog button (Cancel, …). */
+/* Secondary dialog button (Cancel, …) — same 30px / radius-6 geometry as AccentButton,
+   so a footer's buttons line up. `data-danger` is the quiet destructive variant. */
 .glass-modal-btn-secondary {
-  transition: background-color 90ms ease, color 90ms ease;
+  height: 30px;
+  padding: 0 14px;
+  border-radius: var(--radius-6);
+  border: 1px solid var(--vt-line);
+  background: transparent;
+  color: var(--vt-text-2);
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: background-color 90ms ease, color 90ms ease, border-color 120ms ease;
 }
 .glass-modal-btn-secondary:hover:not(:disabled) {
   background: var(--vt-hover);
   color: var(--vt-text);
+}
+.glass-modal-btn-secondary:active:not(:disabled) {
+  background: var(--vt-press);
+}
+.glass-modal-btn-secondary:disabled {
+  opacity: 0.45;
+}
+.glass-modal-btn-secondary[data-danger] {
+  border-color: rgba(239, 107, 107, 0.45);
+  color: #f08a8a;
+}
+.glass-modal-btn-secondary[data-danger]:hover:not(:disabled) {
+  background: rgba(239, 107, 107, 0.1);
+  color: #f6a3a3;
 }
 
 /* Primary dialog button (Export, Apply, …) — backs Controls/AccentButton. */

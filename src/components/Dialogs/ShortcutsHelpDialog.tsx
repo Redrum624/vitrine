@@ -12,31 +12,30 @@ interface ShortcutsHelpDialogProps {
 }
 
 const categoryNames: Record<string, string> = {
-  file: 'File Operations',
-  edit: 'Edit Operations',
-  view: 'View Controls',
-  tools: 'Tool Selection',
-  processing: 'Processing & Effects'
+  file: 'File',
+  edit: 'Editing and rating',
+  view: 'View',
+  tools: 'Tools',
+  processing: 'Processing and effects'
 };
 
-const categoryIcons: Record<string, string> = {
-  file: '📁',
-  edit: '✏️',
-  view: '👁️',
-  tools: '🛠️',
-  processing: '⚡'
-};
-
-// Mono "kbd chip" idiom for a rendered key part (Ctrl / Shift / Alt / the
-// key itself). Shared between the per-shortcut key combos and the footer tip.
+// Keycap: the one monospace idiom in the UI. A 2px bottom edge reads as a key, not a chip.
+// Shared between the per-shortcut key combos and the footer tip.
 const kbdChipStyle: React.CSSProperties = {
-  fontFamily: 'ui-monospace, monospace',
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  minWidth: 22,
+  height: 20,
+  padding: '0 6px',
+  fontFamily: 'var(--font-mono)',
   fontSize: 10.5,
-  padding: '3px 7px',
-  borderRadius: 6,
-  border: '1px solid rgba(255,255,255,.1)',
-  background: 'rgba(255,255,255,.04)',
-  color: 'var(--glass-text-label)',
+  lineHeight: 1,
+  borderRadius: 'var(--radius-4)',
+  border: '1px solid var(--vt-line)',
+  borderBottomWidth: 2,
+  background: 'var(--vt-field)',
+  color: 'var(--vt-text-2)',
 };
 
 export function ShortcutsHelpDialog({ isOpen, onClose, shortcuts }: ShortcutsHelpDialogProps) {
@@ -83,7 +82,7 @@ export function ShortcutsHelpDialog({ isOpen, onClose, shortcuts }: ShortcutsHel
           <React.Fragment key={part}>
             <kbd style={kbdChipStyle}>{part}</kbd>
             {index < parts.length - 1 && (
-              <span style={{ fontSize: 10, color: 'var(--glass-text-muted)' }}>+</span>
+              <span style={{ fontSize: 10, color: 'var(--vt-text-3)' }}>+</span>
             )}
           </React.Fragment>
         ))}
@@ -94,11 +93,11 @@ export function ShortcutsHelpDialog({ isOpen, onClose, shortcuts }: ShortcutsHel
   const totalShortcuts = Object.values(shortcuts).reduce((sum, arr) => sum + arr.length, 0);
 
   const footer = (
-    <div className="flex items-center justify-between" style={{ fontSize: 11, color: 'var(--glass-text-muted)' }}>
+    <div className="flex items-center justify-between" style={{ fontSize: 11.5, color: 'var(--vt-text-3)' }}>
       <span>
-        Tip: Press <kbd style={kbdChipStyle}>F1</kbd> or <kbd style={kbdChipStyle}>?</kbd> to toggle this dialog
+        Press <kbd style={kbdChipStyle}>F1</kbd> or <kbd style={kbdChipStyle}>?</kbd> to open or close this list
       </span>
-      <span>Total: {totalShortcuts} shortcuts</span>
+      <span>{totalShortcuts} shortcuts</span>
     </div>
   );
 
@@ -118,7 +117,7 @@ export function ShortcutsHelpDialog({ isOpen, onClose, shortcuts }: ShortcutsHel
           <Search size={13} style={{ position: 'absolute', left: 8, color: 'var(--glass-text-muted)' }} />
           <input
             type="text"
-            placeholder="Search shortcuts..."
+            placeholder="Search shortcuts"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             style={{ ...inputStyle, paddingLeft: 26 }}
@@ -127,48 +126,36 @@ export function ShortcutsHelpDialog({ isOpen, onClose, shortcuts }: ShortcutsHel
       </div>
 
       <div className="flex-1 overflow-y-auto" style={{ padding: '18px 20px' }}>
-        <div className="space-y-7">
+        <div className="space-y-6">
           {Object.entries(filteredShortcuts).map(([category, categoryShortcuts]) => (
-            <div key={category} className="space-y-3">
-              {/* Category header */}
-              <div className="flex items-center" style={{ gap: 10 }}>
-                <span style={{ fontSize: 15 }}>{categoryIcons[category]}</span>
+            <section key={category} aria-label={categoryNames[category] || category}>
+              <div className="flex items-center" style={{ gap: 10, marginBottom: 6 }}>
                 <div className="flex-1 min-w-0">
                   <SectionLabel>{categoryNames[category] || category}</SectionLabel>
                 </div>
-                <span
-                  style={{
-                    fontSize: 10, padding: '3px 8px', borderRadius: 6, whiteSpace: 'nowrap',
-                    background: 'rgba(255,255,255,.04)', border: '1px solid rgba(255,255,255,.1)', color: 'var(--glass-text-muted)',
-                  }}
-                >
-                  {categoryShortcuts.length} shortcut{categoryShortcuts.length !== 1 ? 's' : ''}
+                <span style={{ fontSize: 11, color: 'var(--vt-text-3)', fontVariantNumeric: 'tabular-nums' }}>
+                  {categoryShortcuts.length}
                 </span>
               </div>
 
-              {/* Shortcuts */}
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-2">
+              {/* Rows on hairlines, two columns when there's room */}
+              <div className="grid grid-cols-1 lg:grid-cols-2" style={{ columnGap: 32 }}>
                 {categoryShortcuts.map((shortcut) => (
                   <div
                     key={shortcut.id}
                     className="flex items-center justify-between"
-                    style={{ padding: 10, borderRadius: 10, border: '1px solid rgba(255,255,255,.1)', background: 'rgba(255,255,255,.04)' }}
+                    style={{ minHeight: 36, gap: 12, borderBottom: '1px solid var(--vt-line-soft)' }}
                   >
-                    <div className="flex-1 min-w-0">
-                      <p className="truncate" style={{ fontSize: 12, fontWeight: 500, color: 'var(--glass-text-label)' }}>
-                        {shortcut.description}
-                      </p>
-                      <p className="truncate" style={{ fontSize: 10.5, color: 'var(--glass-text-muted)' }}>
-                        ID: {shortcut.id}
-                      </p>
-                    </div>
-                    <div style={{ marginLeft: 12, flexShrink: 0 }}>
+                    <span className="truncate" style={{ fontSize: 12.5, color: 'var(--vt-text)' }}>
+                      {shortcut.description}
+                    </span>
+                    <div style={{ flexShrink: 0 }}>
                       {renderShortcutKey(shortcut)}
                     </div>
                   </div>
                 ))}
               </div>
-            </div>
+            </section>
           ))}
 
           {Object.keys(filteredShortcuts).length === 0 && (

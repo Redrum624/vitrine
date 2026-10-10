@@ -500,8 +500,8 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
                 data-testid="upscale-mode-badge"
                 title="AI upscale uses your GPU when available; falls back to Standard otherwise."
                 style={{
-                  fontSize: 9.5, fontWeight: 700, letterSpacing: '.04em', padding: '2px 7px',
-                  borderRadius: 999, textTransform: 'uppercase',
+                  fontSize: 10.5, fontWeight: 600, padding: '1px 7px',
+                  borderRadius: 999,
                   background: upscaleMode === 'ai' ? 'var(--accent-soft)' : 'rgba(255,255,255,.04)',
                   color: upscaleMode === 'ai' ? 'var(--accent)' : 'var(--glass-text-secondary)',
                   border: `1px solid ${upscaleMode === 'ai' ? 'var(--accent-ring)' : 'rgba(255,255,255,.1)'}`,
@@ -618,8 +618,8 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
                 data-testid="motion-deblur-ai-badge"
                 title="Runs a neural network on your GPU (DirectML). Aim it at camera-shake / motion blur, not soft focus."
                 style={{
-                  fontSize: 9.5, fontWeight: 700, letterSpacing: '.04em', padding: '2px 7px',
-                  borderRadius: 999, textTransform: 'uppercase',
+                  fontSize: 10.5, fontWeight: 600, padding: '1px 7px',
+                  borderRadius: 999,
                   background: 'var(--accent-soft)', color: 'var(--accent)',
                   border: '1px solid var(--accent-ring)',
                 }}
