@@ -1,4 +1,4 @@
-import { useId, useState } from 'react';
+import { useId } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import { X } from 'lucide-react';
 
@@ -13,7 +13,7 @@ export interface GlassModalProps {
   title: string;
   /** Muted state subtitle under the title (e.g. "3 images queued"). */
   subtitle?: string;
-  /** 28px accent icon chip, module-card header anatomy. Omit for icon-less dialogs. */
+  /** 15px header glyph (inherits the label colour). Omit for icon-less dialogs. */
   icon?: ReactNode;
   /** Extra header controls rendered before the close chip (rare; most dialogs
    *  only need the standard close affordance). */
@@ -44,18 +44,13 @@ export interface GlassModalProps {
 }
 
 /**
- * Shared Glass · Sectioned modal chrome: scrim + centered glass card + the
- * module-card header anatomy (icon chip / title / subtitle / action chips)
- * + a scrollable body slot + an optional footer slot. One wrapper so the
- * ported dialogs (Export/Batch/ImageSize/...) restate only their own
- * content, not the overlay/card/header boilerplate.
- *
- * Card opacity decision: `.glass-card`'s default --glass-bg is rgba(15,15,19,.78)
- * (tuned for panels sitting beside the canvas). Modals sit ON TOP of the busy
- * canvas/filmstrip, so at .78 alpha body text loses contrast against whatever
- * image is behind it — this component overrides to rgba(15,15,19,.92) (still
- * translucent enough to read as "glass", opaque enough to stay legible over
- * any image). Decided once here rather than per-dialog.
+ * Shared modal chrome (Safelight): a dimming scrim + a centered, opaque
+ * popover-surface card (`.glass-chrome`, radius 10) that scales up from .97
+ * on the spring as it opens, a flat header (glyph / title / subtitle / close),
+ * a scrollable body slot and an optional footer slot. One wrapper so the
+ * dialogs (Export/Batch/ImageSize/...) restate only their own content, not
+ * the overlay/card/header boilerplate. The card is fully opaque: dialogs sit
+ * on top of the photo, and translucent cards lose contrast over a busy image.
  *
  * Escape is deliberately NOT imposed here: this app's existing dialogs only
  * ever expose an explicit close button (no Escape-to-dismiss anywhere in the
@@ -89,11 +84,9 @@ export function GlassModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center"
+      className="fixed inset-0 z-50 flex items-center justify-center vt-fade-in"
       style={{
-        background: 'rgba(5,5,8,.6)',
-        backdropFilter: 'blur(8px)',
-        WebkitBackdropFilter: 'blur(8px)',
+        background: 'rgba(0, 0, 0, 0.45)',
       }}
       onClick={closeOnOverlayClick && onClose ? onClose : undefined}
     >
@@ -101,29 +94,25 @@ export function GlassModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className={`glass-card dc-rise flex flex-col ${cardClassName}`}
-        style={{ background: 'rgba(15,15,19,.92)', overflow: 'hidden', ...cardStyle }}
+        className={`glass-chrome vt-pop-in flex flex-col ${cardClassName}`}
+        style={{ borderRadius: 10, overflow: 'hidden', transformOrigin: 'center', ...cardStyle }}
         onClick={(e) => e.stopPropagation()}
       >
         <div
           className="flex items-center flex-shrink-0"
           style={{
-            padding: '13px 16px',
-            gap: 11,
-            background: 'rgba(0,0,0,.3)',
-            borderBottom: '1px solid var(--glass-border)',
+            padding: '12px 10px 12px 16px',
+            gap: 10,
+            borderBottom: '1px solid var(--vt-line)',
           }}
         >
           {icon && (
             <div
               className="inline-flex items-center justify-center flex-shrink-0"
               style={{
-                width: 28,
-                height: 28,
-                borderRadius: 8,
-                background: 'var(--accent-soft)',
-                border: '1px solid var(--accent-ring)',
-                color: 'var(--accent)',
+                width: 18,
+                height: 18,
+                color: 'var(--glass-text-label)',
               }}
             >
               {icon}
@@ -134,7 +123,7 @@ export function GlassModal({
             <div
               id={titleId}
               style={{
-                fontSize: 12.5,
+                fontSize: 13.5,
                 fontWeight: 600,
                 color: 'var(--glass-text-title)',
                 lineHeight: 1.25,
@@ -148,9 +137,10 @@ export function GlassModal({
             {subtitle && (
               <div
                 style={{
-                  fontSize: 10.5,
+                  fontSize: 11.5,
                   color: 'var(--glass-text-muted)',
                   lineHeight: 1.35,
+                  marginTop: 1,
                   whiteSpace: 'nowrap',
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
@@ -176,7 +166,7 @@ export function GlassModal({
           <div
             data-testid="glass-modal-footer"
             className="flex-shrink-0"
-            style={{ padding: '14px 16px', borderTop: '1px solid var(--glass-border)' }}
+            style={{ padding: '12px 16px', borderTop: '1px solid var(--vt-line)' }}
           >
             {footer}
           </div>
@@ -186,38 +176,26 @@ export function GlassModal({
   );
 }
 
-/** 26px square close chip — same hover/press idiom as ModuleCardHeader's
- *  action chips (local JS hover state; there's no shared component for this
- *  exact square-icon-button shape to import). */
+/** 28px square close button — a plain glyph with the command-bar hover fill
+ *  (.glass-pill-btn), like a native dialog's close button. */
 function ModalCloseChip({ onClick }: { onClick: () => void }) {
-  const [hovered, setHovered] = useState(false);
-  const [pressed, setPressed] = useState(false);
   return (
     <button
       type="button"
       aria-label="Close"
       title="Close"
       onClick={onClick}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => { setHovered(false); setPressed(false); }}
-      onMouseDown={() => setPressed(true)}
-      onMouseUp={() => setPressed(false)}
-      className="inline-flex items-center justify-center flex-shrink-0"
+      className="glass-pill-btn inline-flex items-center justify-center flex-shrink-0"
       style={{
-        width: 26,
-        height: 26,
-        borderRadius: 8,
-        borderWidth: 1,
-        borderStyle: 'solid',
-        borderColor: hovered ? 'var(--accent-ring)' : 'rgba(255,255,255,.1)',
-        background: hovered ? 'var(--accent-soft)' : 'rgba(255,255,255,.04)',
-        color: hovered ? 'var(--accent)' : 'var(--glass-text-secondary)',
-        cursor: 'pointer',
-        transform: pressed ? 'scale(.96)' : 'scale(1)',
-        transition: 'background 150ms ease, border-color 150ms ease, color 150ms ease, transform 100ms ease',
+        width: 28,
+        height: 28,
+        borderRadius: 5,
+        border: 0,
+        background: 'transparent',
+        color: 'var(--glass-text-secondary)',
       }}
     >
-      <X size={14} />
+      <X size={15} />
     </button>
   );
 }

@@ -335,7 +335,7 @@ export function PresetDialog({ isOpen, onClose, onApplyPreset }: PresetDialogPro
             <textarea
               value={newPresetDescription}
               onChange={(e) => setNewPresetDescription(e.target.value)}
-              style={{ ...inputStyle, resize: 'vertical' }}
+              style={{ ...inputStyle, height: 'auto', padding: '6px 8px', resize: 'vertical' }}
               rows={3}
               placeholder="Description of the preset..."
             />

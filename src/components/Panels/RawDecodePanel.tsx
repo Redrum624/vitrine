@@ -147,10 +147,10 @@ export function RawDecodePanel({ currentImage }: RawDecodePanelProps) {
   };
 
   return (
-    <div className="glass-card dc-rise" style={{ overflow: 'hidden', marginBottom: 12 }}>
+    <section aria-label="RAW Decode" className="vt-fade-in" style={{ overflow: 'hidden', borderBottom: '1px solid var(--glass-border)' }}>
       <div
         className="flex items-center"
-        style={{ gap: 8, padding: '10px 14px', cursor: 'pointer' }}
+        style={{ gap: 8, padding: '12px 14px 12px 16px' }}
         onClick={() => setOpen((o) => !o)}
       >
         {open ? (
@@ -158,10 +158,10 @@ export function RawDecodePanel({ currentImage }: RawDecodePanelProps) {
         ) : (
           <ChevronRight size={14} style={{ color: 'var(--glass-text-muted)' }} />
         )}
-        <Aperture size={14} style={{ color: 'var(--accent)' }} />
+        <Aperture size={14} style={{ color: 'var(--glass-text-label)' }} />
         <span className="flex-1 truncate" style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--glass-text-title)' }}>RAW Decode</span>
         {!open && (
-          <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: 10.5, color: 'var(--glass-text-muted)' }}>
+          <span style={{ fontSize: 11.5, color: 'var(--glass-text-muted)' }}>
             {rawDecodeOptions.demosaic.toUpperCase()} &middot; {rawDecodeOptions.highlightMode}
             {rawDecodeOptions.cameraMatch ? ' · cam' : ''}
           </span>
@@ -169,7 +169,7 @@ export function RawDecodePanel({ currentImage }: RawDecodePanelProps) {
         {reDecoding && <span style={{ fontSize: 10.5, color: 'var(--accent)' }}>Decoding&hellip;</span>}
       </div>
       {open && (
-        <div className="flex flex-col" style={{ gap: 12, padding: '4px 14px 14px' }}>
+        <div className="flex flex-col" style={{ gap: 12, padding: '2px 16px 16px' }}>
           <div className="flex items-center justify-between" style={{ gap: 8 }}>
             <label htmlFor="raw-decode-camera-match" style={{ fontSize: 11, fontWeight: 500, color: 'var(--glass-text-label)' }}>
               Camera match
@@ -253,7 +253,7 @@ export function RawDecodePanel({ currentImage }: RawDecodePanelProps) {
           </div>
         </div>
       )}
-    </div>
+    </section>
   );
 }
 

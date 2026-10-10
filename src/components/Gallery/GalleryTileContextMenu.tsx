@@ -107,12 +107,13 @@ export function GalleryTileContextMenu({ x, y, onOpen, onRemove, onShowInExplore
     <div
       ref={menuRef}
       role="menu"
-      className="glass-chrome"
+      className="glass-chrome vt-pop-in"
       style={{
         position: 'fixed',
         left: pos.left,
         top: pos.top,
-        borderRadius: '10px',
+        borderRadius: '8px',
+        transformOrigin: 'top left',
         padding: '5px',
         display: 'flex',
         flexDirection: 'column',

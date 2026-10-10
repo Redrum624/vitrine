@@ -170,11 +170,11 @@ const RAW_IMAGE: ImageFileInfo = {
 };
 
 describe('RawDecodePanel — glass port', () => {
-  it('renders as a glass card and keeps the Demosaic/Highlights selects labeled', () => {
+  it('renders as a docked inspector section and keeps the Demosaic/Highlights selects labeled', () => {
     useAppStore.setState({ rawDecodeOptions: DEFAULT_RAW_DECODE_OPTIONS, reDecoding: false });
-    const { container } = render(<RawDecodePanel currentImage={RAW_IMAGE} />);
+    render(<RawDecodePanel currentImage={RAW_IMAGE} />);
 
-    expect(container.querySelector('.glass-card')).not.toBeNull();
+    expect(screen.getByRole('region', { name: 'RAW Decode' })).toBeInTheDocument();
     fireEvent.click(screen.getByText('RAW Decode'));
     expect(screen.getByLabelText('Demosaic')).toBeInTheDocument();
     expect(screen.getByLabelText('Highlights')).toBeInTheDocument();

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Camera, Image, Folder, BookOpen, Zap, ArrowRight, X } from 'lucide-react';
+import { Image, Folder, BookOpen, ArrowRight, X } from 'lucide-react';
 import { AccentButton } from '../Controls/AccentButton';
 import { infoBoxStyle } from '../Dialogs/glassFormStyles';
 
@@ -79,29 +79,37 @@ export function WelcomeScreen({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center"
-      style={{ background: 'rgba(5,5,8,.6)', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)' }}
+      className="fixed inset-0 z-50 flex items-center justify-center vt-fade-in"
+      style={{ background: 'rgba(0, 0, 0, 0.45)' }}
     >
       <div
         role="dialog"
         aria-label="Welcome to Vitrine"
-        className="glass-card dc-rise flex flex-col max-w-2xl w-full"
-        style={{ background: 'rgba(15,15,19,.92)', maxHeight: '90vh', overflow: 'hidden' }}
+        className="glass-chrome vt-pop-in flex flex-col w-full"
+        style={{ maxWidth: 520, maxHeight: '90vh', overflow: 'hidden', borderRadius: 12, transformOrigin: 'center' }}
       >
-        {/* Header */}
-        <div
-          className="flex items-center flex-shrink-0"
-          style={{ padding: '13px 16px', gap: 11, background: 'rgba(0,0,0,.3)', borderBottom: '1px solid var(--glass-border)' }}
-        >
-          <div
-            className="inline-flex items-center justify-center flex-shrink-0"
-            style={{ width: 28, height: 28, borderRadius: 8, background: 'var(--accent-soft)', border: '1px solid var(--accent-ring)', color: 'var(--accent)' }}
-          >
-            <Camera size={15} />
-          </div>
-          <div className="flex-1 min-w-0">
-            <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--glass-text-title)' }}>Welcome to Vitrine</div>
-            <div style={{ fontSize: 10.5, color: 'var(--glass-text-muted)' }}>Develop. Display.</div>
+        {/* Header: mark, name, tagline */}
+        <div className="flex items-start flex-shrink-0" style={{ padding: '22px 20px 18px 24px', gap: 14 }}>
+          <svg viewBox="0 0 256 256" width="40" height="40" aria-hidden="true" style={{ flex: 'none' }}>
+            <defs>
+              <linearGradient id="welcomeBladeGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" style={{ stopColor: '#b0b0b0' }} />
+                <stop offset="100%" style={{ stopColor: '#505050' }} />
+              </linearGradient>
+            </defs>
+            <rect x="0" y="0" width="256" height="256" rx="48" ry="48" fill="#141416" />
+            <circle cx="128" cy="128" r="93" fill="none" stroke="#454545" strokeWidth="5" />
+            <circle cx="128" cy="128" r="85" fill="#0a0a0a" />
+            <g fill="url(#welcomeBladeGradient)" stroke="#252525" strokeWidth="1">
+              {[0, 45, 90, 135, 180, 225, 270, 315].map((deg) => (
+                <path key={deg} d="M98,46 A85,85 0 0,1 158,46 L128,75 L98,105 Z" transform={`rotate(${deg}, 128, 128)`} />
+              ))}
+            </g>
+            <circle cx="128" cy="128" r="25" fill="#0a0a0a" />
+          </svg>
+          <div className="flex-1 min-w-0" style={{ paddingTop: 1 }}>
+            <div style={{ fontSize: 18, fontWeight: 600, color: 'var(--glass-text-title)', letterSpacing: '-0.01em' }}>Welcome to Vitrine</div>
+            <div style={{ fontSize: 12.5, color: 'var(--glass-text-muted)', marginTop: 3 }}>The darkroom, behind glass. Everything stays on this computer.</div>
           </div>
           <button
             type="button"
@@ -109,69 +117,81 @@ export function WelcomeScreen({
             title="Close"
             onClick={handleClose}
             className="glass-pill-btn inline-flex items-center justify-center flex-shrink-0"
-            style={{ width: 26, height: 26, borderRadius: 8, border: '1px solid rgba(255,255,255,.1)', background: 'rgba(255,255,255,.04)', color: 'var(--glass-text-secondary)' }}
+            style={{ width: 28, height: 28, borderRadius: 5, border: 0, background: 'transparent', color: 'var(--glass-text-secondary)' }}
           >
-            <X size={14} />
+            <X size={15} />
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto space-y-6" style={{ padding: '20px 24px' }}>
-          {/* Quick Start */}
-          <div>
-            <h3 className="flex items-center gap-2 mb-3" style={{ fontSize: 10, fontWeight: 700, letterSpacing: '1.4px', textTransform: 'uppercase', color: 'var(--accent)' }}>
-              <Zap size={14} />
-              Quick Start
-            </h3>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              {quickActions.map((action) => (
-                <button
-                  key={action.id}
-                  type="button"
-                  onClick={() => handleQuickAction(action.id)}
-                  className="glass-modal-card-btn text-left"
-                  style={{ padding: 14, borderRadius: 12, border: '1px solid rgba(255,255,255,.1)', background: 'rgba(255,255,255,.04)' }}
+        <div className="flex-1 overflow-y-auto" style={{ padding: '0 16px 16px' }}>
+          {/* Get started — a list of actions, like a native start page */}
+          <h3 className="sr-only">Quick Start</h3>
+          <div className="flex flex-col" style={{ gap: 2 }}>
+            {quickActions.map((action, i) => (
+              <button
+                key={action.id}
+                type="button"
+                onClick={() => handleQuickAction(action.id)}
+                className="glass-pill-btn dc-rise text-left"
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: '32px minmax(0, 1fr) auto auto',
+                  alignItems: 'center',
+                  gap: 12,
+                  padding: '10px 10px 10px 8px',
+                  borderRadius: 7,
+                  border: 0,
+                  background: 'transparent',
+                  animationDelay: `${80 + i * 50}ms`,
+                }}
+              >
+                <span
+                  className="inline-flex items-center justify-center"
+                  style={{ width: 32, height: 32, borderRadius: 7, background: 'var(--vt-raised)', color: 'var(--glass-text-label)' }}
                 >
-                  <action.icon size={22} style={{ marginBottom: 8, color: 'var(--glass-text-label)' }} />
-                  <h4 className="flex items-center justify-between" style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 4, color: 'var(--glass-text-title)' }}>
-                    {action.title}
-                    <ArrowRight size={14} style={{ opacity: 0.5, color: 'var(--glass-text-muted)' }} />
-                  </h4>
-                  <p style={{ fontSize: 11, marginBottom: 8, color: 'var(--glass-text-muted)' }}>{action.description}</p>
-                  <span
-                    style={{
-                      fontSize: 10.5, padding: '2px 8px', borderRadius: 6,
-                      background: 'rgba(0,0,0,.3)', border: '1px solid var(--glass-border)', color: 'var(--glass-text-label)',
-                    }}
-                  >
-                    {action.shortcut}
-                  </span>
-                </button>
-              ))}
-            </div>
+                  <action.icon size={16} />
+                </span>
+                <span style={{ minWidth: 0 }}>
+                  <span style={{ display: 'block', fontSize: 13, fontWeight: 600, color: 'var(--glass-text-title)' }}>{action.title}</span>
+                  <span style={{ display: 'block', fontSize: 11.5, color: 'var(--glass-text-muted)', marginTop: 1 }}>{action.description}</span>
+                </span>
+                <span style={{ fontSize: 11.5, color: 'var(--glass-text-muted)', fontVariantNumeric: 'tabular-nums' }}>{action.shortcut}</span>
+                <ArrowRight size={14} style={{ color: 'var(--glass-text-muted)' }} />
+              </button>
+            ))}
           </div>
 
-          {/* Tips */}
-          <div style={infoBoxStyle}>
-            <h3 style={{ fontSize: 10, fontWeight: 700, letterSpacing: '1.4px', textTransform: 'uppercase', marginBottom: 8, color: 'var(--glass-text-secondary)' }}>💡 Pro Tip</h3>
-            <p style={{ fontSize: 12.5, lineHeight: 1.5, minHeight: '3rem', color: 'var(--glass-text-muted)' }}>{tips[currentTip]}</p>
-            <div className="flex gap-1.5 mt-3">
-              {tips.map((_, index) => (
-                <div
-                  key={index}
-                  className="h-1 rounded-full transition-all duration-300"
-                  style={{ background: index === currentTip ? 'var(--accent)' : 'rgba(255,255,255,.14)', width: index === currentTip ? 24 : 8 }}
-                />
-              ))}
+          {/* Tip — rotates every few seconds with a cross-fade */}
+          <div style={{ ...infoBoxStyle, marginTop: 14, padding: '12px 14px' }}>
+            <div className="flex items-center justify-between" style={{ marginBottom: 6 }}>
+              <h3 style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--glass-text-muted)' }}>Tip</h3>
+              <div className="flex" style={{ gap: 4 }} aria-hidden="true">
+                {tips.map((_, index) => (
+                  <span
+                    key={index}
+                    style={{
+                      height: 4,
+                      borderRadius: 2,
+                      background: index === currentTip ? 'var(--glass-text-label)' : 'var(--vt-line)',
+                      width: index === currentTip ? 16 : 4,
+                      transition: 'width 380ms var(--ease-spring), background-color 200ms ease',
+                    }}
+                  />
+                ))}
+              </div>
             </div>
+            <p key={currentTip} className="vt-fade-in" style={{ fontSize: 12.5, lineHeight: 1.5, minHeight: '2.6em', color: 'var(--glass-text-label)', margin: 0 }}>
+              {tips[currentTip]}
+            </p>
           </div>
         </div>
 
         {/* Footer */}
         <div
           className="flex items-center justify-between flex-shrink-0"
-          style={{ padding: '14px 16px', borderTop: '1px solid var(--glass-border)' }}
+          style={{ padding: '12px 16px', borderTop: '1px solid var(--vt-line)' }}
         >
-          <label className="flex items-center gap-2 cursor-pointer" style={{ fontSize: 11.5, color: 'var(--glass-text-muted)' }}>
+          <label className="flex items-center gap-2" style={{ fontSize: 12, color: 'var(--glass-text-muted)' }}>
             <input
               type="checkbox"
               checked={dontShowAgain}

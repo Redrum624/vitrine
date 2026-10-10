@@ -121,6 +121,13 @@ textarea,
   -webkit-user-select: text;
 }
 
+/* Native checkboxes, radios and progress bars take the accent. */
+input[type='checkbox'],
+input[type='radio'],
+progress {
+  accent-color: var(--accent);
+}
+
 button,
 [role='button'],
 [role='tab'],
@@ -551,25 +558,29 @@ button,
 }
 .glass-modal-tab:hover:not([data-active]) {
   background: var(--vt-hover);
-  color: var(--vt-text);
+  color: var(--vt-text) !important;
 }
 .glass-modal-tab[data-active] {
   background: var(--vt-raised);
-  border: 1px solid var(--vt-line);
-  color: var(--vt-text);
+  border: 1px solid var(--vt-line) !important;
+  color: var(--vt-text) !important;
 }
 
-/* Larger selectable cards (format / preset / resize mode / bit depth). */
+/* Larger selectable cards (format / preset / resize mode / bit depth).
+   The dialogs set each card's idle look inline, so the hover and selected
+   states must be !important to win over it (without that the selected card
+   never looked selected). */
 .glass-modal-card-btn {
-  transition: background-color 90ms ease, border-color 120ms ease;
+  transition: background-color 90ms ease, border-color 120ms ease, box-shadow 120ms ease;
 }
 .glass-modal-card-btn:hover:not([data-active]):not(:disabled) {
-  background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.06) !important;
+  border-color: rgba(255, 255, 255, 0.18) !important;
 }
 .glass-modal-card-btn[data-active] {
-  background: var(--vt-raised);
-  border-color: var(--accent);
+  background: var(--vt-raised) !important;
+  border-color: var(--accent) !important;
+  box-shadow: inset 0 0 0 1px var(--accent);
 }
 
 /* Secondary dialog button (Cancel, …). */
