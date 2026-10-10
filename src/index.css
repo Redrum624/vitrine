@@ -55,12 +55,12 @@
   --vt-line-soft: #242428;   /* panel dividers */
   --vt-hover: rgba(255, 255, 255, 0.055);
   --vt-press: rgba(255, 255, 255, 0.09);
-  --vt-text: #ececef;        /* 14.6:1 on panel */
-  --vt-text-2: #b4b4bb;      /* labels, 8.6:1 on panel */
+  --vt-text: #ececef;        /* 14.3:1 on panel */
+  --vt-text-2: #b4b4bb;      /* labels, 8.2:1 on panel */
   --vt-text-3: #8c8c94;      /* meta, 5.0:1 on panel */
 
   --accent: #f0a640;
-  --accent-ink: #1f1405;     /* text on a solid accent fill, 8.7:1 */
+  --accent-ink: #1f1405;     /* text on a solid accent fill, 8.8:1 */
   --accent-soft: rgba(240, 166, 64, 0.14);
   --accent-ring: rgba(240, 166, 64, 0.4);
 
