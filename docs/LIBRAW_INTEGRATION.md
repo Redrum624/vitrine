@@ -36,13 +36,27 @@ RawImageService.loadRawImage()
    `electron/librawWasmNode.cjs`) — the same true demosaic without the native
    binary, used only when step 1 throws (binary missing, decode failure, etc.).
    Noticeably slower (~10s/file); runs in a dedicated worker so a bad file can't
-   wedge the main process.
+   wedge the main process. Its runtime is `public/libraw/worker.js` plus
+   `libraw.js` and `libraw.wasm` from the `libraw-wasm` package — the latter two
+   are git-ignored and copied in by `scripts/sync-libraw-wasm.cjs` (runs on
+   `postinstall` and before every `build`). The rung is skipped instantly when
+   the runtime is incomplete, and fails immediately with LibRaw's reason when it
+   can't read a file (unsupported camera, damaged RAW).
 3. **Embedded JPEG extraction** (`decodeEmbeddedJpeg`, via `sharp`) — last
    resort. Parses the RAW file's TIFF/IFD header for sensor dimensions, locates
-   the largest embedded JPEG preview (`electron/embeddedPreview.cjs`), and
-   upscales it to sensor size with Lanczos3. This is the camera's own
+   the largest embedded JPEG preview (`electron/embeddedPreview.cjs`), turns it
+   upright (the JPEG's own EXIF orientation, else the RAW container's — ORF
+   previews carry none), and upscales it to fit the sensor size with Lanczos3,
+   keeping its aspect ratio. This is the camera's own
    already-graded rendering (looks like the out-of-camera JPEG), not a fresh
    demosaic — decode options below don't apply to it.
+
+### Setting up a source checkout
+
+`vendor/libraw/dcraw_emu.exe` (and its DLLs) are git-ignored Windows binaries from a
+LibRaw release; drop them in `vendor/libraw/` for the fast native rung. Without them
+RAW files still open through `libraw-wasm`, as long as `pnpm install` (or
+`node scripts/sync-libraw-wasm.cjs`) has copied its runtime into `public/libraw/`.
 
 If all three throw, `decodeRawFile` rethrows and `RawImageService.loadRawImage`
 propagates the error (no silent fallback to a placeholder image).

@@ -205,7 +205,7 @@ async function decodeEmbeddedJpeg(filePath, log) {
 
   // 2. Find the largest embedded JPEG, bounding each by PARSING its marker structure
   //    (a naive FF D8 .. FF D9 scan grabs false markers inside entropy-coded data).
-  const { findEmbeddedJpegs } = require('./embeddedPreview.cjs');
+  const { findEmbeddedJpegs, readOrientation, applyExifOrientation } = require('./embeddedPreview.cjs');
   const jpegs = findEmbeddedJpegs(buf);
   const bestStart = jpegs.length ? jpegs[0].offset : -1;
   const bestSize = jpegs.length ? jpegs[0].length : 0;
@@ -214,29 +214,36 @@ async function decodeEmbeddedJpeg(filePath, log) {
 
   if (bestSize > 50000) {
     const jpeg = buf.slice(bestStart, bestStart + bestSize);
-    let pipeline = sharp(jpeg, { failOn: 'none' });
+    const meta = await sharp(jpeg, { failOn: 'none' }).metadata();
+
+    // Orient upright exactly like the progressive preview (decodeEmbeddedPreview): the JPEG's own
+    // EXIF orientation wins, else the RAW container's — ORF previews carry none of their own, so
+    // without this a portrait ORF opened upright and then turned sideways when this "full" decode
+    // swapped in.
+    const orientation = meta.orientation > 1 ? meta.orientation : readOrientation(buf);
+    let pipeline = applyExifOrientation(sharp(jpeg, { failOn: 'none' }), orientation);
+    const quarterTurn = orientation >= 5;
+    const uprightW = quarterTurn ? meta.height : meta.width;
+    const uprightH = quarterTurn ? meta.width : meta.height;
 
     if (sensorWidth > 0 && sensorHeight > 0) {
-      const meta = await sharp(jpeg, { failOn: 'none' }).metadata();
-      if (meta.width < sensorWidth || meta.height < sensorHeight) {
-        // Respect orientation: if JPEG is landscape but sensor is portrait (or vice versa), swap
-        let targetW = sensorWidth, targetH = sensorHeight;
-        if ((meta.width > meta.height) !== (sensorWidth > sensorHeight)) {
-          targetW = sensorHeight;
-          targetH = sensorWidth;
-        }
-        pipeline = pipeline.resize(targetW, targetH, {
-          kernel: sharp.kernel.lanczos3,
-          fit: 'fill',
-        });
-        log.log(`RAW decode: upscaling ${meta.width}x${meta.height} -> ${targetW}x${targetH}`);
+      // Upscale to the sensor's size in the photo's own orientation. `inside` keeps the preview's
+      // aspect ratio: the IFD0 sensor size includes margins (e.g. 5200×3904 for a 4:3 PEN-F
+      // preview), and `fill` stretched the picture to it.
+      const long = Math.max(sensorWidth, sensorHeight);
+      const short = Math.min(sensorWidth, sensorHeight);
+      const targetW = uprightW >= uprightH ? long : short;
+      const targetH = uprightW >= uprightH ? short : long;
+      if (uprightW < targetW && uprightH < targetH) {
+        pipeline = pipeline.resize(targetW, targetH, { kernel: sharp.kernel.lanczos3, fit: 'inside' });
+        log.log(`RAW decode: upscaling ${uprightW}x${uprightH} to fit ${targetW}x${targetH}`);
       }
     }
 
-    const result = await pipeline.raw().toBuffer({ resolveWithObject: true });
+    const result = await pipeline.removeAlpha().raw().toBuffer({ resolveWithObject: true });
     pixelBuffer = result.data;
     info = result.info;
-    log.log(`RAW decode (embedded JPEG): ${info.width}x${info.height} (${info.channels}ch) from ${filePath}`);
+    log.log(`RAW decode (embedded JPEG): ${info.width}x${info.height} (${info.channels}ch, orientation ${orientation}) from ${filePath}`);
   } else {
     const result = await sharp(filePath, { failOn: 'none' })
       .raw()

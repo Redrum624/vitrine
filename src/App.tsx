@@ -60,6 +60,7 @@ import type { CropPipelineModule } from './modules/CropPipelineModule';
 import { PrintDialog } from './components/Dialogs/PrintDialog';
 import { InfoPopover } from './components/InfoPopover';
 import { guardDeveloping } from './utils/developingGuard';
+import { RAW_EXTENSIONS } from './utils/rawExtensions';
 
 // Import pipeline tests for development
 if (process.env.NODE_ENV === 'development') {
@@ -611,7 +612,7 @@ function App() {
           properties: ['openFile', 'multiSelections'],
           filters: [
             { name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'tiff', 'tif', 'bmp', 'webp'] },
-            { name: 'RAW Files', extensions: ['cr2', 'nef', 'arw', 'dng', 'orf', 'rw2', 'pef'] },
+            { name: 'RAW Files', extensions: RAW_EXTENSIONS },
             { name: 'All Files', extensions: ['*'] }
           ]
         });
@@ -1805,7 +1806,7 @@ function App() {
                 properties: ['openFile', 'multiSelections'],
                 filters: [
                   { name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'tiff', 'tif', 'bmp', 'webp'] },
-                  { name: 'RAW Files', extensions: ['cr2', 'nef', 'arw', 'dng', 'orf', 'rw2', 'pef'] },
+                  { name: 'RAW Files', extensions: RAW_EXTENSIONS },
                   { name: 'All Files', extensions: ['*'] }
                 ]
               });

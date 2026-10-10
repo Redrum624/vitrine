@@ -191,15 +191,7 @@ export class FileSystemService {
     if (lastDotIndex === -1) return false; // No extension
 
     const extension = fileName.substring(lastDotIndex).toLowerCase();
-    const isImage = IMAGE_EXTENSIONS.includes(extension);
-
-    // Debug logging for ORF files (both cases)
-    if (extension === '.orf' || fileName.toLowerCase().includes('.orf')) {
-      logger.info(`ORF file check: original="${fileName}", processed extension="${extension}", isImage=${isImage}`);
-      logger.info(`Available extensions:`, IMAGE_EXTENSIONS);
-    }
-
-    return isImage;
+    return IMAGE_EXTENSIONS.includes(extension);
   }
 
   // Format file size
