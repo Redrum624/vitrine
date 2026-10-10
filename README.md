@@ -18,8 +18,9 @@ masks, lens fixes, GPU denoise, AI upscaling and motion deblur, then export in t
 format and colour space you need. Every edit is saved per photo and re-applied when
 you reopen it; your original file is never touched.
 
-Everything runs on your machine — no cloud, no upload, no sign-in — inside a clean
-full-screen **glass workspace** that keeps every tool one click away.
+Everything runs on your machine — no cloud, no upload, no sign-in — in a quiet, docked
+**darkroom workspace** where the photo is the only colour on screen and every tool is one
+click away.
 
 ### Why Vitrine
 
@@ -110,7 +111,7 @@ the versioned `Setup …​.exe` and `… portable.exe`, their `SHA256SUMS.txt`,
 |:--:|:--:|
 | ![RAW Decode panel](docs/shots/raw-decode.png) | ![Camera and lens EXIF](docs/shots/exif.png) |
 
-**Every tool in one consistent card system** — a floating glass workspace where each module reads the same.
+**Every tool reads the same** — one docked inspector, the same sliders everywhere, and an amber dot on exactly what you changed.
 
 | | |
 |:--:|:--:|
@@ -133,9 +134,9 @@ the versioned `Setup …​.exe` and `… portable.exe`, their `SHA256SUMS.txt`,
 - **Enhance** — Noise Reduction (GPU Non-Local-Means), Sharpening (FidelityFX CAS + Richardson–Lucy deblur with adjustable detail radius), AI motion deblur (NAFNet on GPU, opt-in), edge-aware chroma noise reduction, and ×2/×4 upscale (AI super-resolution on GPU, else Lanczos) in a single panel — the whole deterministic chain runs as WebGL2 passes (~30× faster applies); one **Apply Enhance** button drives them all, with a "re-apply to update" hint when upstream edits go stale.
 - **Lens Corrections** — Distortion, Vignetting, Chromatic Aberration, creative Blur, and Film Grain in sectioned groups within one card.
 - **History** — per-image checkpoint timeline; click any checkpoint to restore that state; persists across sessions separately from Ctrl+Z undo.
-- **Histogram** — live RGB and luminosity tone-distribution display in its own floating card.
-- **Gallery** — a library grid view of the open folder with selection, per-tile ratings, rating filter, double-click-to-edit, Del-to-remove (drop from the session or move to the Recycle Bin, always confirmed), and a right-click context menu (Open, Remove…, Show in Explorer); opened from the filmstrip dock.
-- **Settings** — application preferences, theme, and workspace configuration.
+- **Histogram** — live RGB and luminosity tone-distribution display at the top of the inspector.
+- **Gallery** — a library grid view of the open folder with selection, per-tile ratings, rating filter, double-click-to-edit, Del-to-remove (drop from the session or move to the Recycle Bin, always confirmed), and a right-click context menu (Open, Remove…, Show in Explorer); switch to it from the title bar (Gallery | Develop) or the filmstrip.
+- **Settings** — RAW defaults for new photos (demosaic, highlights, camera match), the startup welcome screen, and the memory cache.
 
 ## Features
 
@@ -155,10 +156,10 @@ the versioned `Setup …​.exe` and `… portable.exe`, their `SHA256SUMS.txt`,
 - **Auto adjustments** — one-click *Auto All* (tone, white balance, colour) driven by a learned user-style profile; individual Auto buttons per panel.
 - **Before/After compare** — toggle the unedited original against the current edit with synced zoom and pan.
 - **Reference image compare** — pin a second photo alongside the current image for side-by-side grading reference.
-- **Camera EXIF info** — click the filename chip for a popover with camera make/model, lens, ISO, shutter, aperture, focal length, and capture date; works for RAW files (read natively from the container) and standard formats alike.
+- **Camera EXIF info** — click the filename in the command bar for a popover with camera make/model, lens, ISO, shutter, aperture, focal length, and capture date; works for RAW files (read natively from the container) and standard formats alike.
 - **Star ratings + filtering** — press 1–5 to rate the open image (0 clears); rating written to the file as `xmp:Rating`; a shared rating filter (footer + Gallery) hides lower-rated photos everywhere at once.
-- **Filmstrip dock** — a floating, scrollable thumbnail dock aligned under the photo; multi-select with Ctrl/Shift+click; mouse-wheel horizontal scroll; prev/next chevrons and a Gallery shortcut.
-- **Glass workspace UI** — full-bleed canvas with floating glass chrome: toolbar pill with responsive overflow menu, icon rail, histogram + module cards, filename chip, and entrance animations that honor reduced-motion preferences.
+- **Filmstrip** — a docked, scrollable thumbnail strip under the photo; multi-select with Ctrl/Shift+click; mouse-wheel horizontal scroll; prev/next chevrons and a Gallery shortcut.
+- **Safelight UI** — a docked, native-feeling layout: Windows-style title bar with a Gallery | Develop switch, a command bar that folds into a `⋯` menu on narrow windows, a 340 px inspector, a tool strip with a sliding indicator, a filmstrip and a status bar. Neutral graphite surfaces, the system font, one amber accent for what you changed, spring-eased motion — all of which collapses under the OS *reduce motion* setting.
 - **Presets** — save and apply named adjustment snapshots across images, including Local Adjustments mask layers, tone curves, color balance, and highlight recovery.
 - **Watermarking** — add text or image watermarks baked into exports.
 - **Web-gallery generation** — export a self-contained browsable HTML gallery from selected photos.

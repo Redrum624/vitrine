@@ -352,16 +352,16 @@ export const ToneCurveModuleComponent: React.FC<ToneCurveModuleComponentProps> =
             onDoubleClick={handleCanvasDoubleClick}
           />
 
-          {/* Instructions */}
-          <div className="absolute bottom-2 left-2" style={{ fontSize: 10, color: 'var(--glass-text-muted)' }}>
-            Click: Add point • Drag: Move point • Double-click: Remove point
-          </div>
+        </div>
+        {/* Instructions — under the graph, never over the curve */}
+        <div style={{ marginTop: 6, fontSize: 11, color: 'var(--vt-text-3)' }}>
+          Click to add · drag to move · double-click to remove
         </div>
       </div>
 
       {/* Quick Actions */}
       <div className="flex items-center justify-between">
-        <span style={{ fontSize: 11.5, color: 'var(--glass-text-label)' }}>Quick Actions</span>
+        <span style={{ fontSize: 12, color: 'var(--vt-text-2)' }}>Quick actions</span>
         <ChipButton
           onClick={() => updateParams({ autoLevels: true, autoContrast: true })}
           title="Automatically adjust levels and contrast based on histogram"
@@ -371,7 +371,7 @@ export const ToneCurveModuleComponent: React.FC<ToneCurveModuleComponentProps> =
       </div>
 
       {/* Curve Presets */}
-      <div className="grid grid-cols-5" style={{ gap: 5 }}>
+      <div className="grid grid-cols-3" style={{ gap: 6 }}>
         {CURVE_PRESETS.map(preset => (
           <ChipButton
             key={preset.id}
@@ -483,18 +483,11 @@ export const ToneCurveModuleComponent: React.FC<ToneCurveModuleComponentProps> =
         </div>
       )}
 
-      {/* Channel Info */}
-      <div className="flex flex-col" style={{ gap: 4, fontSize: 10.5, color: 'var(--glass-text-muted)' }}>
-        <div>Active Channel: <span style={{ color: 'var(--glass-text-title)' }}>{activeChannel.toUpperCase()}</span></div>
-        <div>
-          Control Points: <span style={{ color: 'var(--glass-text-title)' }}>
-            {activeChannel === 'base' ? params.baseCurveNodes : params.rgbCurveNodes[activeChannel]}
-          </span>
+      {params.exposureFusion > 0 && (
+        <div style={{ fontSize: 11.5, color: 'var(--vt-text-3)' }}>
+          Exposure fusion <span style={{ color: 'var(--accent)' }}>on</span>
         </div>
-        {params.exposureFusion > 0 && (
-          <div>Fusion: <span style={{ color: 'var(--accent)' }}>Active</span></div>
-        )}
-      </div>
+      )}
     </div>
   );
 };

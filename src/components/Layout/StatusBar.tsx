@@ -185,7 +185,9 @@ export function StatusBar({ currentImage, processingStats, images }: StatusBarPr
               // does, it ellipsizes too instead of being hard-clipped by the
               // container's overflow:hidden (which is a plain visual cut, not an
               // ellipsis).
-              <span className="truncate" style={{ minWidth: 0, flexShrink: 1 }}>{` · ${fileInfoParts.meta}`}</span>
+              // Non-breaking leading space: a flex item's leading collapsible space is
+              // trimmed, which glued the separator to the name ("photo.jpg· 1800 × …").
+              <span className="truncate" style={{ minWidth: 0, flexShrink: 1 }}>{`\u00a0· ${fileInfoParts.meta}`}</span>
             )}
           </>
         )}

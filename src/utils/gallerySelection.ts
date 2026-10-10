@@ -151,7 +151,11 @@ export function formatGalleryFooterLeft(images: ImageFileInfo[]): string {
   const path = getParentFolderPath(images[0].path);
   const rawCount = images.filter(isRawImage).length;
   const totalSize = images.reduce((sum, img) => sum + (img.size || 0), 0);
-  return `${path} · ${images.length} image${images.length === 1 ? '' : 's'} · ${rawCount} RAW · ${formatBytes(totalSize)}`;
+  // Zero parts are noise ("0 RAW · 0 B" for a JPEG drag-import without file stats) — omit them.
+  const parts = [path, `${images.length} image${images.length === 1 ? '' : 's'}`];
+  if (rawCount > 0) parts.push(`${rawCount} RAW`);
+  if (totalSize > 0) parts.push(formatBytes(totalSize));
+  return parts.join(' · ');
 }
 
 /** Gallery tile's meta line: `W × H · FMT` once dimensions are known (either
