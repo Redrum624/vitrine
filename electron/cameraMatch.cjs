@@ -358,10 +358,21 @@ async function applyCameraMatch(decoded, orfBuf, log = console) {
   }
 }
 
+/**
+ * The worker script on the real filesystem. In a packaged build electron/ lives inside
+ * app.asar, which worker_threads cannot load from; electron-builder unpacks this file
+ * (package.json asarUnpack) to app.asar.unpacked, so point there. Unchanged in dev.
+ */
+function workerScriptPath(dir = __dirname) {
+  const p = path.join(dir, 'cameraMatchWorker.cjs');
+  const asar = `${path.sep}app.asar${path.sep}`;
+  return p.includes(asar) ? p.replace(asar, `${path.sep}app.asar.unpacked${path.sep}`) : p;
+}
+
 /** Run the full-res apply loop in a worker thread; transfers the buffer both ways. */
 function runApplyWorker(dataArrayBuffer, model) {
   return new Promise((resolve, reject) => {
-    const worker = new Worker(path.join(__dirname, 'cameraMatchWorker.cjs'), {
+    const worker = new Worker(workerScriptPath(), {
       workerData: { model },
     });
     worker.once('message', (msg) => {
@@ -379,6 +390,7 @@ function runApplyWorker(dataArrayBuffer, model) {
 
 module.exports = {
   applyCameraMatch,
+  workerScriptPath,
   // pure internals exported for unit tests
   fitTransform,
   fitMatrix,

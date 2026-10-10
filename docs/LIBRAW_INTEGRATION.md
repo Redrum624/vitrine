@@ -69,37 +69,43 @@ chain lacked), and it could not even read the file without `window.electronAPI`.
 In a non-Electron/browser context `decodeRawFile` therefore surfaces an error
 rather than returning fabricated pixels.
 
-## Per-image decode options
+## Decode options (fixed)
 
-`RawDecodeOptions` (`src/types/electron.ts`):
+Every RAW decodes one way — there is no per-photo or per-user setting. The RAW
+Decode panel (demosaic / highlight mode / camera match per photo) and the
+remembered decode defaults were removed: they let a photo get stuck in a bad
+state (a dark, flat render was reported on a PEN-F ORF) and they answered a
+question most photographers never want to ask. Options an older build
+persisted per photo are ignored.
+
+`DEFAULT_RAW_DECODE_OPTIONS` (`src/types/electron.ts`, mirrored in
+`electron/rawDecoder.cjs`):
 
 ```typescript
-type DemosaicAlgo = 'ahd' | 'dcb';
-type HighlightMode = 'off' | 'blend' | 'reconstruct';
-interface RawDecodeOptions { demosaic: DemosaicAlgo; highlightMode: HighlightMode; }
-// Default: { demosaic: 'dcb', highlightMode: 'blend' }
+{ demosaic: 'dcb', highlightMode: 'blend', cameraMatch: true }
 ```
 
-These are set per image from the RAW Decode panel and threaded end-to-end:
-`RawImageService.reDecode(options)` → `loadRawImage(path, options)` → the
-`decode-raw-file` IPC call → `decodeRawFile(filePath, log, options)`, which maps
-them onto whichever engine actually runs:
+Canvas seeds the store with it on every open, and `ImageService.decodeForExport`
+(single export and batch) uses it directly, so an export always matches the
+editor. How it maps onto the engines:
 
 | option | native `dcraw_emu` flag | libraw-wasm field |
 |---|---|---|
-| `demosaic: 'ahd'` / `'dcb'` | `-q 3` / `-q 4` | `userQual: 3` / `4` |
-| `highlightMode: 'off'` | (omitted — LibRaw default = clip) | (omitted) |
+| `demosaic: 'dcb'` | `-q 4` | `userQual: 4` |
 | `highlightMode: 'blend'` | `-H 2` | `highlight: 2` |
-| `highlightMode: 'reconstruct'` | `-H 5` | `highlight: 5` |
+| `cameraMatch: true` | `-W` (auto-brighten off; the match sets the tone) | — |
 
-The embedded-JPEG fallback ignores both options (there is no demosaic to steer).
+**Camera match** fits the decode to the photo's own embedded camera JPEG
+(`electron/cameraMatch.cjs`; the full-resolution apply runs in
+`cameraMatchWorker.cjs`, which is `asarUnpack`ed and loaded from
+`app.asar.unpacked` in packaged builds). If the match can't be made, the native
+rung re-decodes **without** `-W` — the un-brightened base is never shown — and
+the result carries `cameraMatched: false`, which keeps it out of the disk base
+cache so the next open retries the match. The embedded-JPEG fallback ignores all
+options (it already is the camera's render).
 
-`reDecode()` re-runs the decode with the new options, re-checks the user hasn't
-switched images while the async decode was in flight, then replaces the cached
-base + working image and clears the processing pipeline's cache so existing
-module edits re-apply on top of the fresh base. It does **not** push a History
-checkpoint — decode options are a property of the base image, orthogonal to the
-module-edit timeline (see the doc comment on `reDecode` for the full reasoning).
+`RawImageService.reDecode(options)` still exists for internal use but has no UI
+caller.
 
 ## Base-image cache
 
@@ -126,4 +132,5 @@ serve pixels from stale decode options.
 | Renderer entry point | `src/services/RawImageService.ts` |
 | Decode options type + defaults | `src/types/electron.ts` |
 | Base-image cache | `src/services/ImageCacheService.ts` |
-| RAW Decode panel (UI) | `src/components/Panels/RawDecodePanel.tsx` |
+| Camera match (fit + worker) | `electron/cameraMatch.cjs`, `electron/cameraMatchWorker.cjs` |
+| Highlight recovery (UI) | `src/components/Panels/HighlightRecoveryControl.tsx` |

@@ -111,7 +111,7 @@ export function OriginalPane() {
 
   // Build the offscreen canvas when this component mounts AND whenever the base image is
   // swapped in place (baseImageVersion bumps on every ImageService.updateCurrentImageData call —
-  // a progressive RAW open's background full-decode swap, or a RAW Decode re-decode). The parent
+  // a progressive RAW open's background full-decode swap, or a RAW re-decode). The parent
   // re-keys us (key={currentImage?.id ?? 'none'}) on image SWITCH, so mount alone would cover a
   // fresh open, but not a swap on the image that's already showing: without baseImageVersion in
   // the deps, Before kept showing the graded embedded PREVIEW forever if the split stayed open

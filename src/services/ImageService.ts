@@ -7,9 +7,7 @@ import { canvasPoolService } from './CanvasPoolService';
 import { autoRawAdjustmentService, RAWDetectionResult } from './AutoRawAdjustmentService';
 import { ImageProcessingPipeline } from './ImageProcessingPipeline';
 import { useAppStore } from '../stores/appStore';
-import { editPersistenceService } from './EditPersistenceService';
-import { RawDecodeOptions } from '../types/electron';
-import { loadRawDecodeDefaults } from '../utils/rawDecodeDefaultsStorage';
+import { DEFAULT_RAW_DECODE_OPTIONS, RawDecodeOptions } from '../types/electron';
 
 export interface ImageData {
   width: number;
@@ -406,7 +404,7 @@ export class ImageService {
         storeOpts.highlightMode !== decodeOptions.highlightMode ||
         !storeOpts.cameraMatch !== !decodeOptions.cameraMatch;
 
-      // A re-decode (RawDecodePanel → RawImageService.reDecode) for THIS path may be in flight.
+      // A re-decode (RawImageService.reDecode) for THIS path may be in flight.
       // reDecode updates the store's rawDecodeOptions only AFTER its own decode resolves, so when
       // the ORIGINAL background decode lands FIRST (the common order — it started earlier),
       // `optionsChanged` still reads false here even though a fresher re-decode is about to own
@@ -849,17 +847,9 @@ export class ImageService {
     logger.info(`Decoding image for export (no editor side effects): ${filePath}`);
 
     if (rawImageService.isRawFile(filePath)) {
-      // Honor the per-image decode options so the export matches what the user sees in the
-      // preview: the CURRENTLY open image's options live in the store (source of truth while
-      // it's open); any OTHER file's options were persisted by EditPersistenceService the last
-      // time it was open. Neither present -> the user's saved decode defaults.
-      const isCurrentImage = this.getCurrentImage()?.filePath === filePath;
-      const decodeOptions = isCurrentImage
-        ? useAppStore.getState().rawDecodeOptions
-        // No saved per-image options → the user's last-chosen defaults (same
-        // fallback the interactive open uses), so a batch export renders a
-        // never-opened RAW the way opening it would.
-        : (await editPersistenceService.getSavedRawDecodeOptions(filePath)) ?? (await loadRawDecodeDefaults());
+      // Every RAW decodes one fixed way — the same options the interactive open uses — so an
+      // export always matches what the editor shows.
+      const decodeOptions = DEFAULT_RAW_DECODE_OPTIONS;
 
       // interactive=false: an export decode is a one-shot the user never reopens interactively —
       // it must not write-through to (and churn) the disk base-cache LRU. Disk READS still apply.

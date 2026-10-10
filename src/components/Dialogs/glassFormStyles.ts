@@ -7,7 +7,7 @@ import type { CSSProperties } from 'react';
  * here so there is one definition to update.
  */
 
-/** Native <input>/<select> restyled with the token palette (RawDecodePanel's
+/** Native <input>/<select> restyled with the token palette (the old RAW Decode panel's
  *  selects were the original precedent). Inputs and selects share the exact
  *  same look, so `selectStyle` is just an alias — no need to keep two copies
  *  of an identical object in sync. */
