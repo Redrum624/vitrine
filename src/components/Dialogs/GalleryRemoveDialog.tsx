@@ -64,10 +64,6 @@ export function GalleryRemoveDialog({
         type="button"
         onClick={onCancel}
         className="glass-modal-btn-secondary"
-        style={{
-          padding: '9px 16px', borderRadius: 10, fontSize: 12, fontWeight: 500,
-          border: '1px solid rgba(255,255,255,.1)', background: 'transparent', color: 'var(--glass-text-secondary)',
-        }}
       >
         Cancel
       </button>
@@ -75,10 +71,7 @@ export function GalleryRemoveDialog({
         type="button"
         onClick={onMoveToTrash}
         className="glass-modal-btn-secondary inline-flex items-center justify-center gap-2"
-        style={{
-          padding: '9px 16px', borderRadius: 10, fontSize: 12, fontWeight: 600,
-          border: '1px solid rgba(239,68,68,.5)', background: 'transparent', color: '#f87171',
-        }}
+        data-danger=""
       >
         <Trash2 size={14} />
         Move to Recycle Bin
@@ -91,7 +84,7 @@ export function GalleryRemoveDialog({
         type="button"
         onClick={onRemoveFromSession}
         className="glass-modal-btn-primary inline-flex items-center justify-center gap-2"
-        style={{ padding: '9px 18px', borderRadius: 11, fontSize: 12.5, fontWeight: 700, cursor: 'pointer' }}
+        style={{ height: 30, padding: '0 16px', borderRadius: 'var(--radius-6)', fontSize: 12.5, fontWeight: 600 }}
       >
         Remove from session
       </button>

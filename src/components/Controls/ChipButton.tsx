@@ -6,7 +6,7 @@ interface ChipButtonProps {
   active?: boolean;
   /** Dashed-border variant (e.g. the dock's Gallery chip); solid on hover/active. */
   dashed?: boolean;
-  /** Corner radius override in px (default 9 — the standard chip radius). */
+  /** Corner radius override in px (default 6 — the standard chip radius). */
   radius?: number;
   onClick?: () => void;
   disabled?: boolean;
@@ -16,17 +16,17 @@ interface ChipButtonProps {
 }
 
 /**
- * Glass · Sectioned chip / tile button: padding 7×10-12, radius 9, idle
- * rgba(255,255,255,.04) fill / .1 border, 11.5px text. Active (and hover, per
- * the spec's "chips → accent soft/ring/text" hover rule) = accent-soft fill +
- * accent-ring border + accent text, 150ms transition; press = scale(.97).
- * See the Glass UI design spec ("Chips/tiles", "Interactions & Behavior").
+ * Safelight chip: a compact toggle / preset button (white-balance presets,
+ * mask tools, crop ratios). Idle chips sit in a dark field with a hairline
+ * border; hover brightens the text; the active chip is a raised neutral tile
+ * with a lighter border — the way native toggle buttons read. The accent is
+ * deliberately NOT used here, so it keeps meaning "you changed this".
  */
 export function ChipButton({
   children,
   active = false,
   dashed = false,
-  radius = 9,
+  radius = 6,
   onClick,
   disabled = false,
   className = '',
@@ -34,9 +34,7 @@ export function ChipButton({
   type = 'button',
 }: ChipButtonProps) {
   const [hovered, setHovered] = useState(false);
-  const [pressed, setPressed] = useState(false);
-
-  const highlighted = active || (hovered && !disabled);
+  const hot = hovered && !disabled;
 
   return (
     <button
@@ -47,25 +45,21 @@ export function ChipButton({
       className={`inline-flex items-center justify-center whitespace-nowrap ${className}`}
       onClick={onClick}
       onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => {
-        setHovered(false);
-        setPressed(false);
-      }}
-      onMouseDown={() => setPressed(true)}
-      onMouseUp={() => setPressed(false)}
+      onMouseLeave={() => setHovered(false)}
       style={{
-        padding: '7px 11px',
+        height: 26,
+        padding: '0 10px',
+        gap: 6,
         borderRadius: radius,
-        fontSize: 11.5,
+        fontSize: 12,
+        fontWeight: active ? 600 : 500,
         borderWidth: 1,
-        borderStyle: dashed && !highlighted ? 'dashed' : 'solid',
-        borderColor: highlighted ? 'var(--accent-ring)' : 'rgba(255,255,255,.1)',
-        background: highlighted ? 'var(--accent-soft)' : 'rgba(255,255,255,.04)',
-        color: highlighted ? 'var(--accent)' : 'var(--glass-text-label)',
-        cursor: disabled ? 'default' : 'pointer',
-        opacity: disabled ? 0.5 : 1,
-        transform: pressed ? 'scale(.97)' : 'scale(1)',
-        transition: 'background 150ms ease, border-color 150ms ease, color 150ms ease, transform 100ms ease',
+        borderStyle: dashed && !active && !hot ? 'dashed' : 'solid',
+        borderColor: active ? '#4b4b53' : hot ? '#3c3c43' : 'var(--vt-line)',
+        background: active ? '#323237' : hot ? '#1c1c1f' : 'var(--vt-field)',
+        color: active || hot ? 'var(--vt-text)' : 'var(--glass-text-label)',
+        opacity: disabled ? 0.45 : 1,
+        transition: 'background-color 90ms ease, border-color 120ms ease, color 90ms ease',
       }}
     >
       {children}

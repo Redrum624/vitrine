@@ -12,17 +12,28 @@ const { Worker } = require('node:worker_threads');
 const path = require('node:path');
 const fs = require('node:fs');
 
-/** Locate public/libraw/worker.js across dev and packaged layouts. */
-function resolveWorkerJs() {
-  const candidates = [
+// worker.js loads libraw.js (its em-pthread workers) and libraw.wasm from its own directory;
+// all three must be present or the Emscripten runtime aborts inside the worker without ever
+// answering — which used to stall every decode for the full 60s watchdog. The two runtime
+// files are git-ignored; scripts/sync-libraw-wasm.cjs copies them in (postinstall + build).
+const RUNTIME_FILES = ['worker.js', 'libraw.js', 'libraw.wasm'];
+
+/**
+ * Locate public/libraw/worker.js across dev and packaged layouts — only in a directory that
+ * also holds the runtime it loads. Returns null when no complete runtime exists, so the caller
+ * fails fast and the chain moves on to the next rung immediately.
+ */
+function resolveWorkerJs(candidates) {
+  const dirs = candidates || [
     // Packaged: public/libraw is shipped via extraResources -> resources/libraw
-    process.resourcesPath ? path.join(process.resourcesPath, 'libraw', 'worker.js') : null,
+    process.resourcesPath ? path.join(process.resourcesPath, 'libraw') : null,
     // Dev
-    path.join(__dirname, '..', 'public', 'libraw', 'worker.js'),
+    path.join(__dirname, '..', 'public', 'libraw'),
     // Built web bundle (vite copies public/* into dist/)
-    path.join(__dirname, '..', 'dist', 'libraw', 'worker.js'),
+    path.join(__dirname, '..', 'dist', 'libraw'),
   ].filter(Boolean);
-  return candidates.find((c) => fs.existsSync(c)) || null;
+  const dir = dirs.find((d) => RUNTIME_FILES.every((f) => fs.existsSync(path.join(d, f))));
+  return dir ? path.join(dir, 'worker.js') : null;
 }
 
 // Demosaic algorithm → libraw-wasm userQual value (mirrors -q in dcraw_emu).
@@ -89,7 +100,9 @@ function buildWasmOptions(options, log) {
 
 async function decodeRawWithWasm(filePath, log = console, options, callTimeoutMs = DEFAULT_CALL_TIMEOUT_MS) {
   const workerJs = resolveWorkerJs();
-  if (!workerJs) throw new Error('libraw-wasm worker.js not found');
+  if (!workerJs) {
+    throw new Error('libraw-wasm runtime not found (public/libraw needs worker.js, libraw.js and libraw.wasm — run scripts/sync-libraw-wasm.cjs)');
+  }
 
   const bootstrap = path.join(__dirname, 'librawWasmWorker.cjs');
   const worker = new Worker(bootstrap, {
@@ -102,6 +115,13 @@ async function decodeRawWithWasm(filePath, log = console, options, callTimeoutMs
   worker.on('message', (m) => {
     if (m && typeof m === 'object' && '__emErr' in m) { reject(new Error(m.__emErr)); return; }
     const data = (m && typeof m === 'object' && '__emMsg' in m) ? m.__emMsg : m;
+    // worker.js answers a failed call (unsupported camera, corrupt file) with { error } rather
+    // than { out } — reject with LibRaw's message instead of resolving the error object and
+    // failing later with a vague "no usable pixels".
+    if (data && typeof data === 'object' && !('out' in data) && typeof data.error === 'string') {
+      reject(new Error(`libraw-wasm: ${data.error}`));
+      return;
+    }
     if (pending) {
       const p = pending;
       pending = null;
@@ -136,6 +156,13 @@ async function decodeRawWithWasm(filePath, log = console, options, callTimeoutMs
     const raw = fs.readFileSync(filePath);
     await call('open', new Uint8Array(raw), buildWasmOptions(options, log));
     const meta = await call('metadata', false);
+    // LibRaw's open doesn't throw on a file it can't read (unsupported camera, corrupt or
+    // truncated RAW) — it reports a 0×0 image. Fail here with a clear reason rather than
+    // after a pointless imageData round-trip.
+    if (!meta || !meta.width || !meta.height) {
+      const camera = [meta && meta.camera_make, meta && meta.camera_model].filter(Boolean).join(' ');
+      throw new Error(`libraw-wasm could not read ${path.basename(filePath)}${camera ? ` (${camera})` : ''} — unsupported camera or damaged file`);
+    }
     const img = await call('imageData');
 
     let pixels = null;

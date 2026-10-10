@@ -175,16 +175,16 @@ export const BatchProcessingDialog: React.FC<BatchProcessingDialogProps> = ({
         {/* Statistics */}
         <div className="grid grid-cols-3 gap-3">
           <div style={statBoxStyle}>
-            <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--glass-text-title)' }}>{statistics.totalJobs}</div>
-            <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '.6px', color: 'var(--glass-text-muted)' }}>Total Jobs</div>
+            <div style={{ fontSize: 18, fontWeight: 600, color: 'var(--vt-text)', fontVariantNumeric: 'tabular-nums' }}>{statistics.totalJobs}</div>
+            <div style={{ fontSize: 11.5, color: 'var(--vt-text-3)' }}>Total jobs</div>
           </div>
           <div style={statBoxStyle}>
-            <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--glass-text-title)' }}>{statistics.activeJobs}</div>
-            <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '.6px', color: 'var(--glass-text-muted)' }}>Active Jobs</div>
+            <div style={{ fontSize: 18, fontWeight: 600, color: 'var(--vt-text)', fontVariantNumeric: 'tabular-nums' }}>{statistics.activeJobs}</div>
+            <div style={{ fontSize: 11.5, color: 'var(--vt-text-3)' }}>Active jobs</div>
           </div>
           <div style={statBoxStyle}>
-            <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--glass-text-title)' }}>{statistics.totalImagesProcessed}</div>
-            <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '.6px', color: 'var(--glass-text-muted)' }}>Images Processed</div>
+            <div style={{ fontSize: 18, fontWeight: 600, color: 'var(--vt-text)', fontVariantNumeric: 'tabular-nums' }}>{statistics.totalImagesProcessed}</div>
+            <div style={{ fontSize: 11.5, color: 'var(--vt-text-3)' }}>Images processed</div>
           </div>
         </div>
 

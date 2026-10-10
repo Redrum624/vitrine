@@ -306,10 +306,6 @@ export function PresetDialog({ isOpen, onClose, onApplyPreset }: PresetDialogPro
               type="button"
               onClick={() => setShowCreateDialog(false)}
               className="glass-modal-btn-secondary"
-              style={{
-                padding: '9px 16px', borderRadius: 10, fontSize: 12, fontWeight: 500,
-                border: '1px solid rgba(255,255,255,.1)', background: 'transparent', color: 'var(--glass-text-secondary)',
-              }}
             >
               Cancel
             </button>
@@ -335,7 +331,7 @@ export function PresetDialog({ isOpen, onClose, onApplyPreset }: PresetDialogPro
             <textarea
               value={newPresetDescription}
               onChange={(e) => setNewPresetDescription(e.target.value)}
-              style={{ ...inputStyle, resize: 'vertical' }}
+              style={{ ...inputStyle, height: 'auto', padding: '6px 8px', resize: 'vertical' }}
               rows={3}
               placeholder="Description of the preset..."
             />

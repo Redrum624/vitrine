@@ -1,4 +1,5 @@
 import type { ElectronAPI } from '../types/electron';
+import { RAW_EXTENSIONS } from '../utils/rawExtensions';
 
 class ElectronService {
   private electronAPI: ElectronAPI | null = null;
@@ -82,7 +83,7 @@ class ElectronService {
         properties: ['openFile'],
         filters: [
           { name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'tiff', 'tif', 'bmp', 'webp'] },
-          { name: 'RAW Files', extensions: ['cr2', 'nef', 'arw', 'dng', 'orf', 'rw2', 'pef'] },
+          { name: 'RAW Files', extensions: RAW_EXTENSIONS },
           { name: 'All Files', extensions: ['*'] }
         ]
       });

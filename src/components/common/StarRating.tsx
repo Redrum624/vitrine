@@ -14,13 +14,13 @@ interface StarRatingProps {
   size?: number;
   /** Gap between stars in px (default 2). */
   gap?: number;
-  /** Filled-star color override (default `#facc15`; the footer cluster uses `#eab308`). */
+  /** Filled-star color override (default: the safelight accent). */
   color?: string;
   className?: string;
 }
 
-const FILLED_COLOR = '#facc15';
-const EMPTY_COLOR = 'rgba(255,255,255,0.75)';
+const FILLED_COLOR = 'var(--accent)';
+const EMPTY_COLOR = 'var(--glass-text-muted)';
 
 export function StarRating({ rating, onRate, size = 16, gap = 2, color = FILLED_COLOR, className }: StarRatingProps) {
   return (
@@ -35,10 +35,11 @@ export function StarRating({ rating, onRate, size = 16, gap = 2, color = FILLED_
             aria-label={`${star} star${star > 1 ? 's' : ''}`}
             data-testid={`star-${star}`}
             data-filled={filled ? 'true' : 'false'}
-            className="cursor-pointer transition-colors"
+            className="transition-colors"
             style={{
               color: filled ? color : EMPTY_COLOR,
               fill: filled ? color : 'none',
+              transitionDuration: '140ms',
             }}
             onClick={(e) => {
               e.stopPropagation();

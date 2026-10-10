@@ -43,43 +43,49 @@ When you first open Vitrine:
 ### Layout
 
 ```
-┌─────────────────────────────────────────────────────┐
-│                    Toolbar                          │
-├──────────┬─────────────────────────┬───────────────┤
-│          │                         │               │
-│   File   │       Canvas            │  Adjustment   │
-│  Browser │      (Image)            │    Panel      │
-│          │                         │               │
-│          │                         │               │
-└──────────┴─────────────────────────┴───────────────┘
+┌ Title bar — menus · Gallery | Develop · window buttons ──────────────────────┐
+│ Command bar — filename · 3 of 24      actions · Auto All · zoom │ Inspector │ T │
+│                                                                 │           │ o │
+│ Canvas — the photo                                              │ Histogram │ o │
+│                                                                 │ Module    │ l │
+│ Filmstrip                                                       │           │ s │
+└ Status bar — file info · rating filter · stats ──────────────────────────────┘
 ```
 
-### Panels
+Everything is docked around the photo; nothing floats over it. Surfaces are neutral
+graphite so they never tint your judgement of the image, and one warm amber marks
+what you changed.
 
-**File Browser** (Left)
-- Browse folders and drives
-- Thumbnail previews
-- Quick image selection
-- Filter by file type
+### Areas
 
-**Canvas** (Center)
-- Image display and preview
-- Zoom and pan controls
-- Crop/transform overlays
-- Before/after comparison
+**Title bar** (top)
+- Menus: File, Edit, Image, Adjust, View, Window, Help
+- **Gallery | Develop** switch in the middle
 
-**Adjustment Panel** (Right)
-- Editing modules
-- Real-time preview
-- Module enable/disable
-- Parameter controls
+**Command bar** (under the title bar)
+- The photo's name and its position in the folder; click it for camera and lens info
+- Open, Export, Print, **Auto All**, Copy/Paste Style, Before/After, Reference, zoom
+- On a narrow window, Print, Copy/Paste Style and Reference fold into a `⋯` menu
 
-**Toolbar** (Top)
-- File operations (Open, Export)
-- Undo/Redo buttons
-- Zoom controls
-- View options
-- Help access
+**Canvas** (center)
+- The photo, with zoom and pan
+- Crop and mask overlays, Before/After and Reference comparisons
+
+**Inspector** (right)
+- Histogram on top (toggle it from the tool strip), the selected tool below
+- Every slider works the same: drag the label to scrub (Shift for fine), click the
+  value to type, double-click to reset; an amber dot marks a changed value
+
+**Tool strip** (far right)
+- File Explorer, Crop & Transform, Basic Adjustments, White Balance, Color Balance,
+  Tone Curve, Enhance, Lens Corrections, History
+- Histogram and Settings at the bottom
+
+**Filmstrip and status bar** (bottom)
+- Thumbnails of the open folder; Ctrl/Shift+click to select several
+- File info, the rating filter, and processing stats
+
+Turning on *Reduce motion* in Windows settings switches off the app's animations.
 
 ---
 

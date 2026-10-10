@@ -33,8 +33,7 @@ import { imageService } from './services/ImageService';
 import { ImageFileInfo, fileSystemService } from './services/FileSystemService';
 import { useAppStore } from './stores/appStore';
 import {
-  CHROME_TOP, CHIP_LEFT, RIGHT_COLUMN_OFFSET, RIGHT_COLUMN_WIDTH, RIGHT_COLUMN_GAP, RIGHT_COLUMN_BOTTOM,
-  PHOTO_INSET_LEFT, PHOTO_INSET_TOP, PHOTO_INSET_BOTTOM, formatFilenameChip, getPhotoInsetRight,
+  INSPECTOR_WIDTH, PHOTO_INSET_LEFT, PHOTO_INSET_TOP, PHOTO_INSET_BOTTOM, getPhotoInsetRight, CANVAS_SURROUND,
 } from './layout/photoRegion';
 import { formatGalleryFolderChip } from './utils/gallerySelection';
 import { computeViewportGeometry } from './utils/viewportGeometry';
@@ -61,6 +60,7 @@ import type { CropPipelineModule } from './modules/CropPipelineModule';
 import { PrintDialog } from './components/Dialogs/PrintDialog';
 import { InfoPopover } from './components/InfoPopover';
 import { guardDeveloping } from './utils/developingGuard';
+import { RAW_EXTENSIONS } from './utils/rawExtensions';
 
 // Import pipeline tests for development
 if (process.env.NODE_ENV === 'development') {
@@ -233,7 +233,7 @@ export function OriginalPane() {
 
     // Background (matches Canvas.tsx). Reset transform so fillRect covers the whole buffer.
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.fillStyle = '#0d0d0d';
+    ctx.fillStyle = CANVAS_SURROUND;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     // Draw the original at the viewport-relative content rect (buffer px), matching the
@@ -441,7 +441,7 @@ export function resizeCurrentImage(toasts: TransformToasts, newWidth: number, ne
 }
 
 function App() {
-  const { setViewport, resetZoom, viewport, processedImageData, setSelectedTool: storeSetSelectedTool, showGrid, showRulers, showOriginal, toggleGrid, toggleRulers, toggleOriginal, referenceMode, referenceImageUrl, referenceImageName, toggleReferenceMode, setReferenceImage, lastProcessingTimeMs, modulesActive, modulesTotal, alignmentAxisX, setAlignmentAxisX, viewMode, selectedImageIds, developing, sidewaysHint, originalSnapshotVersion } = useAppStore();
+  const { setViewport, resetZoom, viewport, processedImageData, setSelectedTool: storeSetSelectedTool, showGrid, showRulers, showOriginal, toggleGrid, toggleRulers, toggleOriginal, referenceMode, referenceImageUrl, referenceImageName, toggleReferenceMode, setReferenceImage, lastProcessingTimeMs, modulesActive, modulesTotal, setAlignmentAxisX, viewMode, selectedImageIds, developing, sidewaysHint, originalSnapshotVersion } = useAppStore();
   const [selectedTool, setSelectedToolLocal] = useState<string | null>('file-explorer'); // Default to file explorer
 
   // Wrapper to update both local state and store
@@ -612,7 +612,7 @@ function App() {
           properties: ['openFile', 'multiSelections'],
           filters: [
             { name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'tiff', 'tif', 'bmp', 'webp'] },
-            { name: 'RAW Files', extensions: ['cr2', 'nef', 'arw', 'dng', 'orf', 'rw2', 'pef'] },
+            { name: 'RAW Files', extensions: RAW_EXTENSIONS },
             { name: 'All Files', extensions: ['*'] }
           ]
         });
@@ -1063,8 +1063,9 @@ function App() {
           dateModified: new Date()
         }));
 
-        // Add to available images
+        // Add to available images, and show them in the filmstrip
         setAvailableImages(prev => [...prev, ...imageFiles]);
+        setShowThumbnailPanel(true);
 
         // Auto-select first image if none selected
         if (!currentImage && imageFiles.length > 0) {
@@ -1429,7 +1430,7 @@ function App() {
 
   return (
     <ErrorBoundary>
-      <div className="h-screen flex flex-col bg-dark-900 text-dark-300">
+      <div className="h-screen flex flex-col" style={{ background: 'var(--vt-canvas)', color: 'var(--vt-text)' }}>
       {/* Menu Bar */}
       <MenuBar
         onFileOpen={() => electronService.isElectron() && electronService.openFile()}
@@ -1471,301 +1472,216 @@ function App() {
         hasImage={!!imageService.getCurrentImage()}
       />
 
-      {/* Main Content — full-bleed workspace with floating glass chrome (Task 5) */}
-      <div className="flex flex-1 flex-col overflow-hidden">
-        {/* Full-bleed workspace: `--canvas-bg` between the menu bar and footer.
-            The photo region + all chrome float above it (absolute). */}
-        <div
-          ref={workspaceRef}
-          className="flex-1 relative overflow-hidden"
-          style={{ background: 'var(--canvas-bg)' }}
-        >
-          {/* Multi-export progress (top-left overlay) */}
-          <ExportProgressBar />
-
-          {/* Photo region — the box the Canvas letterboxes inside. Insets derived
-              from the floating chrome so nothing overlaps the photo. Splits 50/50
-              internally for Before/After and Reference modes. Stays mounted (not
-              conditionally unmounted) when viewMode is 'gallery' — display:none only
-              — so the Canvas/decode state survives the round-trip AND the alignment-
-              axis ResizeObserver keeps observing the SAME node (a detach/reattach on
-              unmount would otherwise stop tracking window resizes while hidden). */}
-          <div
-            ref={photoRegionRef}
-            className="absolute flex"
-            style={{
-              left: PHOTO_INSET_LEFT,
-              right: getPhotoInsetRight(rightColumnVisible),
-              top: PHOTO_INSET_TOP,
-              bottom: PHOTO_INSET_BOTTOM,
-              display: viewMode === 'develop' ? 'flex' : 'none',
-            }}
-          >
-            {/* Before/After pane — left half shows original (only when showOriginal) */}
-            {showOriginal && (
-              <div
-                className="flex items-center justify-center"
-                style={{ width: '50%', height: '100%', borderRight: '2px solid var(--border)', position: 'relative' }}
+      {/* Main row — canvas column · docked inspector · tool strip. Nothing floats
+          over the photo: every bar is docked around the canvas (Safelight). */}
+      <div className="flex flex-1 min-h-0">
+        <div className="flex flex-1 flex-col min-w-0 min-h-0">
+          {/* Docked command bar: the filename (Develop) or folder summary (Gallery)
+              on the left, the actions on the right. */}
+          <Toolbar
+            onExport={() => setIsExportDialogOpen(true)}
+            onPrint={handlePrint}
+            onBatchProcess={() => setIsBatchDialogOpen(true)}
+            onOpenPresets={() => setIsPresetDialogOpen(true)}
+            onShowHelp={() => setIsShortcutsDialogOpen(true)}
+            onUndo={doUndo}
+            onRedo={doRedo}
+            canUndo={canUndo}
+            canRedo={canRedo}
+            onZoomIn={handleZoomIn}
+            onZoomOut={handleZoomOut}
+            onFitWindow={handleFitWindow}
+            onActualSize={handleActualSize}
+            zoom={viewport.zoom}
+            onAutoAll={handleAutoAll}
+            developing={developing}
+            sidewaysHint={!!sidewaysHint && sidewaysHint.imageId === currentImage?.id}
+            onSidewaysRotate={handleSidewaysRotate}
+            onSidewaysDismiss={handleSidewaysDismiss}
+            onCopyStyle={handleCopyStyle}
+            onPasteStyle={handlePasteStyle}
+            hasStyleClipboard={hasStyleClipboard}
+            hasImage={!!imageService.getCurrentImage()}
+            onToggleOriginal={toggleOriginal}
+            showOriginal={showOriginal}
+            onToggleReference={toggleReferenceMode}
+            referenceMode={referenceMode}
+            onOpenFolder={handleOpenFolder}
+            onExportSelected={handleExportSelected}
+            leading={viewMode === 'gallery' ? (
+              <span
+                className="no-select"
+                style={{ padding: '0 8px', fontSize: 12.5, fontWeight: 600, color: 'var(--glass-text-title)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
               >
-                <OriginalPane key={currentImage?.id ?? 'none'} />
-              </div>
-            )}
-
-            {/* Reference pane — left half (only when referenceMode) */}
-            {referenceMode && (
-              <div
-                className="flex items-center justify-center"
-                style={{
-                  width: '50%',
-                  height: '100%',
-                  borderRight: '2px solid var(--border)',
-                  position: 'relative',
-                }}
-                onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; setRefDragOver(true); }}
-                onDragLeave={() => setRefDragOver(false)}
-                onDrop={handleReferenceDrop}
-              >
-                {referenceImageUrl ? (
-                  <div className="w-full h-full flex items-center justify-center p-5 relative">
-                    <img
-                      src={referenceImageUrl}
-                      alt={referenceImageName || 'Reference'}
-                      className="max-w-full max-h-full object-contain"
-                      draggable={false}
-                    />
-                    {/* Label */}
-                    <div
-                      className="absolute top-3 left-3 px-3 py-1.5 rounded text-xs font-semibold tracking-wider uppercase pointer-events-none"
-                      style={{ backgroundColor: 'rgba(0,0,0,0.7)', color: '#ccc', backdropFilter: 'blur(4px)', border: '1px solid rgba(255,255,255,0.1)' }}
-                    >
-                      Reference — {referenceImageName}
-                    </div>
-                    {/* Drop overlay */}
-                    {refDragOver && (
-                      <div className="absolute inset-0 flex items-center justify-center" style={{ backgroundColor: 'rgba(59,130,246,0.15)', border: '2px dashed rgba(59,130,246,0.5)' }}>
-                        <span className="text-sm font-medium" style={{ color: 'rgba(147,197,253,0.9)' }}>Replace reference</span>
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <div className="w-full h-full flex flex-col items-center justify-center relative" style={{ color: 'var(--gray-600)' }}>
-                    <span className="text-lg font-semibold tracking-wider uppercase mb-2">Reference</span>
-                    <span className="text-xs" style={{ color: 'var(--gray-700)' }}>Drag a photo from the filmstrip</span>
-                    {/* Drop overlay */}
-                    {refDragOver && (
-                      <div className="absolute inset-0 flex items-center justify-center" style={{ backgroundColor: 'rgba(59,130,246,0.15)', border: '2px dashed rgba(59,130,246,0.5)' }}>
-                        <span className="text-sm font-medium" style={{ color: 'rgba(147,197,253,0.9)' }}>Drop here to set reference</span>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Main canvas pane — the photo (drop shadow applied inside Canvas on
-                the letterbox wrapper so it hugs the image, not the region).
-                `min-w-0`/`min-h-0` are load-bearing: without them a flex child
-                keeps its intrinsic (canvas) size and refuses to shrink when the
-                region narrows, overflowing into the column and clipping the photo. */}
-            <div className="flex-1 min-w-0 min-h-0" style={{ height: '100%' }}>
-              <Canvas
-                onFitWindow={handleFitWindow}
-                onActualSize={handleActualSize}
-                onZoomIn={handleZoomIn}
-                onZoomOut={handleZoomOut}
-                zoom={viewport.zoom}
-                currentImage={currentImage}
-              />
-            </div>
-          </div>
-
-          {/* Gallery grid (Task 7) — replaces the photo region when viewMode is
-              'gallery'. Stays mounted (visible toggle) so its own thumbnail cache
-              survives Develop ↔ Gallery round-trips, mirroring the dock. */}
-          <GalleryView
-            images={availableImages}
-            onImageSelect={setCurrentImage}
-            visible={viewMode === 'gallery'}
-            onRequestRemove={setRemoveTargetIds}
+                {formatGalleryFolderChip(availableImages, selectedImageIds?.length ?? 0)}
+              </span>
+            ) : currentImage ? (() => {
+              // Position within the loaded list (the same list the filmstrip shows);
+              // falls back to the folder service's count for a lone opened file.
+              const listIndex = availableImages.findIndex((img) => img.id === currentImage.id);
+              const { current, total } = listIndex >= 0
+                ? { current: listIndex + 1, total: availableImages.length }
+                : fileSystemService.getCurrentImageInfo();
+              return (
+                <div
+                  ref={filenameChipRef}
+                  data-testid="filename-chip"
+                  role="button"
+                  tabIndex={0}
+                  aria-label="Image info"
+                  aria-expanded={infoOpen}
+                  title="Photo info (camera, lens, exposure)"
+                  className="glass-pill-btn no-select"
+                  onClick={() => setInfoOpen((v) => !v)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      setInfoOpen((v) => !v);
+                    }
+                  }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    height: 28,
+                    padding: '0 8px',
+                    borderRadius: 5,
+                    fontSize: 12.5,
+                    fontWeight: 600,
+                    color: 'var(--glass-text-title)',
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    minWidth: 0,
+                    background: infoOpen ? 'var(--vt-hover)' : undefined,
+                  }}
+                >
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{currentImage.name}</span>
+                  <span style={{ fontWeight: 400, color: 'var(--glass-text-muted)', fontVariantNumeric: 'tabular-nums', flex: 'none' }}>
+                    {(total === 0 ? 1 : current)} of {(total === 0 ? 1 : total)}
+                  </span>
+                </div>
+              );
+            })() : null}
           />
 
-          {/* Floating filename chip (Develop) — top-left: `name · i of N · zoom%`.
-              A single image loaded outside a folder listing (list total 0) clamps to
-              "1 of 1" rather than showing a stale/zero count. Gallery shows the
-              folder chip instead (mirrors the same top-left idiom). */}
-          {viewMode === 'gallery' ? (
+          {/* Canvas area — the graphite surround the photo sits in. */}
+          <div
+            ref={workspaceRef}
+            className="flex-1 relative overflow-hidden"
+            style={{ background: 'var(--canvas-bg)' }}
+          >
+            {/* Multi-export progress (top-left overlay) */}
+            <ExportProgressBar />
+
+            {/* Photo region — the box the Canvas letterboxes inside, inset by the
+                same breathing room on every side. Splits 50/50 internally for
+                Before/After and Reference modes. Stays mounted (display:none only)
+                when viewMode is 'gallery' so the Canvas/decode state survives the
+                round-trip AND the alignment-axis ResizeObserver keeps observing the
+                SAME node. */}
             <div
-              className="glass-chrome no-select"
+              ref={photoRegionRef}
+              className="absolute flex"
               style={{
-                position: 'absolute',
-                left: CHIP_LEFT,
-                top: CHROME_TOP,
-                borderRadius: '12px',
-                padding: '7px 13px',
-                fontSize: '12px',
-                fontWeight: 500,
-                color: 'var(--glass-text-chrome-primary)',
-                zIndex: 30,
-                pointerEvents: 'none',
-                whiteSpace: 'nowrap',
+                left: PHOTO_INSET_LEFT,
+                right: getPhotoInsetRight(rightColumnVisible),
+                top: PHOTO_INSET_TOP,
+                bottom: PHOTO_INSET_BOTTOM,
+                display: viewMode === 'develop' ? 'flex' : 'none',
               }}
             >
-              {formatGalleryFolderChip(availableImages, selectedImageIds?.length ?? 0)}
-            </div>
-          ) : currentImage && (() => {
-            const { current, total } = fileSystemService.getCurrentImageInfo();
-            return (
-              <div
-                ref={filenameChipRef}
-                data-testid="filename-chip"
-                role="button"
-                tabIndex={0}
-                aria-label="Image info"
-                aria-expanded={infoOpen}
-                className="glass-chrome no-select"
-                onClick={() => setInfoOpen((v) => !v)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    setInfoOpen((v) => !v);
-                  }
-                }}
-                style={{
-                  position: 'absolute',
-                  left: CHIP_LEFT,
-                  top: CHROME_TOP,
-                  borderRadius: '12px',
-                  padding: '7px 13px',
-                  fontSize: '12px',
-                  fontWeight: 500,
-                  color: 'var(--glass-text-chrome-primary)',
-                  zIndex: 30,
-                  cursor: 'pointer',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                {formatFilenameChip({
-                  name: currentImage.name,
-                  current: total === 0 ? 1 : current,
-                  total: total === 0 ? 1 : total,
-                  zoom: viewport.zoom,
-                })}
+            {/* Before/After pane — left half shows original (only when showOriginal) */}
+              {showOriginal && (
+                <div
+                  className="flex items-center justify-center"
+                  style={{ width: '50%', height: '100%', borderRight: '2px solid var(--border)', position: 'relative' }}
+                >
+                  <OriginalPane key={currentImage?.id ?? 'none'} />
+                </div>
+              )}
+
+              {/* Reference pane — left half (only when referenceMode) */}
+              {referenceMode && (
+                <div
+                  className="flex items-center justify-center"
+                  style={{
+                    width: '50%',
+                    height: '100%',
+                    borderRight: '2px solid var(--border)',
+                    position: 'relative',
+                  }}
+                  onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; setRefDragOver(true); }}
+                  onDragLeave={() => setRefDragOver(false)}
+                  onDrop={handleReferenceDrop}
+                >
+                  {referenceImageUrl ? (
+                    <div className="w-full h-full flex items-center justify-center p-5 relative">
+                      <img
+                        src={referenceImageUrl}
+                        alt={referenceImageName || 'Reference'}
+                        className="max-w-full max-h-full object-contain"
+                        draggable={false}
+                      />
+                      {/* Label */}
+                      <div
+                        className="absolute top-3 left-3 px-3 py-1.5 rounded text-xs font-semibold tracking-wider uppercase pointer-events-none"
+                        style={{ backgroundColor: 'rgba(0,0,0,0.7)', color: '#ccc', backdropFilter: 'blur(4px)', border: '1px solid rgba(255,255,255,0.1)' }}
+                      >
+                        Reference — {referenceImageName}
+                      </div>
+                      {/* Drop overlay */}
+                      {refDragOver && (
+                        <div className="absolute inset-0 flex items-center justify-center" style={{ backgroundColor: 'var(--accent-soft)', border: '2px dashed var(--accent-ring)' }}>
+                          <span className="text-sm font-medium" style={{ color: 'var(--accent)' }}>Replace reference</span>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="w-full h-full flex flex-col items-center justify-center relative" style={{ color: 'var(--gray-600)' }}>
+                      <span className="text-lg font-semibold tracking-wider uppercase mb-2">Reference</span>
+                      <span className="text-xs" style={{ color: 'var(--gray-700)' }}>Drag a photo from the filmstrip</span>
+                      {/* Drop overlay */}
+                      {refDragOver && (
+                        <div className="absolute inset-0 flex items-center justify-center" style={{ backgroundColor: 'var(--accent-soft)', border: '2px dashed var(--accent-ring)' }}>
+                          <span className="text-sm font-medium" style={{ color: 'var(--accent)' }}>Drop here to set reference</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Main canvas pane — the photo (drop shadow applied inside Canvas on
+                  the letterbox wrapper so it hugs the image, not the region).
+                  `min-w-0`/`min-h-0` are load-bearing: without them a flex child
+                  keeps its intrinsic (canvas) size and refuses to shrink when the
+                  region narrows, overflowing into the column and clipping the photo. */}
+              <div className="flex-1 min-w-0 min-h-0" style={{ height: '100%' }}>
+                <Canvas
+                  onFitWindow={handleFitWindow}
+                  onActualSize={handleActualSize}
+                  onZoomIn={handleZoomIn}
+                  onZoomOut={handleZoomOut}
+                  zoom={viewport.zoom}
+                  currentImage={currentImage}
+                />
               </div>
-            );
-          })()}
+            </div>
 
-          {/* Info popover (Task Q6) — camera EXIF + file facts, anchored under the
-              filename chip. Develop view only (Gallery shows the folder chip). */}
-          {infoOpen && currentImage && viewMode !== 'gallery' && (
-            <InfoPopover image={currentImage} anchorRef={filenameChipRef} onClose={() => setInfoOpen(false)} />
-          )}
-
-          {/* Floating toolbar pill — top, centered on the alignment axis in Develop;
-              window-centered in Gallery (no photo region / axis in that view). */}
-          <div
-            className="absolute"
-            style={{
-              top: CHROME_TOP,
-              left: viewMode === 'gallery' ? '50%' : (alignmentAxisX ?? '50%'),
-              transform: 'translateX(-50%)',
-              zIndex: 30,
-            }}
-          >
-            <Toolbar
-              onExport={() => setIsExportDialogOpen(true)}
-              onPrint={handlePrint}
-              onBatchProcess={() => setIsBatchDialogOpen(true)}
-              onOpenPresets={() => setIsPresetDialogOpen(true)}
-              onShowHelp={() => setIsShortcutsDialogOpen(true)}
-              onUndo={doUndo}
-              onRedo={doRedo}
-              canUndo={canUndo}
-              canRedo={canRedo}
-              onZoomIn={handleZoomIn}
-              onZoomOut={handleZoomOut}
-              onFitWindow={handleFitWindow}
-              onActualSize={handleActualSize}
-              zoom={viewport.zoom}
-              onAutoAll={handleAutoAll}
-              developing={developing}
-              sidewaysHint={!!sidewaysHint && sidewaysHint.imageId === currentImage?.id}
-              onSidewaysRotate={handleSidewaysRotate}
-              onSidewaysDismiss={handleSidewaysDismiss}
-              onCopyStyle={handleCopyStyle}
-              onPasteStyle={handlePasteStyle}
-              hasStyleClipboard={hasStyleClipboard}
-              hasImage={!!imageService.getCurrentImage()}
-              onToggleOriginal={toggleOriginal}
-              showOriginal={showOriginal}
-              onToggleReference={toggleReferenceMode}
-              referenceMode={referenceMode}
-              onOpenFolder={handleOpenFolder}
-              onExportSelected={handleExportSelected}
+            {/* Gallery grid (Task 7) — replaces the photo region when viewMode is
+                'gallery'. Stays mounted (visible toggle) so its own thumbnail cache
+                survives Develop ↔ Gallery round-trips, mirroring the filmstrip. */}
+            <GalleryView
+              images={availableImages}
+              onImageSelect={setCurrentImage}
+              visible={viewMode === 'gallery'}
+              onRequestRemove={setRemoveTargetIds}
             />
           </div>
 
-          {/* Floating right column — histogram card (fixed) + module card (grows,
-              scrolls inside, never clipped). Replaces the old 360px slide-in;
-              the canvas no longer moves. Develop-only chrome — hidden in Gallery. */}
-          {viewMode === 'develop' && (selectedTool || histogramVisible) && (
-            <div
-              className="absolute flex flex-col"
-              style={{
-                right: RIGHT_COLUMN_OFFSET,
-                top: CHROME_TOP,
-                bottom: RIGHT_COLUMN_BOTTOM,
-                width: RIGHT_COLUMN_WIDTH,
-                gap: RIGHT_COLUMN_GAP,
-                zIndex: 20,
-              }}
-            >
-              {/* Histogram card — content-driven height, above the module card. */}
-              {histogramVisible && (
-                <div style={{ flex: '0 0 auto' }}>
-                  <HistogramPanel />
-                </div>
-              )}
-
-              {/* Module slot — grows to fill; each panel scrolls internally.
-                  Panels stay mounted (display toggle) so their state persists. */}
-              {selectedTool && (
-                <div style={{ flex: '1 1 auto', minHeight: 0, position: 'relative' }}>
-                  <div style={{ display: selectedTool === 'file-explorer' ? 'block' : 'none', height: '100%' }}>
-                    <div className="glass-card" style={{ height: '100%', overflow: 'hidden' }}>
-                      <FileBrowser
-                        onImageSelected={handleImageSelected}
-                        onFolderSelected={handleFolderSelected}
-                      />
-                    </div>
-                  </div>
-                  <div style={{ display: selectedTool === 'settings' ? 'block' : 'none', height: '100%' }}>
-                    <div className="glass-card" style={{ height: '100%', overflowY: 'auto' }}>
-                      <SettingsPanel />
-                    </div>
-                  </div>
-                  {/* Module panels (AdjustmentPanel brings its own glass card). */}
-                  <div style={{ display: selectedTool && !['file-explorer', 'settings'].includes(selectedTool) ? 'block' : 'none', height: '100%' }}>
-                    <AdjustmentPanel selectedModule={selectedTool} currentImage={currentImage} />
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Floating icon rail (positions itself: right 20, vertically centered).
-              Develop-only chrome — hidden in Gallery. */}
-          {viewMode === 'develop' && (
-            <IconSidebar
-              selectedTool={selectedTool}
-              histogramVisible={histogramVisible}
-              onToolSelect={handleToolSelect}
-            />
-          )}
-
-          {/* Floating filmstrip dock (positions itself: bottom 24, centered on the
-              alignment axis, hugs content — Glass · Sectioned, Task 6). Develop-only
-              chrome — hidden in Gallery (stays mounted so its thumbnail cache
-              survives the round-trip, same as GalleryView's own cache). */}
+          {/* Docked filmstrip (Develop). Stays mounted while hidden in Gallery so its
+              thumbnail cache survives the round-trip, same as GalleryView's own cache. */}
           <ThumbnailPanel
             images={availableImages}
             selectedImage={currentImage || undefined}
@@ -1775,6 +1691,63 @@ function App() {
             onExportSelected={handleExportSelected}
           />
         </div>
+
+        {/* Info popover (Task Q6) — camera EXIF + file facts, anchored under the
+            filename label. Develop view only (Gallery shows the folder summary). */}
+        {infoOpen && currentImage && viewMode !== 'gallery' && (
+          <InfoPopover image={currentImage} anchorRef={filenameChipRef} onClose={() => setInfoOpen(false)} />
+        )}
+
+        {/* Docked inspector — histogram on top, the selected module below (it
+            scrolls inside). Develop-only; collapses when nothing is selected. */}
+        {viewMode === 'develop' && rightColumnVisible && (
+          <aside
+            aria-label="Inspector"
+            className="flex flex-col"
+            style={{
+              width: INSPECTOR_WIDTH,
+              flex: 'none',
+              minHeight: 0,
+              background: 'var(--vt-panel)',
+              borderLeft: '1px solid var(--vt-line-soft)',
+            }}
+          >
+            {histogramVisible && (
+              <div style={{ flex: '0 0 auto' }}>
+                <HistogramPanel />
+              </div>
+            )}
+
+            {/* Module slot — grows to fill; each panel scrolls internally.
+                Panels stay mounted (display toggle) so their state persists. */}
+            {selectedTool && (
+              <div style={{ flex: '1 1 auto', minHeight: 0, position: 'relative' }}>
+                <div style={{ display: selectedTool === 'file-explorer' ? 'block' : 'none', height: '100%', overflow: 'hidden' }}>
+                  <FileBrowser
+                    onImageSelected={handleImageSelected}
+                    onFolderSelected={handleFolderSelected}
+                  />
+                </div>
+                <div style={{ display: selectedTool === 'settings' ? 'block' : 'none', height: '100%', overflowY: 'auto' }}>
+                  <SettingsPanel />
+                </div>
+                {/* Module panels. */}
+                <div style={{ display: selectedTool && !['file-explorer', 'settings'].includes(selectedTool) ? 'block' : 'none', height: '100%' }}>
+                  <AdjustmentPanel selectedModule={selectedTool} currentImage={currentImage} />
+                </div>
+              </div>
+            )}
+          </aside>
+        )}
+
+        {/* Docked tool strip. Develop-only chrome — hidden in Gallery. */}
+        {viewMode === 'develop' && (
+          <IconSidebar
+            selectedTool={selectedTool}
+            histogramVisible={histogramVisible}
+            onToolSelect={handleToolSelect}
+          />
+        )}
       </div>
 
       {/* Bottom Status Bar */}
@@ -1833,7 +1806,7 @@ function App() {
                 properties: ['openFile', 'multiSelections'],
                 filters: [
                   { name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'tiff', 'tif', 'bmp', 'webp'] },
-                  { name: 'RAW Files', extensions: ['cr2', 'nef', 'arw', 'dng', 'orf', 'rw2', 'pef'] },
+                  { name: 'RAW Files', extensions: RAW_EXTENSIONS },
                   { name: 'All Files', extensions: ['*'] }
                 ]
               });

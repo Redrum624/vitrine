@@ -33,8 +33,11 @@ interface GalleryViewProps {
   onRequestRemove?: (ids: string[]) => void;
 }
 
-const GRID_GAP = 16;
-const TILE_MIN_WIDTH = 420;
+const GRID_GAP = 14;
+const TILE_MIN_WIDTH = 240;
+/** Each cell is a 4:3 photo well (the photo letterboxed whole) + a caption row. */
+const TILE_IMAGE_ASPECT = 4 / 3;
+const TILE_CAPTION_HEIGHT = 44;
 /** Extra rows rendered above/below the viewport so scrolling never flashes blanks. */
 const OVERSCAN_ROWS = 2;
 
@@ -126,7 +129,7 @@ export function GalleryView({ images, onImageSelect, visible, onRequestRemove }:
   // which rows to mount — an approximation of the browser's actual `auto-fill`
   // column width, generous OVERSCAN absorbs the slop.
   const columnWidthEstimate = columns > 0 ? (viewportSize.width - GRID_GAP * (columns - 1)) / columns : 0;
-  const rowHeightEstimate = columnWidthEstimate > 0 ? columnWidthEstimate + GRID_GAP : 0;
+  const rowHeightEstimate = columnWidthEstimate > 0 ? columnWidthEstimate / TILE_IMAGE_ASPECT + TILE_CAPTION_HEIGHT + GRID_GAP : 0;
   const canVirtualize = columns > 0 && rowHeightEstimate > 0 && viewportSize.height > 0;
 
   const startRow = canVirtualize ? Math.max(0, Math.floor(scrollTop / rowHeightEstimate) - OVERSCAN_ROWS) : 0;
@@ -298,7 +301,7 @@ export function GalleryView({ images, onImageSelect, visible, onRequestRemove }:
       ) : (
         <>
           <div style={{ height: topSpacerHeight }} aria-hidden="true" />
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(420px, 1fr))', gap: GRID_GAP }}>
+          <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fill, minmax(${TILE_MIN_WIDTH}px, 1fr))`, gap: GRID_GAP }}>
             {visibleImages.map((image, localIndex) => {
               const isSelected = selectedImageIds?.includes(image.id) ?? false;
               const thumbnail = thumbnails.get(image.id);
@@ -308,102 +311,115 @@ export function GalleryView({ images, onImageSelect, visible, onRequestRemove }:
                   key={image.id}
                   data-image-id={image.id}
                   data-selected={isSelected || undefined}
-                  className={`glass-gallery-tile relative cursor-pointer ${isSelected ? 'is-selected' : ''}${entranceAnimating ? ' dc-rise' : ''}`}
+                  className={`relative${entranceAnimating ? ' dc-rise' : ''}`}
                   style={{
-                    borderRadius: 14,
-                    background: '#141418',
-                    borderWidth: isSelected ? 2 : 1,
-                    borderStyle: 'solid',
-                    borderColor: isSelected ? 'var(--accent)' : 'rgba(255, 255, 255, 0.09)',
-                    boxShadow: isSelected ? '0 0 18px rgba(59, 130, 246, 0.45)' : '0 4px 14px rgba(0, 0, 0, 0.35)',
-                    overflow: 'hidden',
-                    aspectRatio: '1 / 1',
-                    animationDelay: entranceAnimating ? `${Math.min(localIndex * 20, 400)}ms` : undefined,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    height: rowHeightEstimate > 0 ? rowHeightEstimate - GRID_GAP : undefined,
+                    animationDelay: entranceAnimating ? `${Math.min(localIndex * 24, 420)}ms` : undefined,
                   }}
                   onClick={(e) => handleTileClick(image, e)}
                   onDoubleClick={handleTileDoubleClick}
                   onContextMenu={(e) => handleTileContextMenu(image, e)}
                   title={`${image.name} (${getDisplayFormat(image.format)})`}
                 >
-                  {isLoading ? (
-                    <div className="w-full h-full flex items-center justify-center" style={{ backgroundColor: 'var(--gray-800)' }}>
-                      <div className="w-5 h-5 border-2 rounded-full animate-spin" style={{ borderColor: 'var(--gray-600)', borderTopColor: 'var(--white)' }} />
-                    </div>
-                  ) : thumbnail ? (
-                    <img
-                      src={thumbnail}
-                      alt={image.name}
-                      className="w-full h-full object-cover"
-                      draggable={false}
-                      onLoad={(e) => {
-                        // Free byproduct of the decode the browser already performs to
-                        // paint this thumbnail — no extra IPC/decode (Task B2). RAW
-                        // formats are excluded: `read-image-as-data-url` (electron/main.cjs)
-                        // returns a preview downscaled to fit 512×512 for RAW files, never
-                        // the sensor's true dimensions — recording that would be confidently
-                        // wrong (fix round 1, Critical review finding).
-                        const { naturalWidth, naturalHeight } = e.currentTarget;
-                        if (naturalWidth && naturalHeight && !isRawImage(image)) {
-                          setImageDimensions(image.id, { width: naturalWidth, height: naturalHeight });
-                        }
-                      }}
-                    />
-                  ) : (
-                    <div
-                      className="w-full h-full flex items-center justify-center"
-                      style={{ backgroundColor: 'var(--gray-800)' }}
-                      onClick={() => loadThumbnail(image)}
-                    >
-                      <span className="text-xs text-center px-2" style={{ color: 'var(--gray-500)' }}>{getDisplayFormat(image.format)}</span>
-                    </div>
-                  )}
-
-                  {/* Selected check badge (top-left) */}
-                  {isSelected && (
-                    <div
-                      data-testid="gallery-check-badge"
-                      className="absolute flex items-center justify-center"
-                      style={{ top: 8, left: 8, width: 22, height: 22, borderRadius: '50%', background: 'var(--accent)', color: '#0b0b0c' }}
-                    >
-                      <Check className="w-3.5 h-3.5" strokeWidth={3} />
-                    </div>
-                  )}
-
-                  {/* RAW badge (top-right) — same style as the dock's thumbnails */}
-                  {isRawImage(image) && (
-                    <div
-                      className="absolute"
-                      style={{
-                        top: 8, right: 8, padding: '0 4px', borderRadius: '3px',
-                        backgroundColor: 'rgba(0,0,0,0.7)', color: '#fff', fontSize: '9px',
-                        fontWeight: 700, letterSpacing: '0.5px', lineHeight: '16px', pointerEvents: 'none',
-                      }}
-                    >
-                      RAW
-                    </div>
-                  )}
-
-                  {/* Bottom scrim: filename, W×H·FMT meta, star strip */}
+                  {/* Photo well — the whole photo, letterboxed (like a contact sheet). */}
                   <div
-                    className="absolute inset-x-0 bottom-0"
-                    style={{ padding: '20px 10px 8px', background: 'linear-gradient(to top, rgba(5,5,8,.85), transparent)' }}
+                    className={`glass-gallery-tile relative ${isSelected ? 'is-selected' : ''}`}
+                    style={{
+                      aspectRatio: `${TILE_IMAGE_ASPECT}`,
+                      borderRadius: 6,
+                      background: '#18181b',
+                      borderWidth: 1,
+                      borderStyle: 'solid',
+                      borderColor: isSelected ? 'transparent' : 'rgba(255, 255, 255, 0.06)',
+                      boxShadow: isSelected ? '0 0 0 2px var(--canvas-bg), 0 0 0 3.5px #ececef' : 'none',
+                      overflow: 'hidden',
+                      flex: 'none',
+                    }}
                   >
-                    <div className="flex items-end justify-between" style={{ gap: 8 }}>
-                      <div style={{ minWidth: 0 }}>
-                        <div
-                          style={{
-                            fontSize: 11.5, fontWeight: 500, color: 'var(--glass-text-title)',
-                            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                          }}
-                        >
-                          {image.name}
-                        </div>
-                        <div style={{ fontSize: 9.5, fontFamily: 'ui-monospace, monospace', color: 'var(--glass-text-secondary)' }}>
-                          {formatGalleryTileMeta(image, imageDimensions[image.id])}
-                        </div>
+                    {isLoading ? (
+                      <div className="w-full h-full flex items-center justify-center">
+                        <div className="w-5 h-5 border-2 rounded-full animate-spin" style={{ borderColor: 'var(--vt-line)', borderTopColor: 'var(--vt-text-2)' }} />
                       </div>
+                    ) : thumbnail ? (
+                      <img
+                        src={thumbnail}
+                        alt={image.name}
+                        className="w-full h-full"
+                        style={{ objectFit: 'contain' }}
+                        draggable={false}
+                        onLoad={(e) => {
+                          // Free byproduct of the decode the browser already performs to
+                          // paint this thumbnail — no extra IPC/decode (Task B2). RAW
+                          // formats are excluded: `read-image-as-data-url` (electron/main.cjs)
+                          // returns a preview downscaled to fit 512×512 for RAW files, never
+                          // the sensor's true dimensions — recording that would be confidently
+                          // wrong (fix round 1, Critical review finding).
+                          const { naturalWidth, naturalHeight } = e.currentTarget;
+                          if (naturalWidth && naturalHeight && !isRawImage(image)) {
+                            setImageDimensions(image.id, { width: naturalWidth, height: naturalHeight });
+                          }
+                        }}
+                      />
+                    ) : (
+                      <div
+                        className="w-full h-full flex flex-col items-center justify-center"
+                        style={{ gap: 2 }}
+                        onClick={() => loadThumbnail(image)}
+                      >
+                        <span style={{ fontSize: 15, fontWeight: 600, color: 'var(--vt-text-2)' }}>
+                          {getDisplayFormat(image.format) || getDisplayFormat(image.name)}
+                        </span>
+                        <span style={{ fontSize: 11.5, color: 'var(--vt-text-3)' }}>No preview</span>
+                      </div>
+                    )}
+
+                    {/* Selected check badge (top-left) — neutral, like the selection ring */}
+                    {isSelected && (
+                      <div
+                        data-testid="gallery-check-badge"
+                        className="absolute flex items-center justify-center vt-pop-in"
+                        style={{ top: 7, left: 7, width: 20, height: 20, borderRadius: '50%', background: '#ececef', color: '#141416', boxShadow: '0 1px 3px rgba(0,0,0,.5)' }}
+                      >
+                        <Check className="w-3 h-3" strokeWidth={3} />
+                      </div>
+                    )}
+
+                    {/* RAW badge (top-right) — same style as the filmstrip's thumbnails */}
+                    {isRawImage(image) && (
+                      <div
+                        className="absolute"
+                        style={{
+                          top: 7, right: 7, padding: '0 4px', borderRadius: '3px',
+                          backgroundColor: 'rgba(0,0,0,0.62)', color: '#e6e6e9', fontSize: '9px',
+                          fontWeight: 700, letterSpacing: '0.5px', lineHeight: '15px', pointerEvents: 'none',
+                        }}
+                      >
+                        RAW
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Caption: filename, W×H · FMT meta, and the star rating */}
+                  <div className="flex items-start justify-between" style={{ gap: 8, padding: '7px 2px 0' }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div
+                        style={{
+                          fontSize: 12, fontWeight: 500, color: isSelected ? 'var(--glass-text-title)' : 'var(--glass-text-label)',
+                          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                        }}
+                      >
+                        {image.name}
+                      </div>
+                      <div style={{ fontSize: 11, fontVariantNumeric: 'tabular-nums', color: 'var(--glass-text-muted)', marginTop: 1, whiteSpace: 'nowrap' }}>
+                        {formatGalleryTileMeta(image, imageDimensions[image.id])}
+                      </div>
+                    </div>
+                    <div style={{ flex: 'none', marginTop: 2 }}>
                       <StarRating
                         size={12}
+                        gap={1}
                         rating={imageRatings[image.id] ?? 0}
                         onRate={(r) => {
                           setImageRating(image.id, r);
