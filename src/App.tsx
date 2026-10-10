@@ -1515,7 +1515,12 @@ function App() {
                 {formatGalleryFolderChip(availableImages, selectedImageIds?.length ?? 0)}
               </span>
             ) : currentImage ? (() => {
-              const { current, total } = fileSystemService.getCurrentImageInfo();
+              // Position within the loaded list (the same list the filmstrip shows);
+              // falls back to the folder service's count for a lone opened file.
+              const listIndex = availableImages.findIndex((img) => img.id === currentImage.id);
+              const { current, total } = listIndex >= 0
+                ? { current: listIndex + 1, total: availableImages.length }
+                : fileSystemService.getCurrentImageInfo();
               return (
                 <div
                   ref={filenameChipRef}

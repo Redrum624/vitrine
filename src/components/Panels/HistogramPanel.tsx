@@ -152,7 +152,7 @@ export function HistogramPanel() {
             width: '0.4%',
             height: `${height}px`,
             backgroundColor: color,
-            opacity: 0.6,
+            opacity: 0.42,
             mixBlendMode: 'screen',
           }}
         />
