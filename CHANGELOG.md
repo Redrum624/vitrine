@@ -4,7 +4,7 @@ All notable changes to **Vitrine** (formerly Photo Editor Pro) are documented in
 this file. The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.38.0] - 2026-10-10
 
 ### Changed
 - **New interface: Safelight.** Why: the floating "glass" workspace read as a web page — blurred cards over the photo, a blue accent competing with the image, web fonts and pointer cursors. Vitrine now has a docked, native-feeling layout: a Windows-style title bar with a Gallery | Develop switch, a command bar (filename and position on the left, actions on the right, folding into a `⋯` menu before the filename truncates on narrow windows), a 340 px inspector with the histogram on top, a tool strip with a sliding indicator, a docked filmstrip and a status bar. Surfaces are neutral graphite separated by hairlines so the photo is the only colour on screen; one safelight amber marks what you changed (an edited dot on every slider), the primary action, ratings and keyboard focus. System font, arrow cursor on controls, no text selection on chrome, menus that switch on hover and close on Escape. Motion is a spring for things that travel (segmented indicators, the tool bar, the filmstrip ring), short fades elsewhere, and all of it turns off under *Reduce motion*. Every slider gained label scrubbing (Shift for fine), click-to-type values and a default tick. Affects: `src/index.css`, `src/components/Layout/*`, `src/components/Controls/*`, `src/components/Panels/*`, `src/components/Gallery/*`, `src/components/Dialogs/*`, `src/layout/photoRegion.ts`.
