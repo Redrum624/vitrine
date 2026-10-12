@@ -4,6 +4,14 @@ All notable changes to **Vitrine** (formerly Photo Editor Pro) are documented in
 this file. The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.38.1] - 2026-10-12
+
+### Fixed
+- **A RAW's highlights dimmed and its contrast flattened when full quality replaced the preview.** Cause: camera match fits the decode to the embedded JPEG cell by cell, but the camera bakes lens-distortion correction into that JPEG and the RAW decode is the uncorrected sensor image. On a lens with visible barrel distortion the two disagree by several percent of the frame towards the edges, so each cell was paired with the wrong part of the scene and the fit regressed to the mean (measured on PEN-F files: about 80 8-bit levels too dark above 75% luminance). The fit now finds the radial coefficient that lines the preview up with the decode and samples the preview through it; photos that already line up are fitted exactly as before. The cache key was bumped so bases fitted the old way miss once. Affects: `electron/cameraMatch.cjs`, `electron/baseCache.cjs`.
+
+### Changed
+- **The splash screen matches the Safelight interface.** Why: it still had the pre-1.38 look (a glass card on black, a glow, a shimmer and a spinner) and the old tagline. It is now a flat graphite surface with a hairline edge, the system font, a thin amber progress line, the status on the left and the percentage on the right, and the tagline used on the welcome screen. If the version lookup fails the version stays blank instead of showing a placeholder. Affects: `electron/splash.html`, `electron/main.cjs`.
+
 ## [1.38.0] - 2026-10-10
 
 ### Changed

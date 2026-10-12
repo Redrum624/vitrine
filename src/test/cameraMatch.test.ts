@@ -196,3 +196,73 @@ describe('cameraMatch fitting internals', () => {
     });
   });
 });
+
+describe('cameraMatch preview registration (lens-distortion-corrected previews)', () => {
+  const PW = cm.REG_W;
+  const PH = cm.REG_H;
+  const ASPECT = 4 / 3;
+
+  /** A textured scene, defined over the normalised frame (x,y in [-0.5,0.5]). */
+  const scene = (x: number, y: number) =>
+    0.5 + 0.2 * Math.sin(37 * x + 5 * y) + 0.15 * Math.cos(11 * x - 29 * y) + 0.1 * Math.sin(53 * y);
+
+  /** The camera preview: the scene as-is, packed 8-bit RGB at the registration size. */
+  function previewOf(): Buffer {
+    const p = Buffer.alloc(PW * PH * 3);
+    for (let y = 0; y < PH; y++) {
+      for (let x = 0; x < PW; x++) {
+        const v = Math.round(255 * scene((x + 0.5) / PW - 0.5, (y + 0.5) / PH - 0.5));
+        p.fill(v, (y * PW + x) * 3, (y * PW + x) * 3 + 3);
+      }
+    }
+    return p;
+  }
+
+  /** The decode grid: the same scene seen through radial distortion k. */
+  function decodeGridOf(k: number): Float64Array {
+    const g = new Float64Array(GW * GH * 3);
+    for (let gy = 0; gy < GH; gy++) {
+      for (let gx = 0; gx < GW; gx++) {
+        const [px, py] = cm.warpPoint((gx + 0.5) / GW - 0.5, (gy + 0.5) / GH - 0.5, k, ASPECT);
+        g.fill(scene(px, py), (gy * GW + gx) * 3, (gy * GW + gx) * 3 + 3);
+      }
+    }
+    return g;
+  }
+
+  it('recovers the distortion coefficient of a corrected preview', () => {
+    const k = cm.estimatePreviewDistortion(decodeGridOf(0.1), previewOf(), ASPECT);
+    expect(k).toBeGreaterThan(0.09);
+    expect(k).toBeLessThan(0.11);
+  });
+
+  it('returns exactly 0 when the preview already lines up', () => {
+    expect(cm.estimatePreviewDistortion(decodeGridOf(0), previewOf(), ASPECT)).toBe(0);
+  });
+
+  it('warps the preview onto the decode grid and marks uncovered cells', () => {
+    const k = 0.1;
+    const dec = decodeGridOf(k);
+    const cam = cm.warpPreviewToGrid(previewOf(), k, ASPECT);
+    // Corners fall outside the corrected preview (the camera cropped them).
+    expect(Number.isNaN(cam[0])).toBe(true);
+    let n = 0, err = 0;
+    for (let i = 0; i < GW * GH; i++) {
+      if (Number.isNaN(cam[i * 3])) continue;
+      n++;
+      err += Math.abs(cam[i * 3] - dec[i * 3]);
+    }
+    expect(n).toBeGreaterThan(GW * GH * 0.8);
+    expect(err / n).toBeLessThan(0.02);
+  });
+
+  it('fitTransform ignores cells the preview does not cover', () => {
+    const dec = syntheticGrid();
+    const cam = Float64Array.from(dec);
+    for (let i = 0; i < GW * 3 * 10; i++) cam[i] = NaN; // top 10 rows uncovered
+    const model = cm.fitTransform(dec, cam);
+    expect(model).not.toBeNull();
+    expect(model.residual.every((r: number[]) => r.every(Number.isFinite))).toBe(true);
+    expect(model.M.flat().every(Number.isFinite)).toBe(true);
+  });
+});

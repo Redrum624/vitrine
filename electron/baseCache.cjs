@@ -56,7 +56,9 @@ function optionsHash(options) {
   // cached bases fitted with the old parameters miss instead of being served.
   // cm2: entries written before the failed-match fix could hold a dark, never-brightened base
   // under the matched key — the bump makes them miss so the RAW decodes fresh.
-  return crypto.createHash('sha1').update(`${demosaic}|${highlightMode}|cm2:${cameraMatch ? 1 : 0}`).digest('hex').slice(0, 8);
+  // cm3: the fit now registers the preview to the decode (lens-distortion-corrected JPEGs);
+  // bases fitted without it have flattened highlights.
+  return crypto.createHash('sha1').update(`${demosaic}|${highlightMode}|cm3:${cameraMatch ? 1 : 0}`).digest('hex').slice(0, 8);
 }
 
 /**

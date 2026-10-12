@@ -48,6 +48,14 @@ const RESIDUAL_LAMBDA = 0.5; // Laplacian smoothing weight
 const RESIDUAL_ITERS = 150;  // Jacobi iterations
 const MIN_FIT_SAMPLES = 500; // below this the fit is not trustworthy — skip
 
+// Preview registration (see estimatePreviewDistortion). The preview is sampled at
+// 4x the analysis grid so a warped cell still averages a 4x4 block.
+const REG_W = GW * 4;
+const REG_H = GH * 4;
+const REG_K_MAX = 0.2;         // search range for the radial coefficient
+const REG_MIN_GAIN = 0.01;     // correlation gain a warp must buy to be used at all
+const REG_MIN_COVERAGE = 0.5;  // fraction of cells the warped preview must still cover
+
 // ---------------------------------------------------------------------------
 // Color helpers (sRGB transfer)
 // ---------------------------------------------------------------------------
@@ -99,6 +107,105 @@ async function previewToGrid(previewJpeg, rotateDeg) {
   const { data } = await img.resize(GW, GH, { fit: 'fill' }).raw().toBuffer({ resolveWithObject: true });
   const grid = new Float64Array(GW * GH * 3);
   for (let i = 0; i < GW * GH * 3; i++) grid[i] = data[i] / 255;
+  return grid;
+}
+
+/** The preview as packed 8-bit RGB at the registration size, rotated like previewToGrid. */
+async function previewToRegistrationBuffer(previewJpeg, rotateDeg) {
+  const sharp = require('sharp');
+  let img = sharp(previewJpeg);
+  if (rotateDeg) img = img.rotate(rotateDeg);
+  return img.resize(REG_W, REG_H, { fit: 'fill' }).removeAlpha().raw().toBuffer();
+}
+
+// ---------------------------------------------------------------------------
+// Preview registration (pure — unit-tested directly)
+//
+// The camera bakes lens-distortion correction into its JPEG; the RAW decode is
+// the uncorrected sensor image. On a lens with visible barrel distortion the two
+// then disagree by several percent of the frame towards the edges, every grid
+// cell is paired with the wrong part of the scene, and the fit regresses to the
+// mean: highlights come out darker and shadows lighter than the camera render
+// (measured on PEN-F files: -80 8-bit levels above 75% luminance). So before
+// fitting, find the radial coefficient that lines the preview up with the decode
+// and sample the preview through it.
+// ---------------------------------------------------------------------------
+
+/**
+ * Where a decode-frame point lands in the corrected preview. x,y are normalised
+ * to [-0.5,0.5]; `aspect` (width/height of the real image) makes the radius
+ * isotropic, and r² is scaled so the frame corner is 1.
+ */
+function warpPoint(x, y, k, aspect) {
+  const xa = x * aspect;
+  const g = 1 + k * ((xa * xa + y * y) / ((aspect * aspect + 1) / 4));
+  return [x * g, y * g];
+}
+
+/** Green-channel correlation between the decode grid and the preview warped by k. */
+function registrationScore(decGrid, prevRGB, k, aspect, step) {
+  let n = 0, sx = 0, sy = 0, sxx = 0, syy = 0, sxy = 0, seen = 0;
+  for (let i = 0; i < GW * GH; i += step) {
+    seen++;
+    const [wx, wy] = warpPoint(((i % GW) + 0.5) / GW - 0.5, (Math.floor(i / GW) + 0.5) / GH - 0.5, k, aspect);
+    const px = Math.floor((wx + 0.5) * REG_W);
+    const py = Math.floor((wy + 0.5) * REG_H);
+    if (px < 0 || py < 0 || px >= REG_W || py >= REG_H) continue;
+    const a = decGrid[i * 3 + 1];
+    const b = prevRGB[(py * REG_W + px) * 3 + 1] / 255;
+    n++; sx += a; sy += b; sxx += a * a; syy += b * b; sxy += a * b;
+  }
+  if (n < seen * REG_MIN_COVERAGE) return -1;
+  const den = Math.sqrt((n * sxx - sx * sx) * (n * syy - sy * sy));
+  return den > 0 ? (n * sxy - sx * sy) / den : -1;
+}
+
+/**
+ * Radial coefficient that best aligns the preview (packed 8-bit RGB, REG_W x
+ * REG_H) with the decode grid. Returns exactly 0 when no warp beats the
+ * unwarped preview by REG_MIN_GAIN, so aligned photos keep their old fit.
+ */
+function estimatePreviewDistortion(decGrid, prevRGB, aspect) {
+  const base = registrationScore(decGrid, prevRGB, 0, aspect, 1);
+  let bestK = 0, best = -1;
+  for (let k = -REG_K_MAX; k <= REG_K_MAX + 1e-9; k += 0.02) {
+    const c = registrationScore(decGrid, prevRGB, k, aspect, 3);
+    if (c > best) { best = c; bestK = k; }
+  }
+  for (let d = 0.01; d >= 0.00125; d /= 2) {
+    for (const k of [bestK - d, bestK + d]) {
+      const c = registrationScore(decGrid, prevRGB, k, aspect, 3);
+      if (c > best) { best = c; bestK = k; }
+    }
+  }
+  return registrationScore(decGrid, prevRGB, bestK, aspect, 1) - base > REG_MIN_GAIN ? bestK : 0;
+}
+
+/**
+ * The preview resampled onto the decode's grid through distortion k. Cells the
+ * corrected preview does not cover (the camera cropped them) are NaN.
+ */
+function warpPreviewToGrid(prevRGB, k, aspect) {
+  const grid = new Float64Array(GW * GH * 3).fill(NaN);
+  const bw = REG_W / GW, bh = REG_H / GH;
+  for (let gy = 0; gy < GH; gy++) {
+    for (let gx = 0; gx < GW; gx++) {
+      const [wx, wy] = warpPoint((gx + 0.5) / GW - 0.5, (gy + 0.5) / GH - 0.5, k, aspect);
+      const x0 = Math.round((wx + 0.5) * REG_W - bw / 2);
+      const y0 = Math.round((wy + 0.5) * REG_H - bh / 2);
+      if (x0 < 0 || y0 < 0 || x0 + bw > REG_W || y0 + bh > REG_H) continue;
+      let r = 0, g = 0, b = 0;
+      for (let yy = y0; yy < y0 + bh; yy++) {
+        for (let xx = x0; xx < x0 + bw; xx++) {
+          const o = (yy * REG_W + xx) * 3;
+          r += prevRGB[o]; g += prevRGB[o + 1]; b += prevRGB[o + 2];
+        }
+      }
+      const gi = (gy * GW + gx) * 3;
+      const div = bw * bh * 255;
+      grid[gi] = r / div; grid[gi + 1] = g / div; grid[gi + 2] = b / div;
+    }
+  }
   return grid;
 }
 
@@ -281,6 +388,7 @@ function fitTransform(decGrid, camGrid) {
   for (let i = 0; i < GW * GH; i++) {
     const s = [decGrid[i * 3], decGrid[i * 3 + 1], decGrid[i * 3 + 2]];
     const t = [camGrid[i * 3], camGrid[i * 3 + 1], camGrid[i * 3 + 2]];
+    if (Number.isNaN(t[0])) continue; // not covered by the registered preview
     const m = applyM(M, [s2l(s[0]), s2l(s[1]), s2l(s[2])]);
     const a = [0, 1, 2].map((c) => Math.min(1, Math.max(0, evalCurve(curves[c], l2s(Math.max(0, Math.min(1, m[c])))))));
     rsamples.push([a, t]);
@@ -342,7 +450,10 @@ async function applyCameraMatch(decoded, orfBuf, log = console) {
     const u16 = new Uint16Array(decoded.data);
     const decGrid = decodeToGrid(u16, decoded.width, decoded.height);
     const rotateDeg = decoded.height > decoded.width ? orientationToDegrees(readOrientation(orfBuf)) : 0;
-    const camGrid = await previewToGrid(preview, rotateDeg);
+    const aspect = decoded.width / decoded.height;
+    const prevRGB = await previewToRegistrationBuffer(preview, rotateDeg);
+    const k = estimatePreviewDistortion(decGrid, prevRGB, aspect);
+    const camGrid = k === 0 ? await previewToGrid(preview, rotateDeg) : warpPreviewToGrid(prevRGB, k, aspect);
     const model = fitTransform(decGrid, camGrid);
     if (!model) {
       log.warn('camera-match: fit not possible (too few usable samples) — skipping');
@@ -350,7 +461,7 @@ async function applyCameraMatch(decoded, orfBuf, log = console) {
     }
     const t0 = Date.now();
     const data = await runApplyWorker(decoded.data, model);
-    log.log(`camera-match: fitted and applied in ${Date.now() - t0}ms (${decoded.width}x${decoded.height})`);
+    log.log(`camera-match: fitted and applied in ${Date.now() - t0}ms (${decoded.width}x${decoded.height}, preview distortion k=${k.toFixed(4)})`);
     return { ...decoded, data };
   } catch (err) {
     log.warn(`camera-match failed (${err.message}) — using unmatched decode`);
@@ -398,6 +509,11 @@ module.exports = {
   evalCurve,
   fitResidualLUT,
   decodeToGrid,
+  warpPoint,
+  estimatePreviewDistortion,
+  warpPreviewToGrid,
+  REG_W,
+  REG_H,
   orientationToDegrees,
   extractLargestPreview,
   GW,

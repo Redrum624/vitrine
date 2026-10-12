@@ -67,7 +67,7 @@ function createSplashWindow() {
       sandbox: true,
       preload: path.join(__dirname, 'preload.cjs')
     },
-    backgroundColor: '#000000',
+    backgroundColor: '#19191b',
     icon: path.join(__dirname, '../assets/icon.ico')
   });
 
