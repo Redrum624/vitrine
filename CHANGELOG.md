@@ -4,6 +4,19 @@ All notable changes to **Vitrine** (formerly Photo Editor Pro) are documented in
 this file. The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.39.0] - 2026-10-13
+
+### Changed
+- **A RAW keeps its shape when full quality replaces the preview.** Why: the camera corrects lens distortion in its embedded JPEG and the RAW decode did not, so on a lens with visible barrel distortion the picture widened and bowed about 10 seconds after opening. Camera match already measured that distortion (1.38.1) to pair its samples; it now applies the same radial model to the pixels, so the full-quality image has the camera's framing as well as its colour. The resample is Catmull-Rom on the 16-bit data, split across worker threads over shared memory (about 1 s for 20 MP). Photos whose preview already lines up are untouched. Note: on affected photos the frame is now cropped the way the camera crops it, so a crop or mask saved before this release sits a few percent off towards the edges. The cache key was bumped so every RAW decodes once more. Affects: `electron/cameraMatchGeometry.cjs` (new), `electron/cameraMatch.cjs`, `electron/baseCache.cjs`, `package.json` (`asarUnpack`).
+- **Camera match holds contrast better in fine detail.** Why: the colour fit ran on a 200x150 grid of cell averages, and a tone curve fitted on averages reads too little contrast wherever the detail is finer than a cell. On a portrait of foliage against a bright sky the highlights came out about 20 8-bit levels darker than the camera JPEG; on a 400x300 grid that is about 12, with the four other test photos unchanged or slightly better, for roughly 0.3 s more per decode. It is still not an exact match on that kind of photo. Affects: `electron/cameraMatch.cjs`.
+- Updated `exifreader` to 4.50.0 and `sharp` to 0.35.5. Why: `pnpm audit --prod` reported high-severity advisories in both (and in `@xmldom/xmldom` through exifreader); they parse the photos you open. The production audit went from 26 advisories to 8, all in `adm-zip`, which only runs in the install script of `onnxruntime-node`.
+- CI installs with pnpm 12.10.1, the version the releases are built with.
+
+### Fixed
+- **A camera-match worker that died silently left the photo stuck on "Developing full quality".** Cause: only the worker's `message` and `error` events were handled, so an exit without either never settled the promise. Fix: an `exit` handler rejects it and the open falls back to the unmatched decode. Affects: `electron/cameraMatch.cjs`.
+- **A malformed log entry from the window could drop a whole batch of log lines.** Cause: the log writer called `level.toUpperCase()` on whatever it was sent, inside the batch flush. Fix: entries are validated, truncated and stripped of newlines before they are queued. Affects: `electron/main.cjs`.
+- Writing metadata into a file now requires an image extension, like the other write paths. Affects: `electron/main.cjs`.
+
 ## [1.38.1] - 2026-10-12
 
 ### Fixed

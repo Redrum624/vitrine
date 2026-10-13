@@ -187,8 +187,8 @@ describe('cameraMatch fitting internals', () => {
 
   describe('decodeToGrid', () => {
     it('box-averages a uniform buffer to its exact value', () => {
-      const w = 400;
-      const h = 300;
+      const w = GW * 2; // decodeToGrid samples every 2nd pixel, so each cell needs at least one
+      const h = GH * 2;
       const u16 = new Uint16Array(w * h * 3).fill(32768);
       const grid = cm.decodeToGrid(u16, w, h);
       expect(grid[0]).toBeCloseTo(32768 / 65535, 5);
@@ -264,5 +264,56 @@ describe('cameraMatch preview registration (lens-distortion-corrected previews)'
     expect(model).not.toBeNull();
     expect(model.residual.every((r: number[]) => r.every(Number.isFinite))).toBe(true);
     expect(model.M.flat().every(Number.isFinite)).toBe(true);
+  });
+});
+
+describe('cameraMatch geometry correction (decode resampled to the camera frame)', () => {
+  const geo = require('../../electron/cameraMatchGeometry.cjs') as any;
+  const W = 240, H = 180, ASPECT_G = W / H;
+  // A smooth scene defined in the corrected (camera JPEG) frame, x,y in [-0.5,0.5].
+  const scene = (x: number, y: number) => 0.5 + 0.3 * Math.sin(x * 9) * Math.cos(y * 7) + 0.15 * x;
+
+  it('the inverse table undoes warpPoint along the radius', () => {
+    const k = 0.1;
+    const lut = geo.buildInverseRadialLut(k);
+    for (const rq of [0.1, 0.4, 0.7, 1]) {
+      const i = rq * rq * geo.LUT_SIZE;
+      const s = lut[Math.floor(i)] + (lut[Math.floor(i) + 1] - lut[Math.floor(i)]) * (i - Math.floor(i));
+      const rp = rq * s;
+      expect(rp * (1 + k * rp * rp)).toBeCloseTo(rq, 4);
+    }
+  });
+
+  it('resamples a distorted decode back onto the scene', () => {
+    const k = 0.1;
+    // The decode shows, at point p, the scene at warpPoint(p).
+    const dec = new Uint16Array(W * H * 3);
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const [wx, wy] = cm.warpPoint((x + 0.5) / W - 0.5, (y + 0.5) / H - 0.5, k, ASPECT_G);
+        const v = Math.round(Math.min(1, Math.max(0, scene(wx, wy))) * 65535);
+        dec.fill(v, (y * W + x) * 3, (y * W + x) * 3 + 3);
+      }
+    }
+    const out = geo.undistortRGB16(dec, W, H, k);
+    let worstBefore = 0, worstAfter = 0;
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const want = Math.min(1, Math.max(0, scene((x + 0.5) / W - 0.5, (y + 0.5) / H - 0.5)));
+        worstBefore = Math.max(worstBefore, Math.abs(dec[(y * W + x) * 3] / 65535 - want));
+        worstAfter = Math.max(worstAfter, Math.abs(out[(y * W + x) * 3] / 65535 - want));
+      }
+    }
+    expect(worstBefore).toBeGreaterThan(0.05); // the distortion is visible without the correction
+    expect(worstAfter).toBeLessThan(0.005);
+  });
+
+  it('fills only the requested rows, so strips can be computed independently', () => {
+    const src = new Uint16Array(W * H * 3).map((_, i) => (i * 7919) % 65536);
+    const whole = geo.undistortRGB16(src, W, H, 0.08);
+    const strips = new Uint16Array(src.length);
+    geo.undistortRGB16(src, W, H, 0.08, strips, 0, 70);
+    geo.undistortRGB16(src, W, H, 0.08, strips, 70, H);
+    expect(Array.from(strips)).toEqual(Array.from(whole));
   });
 });
