@@ -58,7 +58,9 @@ function optionsHash(options) {
   // under the matched key — the bump makes them miss so the RAW decodes fresh.
   // cm3: the fit now registers the preview to the decode (lens-distortion-corrected JPEGs);
   // bases fitted without it have flattened highlights.
-  return crypto.createHash('sha1').update(`${demosaic}|${highlightMode}|cm3:${cameraMatch ? 1 : 0}`).digest('hex').slice(0, 8);
+  // cm5: matched bases are also resampled to the camera JPEG's geometry (cameraMatchGeometry.cjs)
+  // and fitted on the 400x300 grid (cm4 was a pre-release key for the geometry change alone).
+  return crypto.createHash('sha1').update(`${demosaic}|${highlightMode}|cm5:${cameraMatch ? 1 : 0}`).digest('hex').slice(0, 8);
 }
 
 /**

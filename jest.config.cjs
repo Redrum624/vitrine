@@ -18,6 +18,10 @@ module.exports = {
     }]
   },
   moduleNameMapper: {
+    // exifreader is only loaded by the main process (Node), which resolves its CommonJS
+    // dist build. Under jsdom Jest picks the package's "browser" export (ESM source)
+    // and cannot parse it, so pin the build the app really runs.
+    '^exifreader$': '<rootDir>/node_modules/exifreader/dist/exif-reader.js',
     '\\.(css|less|scss|sass)$': 'identity-obj-proxy',
     '\\.(jpg|jpeg|png|gif|webp|svg)$': '<rootDir>/src/__mocks__/fileMock.js',
     // The worker factory uses a Vite `?worker&url` import, which ts-jest cannot

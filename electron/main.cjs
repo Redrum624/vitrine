@@ -956,7 +956,7 @@ ipcMain.handle('read-raw-metadata', async (event, filePath) => {
 // failure so the renderer promise rejects (no silent success).
 ipcMain.handle('write-image-metadata', async (event, filePath, metadata) => {
   try {
-    const safeFilePath = validateWritePath(filePath);
+    const safeFilePath = validateWritePath(filePath, { requireAllowedExtension: true });
     markSelfWrite(safeFilePath); // in-place metadata write must not retrigger the watcher
     return await writeImageMetadata(safeFilePath, metadata);
   } catch (error) {
@@ -1141,7 +1141,14 @@ const scheduleFlush = () => {
 
 ipcMain.handle('write-log', async (event, logEntry) => {
   try {
-    logQueue.push(logEntry);
+    // The entry comes from the renderer: a missing level would throw inside the batch
+    // flush and drop the whole batch, and a newline in the message would forge a log line.
+    if (!logEntry || typeof logEntry.level !== 'string' || typeof logEntry.message !== 'string') return false;
+    logQueue.push({
+      timestamp: String(logEntry.timestamp),
+      level: logEntry.level.slice(0, 16),
+      message: logEntry.message.slice(0, 8192).replace(/[\r\n]+/g, ' | '),
+    });
     scheduleFlush();
 
     // For critical errors, flush immediately

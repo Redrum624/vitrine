@@ -32,12 +32,17 @@
 const { Worker } = require('worker_threads');
 const path = require('path');
 const { findEmbeddedJpegs, readOrientation } = require('./embeddedPreview.cjs');
+const { undistortParallel } = require('./cameraMatchGeometry.cjs');
 
-// Analysis grid. 200x150 ≈ 30k cells → ~20-28k usable fit samples on a typical
-// photo; each cell averages ~500 source pixels, so per-pixel detail differences
-// (sharpening halos, noise reduction) wash out of the fit target.
-const GW = 200;
-const GH = 150;
+// Analysis grid. 400x300 = 120k cells; each cell averages ~170 source pixels of a
+// 20MP decode, so per-pixel detail differences (sharpening halos, noise
+// reduction) still wash out of the fit target. It was 200x150 until the preview
+// was registered to the decode: a tone curve fitted on coarser averages reads
+// too little contrast wherever the detail is finer than a cell (foliage against
+// sky measured 20 8-bit levels dark in the highlights at 200x150, 12 at 400x300),
+// and finer cells only pair correctly once the two images line up.
+const GW = 400;
+const GH = 300;
 
 // Fit hyper-parameters (validated on a 56-image corpus + the 4-photo comparison
 // set; N13/λ0.5 with perceptual weighting matched or improved every case over
@@ -460,8 +465,22 @@ async function applyCameraMatch(decoded, orfBuf, log = console) {
       return decoded;
     }
     const t0 = Date.now();
-    const data = await runApplyWorker(decoded.data, model);
-    log.log(`camera-match: fitted and applied in ${Date.now() - t0}ms (${decoded.width}x${decoded.height}, preview distortion k=${k.toFixed(4)})`);
+    let data = await runApplyWorker(decoded.data, model);
+    const tColour = Date.now() - t0;
+    // Give the pixels the camera's geometry too, so the picture does not change
+    // shape when full quality replaces the preview. Only k > 0 (barrel corrected
+    // by the camera): the corrected frame is then a crop of the decode. On
+    // failure keep the colour-matched, uncorrected decode.
+    let geometry = 'unchanged';
+    if (k > 0) {
+      try {
+        data = await undistortParallel(data, decoded.width, decoded.height, k);
+        geometry = `corrected in ${Date.now() - t0 - tColour}ms`;
+      } catch (err) {
+        log.warn(`camera-match: geometry correction failed (${err.message}) — keeping the decode's geometry`);
+      }
+    }
+    log.log(`camera-match: fitted and applied in ${tColour}ms (${decoded.width}x${decoded.height}, preview distortion k=${k.toFixed(4)}, geometry ${geometry})`);
     return { ...decoded, data };
   } catch (err) {
     log.warn(`camera-match failed (${err.message}) — using unmatched decode`);
@@ -495,6 +514,8 @@ function runApplyWorker(dataArrayBuffer, model) {
       worker.terminate();
       reject(err);
     });
+    // A worker that dies without posting or erroring would otherwise leave the open hanging.
+    worker.once('exit', (code) => reject(new Error(`camera-match worker exited with code ${code}`)));
     worker.postMessage({ data: dataArrayBuffer }, [dataArrayBuffer]);
   });
 }
