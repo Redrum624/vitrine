@@ -29,7 +29,9 @@ export function applyMaskGeometry(
   hooks: MaskGeometryHooks,
 ): void {
   // Drag frames bake a capped draft (≤ DRAFT_MASK_MAX_EDGE, upsampled); the release bakes full size.
-  la.setLayerGeometryDeferred(layerId, geom, { draft: phase === 'live' });
+  // The layer can be gone by the time an end-of-drag commit lands (deleted, or the overlay unmounted
+  // on an image switch): then do nothing, so no reprocess/checkpoint/save is attributed to the new state.
+  if (!la.setLayerGeometryDeferred(layerId, geom, { draft: phase === 'live' })) return;
   hooks.invalidateModuleCache('localadjustments');
   if (phase === 'live') hooks.requestLivePreview();
   else hooks.triggerReprocessing();

@@ -322,3 +322,15 @@ describe('GPU mask cache key + bounded per-layer texture cache', () => {
     expect(created).toBe(101);
   });
 });
+
+describe('a commit for a layer that no longer exists does nothing', () => {
+  it('deleted layer / switched image: no cache invalidation, no reprocess, no checkpoint', () => {
+    const m = new LocalAdjustmentsModule();
+    const hooks = { invalidateModuleCache: jest.fn(), requestLivePreview: jest.fn(), triggerReprocessing: jest.fn() };
+    applyMaskGeometry(m, 'layer_gone', { ...radial, centerX: 0.7 }, 'commit', hooks);
+    applyMaskGeometry(m, 'layer_gone', { ...radial, centerX: 0.7 }, 'live', hooks);
+    expect(hooks.triggerReprocessing).not.toHaveBeenCalled();
+    expect(hooks.requestLivePreview).not.toHaveBeenCalled();
+    expect(hooks.invalidateModuleCache).not.toHaveBeenCalled();
+  });
+});
