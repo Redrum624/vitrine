@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { CropParams } from '../../modules/CropModule';
+import type { CropClampAnchor, NormalizedCropRect } from '../../modules/cropGeometry';
 
 interface InteractiveCropHandlesProps {
   // Image dimensions (processed dimensions)
@@ -49,6 +50,13 @@ interface InteractiveCropHandlesProps {
 
   // Canvas element ref for coordinate calculations
   canvasRef: React.RefObject<HTMLCanvasElement | null>;
+
+  // Wedge-free clamp (v1.40.0): applied to every emitted rect AFTER the box /
+  // ratio clamps, so the stored rect never reaches into the fill wedges of a
+  // straightened photo — live, during the drag. The anchor names the fixed
+  // side ('move' for the centre drag). Canvas passes CropModule's clamp at the
+  // native dims; absent ⇒ no extra clamp.
+  clampRect?: (rect: NormalizedCropRect, anchor: CropClampAnchor) => NormalizedCropRect;
 }
 
 type HandleType = 'nw' | 'ne' | 'sw' | 'se' | 'n' | 's' | 'e' | 'w' | 'center';
@@ -84,7 +92,8 @@ export function InteractiveCropHandles({
   showHandles,
   aspectRatio = null,
   anchorCropParams,
-  canvasRef
+  canvasRef,
+  clampRect
 }: InteractiveCropHandlesProps) {
   // Content base for image scaling (fit-rect); the box stays canvasDisplay* (viewport).
   const contentW = contentWidth ?? canvasDisplayWidth;
@@ -270,12 +279,13 @@ export function InteractiveCropHandles({
         newBottom = newTop + finalH;
       }
 
-      onCropChange({
+      const rect = {
         x: (newLeft - img.left) / img.scaledW,
         y: (newTop - img.top) / img.scaledH,
         width: (newRight - newLeft) / img.scaledW,
         height: (newBottom - newTop) / img.scaledH,
-      });
+      };
+      onCropChange(clampRect ? clampRect(rect, dragHandle === 'center' ? 'move' : dragHandle) : rect);
     };
 
     const handleMouseUp = () => {
@@ -293,7 +303,7 @@ export function InteractiveCropHandles({
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [isDragging, dragHandle, dragStart, anchorParams, getImageBox, onCropChange, aspectRatio, canvasRef, onDragEnd]);
+  }, [isDragging, dragHandle, dragStart, anchorParams, getImageBox, onCropChange, aspectRatio, canvasRef, onDragEnd, clampRect]);
 
   if (!showHandles || imageWidth === 0 || imageHeight === 0) {
     return null;

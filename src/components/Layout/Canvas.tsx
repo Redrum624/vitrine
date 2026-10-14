@@ -1394,6 +1394,13 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
                   showHandles={showCropOverlay}
                   aspectRatio={cropModule.getCropModule().getAspectRatioValue()}
                   canvasRef={canvasRef}
+                  clampRect={(rect, anchor) => {
+                    // Wedge-free live during the drag, at the NATIVE dims (the
+                    // render backstop re-clamps at each pass's actual dims).
+                    const native = imageService.getCurrentImage();
+                    if (!native?.width || !native?.height) return rect;
+                    return cropModule.getCropModule().clampRectWedgeFree(rect, native.width, native.height, anchor);
+                  }}
                 />
               </>
               );

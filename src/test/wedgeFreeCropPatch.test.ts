@@ -10,6 +10,7 @@
  *  - orientation 90/270 → inscribed math runs on the ROTATED frame's dims
  */
 import { CropModule } from '../modules/CropModule';
+import { inscribedScale, computeCropGeometry, isPixelRectWedgeFree } from '../modules/cropGeometry';
 
 const IMG_W = 4000;
 const IMG_H = 3000;
@@ -75,5 +76,17 @@ describe('CropModule.wedgeFreeCropPatch', () => {
     const patch = m.wedgeFreeCropPatch(5, IMG_W, IMG_H) as { width: number; height: number };
     expect(patch.width).toBeGreaterThanOrEqual(0.05);
     expect(patch.height).toBeGreaterThanOrEqual(0.05);
+  });
+
+  test('v1.40.0: inscribed scale at 5 deg on 5200x3904 == cos + sin * (5200/3904), patch is pixel wedge-free', () => {
+    const r = 5 * Math.PI / 180;
+    expect(inscribedScale(5200, 3904, 5)).toBeCloseTo(Math.cos(r) + Math.sin(r) * (5200 / 3904), 12);
+    const m = new CropModule();
+    m.setOriginalDimensions(5200, 3904);
+    const patch = m.wedgeFreeCropPatch(5, 5200, 3904);
+    const geom = computeCropGeometry({ ...m.getParams(), ...patch } as never, 5200, 3904);
+    expect(isPixelRectWedgeFree(geom)).toBe(true);
+    // Within a few pixels of the continuous inscribed rect (pixel clamp only).
+    expect(Math.abs(geom.outW - 5200 / inscribedScale(5200, 3904, 5))).toBeLessThanOrEqual(4);
   });
 });

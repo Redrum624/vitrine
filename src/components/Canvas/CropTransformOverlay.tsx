@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { CropParams } from '../../modules/CropModule';
+import { autoCropRectForRotation, normalizeOrientation } from '../../modules/cropGeometry';
 
 interface CropTransformOverlayProps {
   // Image dimensions (processed dimensions after any transforms)
@@ -124,30 +125,14 @@ export function CropTransformOverlay({
       const origH = originalHeight || imageHeight;
 
       if (Math.abs(angle) > 0.01 && origW > 0 && origH > 0) {
-        // Calculate the inscribed rectangle that fits within the rotated image
-        // This is the visible content without black borders
-        const angleRad = Math.abs(angle * Math.PI / 180);
-        const sin = Math.sin(angleRad);
-        const cos = Math.cos(angleRad);
-
-        // Calculate scale factor for inscribed rectangle
-        const aspectRatio = origW / origH;
-        let scale: number;
-        if (aspectRatio >= 1) {
-          scale = cos + sin * (origH / origW);
-        } else {
-          scale = cos + sin * (origW / origH);
-        }
-
-        // The inscribed rectangle dimensions in original pixels
-        const inscribedW = origW / scale;
-        const inscribedH = origH / scale;
-
-        // Convert to normalized coordinates relative to the expanded canvas
-        gridCropWidth = Math.min(1.0, inscribedW / imageWidth);
-        gridCropHeight = Math.min(1.0, inscribedH / imageHeight);
-        gridCropX = (1.0 - gridCropWidth) / 2;
-        gridCropY = (1.0 - gridCropHeight) / 2;
+        // The visible content without fill wedges: the module's own inscribed
+        // rect (one source — cropGeometry), on the ORIENTED frame.
+        const swapped = normalizeOrientation(cropParams.orientation) % 180 !== 0;
+        const inscribed = autoCropRectForRotation(swapped ? origH : origW, swapped ? origW : origH, angle);
+        gridCropX = inscribed.x;
+        gridCropY = inscribed.y;
+        gridCropWidth = inscribed.width;
+        gridCropHeight = inscribed.height;
       } else {
         // No rotation, use full image
         gridCropX = 0;
