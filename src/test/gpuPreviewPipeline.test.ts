@@ -9,7 +9,9 @@
  */
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { GpuPreviewPipeline, gpuPreviewPipeline, memoizeUniformLocation } from '../shaders/GpuPreviewPipeline';
+import { GpuPreviewPipeline, gpuPreviewPipeline, memoizeUniformLocation, edgeMaxReductionSizes } from '../shaders/GpuPreviewPipeline';
+import type { PassDescriptor } from '../shaders/passDescriptors';
+import { DEFAULT_ENHANCE_PARAMS } from '../utils/enhanceChain';
 
 describe('GpuPreviewPipeline (no WebGL2 in jsdom)', () => {
   it('attach() returns false gracefully when WebGL2 is unavailable', () => {
@@ -126,5 +128,58 @@ describe('memoizeUniformLocation', () => {
     expect(memo(programA, 'u_unused')).toBeNull();
     expect(memo(programA, 'u_unused')).toBeNull();
     expect(raw).toHaveBeenCalledTimes(1); // null is cached via map.has(), not truthiness
+  });
+});
+
+describe('resident enhance step (v1.40.0 Task 2)', () => {
+  // Normalise CRLF so the 2-space method-closing brace is a stable end anchor.
+  const src = readFileSync(join(__dirname, '..', 'shaders', 'GpuPreviewPipeline.ts'), 'utf8').replace(/\r\n/g, '\n');
+  const methodBody = (signature: string): string => {
+    const start = src.indexOf(signature);
+    expect(start).toBeGreaterThan(-1);
+    // Class methods close with a 2-space-indented brace; nested closures sit deeper.
+    const end = src.indexOf('\n  }\n', start);
+    expect(end).toBeGreaterThan(start);
+    return src.slice(start, end);
+  };
+
+  it('edgeMaxReductionSizes chains ceil(/4) down to 1x1', () => {
+    expect(edgeMaxReductionSizes(961, 1280)).toEqual([[241, 320], [61, 80], [16, 20], [4, 5], [1, 2], [1, 1]]);
+    expect(edgeMaxReductionSizes(1, 1)).toEqual([[1, 1]]);
+    expect(edgeMaxReductionSizes(4, 4)).toEqual([[1, 1]]);
+    expect(edgeMaxReductionSizes(5, 1)).toEqual([[2, 1], [1, 1]]);
+  });
+
+  it('render([enhancePass]) throws the before-attach error in jsdom (no crash)', () => {
+    const pipeline = new GpuPreviewPipeline();
+    pipeline.attach();
+    const pass: PassDescriptor = {
+      id: 'enhance',
+      programKey: 'enhance:resident',
+      setUniforms: () => undefined,
+      residentStep: { kind: 'enhance', params: { ...DEFAULT_ENHANCE_PARAMS, enabled: true, sharpen: true }, kernelScale: 1 },
+    };
+    expect(() => pipeline.render([pass])).toThrow(/before a successful attach/);
+  });
+
+  it('registers the NR denoise program with the SAME source WebGLImageProcessor uses', () => {
+    expect(src).toMatch(/^\s+denoise: FRAG_DENOISE,$/m);
+  });
+
+  it('render() dispatches residentStep BEFORE the programs.get(pass.programKey) lookup', () => {
+    const body = methodBody('render(passes: PassDescriptor[]): PreviewRenderResult {');
+    const resident = body.indexOf('pass.residentStep');
+    const lookup = body.indexOf('this.programs.get(pass.programKey)');
+    expect(resident).toBeGreaterThan(-1);
+    expect(lookup).toBeGreaterThan(resident);
+    expect(body).toContain('this.runResidentEnhance(gl, inputTexture, this.ping[idx]!, ');
+    expect(body).toContain("failedSteps.push('enhance')");
+    // Pools are dropped at the end of a render with no enhance step.
+    expect(body).toContain('this.freeEnhancePools(gl)');
+  });
+
+  it('frees the enhance pools on resize and destroy', () => {
+    expect(methodBody('private ensureFramebuffers(')).toContain('this.freeEnhancePools(gl)');
+    expect(methodBody('destroy(): void {')).toContain('this.freeEnhancePools(gl)');
   });
 });
