@@ -83,6 +83,7 @@ export function GalleryView({ images, onImageSelect, visible, onRequestRemove }:
   const imageRatings = useAppStore((s) => s.imageRatings);
   const setImageRating = useAppStore((s) => s.setImageRating);
   const ratingFilter = useAppStore((s) => s.ratingFilter);
+  const ratingFilterMode = useAppStore((s) => s.ratingFilterMode) ?? 'min';
   const selectedImageIds = useAppStore((s) => s.selectedImageIds);
   const selectionAnchorId = useAppStore((s) => s.selectionAnchorId);
   const setSelection = useAppStore((s) => s.setSelection);
@@ -93,9 +94,9 @@ export function GalleryView({ images, onImageSelect, visible, onRequestRemove }:
   const setImageDimensions = useAppStore((s) => s.setImageDimensions);
 
   const sortedFilteredImages = useMemo(() => {
-    const filtered = filterImagesByRating(images, imageRatings, ratingFilter ?? 0);
+    const filtered = filterImagesByRating(images, imageRatings, ratingFilter ?? 0, ratingFilterMode);
     return sortImagesByDate(filtered, gallerySortAscending ?? false);
-  }, [images, imageRatings, ratingFilter, gallerySortAscending]);
+  }, [images, imageRatings, ratingFilter, ratingFilterMode, gallerySortAscending]);
 
   // Measure the scroll container to window rows. Unmeasured (width/height stay 0 —
   // e.g. jsdom, where ResizeObserver.observe() never invokes its callback) falls

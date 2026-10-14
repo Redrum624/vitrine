@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { AppState, Layer, ViewportState, ProcessedImageData, RenderMode } from '../types';
+import type { RatingFilterMode } from '../utils/gallerySelection';
 import { DEFAULT_RAW_DECODE_OPTIONS, type RawDecodeOptions, type BakedUpscaleIntent } from '../types/electron';
 
 interface AppStore extends AppState {
@@ -154,7 +155,13 @@ interface AppStore extends AppState {
   // Shared rating filter (0 = All, 1-5 = show only images rated >= N). Consumed by
   // the footer's segmented control, the filmstrip dock, and (Task 7) the gallery grid.
   ratingFilter: number;
-  setRatingFilter: (n: number) => void;
+  /** 'min' = show >= N stars (default); 'exact' = show only == N. Undefined (old
+   * snapshots/mocks) is treated as 'min'. */
+  ratingFilterMode: RatingFilterMode;
+  /** Sets N with an explicit mode (default 'min'; 0 always resets to 'min'). */
+  setRatingFilter: (n: number, mode?: RatingFilterMode) => void;
+  /** Footer chip click: new chip -> >=N; same chip again -> =N; again -> off. */
+  cycleRatingFilter: (n: number) => void;
   // View mode (Task 7, Glass · Sectioned 5a): 'develop' is the editing workspace
   // (default); 'gallery' is the library grid. Toggled by the filmstrip dock's
   // Gallery chip (Develop -> Gallery) and the toolbar's Develop|Gallery segmented,
@@ -250,6 +257,7 @@ export const useAppStore = create<AppStore>((set) => ({
   referenceImageName: null,
   imageRatings: {},
   ratingFilter: 0,
+  ratingFilterMode: 'min',
   viewMode: 'develop',
   gallerySortAscending: false,
   selectedImageIds: [],
@@ -362,7 +370,13 @@ export const useAppStore = create<AppStore>((set) => ({
     imageRatings: { ...state.imageRatings, [imageId]: rating }
   })),
 
-  setRatingFilter: (n) => set({ ratingFilter: n }),
+  setRatingFilter: (n, mode = 'min') => set({ ratingFilter: n, ratingFilterMode: n === 0 ? 'min' : mode }),
+  cycleRatingFilter: (n) =>
+    set((s) => {
+      if (n === 0 || s.ratingFilter !== n) return { ratingFilter: n, ratingFilterMode: 'min' };
+      if ((s.ratingFilterMode ?? 'min') === 'min') return { ratingFilter: n, ratingFilterMode: 'exact' };
+      return { ratingFilter: 0, ratingFilterMode: 'min' };
+    }),
 
   setViewMode: (mode) => set({ viewMode: mode }),
 

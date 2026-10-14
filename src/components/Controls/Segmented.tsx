@@ -10,6 +10,9 @@ interface SegmentedProps<T extends string> {
   options: SegmentedOption<T>[];
   value: T;
   onChange: (value: T) => void;
+  /** Fired when the ALREADY-active segment is clicked (onChange does not fire
+   * then). Lets a control cycle states by re-clicking the same chip. */
+  onReselect?: (value: T) => void;
   className?: string;
   /** Smaller 22px segments for dense panels (default 24px). */
   size?: 'sm' | 'md';
@@ -30,7 +33,7 @@ interface SegmentedProps<T extends string> {
  * selection instead of the manual-activation variant (move focus, then
  * Enter/Space to commit).
  */
-export function Segmented<T extends string>({ options, value, onChange, className = '', size = 'md' }: SegmentedProps<T>) {
+export function Segmented<T extends string>({ options, value, onChange, onReselect, className = '', size = 'md' }: SegmentedProps<T>) {
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const activeIndex = options.findIndex((o) => o.value === value);
   const count = Math.max(1, options.length);
@@ -116,7 +119,7 @@ export function Segmented<T extends string>({ options, value, onChange, classNam
             aria-selected={active}
             tabIndex={active ? 0 : -1}
             className="segmented-tab"
-            onClick={() => onChange(option.value)}
+            onClick={() => (active ? onReselect?.(option.value) : onChange(option.value))}
             onKeyDown={(event) => handleKeyDown(event, index)}
             style={{
               position: 'relative',

@@ -21,14 +21,18 @@ export const isRawImage = (img: ImageFileInfo): boolean =>
 
 // ─── Rating filter (shared by the dock, the footer, and the gallery grid) ─────────
 
-/** `ratingFilter` 0 = All; 1-5 = keep only images rated >= N. Matches the exact
- * predicate ThumbnailPanel used inline before this was extracted. */
+/** `ratingFilter` 0 = All; 1-5 = keep images rated >= N ('min', default) or
+ * exactly N ('exact'). */
+export type RatingFilterMode = 'min' | 'exact';
+
 export function filterImagesByRating(
   images: ImageFileInfo[],
   ratings: Record<string, number>,
   ratingFilter: number,
+  mode: RatingFilterMode = 'min',
 ): ImageFileInfo[] {
   if (ratingFilter === 0) return images;
+  if (mode === 'exact') return images.filter((img) => (ratings[img.id] || 0) === ratingFilter);
   return images.filter((img) => (ratings[img.id] || 0) >= ratingFilter);
 }
 
