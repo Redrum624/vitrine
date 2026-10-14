@@ -47,6 +47,7 @@ jest.mock('../services/ImageService', () => ({ imageService: {
   getOriginalImage: jest.fn(() => null),
   getOriginalImageDimensions: jest.fn(() => null),
   getCurrentImage: jest.fn(() => null),
+  isBakedUpscaleActive: jest.fn(() => false),
 } }));
 jest.mock('../services/EnhanceService', () => ({
   getUpscaleFeasibility: jest.requireActual('../services/EnhanceService').getUpscaleFeasibility,

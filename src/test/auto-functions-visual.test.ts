@@ -635,8 +635,9 @@ describe('LensCorrectionsModule.autoDetectVignetting', () => {
     const params = lc.getParams();
 
     expect(params.vignetting.enabled).toBe(true);
-    expect(params.vignetting.amount).toBeGreaterThan(0);
-    expect(params.vignetting.amount).toBeLessThanOrEqual(50);
+    // v1.40.0 creative convention: dark lens corners are countered with a NEGATIVE amount.
+    expect(params.vignetting.amount).toBeLessThan(0);
+    expect(params.vignetting.amount).toBeGreaterThanOrEqual(-50);
     logVisual('autoVignette on vignetted', { enabled: params.vignetting.enabled, amount: params.vignetting.amount });
   });
 
@@ -663,7 +664,7 @@ describe('LensCorrectionsModule.autoDetectVignetting', () => {
     lc.autoDetectVignetting(data, w, h);
     const params = lc.getParams();
 
-    expect(params.vignetting.amount).toBeLessThanOrEqual(50);
+    expect(params.vignetting.amount).toBeGreaterThanOrEqual(-50); // magnitude cap (negative = brighten edges)
   });
 });
 

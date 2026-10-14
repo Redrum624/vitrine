@@ -15,7 +15,8 @@
  * only ever used when it matches the CPU result — no possibility of a regression.
  */
 import { logger } from '../utils/Logger';
-import { rgbToHsl, hslToRgb, smoothStep } from '../modules/utils/ColorUtils';
+import { vignetteFactor } from '../utils/vignetteMath';
+import { rgbToHsl, hslToRgb } from '../modules/utils/ColorUtils';
 import {
   VERT_SRC,
   FRAG_EXPOSURE,
@@ -541,7 +542,7 @@ class WebGLImageProcessor {
     return out;
   }
 
-  /** Apply lens vignetting correction (radial). GPU when verified, else CPU. */
+  /** Apply the creative vignette (radial; + darkens, - brightens). GPU when verified, else CPU. */
   applyVignetting(
     data: Float32Array, width: number, height: number,
     strength: number, midpoint: number, roundnessNorm: number, featherNorm: number
@@ -562,8 +563,8 @@ class WebGLImageProcessor {
     try {
       const { data, w, h } = CB_SELFTEST;
       const a = this.runPass(this.vignetteProgram!, data, w, h,
-        vignetteUniforms(w, h, 0.5, 0.5, 0.2, 0.6));
-      const c = this.vignettingCPU(data, w, h, 0.5, 0.5, 0.2, 0.6);
+        vignetteUniforms(w, h, 0.5, 0.8, 0.2, 0.6));
+      const c = this.vignettingCPU(data, w, h, 0.5, 0.8, 0.2, 0.6);
       let maxDiff = 0;
       for (let i = 0; i < c.length; i++) maxDiff = Math.max(maxDiff, Math.abs(a[i] - c[i]));
       ok = maxDiff < 0.02;
@@ -573,7 +574,7 @@ class WebGLImageProcessor {
     return ok;
   }
 
-  /** CPU reference — a replica of LensCorrectionsModule.correctVignetting. */
+  /** CPU reference - same falloff as LensCorrectionsModule.correctVignetting (shared vignetteFactor). */
   vignettingCPU(
     data: Float32Array, width: number, height: number,
     strength: number, midpoint: number, roundnessNorm: number, featherNorm: number
@@ -586,17 +587,7 @@ class WebGLImageProcessor {
         const dx = (x - cx) / cx;
         const dy = ((y - cy) / cy) * (1 + roundnessNorm);
         const nd = Math.sqrt(dx * dx + dy * dy) / Math.sqrt(2);
-        let mask = 1;
-        if (nd > 0) {
-          const fs = midpoint * 0.5, fe = midpoint * 1.5;
-          if (nd > fs) {
-            const fp = Math.min(1, (nd - fs) / (fe - fs));
-            const sf = smoothStep(0, 1, fp);
-            const ff = fp * (1 - featherNorm) + sf * featherNorm;
-            mask = 1 - ff;
-          }
-        }
-        const factor = 1 + strength * (1 / Math.max(0.1, mask) - 1);
+        const factor = vignetteFactor(nd, strength, midpoint, featherNorm);
         result[i] *= factor; result[i + 1] *= factor; result[i + 2] *= factor;
       }
     }

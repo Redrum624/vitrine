@@ -23,7 +23,7 @@ jest.mock('../utils/Logger', () => ({
 const W = 32, H = 32;
 const ctx = (): ProcessingContext => ({ width: W, height: H, channels: 4 });
 
-/** Uniform bright input — vignetting amount 100 doubles the corners (0.9 → 1.8 > 1). */
+/** Uniform bright input — vignetting amount -100 (v1.40.0: negative brightens) doubles the corners (0.9 → 1.8 > 1). */
 const brightInput = () => createTestImage(W, H, 0.9, 0.9, 0.9);
 
 const enableVignetting = (pipeline: ImageProcessingPipeline, amount: number) => {
@@ -51,7 +51,7 @@ const clamp01 = (buf: Float32Array): Float32Array => {
 /** Raw lens output OUTSIDE the pipeline (no identity logic involved) — the >1 producer. */
 const rawVignettingOutput = (input: Float32Array): Float32Array => {
   const lens = new LensCorrectionsPipelineModule();
-  lens.updateVignettingParams({ enabled: true, amount: 100 });
+  lens.updateVignettingParams({ enabled: true, amount: -100 });
   return lens.process(new Float32Array(input), ctx());
 };
 
@@ -88,7 +88,7 @@ describe('default exposure clamps vignetting overshoot (pre-W3 bytes, finding M1
     // The real pipeline: vignetting active, exposure at DEFAULTS, downstream active. The
     // exposure identity skip must not fire — output must match the clamped reference exactly.
     const fullPipeline = new ImageProcessingPipeline();
-    enableVignetting(fullPipeline, 100);
+    enableVignetting(fullPipeline, -100);
     enableDownstream(fullPipeline);
     const actual = await run(fullPipeline, input);
 
@@ -109,7 +109,7 @@ describe('default exposure clamps vignetting overshoot (pre-W3 bytes, finding M1
 
   it('gate: vignetting amount ≠ 0 pulls the default exposure pass back in (lens + exposure run)', async () => {
     const pipeline = new ImageProcessingPipeline();
-    enableVignetting(pipeline, 100);
+    enableVignetting(pipeline, -100);
     const totals: number[] = [];
     await pipeline.processImage(brightInput(), ctx(), {
       useWebWorkers: false, cacheResults: false,

@@ -180,6 +180,7 @@ export function sanitizeImportedPreset(raw: unknown): SanitizedPresetResult {
     modifiedAt: str(raw.modifiedAt) ? raw.modifiedAt : new Date().toISOString(),
     ...(str(raw.thumbnail) ? { thumbnail: raw.thumbnail } : {}),
     settings,
+    ...(num(raw.settingsSchema) ? { settingsSchema: raw.settingsSchema as number } : {}),
     metadata: {
       version: str(md.version) ? md.version : '1.0.0',
       compatibility: Array.isArray(md.compatibility) ? md.compatibility.filter(str) : [],

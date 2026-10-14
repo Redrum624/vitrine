@@ -1,6 +1,7 @@
 import { editPersistenceService } from './EditPersistenceService';
 import { imageService } from './ImageService';
 import { logger } from '../utils/Logger';
+import { migrateEditState } from '../utils/editSchemaMigration';
 
 // A checkpoint stores a full edit-state snapshot (reusing EditPersistenceService's
 // serialize format) so it can be restored later. Mask buffers are never stored — they
@@ -396,7 +397,9 @@ class CheckpointService {
       try {
         const data = await api.storeGet<StoredHistory>(this.keyFor(path));
         if (data && data.version === HISTORY_VERSION && Array.isArray(data.checkpoints)) {
-          this.checkpoints = data.checkpoints;
+          // v1.40.0: persisted checkpoints from before the semantic-schema stamp are migrated once
+          // (idempotent), so restore, labels and the dedupe snapshot all see current-schema data.
+          this.checkpoints = data.checkpoints.map((c) => (c && c.state ? { ...c, state: migrateEditState(c.state) } : c));
           this.seq = Math.max(data.nextSeq ?? 0, this.checkpoints.reduce((m, c) => Math.max(m, c.id), 0));
           const last = this.checkpoints[this.checkpoints.length - 1];
           this.activeId = last ? last.id : null;

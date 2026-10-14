@@ -139,7 +139,7 @@ export class LocalAdjustmentsModule {
       }, imageWidth, imageHeight);
     } else if (type === 'linear_gradient') {
       // Default: a horizontal line across the centre, effect on the bottom half,
-      // feather 0.5 (rotation 0). 1.0 feather → a solid full-effect rectangle below.
+      // feather 0.5 (rotation 0). A low feather → a near-hard edge at the line.
       this.setLayerGeometry(layer.id, {
         type: 'linear', centerX: 0.5, centerY: 0.5, radiusX: 0.3, radiusY: 0.3,
         startX: 0.5, startY: 0.15, endX: 0.5, endY: 0.85, feather: 0.5, invert: false, rotation: 0,
@@ -200,12 +200,14 @@ export class LocalAdjustmentsModule {
     } else {
       // Graduated filter: a line through (centerX, centerY) at angle `rotation`. The
       // effect is on ONE side — the line's perpendicular +direction, which is "down"
-      // at rotation 0. `feather` is the spread: 1 = a solid full-effect rectangle
-      // (hard edge at the line); lower = a softer ramp from the line outward.
+      // at rotation 0. `feather` is the ramp width: low = a hard edge at the line,
+      // high = a softer ramp from the line outward.
       const cx = geom.centerX, cy = geom.centerY;
       const rot = geom.rotation || 0;
       const pxn = -Math.sin(rot), pyn = Math.cos(rot); // effect-side unit normal
-      const D = Math.max(1e-3, 1 - Math.max(0.001, Math.min(1, geom.feather)));
+      // v1.40.0: ramp width = feather (higher = softer, like radial). Legacy saved edits are
+      // migrated feather' = 1 - feather (utils/editSchemaMigration.ts) so they look the same.
+      const D = Math.max(1e-3, Math.min(1, geom.feather));
       for (let y = 0; y < height; y++) {
         for (let x = 0; x < width; x++) {
           // Signed perpendicular distance from the line (normalised image units).

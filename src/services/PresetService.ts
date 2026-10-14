@@ -3,6 +3,7 @@ import { imageProcessingPipeline } from './ImageProcessingPipeline';
 import { imageService } from './ImageService';
 import { notificationService } from './NotificationService';
 import { sanitizeImportedPreset } from './presetShapeValidation';
+import { EDIT_SCHEMA_CURRENT, migratePresetSettings } from '../utils/editSchemaMigration';
 import { formatSkippedNames } from '../components/Dialogs/formatSkippedNames';
 import type { LocalAdjustmentsPipelineModule } from '../modules/LocalAdjustmentsPipelineModule';
 import type { LocalAdjustmentLayer, LocalAdjustmentParams, MaskGeometry } from '../modules/LocalAdjustmentsModule';
@@ -50,6 +51,9 @@ export interface AdjustmentPreset {
   modifiedAt: string;
   thumbnail?: string; // Base64 encoded thumbnail
   settings: PresetSettings;
+  // Semantic schema of `settings` (v1.40.0). Absent = legacy (inverted linear Feather, Vignetting
+  // amount as a correction); migrated exactly once on load/import, see utils/editSchemaMigration.ts.
+  settingsSchema?: number;
   metadata: {
     version: string;
     compatibility: string[];
@@ -485,9 +489,13 @@ export class PresetService {
       const stored = localStorage.getItem(this.STORAGE_KEY);
       if (stored) {
         const data = JSON.parse(stored);
-        for (const preset of data.presets || []) {
+        let migrated = false;
+        for (const raw of data.presets || []) {
+          const preset = this.migratePreset(raw);
+          if (preset !== raw) migrated = true;
           this.presets.set(preset.id, preset);
         }
+        if (migrated) this.savePresets(); // persist the stamp so a stored preset is never migrated twice
         logger.info(`Loaded ${this.presets.size} presets from storage`);
       }
     } catch (error) {
@@ -495,12 +503,18 @@ export class PresetService {
     }
   }
 
+  /** Bring a preset to the current settings semantics exactly once (idempotent via settingsSchema). */
+  private migratePreset(preset: AdjustmentPreset): AdjustmentPreset {
+    if (!preset || (preset.settingsSchema ?? 1) >= EDIT_SCHEMA_CURRENT) return preset;
+    return { ...preset, settings: migratePresetSettings(preset.settings), settingsSchema: EDIT_SCHEMA_CURRENT };
+  }
+
   // Initialize built-in presets if they don't exist
   private initializeBuiltinPresets(): void {
     let addedCount = 0;
     for (const preset of this.builtinPresets) {
       if (!this.presets.has(preset.id)) {
-        this.presets.set(preset.id, preset);
+        this.presets.set(preset.id, { ...preset, settingsSchema: EDIT_SCHEMA_CURRENT });
         addedCount++;
       }
     }
@@ -541,6 +555,7 @@ export class PresetService {
         createdAt: new Date().toISOString(),
         modifiedAt: new Date().toISOString(),
         settings,
+        settingsSchema: EDIT_SCHEMA_CURRENT,
         metadata: {
           version: this.VERSION,
           compatibility: [this.VERSION],
@@ -723,7 +738,7 @@ export class PresetService {
           continue;
         }
 
-        const preset = sanitized.preset;
+        const preset = this.migratePreset(sanitized.preset);
 
         // Check if preset already exists
         if (this.presets.has(preset.id)) {

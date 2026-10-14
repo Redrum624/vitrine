@@ -2143,7 +2143,7 @@ export class GpuPreviewPipeline {
       // CA is a radial shift — both make pixel-exact comparison harder than a per-pixel op).
       // GPU shader is FRAG_VIGNETTE.
       // CPU reference: LensCorrectionsModule.processImage() with ONLY vignetting enabled.
-      const vigAmount = 50;   // amount / 100 = 0.5 in the uniform (negative = darken)
+      const vigAmount = 50;   // amount / 100 = 0.5 in the uniform (positive = darken, v1.40.0)
       const vigMidpoint = 1.0;
       const vigRoundness = 0;
       const vigFeather = 50;
@@ -2175,7 +2175,7 @@ export class GpuPreviewPipeline {
       for (let i = 0; i < refVig.length; i++) {
         vigMaxDiff = Math.max(vigMaxDiff, Math.abs(gpuVig[i] - refVig[i]));
       }
-      // Per-pixel smoothstep vignette — same formula both sides.
+      // Per-pixel smoothstep vignette - same formula both sides (utils/vignetteMath.ts <-> FRAG_VIGNETTE).
       const vigOk = vigMaxDiff < 1e-3;
       logger.info(`[GPU-PIPELINE] vignette self-test maxDiff=${vigMaxDiff.toExponential(2)} ${vigOk ? 'PASS' : 'FAIL'}`);
 

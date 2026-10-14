@@ -20,7 +20,7 @@ const VIGNETTING_PRESETS = [
   { name: 'Subtle', amount: 20, midpoint: 1.0, roundness: 0, feather: 60 },
   { name: 'Moderate', amount: 40, midpoint: 1.0, roundness: 0, feather: 50 },
   { name: 'Strong', amount: 60, midpoint: 0.8, roundness: -10, feather: 40 },
-  { name: 'Wide Lens', amount: 80, midpoint: 0.6, roundness: -20, feather: 30 },
+  { name: 'Wide Lens', amount: -80, midpoint: 0.6, roundness: -20, feather: 30 },
 ];
 
 const DISTORTION_PRESETS = [
@@ -62,12 +62,12 @@ function IconChip({ title, onClick, children }: { title: string; onClick: () => 
  * request): a section is active exactly when its values are non-neutral — the
  * `enabled` flags in the params are DERIVED from the values by the setters, so
  * neutral (0) settings cost nothing and there is nothing to arm. */
-function SectionHeader({ title, active, onAuto, onReset }: {
-  title: string; active: boolean; onAuto?: () => void; onReset?: () => void;
+function SectionHeader({ title, tooltip, active, onAuto, onReset }: {
+  title: string; tooltip?: string; active: boolean; onAuto?: () => void; onReset?: () => void;
 }) {
   return (
     <div className="flex items-center justify-between" style={{ gap: 8 }}>
-      <SectionLabel className="flex-1">{title}</SectionLabel>
+      <span className="flex-1" title={tooltip}><SectionLabel>{title}</SectionLabel></span>
       <div className="flex items-center flex-shrink-0" style={{ gap: 6 }}>
         {active && (
           <span
@@ -182,6 +182,7 @@ export const LensCorrectionsModuleComponent: React.FC<LensCorrectionsModuleCompo
       <div className="flex flex-col" style={{ gap: 12 }}>
         <SectionHeader
           title="Vignetting"
+          tooltip="Darken (+) or lighten (−) the edges"
           active={vignetting.enabled}
           onAuto={onAutoDetectVignetting}
           onReset={onResetSection && (() => onResetSection('vignetting'))}
@@ -189,7 +190,7 @@ export const LensCorrectionsModuleComponent: React.FC<LensCorrectionsModuleCompo
         <div style={sectionBodyStyle}>
           <Presets items={VIGNETTING_PRESETS} onApply={(i) => update({ vignetting: { ...params.vignetting, enabled: true, ...VIGNETTING_PRESETS[i] } })} />
           <SliderRow label="Amount" value={vignetting.amount} defaultValue={0} min={-100} max={100} step={1} onChange={(v) => setVignetting('amount', v)} />
-          <SliderRow label="Midpoint" value={vignetting.midpoint} defaultValue={1.0} min={0.1} max={2.0} step={0.01} formatValue={(v) => v.toFixed(2)} onChange={(v) => setVignetting('midpoint', v)} />
+          <SliderRow label="Midpoint" value={vignetting.midpoint} defaultValue={1.0} min={0.5} max={1.5} step={0.01} formatValue={(v) => v.toFixed(2)} onChange={(v) => setVignetting('midpoint', v)} />
           <SliderRow label="Roundness" value={vignetting.roundness} defaultValue={0} min={-100} max={100} step={1} onChange={(v) => setVignetting('roundness', v)} />
           <SliderRow label="Feather" value={vignetting.feather} defaultValue={50} min={0} max={100} step={1} formatValue={(v) => `${v}%`} onChange={(v) => setVignetting('feather', v)} />
         </div>

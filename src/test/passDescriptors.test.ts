@@ -746,7 +746,7 @@ describe('NR + enhance resident passes', () => {
   afterEach(() => setGpuUnsafeModuleIds([]));
   const nr = (params: Record<string, unknown>) => fakeModule('noise-reduction', true, params);
   const enh = (over: Record<string, unknown> = {}) =>
-    fakeModule('enhance', true, { ...DEFAULT_ENHANCE_PARAMS, enabled: true, ...over });
+    fakeModule('enhance', true, { ...DEFAULT_ENHANCE_PARAMS, upscale: false, enabled: true, ...over });
   const OPTS = { width: 800, height: 600, kernelScale: 0.4 };
 
   test('NR enabled -> denoise pass, not a cpuBridge', () => {
@@ -839,14 +839,14 @@ describe('NR + enhance resident passes', () => {
   });
 
   test('enhanceResidentEligible mirrors runEnhanceChain limits', () => {
-    const p = { ...DEFAULT_ENHANCE_PARAMS, enabled: true };
+    const p = { ...DEFAULT_ENHANCE_PARAMS, upscale: false, enabled: true };
     expect(enhanceResidentEligible(p, 1, 1000, 1000)).toBe(true);
     expect(enhanceResidentEligible(p, 1, 20000, 20000)).toBe(false);
     expect(enhanceResidentEligible({ ...p, denoiseStrength: 100 }, 1)).toBe(false);
   });
 
   test('enhanceResidentEligible defaults maxTextureSize to 16384 like the pipeline', () => {
-    const p = { ...DEFAULT_ENHANCE_PARAMS, enabled: true };
+    const p = { ...DEFAULT_ENHANCE_PARAMS, upscale: false, enabled: true };
     expect(enhanceResidentEligible(p, 1, 16384, 100)).toBe(true);
     expect(enhanceResidentEligible(p, 1, 16385, 100)).toBe(false);
     expect(enhanceResidentEligible(p, 1, 16385, 100, 32768)).toBe(true);
@@ -859,7 +859,7 @@ describe('NR + enhance resident passes', () => {
   });
 
   test('denoiseStrength boundary derived from ENH_DENOISE_MAXR', () => {
-    const p = { ...DEFAULT_ENHANCE_PARAMS, enabled: true };
+    const p = { ...DEFAULT_ENHANCE_PARAMS, upscale: false, enabled: true };
     const radius = (d: number) => Math.max(1, Math.ceil((0.4 + 0.12 * d) * 3));
     let last = 0;
     while (radius(last + 1) <= ENH_DENOISE_MAXR) last++;
@@ -869,7 +869,7 @@ describe('NR + enhance resident passes', () => {
   });
 
   test('psfSigma 0 with rlIters > 0 -> RL gate off, eligible', () => {
-    const p = { ...DEFAULT_ENHANCE_PARAMS, enabled: true, psfSigma: 0, rlIters: 12 };
+    const p = { ...DEFAULT_ENHANCE_PARAMS, upscale: false, enabled: true, psfSigma: 0, rlIters: 12 };
     expect(enhanceResidentEligible(p, 1, 1000, 1000)).toBe(true);
     expect(enhanceResidentEligible({ ...p, psfSigma: 8 }, 1, 1000, 1000)).toBe(false);
   });
