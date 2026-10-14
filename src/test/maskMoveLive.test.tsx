@@ -117,6 +117,88 @@ describe('overlay: live geometry during a drag (rAF-coalesced) + one final commi
   });
 });
 
+describe('overlay unmount mid-drag after live frames (fix round 1)', () => {
+  beforeEach(installFakeRaf);
+  afterEach(() => jest.restoreAllMocks());
+
+  it('commits the latest geometry once, so the moved mask gets its checkpoint/save', () => {
+    const onGeometryChange = jest.fn();
+    const onGeometryPreview = jest.fn();
+    const { container, unmount } = render(
+      <LocalAdjustmentMaskOverlay
+        viewport={{ zoom: 1, panX: 0, panY: 0 }} contentWidth={800} contentHeight={600}
+        layerType="radial_gradient" geometry={{ ...radial, centerX: 0.5 }}
+        onGeometryChange={onGeometryChange} onGeometryPreview={onGeometryPreview}
+      />,
+    );
+    const root = container.firstChild as HTMLElement;
+    sizeElement(root, 800, 600);
+    fireEvent.mouseDown(root, { clientX: 400, clientY: 300 });
+    fireEvent.mouseMove(window, { clientX: 440, clientY: 300 });
+    frame();
+    expect(onGeometryPreview).toHaveBeenCalledTimes(1);
+    fireEvent.mouseMove(window, { clientX: 480, clientY: 300 }); // not yet flushed
+    unmount();
+    expect(onGeometryChange).toHaveBeenCalledTimes(1);
+    expect((onGeometryChange.mock.calls[0][0] as MaskGeometry).centerX).toBeCloseTo(0.6, 4);
+    fireEvent.mouseUp(window);
+    frame();
+    expect(onGeometryChange).toHaveBeenCalledTimes(1);
+    expect(onGeometryPreview).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('live drag frames bake a capped draft; the release bakes full size (fix round 1)', () => {
+  it('draft at ≤ DRAFT_MASK_MAX_EDGE upsampled to the render size, then a full bake on commit', () => {
+    const W = 4096, H = 2731;
+    const m = new LocalAdjustmentsModule();
+    const id = m.createLayer('radial_gradient', 'L', 8, 8);
+    m.updateLayerBasicAdj(id, { exposure: 1 });
+    const hooks = { invalidateModuleCache: jest.fn(), requestLivePreview: jest.fn(), triggerReprocessing: jest.fn() };
+    const bakeSpy = jest.spyOn(m, 'rebakeLayerMask');
+    applyMaskGeometry(m, id, { ...radial, centerX: 0.7 }, 'live', hooks);
+    expect(m.getLayer(id)!.maskDraft).toBe(true);
+    const draft = m.rebakeLayerMask(id, W, H)!;
+    expect(draft.length).toBe(W * H);
+    const at = (mask: Float32Array, nx: number) => mask[Math.round(0.5 * (H - 1)) * W + Math.round(nx * (W - 1))];
+    expect(at(draft, 0.7)).toBeGreaterThan(0.9);
+    expect(at(draft, 0.3)).toBeLessThan(0.1);
+    const draftKey = maskCacheKey(m.getLayer(id)!, draft, W, H);
+
+    applyMaskGeometry(m, id, { ...radial, centerX: 0.7 }, 'commit', hooks);
+    expect(m.getLayer(id)!.maskDraft).toBe(false);
+    const full = m.rebakeLayerMask(id, W, H)!;
+    const exact = new LocalAdjustmentsModule();
+    const id2 = exact.createLayer('radial_gradient', 'L', 8, 8);
+    exact.setLayerGeometry(id2, { ...radial, centerX: 0.7 }, W, H);
+    expect(firstDiff(full, exact.getLayer(id2)!.mask)).toBe(-1); // byte-identical full bake
+    // Same geometry, draft vs final: different GPU keys so the final mask is uploaded.
+    expect(maskCacheKey(m.getLayer(id)!, full, W, H)).not.toBe(draftKey);
+    // Draft and full agree closely (bilinear of the same field).
+    let maxDiff = 0;
+    for (let i = 0; i < full.length; i += 997) maxDiff = Math.max(maxDiff, Math.abs(full[i] - draft[i]));
+    expect(maxDiff).toBeLessThan(0.05);
+    bakeSpy.mockRestore();
+  });
+
+  it('a render at or below the cap bakes the draft at full size (nothing to save)', () => {
+    const m = new LocalAdjustmentsModule();
+    const id = m.createLayer('radial_gradient', 'L', 8, 8);
+    m.setLayerGeometryDeferred(id, radial, { draft: true });
+    const mask = m.rebakeLayerMask(id, 1024, 683)!;
+    const ref = new LocalAdjustmentsModule();
+    const id2 = ref.createLayer('radial_gradient', 'L', 8, 8);
+    ref.setLayerGeometry(id2, radial, 1024, 683);
+    expect(firstDiff(mask, ref.getLayer(id2)!.mask)).toBe(-1);
+  });
+});
+
+function firstDiff(a: Float32Array, b: Float32Array): number {
+  if (a.length !== b.length) return -2;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return i;
+  return -1;
+}
+
 describe('applyMaskGeometry: live frames reprocess immediately; history/persistence only on release', () => {
   it('live → requestLivePreview (no processingVersion bump); commit → triggerReprocessing once', () => {
     const m = new LocalAdjustmentsModule();
@@ -135,10 +217,12 @@ describe('applyMaskGeometry: live frames reprocess immediately; history/persiste
     const m = new LocalAdjustmentsModule();
     const id = m.createLayer('radial_gradient', 'L', 64, 48);
     m.setLayerGeometry(id, radial, 64, 48);
-    const spy = jest.spyOn(m, 'setLayerGeometry');
+    const spy = jest.spyOn(m, 'rebakeLayerMask');
+    const pre = jest.spyOn(m, 'setLayerGeometry');
     const hooks = { invalidateModuleCache: jest.fn(), requestLivePreview: jest.fn(), triggerReprocessing: jest.fn() };
     applyMaskGeometry(m, id, { ...radial, centerX: 0.6 }, 'live', hooks);
     expect(spy).not.toHaveBeenCalled();
+    expect(pre).not.toHaveBeenCalled();
     m.updateLayerBasicAdj(id, { exposure: 1 });
     m.processImage(new Float32Array(40 * 30 * 4).fill(0.2), 40, 30);
     expect(spy).toHaveBeenCalledTimes(1);

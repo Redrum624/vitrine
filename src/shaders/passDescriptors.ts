@@ -553,6 +553,8 @@ interface LayerView {
   basicAdj?: BasicAdjustmentsParams;
   mask?: Float32Array;
   geometry?: { type?: string; [k: string]: unknown };
+  /** Live-drag draft mask (Task 12c) — part of the GPU mask cache key. */
+  maskDraft?: boolean;
 }
 
 /**
@@ -597,7 +599,7 @@ function isLayerActive(layer: LayerView): boolean {
  *  makes every move a new key. GpuPreviewPipeline.uploadMask evicts the layer's previous
  *  texture on a new key, so per-frame keys during a drag never churn the cache. */
 export function maskCacheKey(
-  layer: { id?: string; geometry?: object },
+  layer: { id?: string; geometry?: object; maskDraft?: boolean },
   mask: Float32Array,
   width: number,
   height: number,
@@ -610,7 +612,7 @@ export function maskCacheKey(
   const geomSig = layer.geometry
     ? Object.entries(layer.geometry).sort(([a], [b]) => (a < b ? -1 : 1)).map(([k, v]) => `${k}=${String(v)}`).join(',')
     : '';
-  return `${layer.id ?? 'layer'}:${width}x${height}:${mask.length}:${h}:${geomSig}`;
+  return `${layer.id ?? 'layer'}:${width}x${height}:${mask.length}:${h}:${geomSig}${layer.maskDraft ? ':draft' : ''}`;
 }
 
 /**

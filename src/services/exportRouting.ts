@@ -80,6 +80,10 @@ export function chooseExportProcessing(opts: ExportRoutingOpts): ExportProcessin
   return { useWebWorkers: true, reason: 'worker-pool' };
 }
 
+// Pure helper (lives in previewRouting so EnhanceService can use it without pulling in the
+// worker pool via this module's WebWorkerImageProcessor import).
+export { laTiledWorkerUnsafe } from './previewRouting';
+
 /** Convenience wrapper reading the live worker-pool health + NR state (mirrors how
  *  AdjustmentPanel feeds choosePreviewPath). `pipeline` is structurally typed so tests and the
  *  export services can pass the real ImageProcessingPipeline without an import cycle. */

@@ -52,9 +52,13 @@ export function LocalAdjustmentMaskOverlay({
   // Latest preview callback behind a ref: the drag's rAF flush always calls the current one.
   const onPreviewRef = useRef(onGeometryPreview);
   onPreviewRef.current = onGeometryPreview;
-  // Tears down an in-flight drag (window listeners + pending frame) — also on unmount.
-  const dragCleanupRef = useRef<(() => void) | null>(null);
-  useEffect(() => () => { dragCleanupRef.current?.(); }, []);
+  const onCommitRef = useRef(onGeometryChange);
+  onCommitRef.current = onGeometryChange;
+  // Tears down an in-flight drag (window listeners + pending frame). On unmount mid-drag the
+  // module already holds live geometry, so the drag is committed (History / persistence)
+  // when at least one live frame went out; otherwise nothing changed and nothing commits.
+  const dragCleanupRef = useRef<((opts?: { commitIfLive?: boolean }) => void) | null>(null);
+  useEffect(() => () => { dragCleanupRef.current?.({ commitIfLive: true }); }, []);
 
   const metrics = () => {
     const root = rootRef.current;
@@ -135,8 +139,10 @@ export function LocalAdjustmentMaskOverlay({
     // Live push (Task 12c): coalesce moves to one onGeometryPreview per animation frame,
     // carrying the latest geometry.
     let frameId: number | null = null;
+    let liveEmitted = false;
     const flushFrame = () => {
       frameId = null;
+      liveEmitted = true;
       onPreviewRef.current?.(latest);
     };
 
@@ -194,12 +200,13 @@ export function LocalAdjustmentMaskOverlay({
       setLiveGeom(next); // instant outline
       if (frameId === null && onPreviewRef.current) frameId = requestAnimationFrame(flushFrame);
     };
-    const teardown = () => {
+    const teardown = (opts?: { commitIfLive?: boolean }) => {
       draggingRef.current = false;
       if (frameId !== null) { cancelAnimationFrame(frameId); frameId = null; }
       window.removeEventListener('mousemove', move);
       window.removeEventListener('mouseup', up);
       dragCleanupRef.current = null;
+      if (opts?.commitIfLive && liveEmitted) onCommitRef.current(latest);
     };
     const up = () => {
       teardown();

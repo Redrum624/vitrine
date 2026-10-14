@@ -12,6 +12,9 @@ export interface LocalAdjustmentLayer {
   mask: Float32Array; // Grayscale mask (0=no effect, 1=full effect)
   parameters: LocalAdjustmentParams;
   geometry?: MaskGeometry;   // for radial/linear gradient layers (drives the mask)
+  /** Live-drag draft (Task 12c): the next geometry bake runs at ≤ DRAFT_MASK_MAX_EDGE and is
+   *  upsampled; the release clears it and the render rebakes at full size. */
+  maskDraft?: boolean;
   basicAdj?: BasicAdjParams; // when set, the mask applies Basic Adjustments to the masked region
 }
 
@@ -170,55 +173,37 @@ export class LocalAdjustmentsModule {
     if (!layer) return false;
 
     layer.geometry = { ...geom };
+    layer.maskDraft = false;
     // Resize the mask buffer if the target resolution changed (e.g. preview vs export).
     if (layer.mask.length !== width * height) {
       layer.mask = new Float32Array(width * height);
     }
-    const mask = layer.mask;
-
-    if (geom.type === 'radial') {
-      const cx = geom.centerX * width;
-      const cy = geom.centerY * height;
-      const rx = Math.max(1e-3, geom.radiusX) * width;
-      const ry = Math.max(1e-3, geom.radiusY) * height;
-      const feather = Math.max(0.001, Math.min(0.999, geom.feather));
-      const rot = geom.rotation || 0;
-      const cosR = Math.cos(rot), sinR = Math.sin(rot);
-      for (let y = 0; y < height; y++) {
-        for (let x = 0; x < width; x++) {
-          // Rotate the offset into the ellipse's local frame before normalising.
-          const ox = x - cx, oy = y - cy;
-          const dx = (ox * cosR + oy * sinR) / rx;
-          const dy = (-ox * sinR + oy * cosR) / ry;
-          const d = Math.sqrt(dx * dx + dy * dy);
-          // 1 inside, smoothly fading to 0 across the feather band at the edge.
-          let m = 1 - smoothStep(1 - feather, 1, d);
-          if (geom.invert) m = 1 - m;
-          mask[y * width + x] = m;
-        }
-      }
-    } else {
-      // Graduated filter: a line through (centerX, centerY) at angle `rotation`. The
-      // effect is on ONE side — the line's perpendicular +direction, which is "down"
-      // at rotation 0. `feather` is the ramp width: low = a hard edge at the line,
-      // high = a softer ramp from the line outward.
-      const cx = geom.centerX, cy = geom.centerY;
-      const rot = geom.rotation || 0;
-      const pxn = -Math.sin(rot), pyn = Math.cos(rot); // effect-side unit normal
-      // v1.40.0: ramp width = feather (higher = softer, like radial). Legacy saved edits are
-      // migrated feather' = 1 - feather (utils/editSchemaMigration.ts) so they look the same.
-      const D = Math.max(1e-3, Math.min(1, geom.feather));
-      for (let y = 0; y < height; y++) {
-        for (let x = 0; x < width; x++) {
-          // Signed perpendicular distance from the line (normalised image units).
-          const s = (x / width - cx) * pxn + (y / height - cy) * pyn;
-          let m = Math.max(0, Math.min(1, s / D));
-          if (geom.invert) m = 1 - m;
-          mask[y * width + x] = m;
-        }
-      }
-    }
+    bakeGeometryMask(layer.mask, geom, width, height);
     return true;
+  }
+
+  /**
+   * Rebake a geometry layer's mask at (width, height) from its stored geometry — the render
+   * path (GPU rebuildMask, CPU processImage). Honours a live-drag draft: the bake runs at a
+   * long edge ≤ DRAFT_MASK_MAX_EDGE and is bilinearly upsampled (one cheap bake per drag
+   * frame even at the 4096 preview ratchet). Always a fresh buffer.
+   */
+  rebakeLayerMask(layerId: string, width: number, height: number): Float32Array | null {
+    const layer = this.getLayer(layerId);
+    if (!layer || !layer.geometry) return null;
+    const long = Math.max(width, height);
+    if (layer.maskDraft && long > DRAFT_MASK_MAX_EDGE) {
+      const s = DRAFT_MASK_MAX_EDGE / long;
+      const dw = Math.max(1, Math.round(width * s));
+      const dh = Math.max(1, Math.round(height * s));
+      const small = new Float32Array(dw * dh);
+      bakeGeometryMask(small, layer.geometry, dw, dh);
+      layer.mask = upsampleBilinear(small, dw, dh, width, height);
+    } else {
+      layer.mask = new Float32Array(width * height);
+      bakeGeometryMask(layer.mask, layer.geometry, width, height);
+    }
+    return layer.mask;
   }
 
   /**
@@ -227,11 +212,14 @@ export class LocalAdjustmentsModule {
    * size (GPU: buildLocalAdjustmentsPass → rebuildMask; CPU: processImage), which is
    * also the post-crop frame when a crop is active. A fresh buffer (never an in-place
    * mutation) keeps the preview state signature / GPU mask key honest.
+   * `draft` (live drag frames): that rebake is a capped draft (see rebakeLayerMask);
+   * the release passes draft=false so the final mask is baked at full render size.
    */
-  setLayerGeometryDeferred(layerId: string, geom: MaskGeometry): boolean {
+  setLayerGeometryDeferred(layerId: string, geom: MaskGeometry, opts?: { draft?: boolean }): boolean {
     const layer = this.getLayer(layerId);
     if (!layer) return false;
     layer.geometry = { ...geom };
+    layer.maskDraft = opts?.draft === true;
     layer.mask = new Float32Array(0);
     return true;
   }
@@ -480,7 +468,13 @@ export class LocalAdjustmentsModule {
       // lands in the wrong place (or nowhere) — so rebuild the geometry mask at the
       // current resolution first.
       if (layer.geometry && layer.mask.length !== width * height) {
-        this.setLayerGeometry(layer.id, layer.geometry, width, height);
+        this.rebakeLayerMask(layer.id, width, height);
+      }
+      // A painted (brush) mask has no geometry to rebake from: at a different size it
+      // would index the wrong pixels (or past the end) — skip the layer, never crash.
+      if (layer.mask.length !== width * height) {
+        logger.warn(`Local adjustment layer ${layer.id}: mask ${layer.mask.length} px != ${width}x${height}, no geometry to rebuild — skipped`);
+        continue;
       }
 
       if (layer.basicAdj) {
@@ -799,6 +793,32 @@ export class LocalAdjustmentsModule {
     return { ...this.brushParams };
   }
 
+  /**
+   * Replace every layer with deep copies of `layers` (geometry, basicAdj, parameters,
+   * mask) — the setParameters / worker-config path (fix round 1, Task 12c). Before this,
+   * setParameters cleared the layers and never rebuilt them, so a worker (fresh module
+   * singleton) silently dropped every local adjustment. Masks arriving in a non-typed
+   * shape (JSON round-trip) are coerced; a geometry layer whose mask can't be used gets an
+   * empty mask, which processImage rebakes at the render size.
+   */
+  replaceLayers(layers: ReadonlyArray<LocalAdjustmentLayer>, activeLayerId: string | null): void {
+    this.layers = layers.map((l) => {
+      let mask = toFloat32(l.mask);
+      if (!mask) mask = new Float32Array(0);
+      return {
+        ...l,
+        mask,
+        parameters: { ...l.parameters, colorBalance: [...(l.parameters?.colorBalance ?? [0, 0, 0])] as [number, number, number] },
+        geometry: l.geometry ? { ...l.geometry } : undefined,
+        maskDraft: l.maskDraft === true,
+        basicAdj: l.basicAdj ? { ...l.basicAdj } : undefined,
+      };
+    });
+    this.activeLayerId = activeLayerId !== null && this.layers.some((l) => l.id === activeLayerId)
+      ? activeLayerId
+      : null;
+  }
+
   // Reset all layers
   clearAllLayers(): void {
     this.layers = [];
@@ -814,6 +834,86 @@ export class LocalAdjustmentsModule {
       enabledLayers: this.layers.filter(l => l.enabled).length
     };
   }
+}
+
+/** Live-drag draft bakes run at this long edge at most (Task 12c fix round 1). */
+export const DRAFT_MASK_MAX_EDGE = 1280;
+
+/** Bake a radial / linear geometry into `mask` (width×height, row-major). */
+function bakeGeometryMask(mask: Float32Array, geom: MaskGeometry, width: number, height: number): void {
+  if (geom.type === 'radial') {
+    const cx = geom.centerX * width;
+    const cy = geom.centerY * height;
+    const rx = Math.max(1e-3, geom.radiusX) * width;
+    const ry = Math.max(1e-3, geom.radiusY) * height;
+    const feather = Math.max(0.001, Math.min(0.999, geom.feather));
+    const rot = geom.rotation || 0;
+    const cosR = Math.cos(rot), sinR = Math.sin(rot);
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        // Rotate the offset into the ellipse's local frame before normalising.
+        const ox = x - cx, oy = y - cy;
+        const dx = (ox * cosR + oy * sinR) / rx;
+        const dy = (-ox * sinR + oy * cosR) / ry;
+        const d = Math.sqrt(dx * dx + dy * dy);
+        // 1 inside, smoothly fading to 0 across the feather band at the edge.
+        let m = 1 - smoothStep(1 - feather, 1, d);
+        if (geom.invert) m = 1 - m;
+        mask[y * width + x] = m;
+      }
+    }
+  } else {
+    // Graduated filter: a line through (centerX, centerY) at angle `rotation`. The
+    // effect is on ONE side — the line's perpendicular +direction, which is "down"
+    // at rotation 0. `feather` is the ramp width: low = a hard edge at the line,
+    // high = a softer ramp from the line outward.
+    const cx = geom.centerX, cy = geom.centerY;
+    const rot = geom.rotation || 0;
+    const pxn = -Math.sin(rot), pyn = Math.cos(rot); // effect-side unit normal
+    // v1.40.0: ramp width = feather (higher = softer, like radial). Legacy saved edits are
+    // migrated feather' = 1 - feather (utils/editSchemaMigration.ts) so they look the same.
+    const D = Math.max(1e-3, Math.min(1, geom.feather));
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        // Signed perpendicular distance from the line (normalised image units).
+        const s = (x / width - cx) * pxn + (y / height - cy) * pyn;
+        let m = Math.max(0, Math.min(1, s / D));
+        if (geom.invert) m = 1 - m;
+        mask[y * width + x] = m;
+      }
+    }
+  }
+}
+
+/** Bilinear (pixel-centre aligned) upsample of a single-channel mask. */
+function upsampleBilinear(src: Float32Array, sw: number, sh: number, dw: number, dh: number): Float32Array {
+  const out = new Float32Array(dw * dh);
+  const sx = sw / dw, sy = sh / dh;
+  for (let y = 0; y < dh; y++) {
+    const fy = Math.min(sh - 1, Math.max(0, (y + 0.5) * sy - 0.5));
+    const y0 = Math.floor(fy), y1 = Math.min(sh - 1, y0 + 1), ty = fy - y0;
+    for (let x = 0; x < dw; x++) {
+      const fx = Math.min(sw - 1, Math.max(0, (x + 0.5) * sx - 0.5));
+      const x0 = Math.floor(fx), x1 = Math.min(sw - 1, x0 + 1), tx = fx - x0;
+      const a = src[y0 * sw + x0] + (src[y0 * sw + x1] - src[y0 * sw + x0]) * tx;
+      const b = src[y1 * sw + x0] + (src[y1 * sw + x1] - src[y1 * sw + x0]) * tx;
+      out[y * dw + x] = a + (b - a) * ty;
+    }
+  }
+  return out;
+}
+
+/** A copy of a mask as Float32Array: typed arrays / plain arrays / JSON'd typed arrays
+ *  ({"0":..,"1":..}); null when the value isn't mask-like. */
+function toFloat32(m: unknown): Float32Array | null {
+  if (m instanceof Float32Array) return new Float32Array(m);
+  if (Array.isArray(m)) return Float32Array.from(m as number[]);
+  if (ArrayBuffer.isView(m)) return Float32Array.from(m as unknown as ArrayLike<number>);
+  if (m && typeof m === 'object') {
+    const vals = Object.values(m as Record<string, unknown>);
+    if (vals.every((v) => typeof v === 'number')) return Float32Array.from(vals as number[]);
+  }
+  return null;
 }
 
 export const localAdjustmentsModule = new LocalAdjustmentsModule();

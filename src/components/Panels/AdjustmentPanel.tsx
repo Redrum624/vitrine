@@ -445,6 +445,7 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
 
       const { path: previewPath, reason: previewReason } = choosePreviewRoute({
         nrActive: imageProcessingPipeline.isModuleActive('noise-reduction'),
+        laActive: imageProcessingPipeline.isModuleActive('localadjustments'),
         workersHealthy: webWorkerImageProcessor.isHealthy(),
         gpuAvailable: gpuPreviewPipeline.isAvailable(),
         activeCpuBridgeCount: activeCpuBridges.length,

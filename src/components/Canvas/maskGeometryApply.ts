@@ -4,7 +4,7 @@ import type { MaskGeometry } from '../../modules/LocalAdjustmentsModule';
 export type MaskGeometryPhase = 'live' | 'commit';
 
 export interface MaskGeometryTarget {
-  setLayerGeometryDeferred(layerId: string, geom: MaskGeometry): boolean;
+  setLayerGeometryDeferred(layerId: string, geom: MaskGeometry, opts?: { draft?: boolean }): boolean;
 }
 
 export interface MaskGeometryHooks {
@@ -28,7 +28,8 @@ export function applyMaskGeometry(
   phase: MaskGeometryPhase,
   hooks: MaskGeometryHooks,
 ): void {
-  la.setLayerGeometryDeferred(layerId, geom);
+  // Drag frames bake a capped draft (≤ DRAFT_MASK_MAX_EDGE, upsampled); the release bakes full size.
+  la.setLayerGeometryDeferred(layerId, geom, { draft: phase === 'live' });
   hooks.invalidateModuleCache('localadjustments');
   if (phase === 'live') hooks.requestLivePreview();
   else hooks.triggerReprocessing();
