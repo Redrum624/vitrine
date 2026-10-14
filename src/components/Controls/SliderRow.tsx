@@ -1,5 +1,6 @@
-import { useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
+import { WHEEL_COMMIT_MS, nextWheelValue, registerWheelParticipant } from '../../utils/sliderWheel';
 
 export interface SliderRowLegend {
   left: string;
@@ -69,7 +70,7 @@ const SCRUB_SPAN_PX = 280;
  */
 export function SliderRow({
   label,
-  value,
+  value: committedValue,
   defaultValue,
   min,
   max,
@@ -86,6 +87,16 @@ export function SliderRow({
 }: SliderRowProps) {
   const sliderId = useId();
   const labelId = `${sliderId}-label`;
+  // Mouse wheel (Task 12b): each notch moves a LOCAL preview that drives everything shown
+  // (label, fill, aria, input value); onChange fires once, on a trailing timer per burst.
+  // The preview lives in a ref too so notches accumulate across parent re-renders.
+  const [wheelPreview, setWheelPreview] = useState<number | null>(null);
+  const previewRef = useRef<number | null>(null);
+  const wheelTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const wheelInputRef = useRef<HTMLInputElement | null>(null);
+  const live = useRef({ committedValue, min, max, step, onChange, disabled });
+  live.current = { committedValue, min, max, step, onChange, disabled };
+  const value = wheelPreview ?? committedValue;
   const effectiveTypingStep = typingStep ?? step;
   const span = max - min || 1;
   const edited = value !== defaultValue;
@@ -95,6 +106,46 @@ export function SliderRow({
   const valueFraction = ((Math.min(max, Math.max(min, value)) - min) / span) * 100;
   const fillFrom = Math.min(detentFraction, valueFraction);
   const fillWidth = Math.abs(valueFraction - detentFraction);
+
+  useEffect(() => {
+    const clearTimer = () => {
+      if (wheelTimerRef.current) { clearTimeout(wheelTimerRef.current); wheelTimerRef.current = null; }
+    };
+    const flush = () => {
+      clearTimer();
+      const v = previewRef.current;
+      previewRef.current = null;
+      if (v === null) return;
+      setWheelPreview(null);
+      live.current.onChange(v);
+    };
+    const cancel = () => {
+      clearTimer();
+      previewRef.current = null;
+      setWheelPreview(null);
+    };
+    const unregister = registerWheelParticipant({ flush, cancel });
+    const el = wheelInputRef.current;
+    const onWheel = (e: WheelEvent) => {
+      const c = live.current;
+      if (c.disabled) return;
+      e.preventDefault();
+      const base = previewRef.current ?? c.committedValue;
+      const next = nextWheelValue(base, e.deltaY, c.min, c.max, c.step);
+      previewRef.current = next;
+      setWheelPreview(next);
+      clearTimer();
+      wheelTimerRef.current = setTimeout(flush, WHEEL_COMMIT_MS);
+    };
+    el?.addEventListener('wheel', onWheel, { passive: false });
+    el?.addEventListener('blur', flush);
+    return () => {
+      el?.removeEventListener('wheel', onWheel);
+      el?.removeEventListener('blur', flush);
+      unregister();
+      flush(); // unmount (panel switch): commit the final value, never lose it
+    };
+  }, []);
 
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
@@ -322,6 +373,8 @@ export function SliderRow({
         )}
         <input
           id={sliderId}
+          ref={wheelInputRef}
+          data-slider-row-wheel="true"
           type="range"
           min={min}
           max={max}

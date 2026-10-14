@@ -93,6 +93,7 @@ import { AdjustmentPanel } from '../components/Panels/AdjustmentPanel';
 import { imageProcessingPipeline } from '../services/ImageProcessingPipeline';
 import { webWorkerImageProcessor } from '../services/WebWorkerImageProcessor';
 import { useAppStore } from '../stores/appStore';
+import { adaptiveDebounceService } from '../services/AdaptiveDebounceService';
 
 const mainProcess = imageProcessingPipeline.processImage as jest.Mock;
 // The real setter, captured before any spy: zustand copies state props into each new state
@@ -301,18 +302,65 @@ describe('AdjustmentPanel single apply (replay signature)', () => {
 
   test('12b: a trigger inside the 50ms window with no pass in flight still renders the latest value', async () => {
     mockRoute.path = 'main';
-    mainProcess.mockImplementation(async (d: Float32Array) => d); // instant passes
+    const seen: number[] = [];
+    mainProcess.mockImplementation(async (d: Float32Array) => { seen.push(liveParams.value); return d; }); // instant passes
+    // Short debounce so trigger B lands inside pass A's 50ms throttle window.
+    const debounce = adaptiveDebounceService.debounce as jest.Mock;
+    debounce.mockImplementation((_k: string, cb: () => void) => { setTimeout(cb, 10); });
+    try {
+      jest.advanceTimersByTime(1000); // fake clock must be non-zero (the throttle ignores a 0 timestamp)
+      await mountPanel(); // pass A runs at once with value 1
+      expect(seen).toEqual([1]);
+      liveParams.value = 5;
+      await act(async () => { useAppStore.getState().triggerReprocessing(); }); // B, same act, no time advanced
+      await flush(300);
+      // The LAST pass rendered the new value (the old throttle dropped B entirely).
+      expect(seen[seen.length - 1]).toBe(5);
+    } finally {
+      debounce.mockImplementation((_k: string, cb: () => void) => { setTimeout(cb, 50); });
+      mainProcess.mockImplementation(async (d: Float32Array) => {
+        await new Promise((r) => setTimeout(r, 500));
+        return d;
+      });
+    }
+  });
+
+  test('12b: an UNCHANGED-state trigger queues behind the worker pass instead of superseding it', async () => {
+    mockRoute.path = 'worker';
+    let resolveStuck: (v: unknown) => void = () => {};
+    workerProcess.mockImplementationOnce((img: { data: Float32Array; width: number; height: number }) =>
+      new Promise((res) => { resolveStuck = () => res({ success: true, data: img.data, processingTime: 1, width: img.width, height: img.height }); }));
     await mountPanel();
-    await flush(100);
-    const before = mainProcess.mock.calls.length;
-    liveParams.value = 5;
-    // Call straight after a pass finished: inside the throttle window.
     await act(async () => { useAppStore.getState().triggerReprocessing(); });
-    await flush(600);
-    expect(mainProcess.mock.calls.length).toBeGreaterThan(before);
-    mainProcess.mockImplementation(async (d: Float32Array) => {
-      await new Promise((r) => setTimeout(r, 500));
-      return d;
-    });
+    await flush(200);
+    expect(workerProcess).toHaveBeenCalledTimes(1); // not superseded
+    await act(async () => { resolveStuck(undefined); });
+    await flush(500);
+    expect(setProcessed).toHaveBeenCalledTimes(1); // the original pass painted
+    expect(workerProcess).toHaveBeenCalledTimes(1); // and no pointless replay
+  });
+
+  test('12b: continuous triggers every 100ms never starve the canvas: paints keep landing, final = latest', async () => {
+    mockRoute.path = 'worker';
+    workerProcess.mockImplementation((img: { data: Float32Array; width: number; height: number }) =>
+      new Promise((res) => { setTimeout(() => res({ success: true, data: img.data, processingTime: 1, width: img.width, height: img.height }), 300); }));
+    await mountPanel();
+    const paintTimes: number[] = [];
+    setProcessed.mockImplementation(() => { paintTimes.push(Date.now()); });
+    const t0 = Date.now();
+    for (let i = 1; i <= 20; i++) {
+      liveParams.value = i;
+      await act(async () => { useAppStore.getState().triggerReprocessing(); });
+      await flush(100);
+    }
+    // ~2000ms of input with a 300ms worker: without the 400ms cap NOTHING paints until
+    // the input stops. With it, a paint lands every ~cap + worker latency (<= 800ms).
+    expect(paintTimes.length).toBeGreaterThanOrEqual(2);
+    const stamps = [t0, ...paintTimes];
+    for (let i = 1; i < stamps.length; i++) expect(stamps[i] - stamps[i - 1]).toBeLessThanOrEqual(800);
+    await flush(2000);
+    const last = workerProcess.mock.calls[workerProcess.mock.calls.length - 1][1][0].params;
+    expect(last).toEqual({ exposure: 20 });
+    expect(setProcessed.mock.calls.length).toBeGreaterThanOrEqual(paintTimes.length);
   });
 });

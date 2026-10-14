@@ -8,6 +8,34 @@
  */
 export const WHEEL_COMMIT_MS = 120;
 
+/**
+ * Pending-wheel registry. Every wheel participant (SliderRow instances and the global
+ * fallback handler) registers a flush (commit now) and a cancel (drop). The App flushes
+ * all on any pointerdown/keydown (capture) so the final value is never lost to a click or
+ * keystroke, and cancels all when the CURRENT IMAGE changes: a wheel preview belongs to
+ * the image it happened on and is never silently applied to the next one. (A user-driven
+ * switch always starts with a pointerdown/keydown, which already flushed to the right
+ * image; cancel only guards programmatic switches.)
+ */
+interface WheelParticipant { flush(): void; cancel(): void }
+const participants = new Set<WheelParticipant>();
+export function registerWheelParticipant(p: WheelParticipant): () => void {
+  participants.add(p);
+  return () => { participants.delete(p); };
+}
+export function flushAllSliderWheels(): void { [...participants].forEach((p) => p.flush()); }
+export function cancelAllSliderWheels(): void { [...participants].forEach((p) => p.cancel()); }
+
+/** One wheel notch applied to `current`, clamped to [min, max] and rounded to `step`'s precision. */
+export function nextWheelValue(current: number, deltaY: number, min: number, max: number, step: number): number {
+  const st = step || 1;
+  const decimals = (String(st).split('.')[1] || '').length;
+  let val = current + (deltaY < 0 ? st : -st);
+  if (!Number.isNaN(min)) val = Math.max(min, val);
+  if (!Number.isNaN(max)) val = Math.min(max, val);
+  return decimals ? parseFloat(val.toFixed(decimals)) : val;
+}
+
 export function createSliderWheelHandler(commitMs: number = WHEEL_COMMIT_MS) {
   let pending: HTMLInputElement | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -21,9 +49,15 @@ export function createSliderWheelHandler(commitMs: number = WHEEL_COMMIT_MS) {
     input.dispatchEvent(new Event('change', { bubbles: true }));
   };
 
+  const cancel = () => {
+    if (timer) { clearTimeout(timer); timer = null; }
+    pending = null;
+  };
   const onWheel = (e: WheelEvent) => {
     const input = e.target as HTMLInputElement | null;
     if (!input || input.tagName !== 'INPUT' || input.type !== 'range' || input.disabled) return;
+    // SliderRow handles its own wheel (local preview state); leave those to it.
+    if (input.dataset.sliderRowWheel === 'true') return;
     e.preventDefault();
     if (pending && pending !== input) flush();
     const step = parseFloat(input.step) || 1;
@@ -42,5 +76,6 @@ export function createSliderWheelHandler(commitMs: number = WHEEL_COMMIT_MS) {
     timer = setTimeout(flush, commitMs);
   };
 
-  return { onWheel, flush };
+  const dispose = registerWheelParticipant({ flush, cancel });
+  return { onWheel, flush, dispose };
 }

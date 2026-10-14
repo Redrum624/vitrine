@@ -1,4 +1,4 @@
-import { createSliderWheelHandler } from './utils/sliderWheel';
+import { cancelAllSliderWheels, createSliderWheelHandler, flushAllSliderWheels } from './utils/sliderWheel';
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { MenuBar } from './components/Layout/MenuBar';
 import { Toolbar } from './components/Layout/Toolbar';
@@ -1382,12 +1382,27 @@ function App() {
   // per burst (last value wins, see utils/sliderWheel). Flushed on blur/unmount.
   useEffect(() => {
     const wheel = createSliderWheelHandler();
+    // Any click/keystroke commits a pending wheel value first (to the image it happened on).
+    const commitPending = () => flushAllSliderWheels();
+    // A pending wheel preview is dropped (never applied to the new photo) when the
+    // current image CHANGES; same-file reloads (progressive base swaps) leave it alone.
+    let lastPath = imageService.getCurrentImage()?.filePath;
+    const offImage = imageService.addImageLoadListener(() => {
+      const path = imageService.getCurrentImage()?.filePath;
+      if (path !== lastPath) { lastPath = path; cancelAllSliderWheels(); }
+    });
     window.addEventListener('wheel', wheel.onWheel, { passive: false });
     window.addEventListener('focusout', wheel.flush, true);
+    window.addEventListener('pointerdown', commitPending, true);
+    window.addEventListener('keydown', commitPending, true);
     return () => {
       window.removeEventListener('wheel', wheel.onWheel);
       window.removeEventListener('focusout', wheel.flush, true);
+      window.removeEventListener('pointerdown', commitPending, true);
+      window.removeEventListener('keydown', commitPending, true);
+      offImage();
       wheel.flush();
+      wheel.dispose();
     };
   }, []);
 

@@ -48,12 +48,12 @@ import { choosePreviewRoute } from '../../services/previewRouting';
 // pixels (baseImageVersion + the source buffer's identity) and the image itself.
 // A pass snapshots it at start; the finally replay fires only if it changed, and
 // the worker-failure fallback renders only while live still equals the posted state.
-// Conservative by construction: a typed array inside params (a baked mask) gets a
-// fresh token on every call, so such state never compares equal and always replays
-// (the pre-9b behaviour) rather than risk skipping a real edit.
+// A typed array inside params (a baked mask) is tokenised by buffer IDENTITY (stable per
+// buffer, via the WeakMap below), so an unchanged buffer compares equal and a new/replaced
+// buffer counts as a change.
+const MAX_PAINT_STARVATION_MS = 400;
 const bufferIds = new WeakMap<object, number>();
 let nextBufferId = 0;
-let volatileToken = 0;
 function bufferId(buf: object): number {
   let id = bufferIds.get(buf);
   if (id === undefined) { id = ++nextBufferId; bufferIds.set(buf, id); }
@@ -61,7 +61,7 @@ function bufferId(buf: object): number {
 }
 function signatureReplacer(key: string, value: unknown): unknown {
   if (key === 'moduleStats') return undefined; // runtime counters, not params
-  if (ArrayBuffer.isView(value)) return `#volatile${++volatileToken}`;
+  if (ArrayBuffer.isView(value)) return `#buf${bufferId(value)}`;
   return value;
 }
 export function previewStateSignature(): string {
@@ -132,6 +132,11 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
   const inFlightRef = useRef<{ seq: number; supersedeAt: number; awaitingWorker: boolean; signature: string } | null>(null);
   // Re-fires a trigger that landed inside the 50 ms throttle window (Task 12b: last value wins).
   const throttleTimerRef = useRef<NodeJS.Timeout | null>(null);
+  // Anti-starvation clock: set when a pass starts from idle and whenever a frame paints. A new
+  // trigger supersedes a worker-parked pass only while less than MAX_PAINT_STARVATION_MS has
+  // passed on this clock; beyond it the in-flight pass is allowed to paint and the latest
+  // state is queued behind it (continuous wheel/slider input still shows progress).
+  const paintClockRef = useRef<number>(0);
   // NOTE: Removed lastProcessedImagePathRef - was blocking param change reprocessing
 
   // ── GPU resident-texture preview: source-reupload gating ──────────────────────
@@ -194,8 +199,10 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
     // finally-block triggerReprocessing() feed the next pass forever.
     let superseded = false;
     const inflight = inFlightRef.current;
+    const nowMs = performance.now();
     if (
       isProcessingRef.current && opts?.queueIfBusy !== false && inflight?.awaitingWorker &&
+      nowMs - paintClockRef.current < MAX_PAINT_STARVATION_MS &&
       (useAppStore.getState().previewSupersedeVersion !== inflight.supersedeAt ||
         previewStateSignature() !== inflight.signature)
     ) {
@@ -221,7 +228,7 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
     }
 
     // Only prevent rapid-fire calls within a short time window (not based on parameter changes)
-    const now = performance.now();
+    const now = nowMs;
     const lastProcessingTime = lastProcessingTimeRef.current;
 
     if (!superseded && lastProcessingTime && (now - lastProcessingTime) < 50) {
@@ -240,6 +247,7 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
     // Track this processing attempt
     lastProcessingTimeRef.current = now;
     isProcessingRef.current = true;
+    if (!superseded) paintClockRef.current = now;
 
     // Clear any pending timeout
     if (processingTimeoutRef.current) {
@@ -498,6 +506,7 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
         const publishReadback = () => {
           try {
             const rb = gpuPreviewPipeline.readback();
+            paintClockRef.current = performance.now();
             useAppStore.getState().setProcessedImageData({
               data: rb,
               width: resultWidth,
@@ -637,6 +646,7 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
       }
 
       // Update UI once with final result — use the TRUE output dims.
+      paintClockRef.current = performance.now();
       setProcessedImageData({
         data: processedData,
         width: outputWidth,
