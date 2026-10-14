@@ -45,21 +45,39 @@ const WANTED = [
  * A mismatch makes every installed copy fail its update download.
  * @returns {{ ok: boolean, errors: string[] }}
  */
-function validateLatestYml(ymlText, installerName, installerSha512) {
+function validateLatestYml(ymlText, installerName, installerSha512, installerSize) {
   const errors = [];
-  const urls = [...ymlText.matchAll(/^\s*-?\s*url:\s*(.+?)\s*$/gm)].map((m) => m[1].replace(/^['"]|['"]$/g, ''));
+  const unq = (v) => v.replace(/^['"]|['"]$/g, '');
+  const entries = [];
+  let inFiles = false;
+  for (const line of ymlText.split('\n')) {
+    if (/^files:\s*$/.test(line)) { inFiles = true; continue; }
+    if (inFiles && /^\S/.test(line)) inFiles = false;
+    if (!inFiles) continue;
+    const m = line.match(/^\s*(-\s+)?(url|sha512|size):\s*(.+?)\s*$/);
+    if (!m) continue;
+    if (m[1] && m[2] === 'url') entries.push({});
+    if (entries.length) entries[entries.length - 1][m[2]] = m[3];
+  }
   const pathM = ymlText.match(/^path:\s*(.+?)\s*$/m);
   const shaM = ymlText.match(/^sha512:\s*(.+?)\s*$/m);
-  if (urls.length === 0) errors.push('latest.yml has no files[].url');
-  for (const u of urls) {
+  if (entries.length === 0) errors.push('latest.yml has no files[].url');
+  for (const e of entries) {
+    const u = e.url === undefined ? '' : unq(e.url);
     if (u !== installerName) errors.push(`latest.yml url "${u}" != installer "${installerName}"`);
+    if (e.sha512 !== undefined && unq(e.sha512) !== installerSha512) {
+      errors.push(`latest.yml files[].sha512 for "${u}" does not match the installer`);
+    }
+    if (installerSize !== undefined && e.size !== undefined && Number(unq(e.size)) !== installerSize) {
+      errors.push(`latest.yml files[].size ${e.size} != installer size ${installerSize}`);
+    }
   }
   if (!pathM) errors.push('latest.yml has no path');
-  else if (pathM[1].replace(/^['"]|['"]$/g, '') !== installerName) {
+  else if (unq(pathM[1]) !== installerName) {
     errors.push(`latest.yml path "${pathM[1]}" != installer "${installerName}"`);
   }
   if (!shaM) errors.push('latest.yml has no sha512');
-  else if (shaM[1].replace(/^['"]|['"]$/g, '') !== installerSha512) {
+  else if (unq(shaM[1]) !== installerSha512) {
     errors.push('latest.yml sha512 does not match the installer');
   }
   return { ok: errors.length === 0, errors };
@@ -90,8 +108,9 @@ function main() {
     process.exit(1);
   }
 
-  const sha = crypto.createHash('sha512').update(fs.readFileSync(path.join(INSTALLER, INSTALLER_NAME))).digest('base64');
-  const v = validateLatestYml(fs.readFileSync(path.join(INSTALLER, 'latest.yml'), 'utf8'), INSTALLER_NAME, sha);
+  const buf = fs.readFileSync(path.join(INSTALLER, INSTALLER_NAME));
+  const sha = crypto.createHash('sha512').update(buf).digest('base64');
+  const v = validateLatestYml(fs.readFileSync(path.join(INSTALLER, 'latest.yml'), 'utf8'), INSTALLER_NAME, sha, buf.length);
   if (!v.ok) {
     for (const e of v.errors) console.error(`[collect-installer] ${e}`);
     process.exit(1);

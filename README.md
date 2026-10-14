@@ -98,7 +98,7 @@ npm run build:win:dir   # fast unpacked build (no installer, quick iteration)
 
 The user-facing distributables are collected into a clean **`installer/`** folder at the repo root:
 the versioned `Vitrine-Setup-….exe` and `Vitrine-…-portable.exe`, the updater feed (`latest.yml` and
-the installer `.blockmap`), `SHA256SUMS.txt`, a plain-text `README.txt`, `LICENSE`, and `THIRD-PARTY-LICENSES.md`. electron-builder's full staging output
+the installer `.blockmap`), `SHA256SUMS.txt`, a plain-text `Vitrine-X.Y.Z-README.txt`, `LICENSE`, and `THIRD-PARTY-LICENSES.md`. electron-builder's full staging output
 (unpacked app) stays in `release/`.
 
 ## A closer look
