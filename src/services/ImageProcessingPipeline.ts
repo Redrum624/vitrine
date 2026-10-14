@@ -102,6 +102,10 @@ export interface ProcessingContext {
   /** v1.40.0 Task 9b: set by the crop module — the effective rect the pass rendered, normalised
    *  to the expanded (rotated) canvas. Absent when crop did not run (full frame displayed). */
   cropFrameRect?: NormalizedCropRect;
+  /** v1.40.0 Task 9b fix 1: set ONLY by the interactive preview pass while a crop handle drag
+   *  is suspending the crop (the store's drag-suspension flag) — the crop module then renders the whole
+   *  expanded canvas for a full-frame rect. Never set by export / bake / history / restore. */
+  cropSuspended?: boolean;
 }
 
 /** Trailing options for {@link ImageProcessingPipeline.processImage}. Replaces the
@@ -613,7 +617,8 @@ export class ImageProcessingPipeline {
         channels: context.channels,
         // C5: full-pass kernel scale rides to the worker (single/tiled) so the enhance sharpen
         // kernels compensate for a sub-native preview there too. Undefined → native semantics.
-        kernelScale: context.kernelScale
+        kernelScale: context.kernelScale,
+        cropSuspended: context.cropSuspended,
       };
 
       const result = await workerPool.processImage(imageData, pipeline);
@@ -718,6 +723,9 @@ export class ImageProcessingPipeline {
             // C5: a pass at the same dims but a different kernel scale (e.g. a quality-ratchet
             // native pass vs a same-size export) must not reuse a differently-sharpened result.
             cached.context.kernelScale === context.kernelScale &&
+            // Task 9b: a suspension pass (whole expanded canvas) must never reuse a clamped
+            // result, nor vice versa.
+            !!cached.context.cropSuspended === !!context.cropSuspended &&
             cached.result.length === currentData.length) {
           // Use cached result
           logger.debug(`Module ${module.getName()} used cached result`);

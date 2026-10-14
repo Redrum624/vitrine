@@ -138,6 +138,8 @@ ctx.addEventListener('message', async (event: MessageEvent) => {
           channels: imageData.channels,
           // C5: whole-image pass — the caller's pass-level kernel scale applies directly.
           kernelScale: imageData.kernelScale,
+          // Task 9b fix 1: drag-suspension preview flag (never set by export passes).
+          cropSuspended: imageData.cropSuspended,
         };
         pipeline.applyWorkerConfig(pipelineConfig);
         const result = await pipeline.processImage(imageData.data, context, { useWebWorkers: false });

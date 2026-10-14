@@ -95,6 +95,9 @@ import { webWorkerImageProcessor } from '../services/WebWorkerImageProcessor';
 import { useAppStore } from '../stores/appStore';
 
 const mainProcess = imageProcessingPipeline.processImage as jest.Mock;
+// The real setter, captured before any spy: zustand copies state props into each new state
+// object, so a restored spy from a previous test would otherwise linger as a no-op.
+const realSetProcessed = useAppStore.getState().setProcessedImageData;
 const workerProcess = webWorkerImageProcessor.processImage as jest.Mock;
 
 async function flush(ms: number) {
@@ -114,7 +117,10 @@ describe('AdjustmentPanel single apply (replay signature)', () => {
     jest.useFakeTimers();
     liveParams.value = 1;
     mockRoute.path = 'main';
-    useAppStore.setState({ processingVersion: 0, externalParamsVersion: 0, isProcessing: false, processedImageData: null });
+    useAppStore.setState({
+      processingVersion: 0, externalParamsVersion: 0, isProcessing: false, processedImageData: null,
+      cropDragSuspended: false, setProcessedImageData: realSetProcessed,
+    });
     mainProcess.mockClear();
     workerProcess.mockReset();
     setProcessed = jest.spyOn(useAppStore.getState(), 'setProcessedImageData');
@@ -175,6 +181,66 @@ describe('AdjustmentPanel single apply (replay signature)', () => {
     await flush(1000);
     expect(mainProcess).toHaveBeenCalledTimes(1);
     expect(setProcessed).toHaveBeenCalledTimes(1);
+  });
+
+  test('fix 4: a dropped fallback ARMS the replay even with no trigger pending', async () => {
+    mockRoute.path = 'worker';
+    let failFirst: (e: Error) => void = () => {};
+    workerProcess.mockImplementationOnce(() => new Promise((_res, rej) => { failFirst = rej; }));
+    workerProcess.mockImplementation(async (img: { data: Float32Array; width: number; height: number }) =>
+      ({ success: true, data: img.data, processingTime: 1, width: img.width, height: img.height }));
+    await mountPanel();
+    liveParams.value = 7; // live moves on WITHOUT a trigger (mid-drag param writes)
+    await act(async () => { failFirst(new Error('timeout')); });
+    await flush(2000);
+    expect(mainProcess).not.toHaveBeenCalled();
+    expect(workerProcess).toHaveBeenCalledTimes(2);
+    expect(workerProcess.mock.calls[1][1][0].params).toEqual({ exposure: 7 });
+    expect(setProcessed).toHaveBeenCalledTimes(1);
+  });
+
+  test('fix 1: the drag-suspension flag rides the pass context (main and worker), and only while set', async () => {
+    mockRoute.path = 'worker';
+    workerProcess.mockImplementation(async (img: { data: Float32Array; width: number; height: number }) =>
+      ({ success: true, data: img.data, processingTime: 1, width: img.width, height: img.height }));
+    useAppStore.setState({ cropDragSuspended: true });
+    await mountPanel();
+    expect(workerProcess.mock.calls[0][0].cropSuspended).toBe(true);
+    useAppStore.setState({ cropDragSuspended: false });
+    mockRoute.path = 'main';
+    await act(async () => { useAppStore.getState().triggerReprocessing(); });
+    await flush(1000);
+    expect(mainProcess).toHaveBeenCalledTimes(1);
+    expect(mainProcess.mock.calls[0][1].cropSuspended).toBe(false);
+  });
+
+  test('fix 2: the GPU route publishes the displayed frame SYNCHRONOUSLY when geometry changes', async () => {
+    mockRoute.path = 'gpu';
+    // A CPU crop frame is on screen (different dims + a frameRect).
+    useAppStore.setState({
+      processedImageData: { data: new Float32Array(4), width: 8, height: 6, isPreview: true, frameRect: { x: 0.1, y: 0.1, width: 0.5, height: 0.5 } },
+    });
+    await mountPanel(); // no timers advanced: the 150ms readback has NOT fired
+    const shown = useAppStore.getState().processedImageData as { width: number; height: number; frameRect?: unknown };
+    expect(shown.width).toBe(16);
+    expect(shown.height).toBe(16);
+    expect(shown.frameRect).toBeUndefined();
+  });
+
+  test('fix 3: a pending GPU readback never overwrites a newer CPU frame', async () => {
+    mockRoute.path = 'gpu';
+    // Same geometry as the GPU output ⇒ the throttled (150ms) readback path is taken.
+    useAppStore.setState({ processedImageData: { data: new Float32Array(4), width: 16, height: 16, isPreview: true } });
+    await mountPanel();
+    // A CPU pass (crop applied) starts at once and paints before the readback is due.
+    mockRoute.path = 'main';
+    const cpuFrame = new Float32Array(16 * 16 * 4).fill(0.25);
+    mainProcess.mockImplementationOnce(async () => cpuFrame);
+    await act(async () => { useAppStore.getState().triggerReprocessing(); });
+    await flush(100); // debounce 50ms → CPU pass paints (~t=50-100ms)
+    await flush(500); // well past the 150ms readback
+    const shown = useAppStore.getState().processedImageData as { data: Float32Array };
+    expect(shown.data).toBe(cpuFrame);
   });
 
   test('supersede: a pass stuck in the worker is marked stale; the release pass starts at once', async () => {

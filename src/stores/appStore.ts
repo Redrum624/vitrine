@@ -28,6 +28,12 @@ interface AppStore extends AppState {
   // release pass at once instead of queueing behind it.
   previewSupersedeVersion: number;
   supersedeInFlightPreview: () => void;
+  // v1.40.0 Task 9b fix 1: true ONLY between a crop-handle mousedown that suspended the
+  // crop and its release. The interactive preview pass forwards it as
+  // ProcessingContext.cropSuspended so the drag shows the WHOLE rotated photo (expanded
+  // canvas). Transient UI state: never serialized, never read by export/bake/history.
+  cropDragSuspended: boolean;
+  setCropDragSuspended: (v: boolean) => void;
   // Preview quality cap (long-edge px) the AdjustmentPanel downsamples the
   // source to. Base 1024; Canvas RATCHETS it up when zoom exceeds the image's
   // previous farthest zoom or a crop apply raises effective magnification
@@ -210,6 +216,7 @@ export const useAppStore = create<AppStore>((set) => ({
   isAdjustingRotation: false,
   processingVersion: 0,
   previewSupersedeVersion: 0,
+  cropDragSuspended: false,
   previewQualityCap: 1024,
   externalParamsVersion: 0,
   isProcessing: false,
@@ -263,6 +270,8 @@ export const useAppStore = create<AppStore>((set) => ({
   supersedeInFlightPreview: () => set((state) => ({
     previewSupersedeVersion: state.previewSupersedeVersion + 1
   })),
+
+  setCropDragSuspended: (v) => set({ cropDragSuspended: v }),
 
   setPreviewQualityCap: (cap) => set({ previewQualityCap: cap }),
 

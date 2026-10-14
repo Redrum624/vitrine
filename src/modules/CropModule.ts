@@ -75,6 +75,8 @@ export interface CropProcessingContext {
   width: number;
   height: number;
   channels: number;
+  /** v1.40.0 Task 9b fix 1: crop-handle drag SUSPENSION preview — see getRenderGeometry. */
+  suspended?: boolean;
 }
 
 export class CropModule {
@@ -247,8 +249,17 @@ export class CropModule {
    * the worker and export wedge-free whatever path wrote the params (v1.40.0).
    * process() and getOutputDimensions() both read this, so they cannot drift.
    */
-  getRenderGeometry(inW: number, inH: number): CropGeometry {
+  getRenderGeometry(inW: number, inH: number, suspended = false): CropGeometry {
     const p = this.params;
+    // Drag-suspension preview (owner decision, v1.40.0 Task 9b fix 1): while a crop
+    // handle is dragged on a rotated photo, show the WHOLE rotated photo — the full
+    // expanded canvas, empty corners included (Lightroom-style). The backstop is
+    // skipped ONLY when the pass is flagged suspended AND the rect is exactly the full
+    // frame (what onDragStart writes): a flag accidentally left set never un-clamps a
+    // real crop, and export/worker/normal passes never carry the flag at all.
+    if (suspended && p.x === 0 && p.y === 0 && p.width === 1 && p.height === 1) {
+      return computeCropGeometry(p, inW, inH);
+    }
     const rect = clampRectWedgeFree({ x: p.x, y: p.y, width: p.width, height: p.height }, inW, inH, p, 'best');
     return computeCropGeometry({ ...p, ...rect }, inW, inH);
   }
@@ -264,7 +275,7 @@ export class CropModule {
       return input;
     }
 
-    return this.processWithGeometry(input, this.getRenderGeometry(context.width, context.height), context.channels);
+    return this.processWithGeometry(input, this.getRenderGeometry(context.width, context.height, !!context.suspended), context.channels);
   }
 
   /**
@@ -317,11 +328,11 @@ export class CropModule {
   }
 
   // Get output dimensions after crop and rotation (same geometry as process()).
-  getOutputDimensions(inputWidth: number, inputHeight: number): { width: number; height: number } {
+  getOutputDimensions(inputWidth: number, inputHeight: number, suspended = false): { width: number; height: number } {
     if (!this.params.enabled) {
       return { width: inputWidth, height: inputHeight };
     }
-    const geom = this.getRenderGeometry(inputWidth, inputHeight);
+    const geom = this.getRenderGeometry(inputWidth, inputHeight, suspended);
     return { width: geom.outW, height: geom.outH };
   }
 

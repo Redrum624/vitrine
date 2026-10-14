@@ -136,16 +136,28 @@ export function CropTransformOverlay({
         // rect (one source — cropGeometry), on the ORIENTED frame.
         const swapped = normalizeOrientation(cropParams.orientation) % 180 !== 0;
         const inscribed = autoCropRectForRotation(swapped ? origH : origW, swapped ? origW : origH, angle);
-        gridCropX = inscribed.x;
-        gridCropY = inscribed.y;
-        gridCropWidth = inscribed.width;
-        gridCropHeight = inscribed.height;
+        // Clip to the DISPLAYED frame (Task 9b fix 4): with a crop applied the image
+        // box shows only that crop, so the grid covers the visible part of the
+        // wedge-free region — never area off the displayed image.
+        const f = resolveFrame(displayFrame);
+        const left = Math.max(inscribed.x, f.x);
+        const top = Math.max(inscribed.y, f.y);
+        const right = Math.min(inscribed.x + inscribed.width, f.x + f.width);
+        const bottom = Math.min(inscribed.y + inscribed.height, f.y + f.height);
+        const clipped = right > left && bottom > top
+          ? { x: left, y: top, width: right - left, height: bottom - top }
+          : f;
+        gridCropX = clipped.x;
+        gridCropY = clipped.y;
+        gridCropWidth = clipped.width;
+        gridCropHeight = clipped.height;
       } else {
-        // No rotation, use full image
-        gridCropX = 0;
-        gridCropY = 0;
-        gridCropWidth = 1.0;
-        gridCropHeight = 1.0;
+        // No rotation: the grid covers the displayed frame (the whole box).
+        const f = resolveFrame(displayFrame);
+        gridCropX = f.x;
+        gridCropY = f.y;
+        gridCropWidth = f.width;
+        gridCropHeight = f.height;
       }
     }
 

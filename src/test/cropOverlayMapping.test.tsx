@@ -10,10 +10,14 @@
  *    both the overlay border and the handles' centre (move) area
  *  - CropPipelineModule.process reports the EFFECTIVE rect it rendered on the
  *    context (cropFrameRect): the render backstop's clamp, quantised to pixels
- *  - drag-suspended full frame with an angle: the render shows the inscribed
- *    (wedge-free) frame; a full-frame-mapped inscribed rect fills the box, the
- *    straighten grid no longer shrinks twice, and the handles are bounded to
- *    the suspension frame
+ *  - straighten grid: on an already-inscribed frame it spans the whole box (no
+ *    double shrink); with a crop applied it is clipped to the displayed frame
+ *  - fix round 1 (owner decision): a drag-SUSPENSION pass (context.cropSuspended
+ *    + full-frame rect) renders the WHOLE expanded canvas, frameRect = full; every
+ *    other pass keeps the wedge-free backstop, including a flagged pass whose rect
+ *    is a real crop; the flag never reaches saved params; the handles are bounded
+ *    by the full canvas + clampRect, so a wedge-free 16:9 crop pushed off-centre on
+ *    a rotated 4:3 photo survives a drag unchanged
  */
 import { render, fireEvent, act } from '@testing-library/react';
 import { CropTransformOverlay } from '../components/Canvas/CropTransformOverlay';
@@ -21,7 +25,11 @@ import { InteractiveCropHandles } from '../components/Canvas/InteractiveCropHand
 import { mapRectToBox } from '../components/Canvas/cropFrameMapping';
 import { CropPipelineModule } from '../modules/CropPipelineModule';
 import { CropParams } from '../modules/CropModule';
-import { autoCropRectForRotation, computeCropGeometry } from '../modules/cropGeometry';
+import {
+  autoCropRectForRotation, clampRectWedgeFree, computeCropGeometry, isPixelRectWedgeFree,
+  type CropClampAnchor, type NormalizedCropRect,
+} from '../modules/cropGeometry';
+import { FULL_FRAME } from '../components/Canvas/cropFrameMapping';
 import type { ProcessingContext } from '../services/ImageProcessingPipeline';
 
 const FRAME = { x: 0.0881, y: 0.0194, width: 0.9111, height: 0.9031 };
@@ -135,6 +143,25 @@ describe('CropTransformOverlay maps through the displayed frame', () => {
   });
 });
 
+describe('straighten grid with a crop applied (fix round 1)', () => {
+  test('grid is clipped to the displayed (cropped) frame — never drawn off the image', () => {
+    const calls = installCanvasRecorder();
+    const angle = 5;
+    const inscribed = autoCropRectForRotation(5200, 3904, angle);
+    // Applied crop strictly inside the inscribed rect.
+    const crop = { x: inscribed.x + 0.05, y: inscribed.y + 0.05, width: inscribed.width / 2, height: inscribed.height / 2 };
+    renderOverlay({
+      cropParams: { ...baseCrop, angle, ...crop },
+      displayFrame: crop,
+      showOverlay: false,
+      showRotationGrid: true,
+    });
+    const xs = calls.filter((c) => c.fn === 'moveTo').map((c) => c.args[0]);
+    expect(Math.abs(xs[0] - BOX_W / 3)).toBeLessThanOrEqual(1);
+    expect(Math.abs(xs[1] - (2 * BOX_W) / 3)).toBeLessThanOrEqual(1);
+  });
+});
+
 describe('InteractiveCropHandles maps through the displayed frame', () => {
   test('owner case: the move area is 1170/1179 * boxW wide (+-1 px)', () => {
     const { container } = renderHandles({ cropParams: { ...baseCrop, ...RECT }, displayFrame: FRAME });
@@ -165,6 +192,59 @@ describe('InteractiveCropHandles maps through the displayed frame', () => {
   });
 });
 
+describe('suspended drag: full-canvas bounds + wedge-free clamp (owner decision)', () => {
+  test('a wedge-free 16:9 crop pushed off-centre on a rotated 4:3 photo survives a drag unchanged', () => {
+    const W = 4000; const H = 3000; const angle = 3;
+    const params = { ...baseCrop, angle, aspectRatio: 'free' } as CropParams;
+    const inscribed = autoCropRectForRotation(W, H, angle);
+    const geom0 = computeCropGeometry({ ...params }, W, H);
+    // A wide 16:9 strip, off-centre (upper part), clamped wedge-free: wider than the
+    // inscribed 4:3 rect — i.e. outside the old inscribed drag bounds.
+    // 0.95*W wide (inscribed 4:3 is ~0.936*W at 3 deg), 16:9 in pixels, shifted up 0.04*W.
+    const wN = (0.95 * W) / geom0.expW;
+    const hN = (wN * geom0.expW * 9) / 16 / geom0.expH;
+    const strip: NormalizedCropRect = { x: 0.5 - wN / 2, y: 0.5 - hN / 2 - (0.04 * W) / geom0.expH, width: wN, height: hN };
+    expect(isPixelRectWedgeFree(computeCropGeometry({ ...params, ...strip }, W, H))).toBe(true);
+    expect(strip.x).toBeLessThan(inscribed.x);
+
+    const clampRect = (r: NormalizedCropRect, anchor: CropClampAnchor) => clampRectWedgeFree(r, W, H, params, anchor);
+    const { container, onCropChange } = renderHandles({
+      cropParams: { ...params, ...strip },
+      displayFrame: FULL_FRAME,
+      boundsRect: FULL_FRAME,
+      clampRect,
+    });
+    const centre = container.querySelector('[data-testid="crop-handle-center"]')!;
+    fireEvent.mouseDown(centre, { clientX: 500, clientY: 300 });
+    act(() => { fireEvent.mouseMove(document, { clientX: 500, clientY: 300 }); });
+    act(() => { fireEvent.mouseUp(document); });
+    const moved = onCropChange.mock.calls[onCropChange.mock.calls.length - 1][0];
+    expect(moved.x).toBeCloseTo(strip.x, 9);
+    expect(moved.y).toBeCloseTo(strip.y, 9);
+    expect(moved.width).toBeCloseTo(strip.width, 9);
+    expect(moved.height).toBeCloseTo(strip.height, 9);
+  });
+
+  test('an e-drag past the wedge stops wedge-free, not at an inscribed bound', () => {
+    const W = 4000; const H = 3000; const angle = 3;
+    const params = { ...baseCrop, angle, aspectRatio: 'free' } as CropParams;
+    const inscribed = autoCropRectForRotation(W, H, angle);
+    const clampRect = (r: NormalizedCropRect, anchor: CropClampAnchor) => clampRectWedgeFree(r, W, H, params, anchor);
+    const start = { x: 0.4, y: 0.45, width: 0.2, height: 0.1 };
+    const { container, onCropChange } = renderHandles({
+      cropParams: { ...params, ...start }, displayFrame: FULL_FRAME, boundsRect: FULL_FRAME, clampRect,
+    });
+    const e = container.querySelector('[data-testid="crop-handle-e"]')!;
+    fireEvent.mouseDown(e, { clientX: 700, clientY: 400 });
+    act(() => { fireEvent.mouseMove(document, { clientX: 5000, clientY: 400 }); });
+    act(() => { fireEvent.mouseUp(document); });
+    const r = onCropChange.mock.calls[onCropChange.mock.calls.length - 1][0];
+    expect(isPixelRectWedgeFree(computeCropGeometry({ ...params, ...r }, W, H))).toBe(true);
+    // A thin middle strip reaches beyond the inscribed 4:3 rect's right edge.
+    expect(r.x + r.width).toBeGreaterThan(inscribed.x + inscribed.width);
+  });
+});
+
 describe('CropPipelineModule reports the effective rendered frame', () => {
   function run(params: Partial<CropParams>, w: number, h: number): ProcessingContext {
     const m = new CropPipelineModule();
@@ -181,7 +261,7 @@ describe('CropPipelineModule reports the effective rendered frame', () => {
     expect(ctx.height).toBe(60);
   });
 
-  test('suspended full frame with an angle reports the inscribed (clamped) frame, matching output dims', () => {
+  test('NON-suspended full frame with an angle is clamped to the inscribed frame (backstop on)', () => {
     const angle = 5;
     const ctx = run({ x: 0, y: 0, width: 1, height: 1, angle }, 300, 200);
     const f = ctx.cropFrameRect!;
@@ -190,6 +270,56 @@ describe('CropPipelineModule reports the effective rendered frame', () => {
     expect(geom.outW).toBe(ctx.width);
     expect(geom.outH).toBe(ctx.height);
     expect(f.width * geom.expW).toBeCloseTo(ctx.width, 6);
+  });
+
+  test('drag-SUSPENSION pass renders the whole expanded canvas (corners visible), frameRect = full', () => {
+    const angle = 5;
+    const m = new CropPipelineModule();
+    m.setParams({ x: 0, y: 0, width: 1, height: 1, angle, enabled: true });
+    const ctx: ProcessingContext = { width: 300, height: 200, channels: 4, cropSuspended: true };
+    const out = m.process(new Float32Array(300 * 200 * 4).fill(0.5), ctx);
+    const geom = computeCropGeometry({ ...baseCrop, angle }, 300, 200);
+    expect(ctx.cropFrameRect).toEqual({ x: 0, y: 0, width: 1, height: 1 });
+    expect(ctx.width).toBe(geom.expW);
+    expect(ctx.height).toBe(geom.expH);
+    expect(out.length).toBe(geom.expW * geom.expH * 4);
+    expect(out[0]).toBe(0); // top-left corner = fill (the empty canvas corner)
+    // The flag is pass-transient: it never lands in the module params (saved edits/history).
+    expect(JSON.stringify(m.getParams())).not.toMatch(/suspend/i);
+  });
+
+  test('flag accidentally left set with a REAL crop rect still clamps (same as unflagged)', () => {
+    const angle = 5;
+    const rect = { x: 0, y: 0, width: 0.9, height: 0.9 }; // reaches into a wedge
+    const flagged = new CropPipelineModule();
+    flagged.setParams({ ...rect, angle, enabled: true });
+    const fctx: ProcessingContext = { width: 300, height: 200, channels: 4, cropSuspended: true };
+    flagged.process(new Float32Array(300 * 200 * 4).fill(0.5), fctx);
+    const plain = run({ ...rect, angle }, 300, 200);
+    expect(fctx.cropFrameRect).toEqual(plain.cropFrameRect);
+    expect(fctx.width).toBe(plain.width);
+    const geom = computeCropGeometry({ ...baseCrop, angle, ...fctx.cropFrameRect! }, 300, 200);
+    expect(isPixelRectWedgeFree(geom)).toBe(true);
+  });
+
+  test('export / normal passes never carry the flag: only the interactive preview plumbing references it', () => {
+    // Source pin: the transient flag is read from the store ONLY by AdjustmentPanel (the
+    // interactive preview pass) and set ONLY by Canvas (handle drag). Export, bake, history
+    // and persistence never mention it, so a stuck store flag cannot un-clamp their output.
+    const fs = require('fs') as typeof import('fs');
+    const path = require('path') as typeof import('path');
+    const root = path.join(__dirname, '..');
+    const hits: string[] = [];
+    const walk = (dir: string) => {
+      for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+        const p = path.join(dir, e.name);
+        if (e.isDirectory()) { if (e.name !== 'test' && e.name !== '__tests__') walk(p); continue; }
+        if (!/\.(ts|tsx)$/.test(e.name) || /\.test\.tsx?$/.test(e.name)) continue;
+        if (/cropDragSuspended/i.test(fs.readFileSync(p, 'utf8'))) hits.push(path.relative(root, p).replace(/\\/g, '/'));
+      }
+    };
+    walk(root);
+    expect(hits.sort()).toEqual(['components/Layout/Canvas.tsx', 'components/Panels/AdjustmentPanel.tsx', 'stores/appStore.ts']);
   });
 
   test('orientation 90 reports the rect in the oriented (swapped) frame', () => {

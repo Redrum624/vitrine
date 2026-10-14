@@ -35,10 +35,12 @@ export class CropPipelineModule implements PipelineModule {
     const startTime = performance.now();
 
     // Create processing context for the crop module
+    const suspended = !!context.cropSuspended;
     const cropContext = {
       width: context.width,
       height: context.height,
-      channels: context.channels
+      channels: context.channels,
+      suspended,
     };
 
     // Process using the crop module
@@ -46,12 +48,12 @@ export class CropPipelineModule implements PipelineModule {
 
     // v1.40.0 Task 9b: report the EFFECTIVE rect this pass rendered (the render
     // backstop's wedge-free clamp, pixel-quantised) so the overlay/handles map
-    // through the frame actually displayed. With the rect zeroed for a drag
-    // and an angle set, this is the inscribed (wedge-free) full frame.
-    context.cropFrameRect = frameRectOf(this.cropModule.getRenderGeometry(context.width, context.height));
+    // through the frame actually displayed. A drag-suspension pass reports the
+    // full expanded canvas (the backstop is skipped for it, see getRenderGeometry).
+    context.cropFrameRect = frameRectOf(this.cropModule.getRenderGeometry(context.width, context.height, suspended));
 
     // IMPORTANT: Update context dimensions for subsequent modules
-    const newDimensions = this.cropModule.getOutputDimensions(context.width, context.height);
+    const newDimensions = this.cropModule.getOutputDimensions(context.width, context.height, suspended);
     context.width = newDimensions.width;
     context.height = newDimensions.height;
 

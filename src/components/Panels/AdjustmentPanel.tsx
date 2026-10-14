@@ -74,7 +74,7 @@ export function previewStateSignature(): string {
     typeof m.getParams === 'function' ? m.getParams() : null,
   ]);
   return JSON.stringify(
-    [img.filePath ?? '', img.width, img.height, bufferId(img.data), st.previewQualityCap, st.baseImageVersion, config],
+    [img.filePath ?? '', img.width, img.height, bufferId(img.data), st.previewQualityCap, st.baseImageVersion, st.cropDragSuspended, config],
     signatureReplacer,
   );
 }
@@ -358,11 +358,14 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
       );
 
       // CRITICAL: Create context object to track dimension changes from rotation/crop
+      // Task 9b fix 1: crop-handle drag suspension → the crop renders the whole expanded canvas.
+      const cropSuspended = useAppStore.getState().cropDragSuspended;
       const processingContext = {
         width: previewWidth,
         height: previewHeight,
         channels: 4,
-        kernelScale
+        kernelScale,
+        cropSuspended
       };
 
       // ── GPU resident-texture fast path ──────────────────────────────────────────
@@ -455,8 +458,7 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
         // Histogram stays live in gpu mode via a trailing, throttled GPU→CPU readback
         // (~150ms). This does NOT gate the present path (which reads the resident texture
         // directly) — it only refreshes processedImageData for the histogram consumers.
-        if (gpuReadbackTimerRef.current) clearTimeout(gpuReadbackTimerRef.current);
-        gpuReadbackTimerRef.current = setTimeout(() => {
+        const publishReadback = () => {
           try {
             const rb = gpuPreviewPipeline.readback();
             useAppStore.getState().setProcessedImageData({
@@ -464,11 +466,33 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
               width: previewWidth,
               height: previewHeight,
               isPreview: true,
+              // GPU route ⇒ crop is identity ⇒ the full frame is displayed (no frameRect).
             });
           } catch (e) {
             logger.warn('GPU histogram readback failed:', e instanceof Error ? e.message : String(e));
           }
-        }, 150);
+        };
+        if (gpuReadbackTimerRef.current) clearTimeout(gpuReadbackTimerRef.current);
+        gpuReadbackTimerRef.current = null;
+        // Task 9b fix 2: when the GPU takes over from a frame of DIFFERENT geometry (a CPU
+        // crop frame → the full frame at a no-angle drag-start suspension), publish NOW:
+        // canvas sizing and the crop overlay/handles read processedImageData's dims and
+        // frameRect, and a 150ms-late readback made the handles (and the GL fit-rect) jump.
+        // Same-geometry GPU ticks (slider drags) keep the throttled readback.
+        const shown = useAppStore.getState().processedImageData;
+        const geometryChanged = !shown || shown instanceof Float32Array ||
+          shown.width !== previewWidth || shown.height !== previewHeight || !!shown.frameRect;
+        if (geometryChanged) {
+          publishReadback();
+        } else {
+          gpuReadbackTimerRef.current = setTimeout(() => {
+            gpuReadbackTimerRef.current = null;
+            // Task 9b fix 3: a newer pass started (and may have painted a CPU frame) —
+            // this pass's readback must not overwrite it.
+            if (previewSeqRef.current !== seq) return;
+            publishReadback();
+          }, 150);
+        }
 
         const processTime = performance.now() - startTime;
         const pipelineStats = imageProcessingPipeline.getStats();
@@ -517,7 +541,7 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
           const workerResult = await webWorkerImageProcessor.processImage(
             // kernelScale: same pass-level C5 scale as the main-thread context above (the worker
             // path forwards it to every tile verbatim — never re-derived from tile dims).
-            { width: previewWidth, height: previewHeight, data: previewData, channels: 4, kernelScale },
+            { width: previewWidth, height: previewHeight, data: previewData, channels: 4, kernelScale, cropSuspended },
             workerConfig,
           );
 
@@ -543,6 +567,8 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
           // the replay in finally renders the live state once.
           if (previewStateSignature() !== signature) {
             logger.warn('Worker fallback skipped: live state changed since the pass was posted');
+            // Arm the replay so the latest state paints even without a pending trigger.
+            pendingReprocessRef.current = true;
             return;
           }
           processedData = await imageProcessingPipeline.processImage(previewData, processingContext, { useWebWorkers: false });
@@ -563,6 +589,13 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
 
       // Discard stale results if a newer preview has already started.
       if (previewSeqRef.current !== seq) return;
+
+      // Task 9b fix 3: an older GPU pass's pending histogram readback must not overwrite
+      // this newer CPU frame (it would also drop its frameRect).
+      if (gpuReadbackTimerRef.current) {
+        clearTimeout(gpuReadbackTimerRef.current);
+        gpuReadbackTimerRef.current = null;
+      }
 
       // Update UI once with final result — use the TRUE output dims.
       setProcessedImageData({

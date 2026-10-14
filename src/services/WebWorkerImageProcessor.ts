@@ -14,6 +14,8 @@ export interface WorkerImageData {
    *  never re-derived from tile dims (same out-of-band rule as edgeMaskGlobalMax).
    *  Undefined → native semantics (scale 1). */
   kernelScale?: number;
+  /** v1.40.0 Task 9b fix 1: drag-suspension preview pass (see ProcessingContext.cropSuspended). */
+  cropSuspended?: boolean;
 }
 
 export interface WorkerModuleConfig {

@@ -10,6 +10,7 @@ import { computeRequiredPreviewCap, BASE_PREVIEW_CAP } from '../../utils/preview
 import { CropTransformOverlay } from '../Canvas/CropTransformOverlay';
 import { InteractiveCropHandles } from '../Canvas/InteractiveCropHandles';
 import { FULL_FRAME } from '../Canvas/cropFrameMapping';
+import { ROTATION_EPSILON_DEG } from '../../modules/cropGeometry';
 import { imageProcessingPipeline } from '../../services/ImageProcessingPipeline';
 import { editPersistenceService } from '../../services/EditPersistenceService';
 import { checkpointService } from '../../services/CheckpointService';
@@ -747,6 +748,8 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
       // (utils/previewQuality.ts) — a previous image's deep-zoom cap must not
       // tax every slider drag on this one.
       useAppStore.getState().setPreviewQualityCap(BASE_PREVIEW_CAP);
+      // A crop-drag suspension never survives an image switch (Task 9b fix 1).
+      useAppStore.getState().setCropDragSuspended(false);
 
 
       setImageLoading(true);
@@ -1319,16 +1322,12 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
               const displayFrame = (processedImageData && typeof processedImageData === 'object' && 'frameRect' in processedImageData)
                 ? processedImageData.frameRect ?? null
                 : null;
-              // Drag bounds = the drag-SUSPENSION frame: onDragStart zeroes the rect to
-              // the full frame, and with an angle set the render backstop renders the
-              // INSCRIBED (wedge-free) full frame — that is what the suspended preview
-              // shows (decision, Task 9b: consistent with the owner's "overlay ==
-              // result" invariant), so the handles are bounded to it and can never
-              // frame area the preview does not show. No angle ⇒ the full frame.
-              const nativeImg = imageService.getCurrentImage();
-              const dragBoundsRect = nativeImg?.width && nativeImg?.height
-                ? cropModule.getCropModule().clampRectWedgeFree(FULL_FRAME, nativeImg.width, nativeImg.height, 'best')
-                : null;
+              // Drag bounds = the whole expanded canvas (owner decision, Task 9b fix 1:
+              // the suspended drag shows the WHOLE rotated photo, Lightroom-style). The
+              // handles may go anywhere that stays wedge-free — clampRect (below) clamps
+              // every emitted rect with the handle's anchor; the APPLIED result never
+              // shows canvas (render backstop). FULL_FRAME is a frozen constant, so the
+              // handles' geometry callbacks keep their identity across renders.
 
               return (
               <>
@@ -1386,9 +1385,13 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
                     const inner = cropModule.getCropModule();
                     const p = inner.getParams();
                     const rectCropped = p.x !== 0 || p.y !== 0 || p.width !== 1 || p.height !== 1;
+                    const rotated = Math.abs(p.angle || 0) > ROTATION_EPSILON_DEG;
                     preDragRectRef.current = { x: p.x, y: p.y, width: p.width, height: p.height };
-                    if (cropModule.getEnabled() && p.enabled && rectCropped) {
+                    if (cropModule.getEnabled() && p.enabled && (rectCropped || rotated)) {
                       inner.setParams({ x: 0, y: 0, width: 1, height: 1 });
+                      // Suspension pass renders the WHOLE expanded canvas (Task 9b fix 1);
+                      // cleared at release, before the apply pass.
+                      useAppStore.getState().setCropDragSuspended(true);
                       imageProcessingPipeline.invalidateModuleCache('crop');
                       triggerReprocessing();
                     }
@@ -1399,6 +1402,8 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
                     // flight is now stale — mark it so the release pass starts at once
                     // instead of queueing behind it (and the stale result never paints).
                     useAppStore.getState().supersedeInFlightPreview();
+                    // End the suspension: the release pass is clamped by the backstop.
+                    useAppStore.getState().setCropDragSuspended(false);
                     // A plain click (no movement) must not lose the crop: the rect
                     // was zeroed for the drag — put the pre-drag rect back first.
                     if (!cropDragChangedRef.current && preDragRectRef.current) {
@@ -1416,7 +1421,7 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
                   aspectRatio={cropModule.getCropModule().getAspectRatioValue()}
                   canvasRef={canvasRef}
                   displayFrame={displayFrame}
-                  boundsRect={dragBoundsRect}
+                  boundsRect={FULL_FRAME}
                   clampRect={(rect, anchor) => {
                     // Wedge-free live during the drag, at the NATIVE dims (the
                     // render backstop re-clamps at each pass's actual dims).
