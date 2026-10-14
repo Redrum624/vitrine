@@ -2325,13 +2325,35 @@ export class GpuPreviewPipeline {
       const cropDimsOk = !cropRes.failedSteps &&
         cropRes.width === cropGeom.outW && cropRes.height === cropGeom.outH &&
         gpuCrop.length === refCrop.length && refCrop.length === cropGeom.outW * cropGeom.outH * 4;
-      let cropMaxDiff = Infinity;
+      let cropMaxDiffA = Infinity;
       if (cropDimsOk) {
-        cropMaxDiff = 0;
-        for (let i = 0; i < refCrop.length; i++) cropMaxDiff = Math.max(cropMaxDiff, Math.abs(gpuCrop[i] - refCrop[i]));
+        cropMaxDiffA = 0;
+        for (let i = 0; i < refCrop.length; i++) cropMaxDiffA = Math.max(cropMaxDiffA, Math.abs(gpuCrop[i] - refCrop[i]));
       }
-      const cropOk = cropDimsOk && cropMaxDiff < 1e-3;
-      logger.info(`[GPU-PIPELINE] crop self-test ${cropRes.width}x${cropRes.height} (ref ${cropGeom.outW}x${cropGeom.outH}) maxDiff=${cropMaxDiff.toExponential(2)} ${cropOk ? 'PASS' : 'FAIL'}`);
+      // (b) the suspended full-canvas drag preview: orientation 270 + flipV + bilinear, fill
+      // pixels in the wedges (the predicate path, u_wedgeFree = 0) vs processWithGeometry.
+      const cropModuleB = new CropModule();
+      cropModuleB.setParams({ enabled: true, angle: -3.3, orientation: 270, flipVertical: true, resampleMethod: 'bilinear', fillColor: [0.2, 0.4, 0.6, 1] });
+      const cropGeomB = cropModuleB.getRenderGeometry(cropW, cropH, true);
+      this.setSource(cropData, cropW, cropH);
+      const cropResB = this.render([cropPassDescriptor(cropGeomB)]);
+      const gpuCropB = this.readback();
+      const refCropB = cropModuleB.processWithGeometry(new Float32Array(cropData), cropGeomB, 4);
+      const cropDimsOkB = !cropResB.failedSteps &&
+        cropResB.width === cropGeomB.outW && cropResB.height === cropGeomB.outH &&
+        cropGeomB.outW === cropGeomB.expW && gpuCropB.length === refCropB.length;
+      let cropMaxDiffB = Infinity;
+      if (cropDimsOkB) {
+        cropMaxDiffB = 0;
+        for (let i = 0; i < refCropB.length; i++) cropMaxDiffB = Math.max(cropMaxDiffB, Math.abs(gpuCropB[i] - refCropB[i]));
+      }
+      const cropMaxDiff = Math.max(cropMaxDiffA, cropMaxDiffB);
+      const cropOk = cropDimsOk && cropDimsOkB && cropMaxDiff < 1e-3;
+      logger.info(
+        `[GPU-PIPELINE] crop self-test maxDiff=${cropMaxDiff.toExponential(2)} ` +
+        `(clamped ${cropRes.width}x${cropRes.height}=${cropMaxDiffA.toExponential(2)} ` +
+        `full-canvas ${cropResB.width}x${cropResB.height}=${cropMaxDiffB.toExponential(2)}) ${cropOk ? 'PASS' : 'FAIL'}`,
+      );
 
       const ok = basicAdjOk && exposureOk && shOk && hrOk && laOk && wbOk && tcOk && cbOk && vigOk && enhSharpenOk && enhUpOk && nrOk && enhResOk && cropOk;
       const maxDiff = Math.max(basicAdjMaxDiff, exposureMaxDiff, shMaxDiff, hrMaxDiff, laMaxDiff, wbMaxDiff, tcMaxDiff, cbMaxDiff, vigMaxDiff, enhSharpenMaxDiff, enhUpMaxDiff, nrMaxDiff, enhResMaxDiff, cropMaxDiff);

@@ -19,7 +19,7 @@ jest.mock('../utils/Logger', () => ({
 }));
 
 import { CropModule, CropParams } from '../modules/CropModule';
-import { computeCropGeometry, cropRenderGeometry, frameRectOf, type CropGeometry } from '../modules/cropGeometry';
+import { computeCropGeometry, cropRenderGeometry, frameRectOf, isPixelRectWedgeFree, type CropGeometry } from '../modules/cropGeometry';
 import { cropPassDescriptor } from '../shaders/passDescriptors';
 import { FRAG_CROP, cropUniforms } from '../shaders/cropShader';
 
@@ -57,6 +57,7 @@ function emulate(u: Uniforms, src: Float32Array): { data: Float32Array; w: numbe
   const [flipH, flipV] = u.u_flip;
   const [rotated] = u.u_rotated;
   const [method] = u.u_method;
+  const [wedgeFree] = u.u_wedgeFree;
   const fill = u.u_fill;
   const tap = (tx: number, ty: number): number[] => {
     let x = Math.max(0, Math.min(oriW - 1, tx));
@@ -85,9 +86,13 @@ function emulate(u: Uniforms, src: Float32Array): { data: Float32Array; w: numbe
         v = tap(ox, oy);
       } else {
         const dx = ox + 0.5 - offX; const dy = oy + 0.5 - offY;
-        const sx = dx * c + dy * s + bx;
-        const sy = -dx * s + dy * c + by;
-        if (sx < 0 || sx >= oriW - 1 || sy < 0 || sy >= oriH - 1) {
+        let sx = dx * c + dy * s + bx;
+        let sy = -dx * s + dy * c + by;
+        if (wedgeFree === 1) {
+          sx = Math.max(0, Math.min(oriW - 1 - 1e-3, sx));
+          sy = Math.max(0, Math.min(oriH - 1 - 1e-3, sy));
+        }
+        if (wedgeFree !== 1 && (sx < 0 || sx >= oriW - 1 || sy < 0 || sy >= oriH - 1)) {
           v = fill;
         } else if (method === 0) {
           v = tap(Math.floor(sx + 0.5), Math.floor(sy + 0.5));
@@ -234,4 +239,135 @@ describe('FRAG_CROP source pins', () => {
     expect(FRAG_CROP).toContain('clamp(acc, 0.0, 1.0)');
     expect(FRAG_CROP).toContain('clamp(t, ivec2(0), u_oriSize - 1)');
   });
+});
+
+describe('float32 boundary: a wedge-free rect never fills on the GPU (fix round 1)', () => {
+  /**
+   * The shader's per-pixel coordinate math in float32 (each GLSL op rounded with
+   * Math.fround). Returns whether the pixel would be FILL: with the fix, a wedge-free
+   * geometry clamps s and never fills; without it, only the CPU predicate decides.
+   */
+  function fills32(u: Uniforms, px: number, py: number, withFix: boolean): boolean {
+    const F = Math.fround;
+    const [cropX, cropY] = u.u_cropOrigin.map(F);
+    const [offX, offY] = u.u_off.map(F);
+    const [bx, by] = u.u_base.map(F);
+    const [c, s] = u.u_cs.map(F);
+    const [oriW, oriH] = u.u_oriSize;
+    const ox = F(F(px + 0.5) - 0.5 + cropX); const oy = F(F(py + 0.5) - 0.5 + cropY);
+    const dx = F(F(ox + 0.5) - offX); const dy = F(F(oy + 0.5) - offY);
+    let sx = F(F(F(dx * c) + F(dy * s)) + bx);
+    let sy = F(F(F(-dx * s) + F(dy * c)) + by);
+    if (withFix && u.u_wedgeFree?.[0] === 1) {
+      // s = clamp(s, vec2(0.0), vec2(u_oriSize - 1) - 1e-3)
+      sx = Math.min(Math.max(sx, 0), F(F(oriW - 1) - F(1e-3)));
+      sy = Math.min(Math.max(sy, 0), F(F(oriH - 1) - F(1e-3)));
+    }
+    return sx < 0 || sx >= oriW - 1 || sy < 0 || sy >= oriH - 1;
+  }
+
+  // Rects pinned EXACTLY on the boundary at ~5000 px: a fixed integer inset rect, the
+  // angle bisected (float64) to the last wedge-free value, so a corner pixel sits ~1e-12 px
+  // inside the valid region (what the backstop clamp can produce). expandCanvas:false keeps
+  // the rect fixed relative to the frame so the margin is continuous in the angle.
+  const cases: CropGeometry[] = [];
+  for (const [w, h, inset] of [[5200, 3904, 60], [5200, 3904, 200], [3904, 5200, 90], [4999, 3333, 41], [6000, 4000, 300]] as const) {
+    for (const sign of [1, -1]) {
+      const at = (a: number): CropGeometry => ({
+        ...computeCropGeometry({ angle: sign * a, x: 0, y: 0, width: 1, height: 1, expandCanvas: false, resampleMethod: 'bilinear' }, w, h),
+        cropX: inset, cropY: inset, outW: w - 2 * inset, outH: h - 2 * inset,
+      });
+      let lo = 0.02; let hi = 30;
+      for (let i = 0; i < 200; i++) {
+        const mid = (lo + hi) / 2;
+        if (isPixelRectWedgeFree(at(mid))) lo = mid; else hi = mid;
+      }
+      cases.push(at(lo));
+    }
+  }
+
+  const perimeter = (g: CropGeometry): Array<[number, number]> => {
+    const out: Array<[number, number]> = [];
+    for (let x = 0; x < g.outW; x++) out.push([x, 0], [x, g.outH - 1]);
+    for (let y = 1; y < g.outH - 1; y++) out.push([0, y], [g.outW - 1, y]);
+    return out;
+  };
+
+  it('every boundary rect is wedge-free in float64 (the CPU paints no fill) and sets u_wedgeFree', () => {
+    for (const g of cases) {
+      expect(isPixelRectWedgeFree(g)).toBe(true);
+      expect(recordUniforms(cropUniforms(g)).u_wedgeFree).toEqual([1]);
+    }
+  });
+
+  it('with u_wedgeFree the float32 shader math emits no fill on any rect edge pixel', () => {
+    let fills = 0;
+    for (const g of cases) {
+      const u = recordUniforms(cropUniforms(g));
+      for (const [px, py] of perimeter(g)) if (fills32(u, px, py, true)) fills++;
+    }
+    expect(fills).toBe(0);
+  });
+
+  it('the shader carries exactly that clamp branch, gated by u_wedgeFree', () => {
+    expect(FRAG_CROP).toContain('if (u_wedgeFree == 1) {');
+    expect(FRAG_CROP).toContain('s = clamp(s, vec2(0.0), vec2(u_oriSize - 1) - 1e-3);');
+  });
+
+  it('control: without u_wedgeFree the float32 predicate DOES fill edge pixels (the bug)', () => {
+    let fills = 0;
+    for (const g of cases) {
+      const u = recordUniforms(cropUniforms(g));
+      for (const [px, py] of perimeter(g)) if (fills32(u, px, py, false)) fills++;
+    }
+    expect(fills).toBeGreaterThan(0);
+  });
+
+  it('the suspended full-canvas drag preview keeps the predicate (fill is real there)', () => {
+    const g = cropRenderGeometry(cropParams({ angle: 3.3 }), 640, 480, true);
+    expect(recordUniforms(cropUniforms(g)).u_wedgeFree).toEqual([0]);
+  });
+});
+
+describe('FRAG_CROP tap(): the shader\'s OWN un-flip / un-orient lines == CropModule (fix round 1)', () => {
+  // Extract the GLSL index-remap lines from tap() and evaluate them as JS, so a wrong
+  // 90/180/270 or flip mapping in the shader source fails here (not only live).
+  const tapBody = FRAG_CROP.slice(FRAG_CROP.indexOf('vec4 tap(ivec2 t) {'), FRAG_CROP.indexOf('float cubicWeight'));
+  const js = (expr: string) => expr
+    .replace(/u_inSize\.x/g, 'inW').replace(/u_inSize\.y/g, 'inH')
+    .replace(/u_oriSize\.x/g, 'oriW').replace(/u_oriSize\.y/g, 'oriH')
+    .replace(/t\.x/g, 'tx').replace(/t\.y/g, 'ty');
+  const orient = new Map<number, (tx: number, ty: number, inW: number, inH: number) => [number, number]>();
+  for (const m of tapBody.matchAll(/u_orientation == (\d+)\) p = ivec2\((.*)\);/g)) {
+    orient.set(Number(m[1]), new Function('tx', 'ty', 'inW', 'inH', `return [${js(m[2])}];`) as never);
+  }
+  const flipX = tapBody.match(/if \(u_flip\.x == 1\) t\.x = (.*);/)![1];
+  const flipY = tapBody.match(/if \(u_flip\.y == 1\) t\.y = (.*);/)![1];
+  const unflipX = new Function('tx', 'oriW', `return ${js(flipX)};`) as (tx: number, oriW: number) => number;
+  const unflipY = new Function('ty', 'oriH', `return ${js(flipY)};`) as (ty: number, oriH: number) => number;
+
+  it('extracts all three quarter turns and both flips', () => {
+    expect([...orient.keys()].sort()).toEqual([180, 270, 90]);
+    expect(tapBody).toContain('t = clamp(t, ivec2(0), u_oriSize - 1);');
+  });
+
+  const W = 5, H = 3;
+  const src = new Float32Array(W * H * 4).map((_, i) => i); // every texel unique
+  for (const orientation of [0, 90, 180, 270] as const) {
+    for (const [fh, fv] of [[false, false], [true, false], [false, true], [true, true]] as const) {
+      it(`o${orientation} fh${+fh} fv${+fv}`, () => {
+        const geom = computeCropGeometry({ x: 0, y: 0, width: 1, height: 1, angle: 0, orientation, flipHorizontal: fh, flipVertical: fv }, W, H);
+        const ref = new CropModule().processWithGeometry(new Float32Array(src), geom, 4);
+        for (let ty0 = 0; ty0 < geom.oriH; ty0++) {
+          for (let tx0 = 0; tx0 < geom.oriW; tx0++) {
+            const tx = fh ? unflipX(tx0, geom.oriW) : tx0;
+            const ty = fv ? unflipY(ty0, geom.oriH) : ty0;
+            const [px, py] = orientation === 0 ? [tx, ty] : orient.get(orientation)!(tx, ty, W, H);
+            const o = (ty0 * geom.oriW + tx0) * 4;
+            expect(src[(py * W + px) * 4]).toBe(ref[o]);
+          }
+        }
+      });
+    }
+  }
 });

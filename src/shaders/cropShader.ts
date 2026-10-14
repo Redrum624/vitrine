@@ -11,7 +11,9 @@
  *   not rotated -> copy the texel at o (orientation/flips are a pure index remap; the
  *                  CPU copies too, so no fill predicate and no clamp)
  *   rotated     -> s = R^-1 (o + 0.5 - off) + (cx - 0.5, cy - 0.5)   (pixel-centre
- *                  convention of mapCanvasPixelToSource); fill unless
+ *                  convention of mapCanvasPixelToSource); a wedge-free rect (every
+ *                  render-geometry rect except the suspended drag preview) clamps s
+ *                  into [0, ori-1-1e-3] and never fills; otherwise fill unless
  *                  0 <= s < ori - 1 (CropModule.samplePixel's predicate); else
  *                  nearest / bilinear / Catmull-Rom exactly as the CPU samplers.
  * Taps are integer indices in the ORIENTED + FLIPPED grid (oriW x oriH), clamped to
@@ -19,7 +21,7 @@
  * rotateOrthogonal. Reads are texelFetch — RGBA32F is not linear-filterable, and exact
  * texel addressing is the point anyway.
  */
-import type { CropGeometry } from '../modules/cropGeometry';
+import { isPixelRectWedgeFree, type CropGeometry } from '../modules/cropGeometry';
 
 export const FRAG_CROP = `#version 300 es
 precision highp float;
@@ -36,6 +38,7 @@ uniform int u_orientation;   // 0 | 90 | 180 | 270 (clockwise)
 uniform ivec2 u_flip;        // (flipH, flipV) as 0/1
 uniform int u_rotated;       // 0 = no fine rotation (pure remap copy)
 uniform int u_method;        // 0 nearest, 1 bilinear, 2 bicubic (Catmull-Rom)
+uniform int u_wedgeFree;     // 1 = isPixelRectWedgeFree(geom): never emit fill (see main)
 uniform vec4 u_fill;
 out vec4 outColor;
 
@@ -68,7 +71,13 @@ void main() {
   }
   vec2 d = o + 0.5 - u_off;
   vec2 s = vec2(d.x * u_cs.x + d.y * u_cs.y, -d.x * u_cs.y + d.y * u_cs.x) + u_base;
-  if (s.x < 0.0 || s.x >= float(u_oriSize.x - 1) || s.y < 0.0 || s.y >= float(u_oriSize.y - 1)) {
+  if (u_wedgeFree == 1) {
+    // The CPU proved (float64) every rect pixel valid; the backstop clamp can leave a
+    // binding corner ~0 px inside, where float32 error (~1e-4..5e-4 px at 5000 px) would
+    // flip the predicate and paint fill the CPU never paints. The valid region is convex,
+    // so clamping s into it is exact up to that error — never fill here.
+    s = clamp(s, vec2(0.0), vec2(u_oriSize - 1) - 1e-3);
+  } else if (s.x < 0.0 || s.x >= float(u_oriSize.x - 1) || s.y < 0.0 || s.y >= float(u_oriSize.y - 1)) {
     outColor = u_fill;
     return;
   }
@@ -116,6 +125,9 @@ export function cropUniforms(geom: CropGeometry): (gl: WebGL2RenderingContext, p
     gl.uniform2i(gl.getUniformLocation(prog, 'u_flip'), geom.flipH ? 1 : 0, geom.flipV ? 1 : 0);
     gl.uniform1i(gl.getUniformLocation(prog, 'u_rotated'), geom.rotated ? 1 : 0);
     gl.uniform1i(gl.getUniformLocation(prog, 'u_method'), METHOD_INDEX[geom.method]);
+    // Fill only where the CPU predicate can actually fire (the suspended full-canvas drag
+    // preview, or any rect that is not wedge-free).
+    gl.uniform1i(gl.getUniformLocation(prog, 'u_wedgeFree'), isPixelRectWedgeFree(geom) ? 1 : 0);
     gl.uniform4f(gl.getUniformLocation(prog, 'u_fill'), geom.fill[0], geom.fill[1], geom.fill[2], geom.fill[3]);
   };
 }
