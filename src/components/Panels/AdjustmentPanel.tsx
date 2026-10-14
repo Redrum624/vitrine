@@ -80,15 +80,6 @@ export function previewStateSignature(): string {
   );
 }
 
-/** Two crop frames (ProcessedImageData.frameRect) are the same; both absent = full frame. */
-function sameFrameRect(
-  a: { x: number; y: number; width: number; height: number } | undefined,
-  b: { x: number; y: number; width: number; height: number } | undefined,
-): boolean {
-  if (!a || !b) return !a && !b;
-  return a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
-}
-
 interface AdjustmentPanelProps {
   selectedModule?: string | null;
   // Required so tsc guarantees App threads its live selection down to the
@@ -536,26 +527,22 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
         };
         if (gpuReadbackTimerRef.current) clearTimeout(gpuReadbackTimerRef.current);
         gpuReadbackTimerRef.current = null;
-        // Task 9b fix 2: when the GPU result's geometry differs from the frame on screen (a
-        // crop apply / drag-start suspension / a CPU frame of other dims), publish NOW:
-        // canvas sizing and the crop overlay/handles read processedImageData's dims and
-        // frameRect, and a 150ms-late readback made the handles (and the GL fit-rect) jump.
-        // Same-geometry GPU ticks (slider drags) keep the throttled readback.
-        const shown = useAppStore.getState().processedImageData;
-        const geometryChanged = !shown || shown instanceof Float32Array ||
-          shown.width !== resultWidth || shown.height !== resultHeight ||
-          !sameFrameRect(shown.frameRect, resultFrameRect);
-        if (geometryChanged) {
+        // Every GPU frame — including one whose geometry changed (crop apply, drag-start
+        // suspension, straighten tick) — keeps the pixel readback on the 150ms throttle.
+        // The geometry itself is already published synchronously above (bumpGpuResult):
+        // Canvas sizing and the crop overlay/handles read gpuResultGeometry in GPU mode, so
+        // they never wait for this readback. (Task 9b fix 2 used to force a synchronous
+        // full RGBA32F readPixels here whenever the dims changed — on a straighten/crop drag
+        // that is EVERY tick, a GPU stall plus a 2D-canvas redraw per tick: final-review
+        // fix 4.) processedImageData stays self-consistent: data, dims and frameRect are
+        // always published together, just up to 150ms late.
+        gpuReadbackTimerRef.current = setTimeout(() => {
+          gpuReadbackTimerRef.current = null;
+          // Task 9b fix 3: a newer pass started (and may have painted a CPU frame) —
+          // this pass's readback must not overwrite it.
+          if (previewSeqRef.current !== seq) return;
           publishReadback();
-        } else {
-          gpuReadbackTimerRef.current = setTimeout(() => {
-            gpuReadbackTimerRef.current = null;
-            // Task 9b fix 3: a newer pass started (and may have painted a CPU frame) —
-            // this pass's readback must not overwrite it.
-            if (previewSeqRef.current !== seq) return;
-            publishReadback();
-          }, 150);
-        }
+        }, 150);
 
         const processTime = performance.now() - startTime;
         const pipelineStats = imageProcessingPipeline.getStats();

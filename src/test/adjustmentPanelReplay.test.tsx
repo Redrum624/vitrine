@@ -215,17 +215,28 @@ describe('AdjustmentPanel single apply (replay signature)', () => {
     expect(mainProcess.mock.calls[0][1].cropSuspended).toBe(false);
   });
 
-  test('fix 2: the GPU route publishes the displayed frame SYNCHRONOUSLY when geometry changes', async () => {
+  test('fix 2 (final-review fix 4): a GPU geometry change publishes its geometry synchronously, the pixels on the 150ms throttle', async () => {
     mockRoute.path = 'gpu';
+    const { gpuPreviewPipeline } = jest.requireMock('../shaders/GpuPreviewPipeline') as { gpuPreviewPipeline: { readback: jest.Mock; render: jest.Mock } };
+    gpuPreviewPipeline.render.mockReturnValue({ width: 16, height: 16 });
+    gpuPreviewPipeline.readback.mockClear();
+    gpuPreviewPipeline.readback.mockReturnValue(new Float32Array(16 * 16 * 4));
     // A CPU crop frame is on screen (different dims + a frameRect).
-    useAppStore.setState({
-      processedImageData: { data: new Float32Array(4), width: 8, height: 6, isPreview: true, frameRect: { x: 0.1, y: 0.1, width: 0.5, height: 0.5 } },
-    });
+    const cpuFrame = { data: new Float32Array(4), width: 8, height: 6, isPreview: true, frameRect: { x: 0.1, y: 0.1, width: 0.5, height: 0.5 } };
+    useAppStore.setState({ processedImageData: cpuFrame, gpuResultGeometry: null });
     await mountPanel(); // no timers advanced: the 150ms readback has NOT fired
-    const shown = useAppStore.getState().processedImageData as { width: number; height: number; frameRect?: unknown };
+    // Canvas sizing + overlay source: synchronous, no pixel readback.
+    expect(useAppStore.getState().gpuResultGeometry).toEqual({ width: 16, height: 16, frameRect: undefined });
+    expect(gpuPreviewPipeline.readback).not.toHaveBeenCalled();
+    expect(useAppStore.getState().processedImageData).toBe(cpuFrame);
+    await flush(200);
+    expect(gpuPreviewPipeline.readback).toHaveBeenCalledTimes(1);
+    const shown = useAppStore.getState().processedImageData as { data: Float32Array; width: number; height: number; frameRect?: unknown };
     expect(shown.width).toBe(16);
     expect(shown.height).toBe(16);
+    expect(shown.data.length).toBe(16 * 16 * 4);
     expect(shown.frameRect).toBeUndefined();
+    gpuPreviewPipeline.render.mockReset();
   });
 
   test('fix 3: a pending GPU readback never overwrites a newer CPU frame', async () => {
