@@ -113,10 +113,15 @@
       ],
       "icon": "assets/icon.ico",
       "verifyUpdateCodeSignature": false,
-      "artifactName": "${productName} Setup ${version}.${ext}"
+      "artifactName": "${productName}-Setup-${version}.${ext}"
     },
     "portable": {
-      "artifactName": "${productName} ${version} portable.${ext}"
+      "artifactName": "${productName}-${version}-portable.${ext}"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "Redrum624",
+      "repo": "vitrine"
     },
     "nsis": {
       "oneClick": false,

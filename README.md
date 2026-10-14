@@ -51,11 +51,11 @@ click away.
 
 ### Download (recommended)
 
-**Just want to use Vitrine?** Download the latest **`Vitrine Setup X.Y.Z.exe`** from the
+**Just want to use Vitrine?** Download the latest **`Vitrine-Setup-X.Y.Z.exe`** from the
 [**Releases**](https://github.com/Redrum624/vitrine/releases) page and run it — no other
 software required. The installer adds a desktop shortcut and a Start Menu entry.
 
-**Prefer not to install anything?** Grab **`Vitrine X.Y.Z portable.exe`** instead — a single
+**Prefer not to install anything?** Grab **`Vitrine-X.Y.Z-portable.exe`** instead — a single
 executable that runs from anywhere (Downloads folder, USB stick) with no installation and no
 admin rights, and shares the same profile as the installed app. Since both downloads are
 currently unsigned, Windows SmartScreen may show an "unknown publisher" prompt the first time
@@ -63,8 +63,13 @@ you run them — choose *More info → Run anyway*. You can verify any download 
 **`SHA256SUMS.txt`** (published with every release):
 
 ```powershell
-CertUtil -hashfile "Vitrine Setup X.Y.Z.exe" SHA256   # compare with SHA256SUMS.txt
+CertUtil -hashfile "Vitrine-Setup-X.Y.Z.exe" SHA256   # compare with SHA256SUMS.txt
 ```
+
+**Updates.** The installed (setup) copy checks GitHub Releases at launch and from
+*Help > Check for Updates...*, downloads a newer version in the background and offers to restart and
+install it. The portable exe and the Microsoft Store build do not update themselves. Details in
+[`docs/UPDATES.md`](docs/UPDATES.md).
 
 - **Windows 10 or 11** (64-bit)
 - 8 GB RAM minimum · 16 GB+ recommended for large RAW files
@@ -85,15 +90,16 @@ Build a distributable Windows installer:
 
 ```bash
 npm run build:win       # clean -> tsc + vite build -> NSIS installer + portable exe -> collect into installer/
-# Output: installer/Vitrine Setup 1.25.0.exe + Vitrine 1.25.0 portable.exe
-#         (+ SHA256SUMS.txt, README.txt, LICENSE, THIRD-PARTY-LICENSES.md)
+# Output: installer/Vitrine-Setup-1.40.0.exe + Vitrine-1.40.0-portable.exe
+#         (+ latest.yml, Vitrine-Setup-1.40.0.exe.blockmap, SHA256SUMS.txt, Vitrine-1.40.0-README.txt,
+#          LICENSE, THIRD-PARTY-LICENSES.md)
 npm run build:win:dir   # fast unpacked build (no installer, quick iteration)
 ```
 
 The user-facing distributables are collected into a clean **`installer/`** folder at the repo root:
-the versioned `Setup …​.exe` and `… portable.exe`, their `SHA256SUMS.txt`, a plain-text
-`README.txt`, `LICENSE`, and `THIRD-PARTY-LICENSES.md`. electron-builder's full staging output
-(unpacked app, block maps) stays in `release/`.
+the versioned `Vitrine-Setup-….exe` and `Vitrine-…-portable.exe`, the updater feed (`latest.yml` and
+the installer `.blockmap`), `SHA256SUMS.txt`, a plain-text `README.txt`, `LICENSE`, and `THIRD-PARTY-LICENSES.md`. electron-builder's full staging output
+(unpacked app) stays in `release/`.
 
 ## A closer look
 

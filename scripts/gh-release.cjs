@@ -51,9 +51,11 @@ console.log(`[gh-release] Targeting release ${TAG}`);
 // 2. Locate artifacts
 // ---------------------------------------------------------------------------
 const CANDIDATES = [
-  `Vitrine Setup ${VERSION}.exe`,
-  `Vitrine ${VERSION} portable.exe`,
-  `Vitrine ${VERSION} README.txt`,
+  `Vitrine-Setup-${VERSION}.exe`,
+  `Vitrine-Setup-${VERSION}.exe.blockmap`, // electron-updater delta downloads
+  'latest.yml',                             // electron-updater feed: REQUIRED or installed copies cannot update
+  `Vitrine-${VERSION}-portable.exe`,
+  `Vitrine-${VERSION}-README.txt`,
   'SHA256SUMS.txt',
   'LICENSE',
   'THIRD-PARTY-LICENSES.md',
