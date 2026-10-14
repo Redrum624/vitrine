@@ -47,6 +47,44 @@ describe('creative vignette (v1.40.0)', () => {
     expect(max).toBeLessThan(1e-6);
   });
 
+  it("FRAG_VIGNETTE's own falloff lines (transcribed from the shader text) equal vignetteFactor on a grid", () => {
+    const body = FRAG_VIGNETTE.slice(FRAG_VIGNETTE.indexOf('void main()'));
+    const line = (re: RegExp) => { const m = body.match(re); if (!m) throw new Error(`shader line missing: ${re}`); return m[1]; };
+    // Each GLSL expression is lifted verbatim, then made JS-valid (float types / builtins / literals).
+    const toJs = (e: string) => e
+      .replace(/u_midpoint/g, 'midpoint').replace(/u_feather/g, 'featherN').replace(/u_strength/g, 'strength');
+    const midE = toJs(line(/float mid = (.*);/));
+    const fsE = toJs(line(/float fs = (.*?),\s*fe = /));
+    const feE = toJs(line(/float fs = .*?,\s*fe = (.*);/));
+    const fpE = toJs(line(/float fp = (.*);/));
+    const sfE = toJs(line(/float sf = (.*);/));
+    const ffE = toJs(line(/float ff = (.*);/));
+    const sE = toJs(line(/float s = (.*);/));
+    const facE = toJs(line(/float factor = (.*);/));
+    const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+    const shader = new Function('clamp', 'nd', 'strength', 'midpoint', 'featherN', `
+      const mid = ${midE};
+      const fs = ${fsE}, fe = ${feE};
+      const fp = ${fpE};
+      const sf = ${sfE};
+      const ff = ${ffE};
+      const s = ${sE};
+      return ${facE};
+    `) as (c: typeof clamp, nd: number, s: number, m: number, f: number) => number;
+    let n = 0;
+    for (const strength of [-1, -0.5, 0, 0.5, 1]) {
+      for (const midpoint of [0.5, 0.8, 1, 1.3, 1.5]) {
+        for (const featherN of [0, 0.3, 1]) {
+          for (let nd = 0; nd <= 1.6; nd += 0.05) {
+            expect(shader(clamp, nd, strength, midpoint, featherN)).toBeCloseTo(vignetteFactor(nd, strength, midpoint, featherN), 9);
+            n++;
+          }
+        }
+      }
+    }
+    expect(n).toBeGreaterThan(1000);
+  });
+
   it('the factor stays finite and within [0, 2] at every slider extreme', () => {
     for (const amount of [-100, -50, 0, 50, 100]) {
       for (const midpoint of [0, 0.1, VIGNETTE_MIDPOINT_MIN, 1, VIGNETTE_MIDPOINT_MAX, 2, 5]) {

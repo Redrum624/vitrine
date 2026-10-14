@@ -37,6 +37,11 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
   // always wins), then persist every change. hydratedRef gates saving so the
   // mount itself never writes factory values over the stored prefs.
   const hydratedRef = useRef(false);
+  // Per-photo un-arm (baked upscale) must NOT become the durable Upscale preference: while set, the
+  // persisted snapshot carries the pref value loaded from the store (undefined = key omitted), until
+  // the user changes Upscale themselves.
+  const upscaleUnarmedRef = useRef(false);
+  const storedUpscalePrefRef = useRef<boolean | undefined>(undefined);
   const [busy, setBusy] = useState(false);
   const upscaleProgress = useAppStore((s) => s.upscaleProgress);
   const upscaleMode = useAppStore((s) => s.upscaleMode);
@@ -82,6 +87,7 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
     let cancelled = false;
     void loadEnhancePrefs().then((prefs) => {
       if (cancelled) return;
+      storedUpscalePrefRef.current = prefs?.upscale;
       if (prefs) {
         const { nrEnabled: prefNrEnabled, nrStrength: prefNrStrength, ...enhance } = prefs;
         const cur = module.getParams();
@@ -112,7 +118,10 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
       // module is not enabled, so update() fires no reprocess and nothing runs.
       {
         const live = module.getParams();
-        if (!live.enabled && live.upscale && imageService.isBakedUpscaleActive()) update({ upscale: false });
+        if (!live.enabled && live.upscale && imageService.isBakedUpscaleActive()) {
+          upscaleUnarmedRef.current = true;
+          update({ upscale: false });
+        }
       }
       hydratedRef.current = true;
     });
@@ -125,7 +134,7 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
     if (!hydratedRef.current) return;
     const p = paramsRef.current;
     saveEnhancePrefs({
-      sharpen: p.sharpen, upscale: p.upscale, scale: p.scale,
+      sharpen: p.sharpen, upscale: upscaleUnarmedRef.current ? storedUpscalePrefRef.current : p.upscale, scale: p.scale,
       denoiseStrength: p.denoiseStrength, psfSigma: p.psfSigma, rlIters: p.rlIters,
       alpha: p.alpha, hpSigma: p.hpSigma, sharpness: p.sharpness, chromaClean: p.chromaClean,
       nrEnabled: nrRef.current.enabled, nrStrength: nrRef.current.strength,
@@ -165,6 +174,7 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
   const resetSection = useCallback(() => {
     setNrEnabled(false);
     setNrStrength(50);
+    upscaleUnarmedRef.current = false;
     const enhanceWasEnabled = module.getParams().enabled;
     update({
       enabled: false,
@@ -492,7 +502,7 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
           <span>Sharpen</span>
         </button>
 
-        <button type="button" aria-pressed={params.upscale} onClick={() => update({ upscale: !params.upscale })} style={modeTileStyle(params.upscale)}>
+        <button type="button" aria-pressed={params.upscale} onClick={() => { upscaleUnarmedRef.current = false; update({ upscale: !params.upscale }); }} style={modeTileStyle(params.upscale)}>
           <span style={modeDotStyle(params.upscale)} />
           <span>Upscale</span>
         </button>

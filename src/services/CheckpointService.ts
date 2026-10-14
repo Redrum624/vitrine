@@ -28,6 +28,18 @@ interface StoredHistory {
 }
 
 const HISTORY_VERSION = 1;
+
+/** Key-order-insensitive snapshot key: a migrated legacy checkpoint places keys (e.g. `schema`) in a
+ *  different order than serialize(), which would defeat the string dedupe. */
+function snapshotKey(value: unknown): string {
+  return JSON.stringify(value, (_k, v) => {
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
+      const o = v as Record<string, unknown>;
+      return Object.keys(o).sort().reduce<Record<string, unknown>>((acc, k) => { acc[k] = o[k]; return acc; }, {});
+    }
+    return v;
+  });
+}
 const MAX_CHECKPOINTS = 200;
 const RECORD_DEBOUNCE_MS = 900;
 const SAVE_DEBOUNCE_MS = 800;
@@ -310,9 +322,10 @@ class CheckpointService {
     if (!imageService.getCurrentImage()) return;
     const state = editPersistenceService.serialize();
     const json = JSON.stringify(state);
-    if (json === this.lastSnapshot) return;                   // nothing changed since last checkpoint
+    const key = snapshotKey(state);
+    if (key === this.lastSnapshot) return;                    // nothing changed since last checkpoint
     const label = describeChange(this.lastState, state) || fallbackLabel;
-    this.lastSnapshot = json;
+    this.lastSnapshot = key;
     const parsed = JSON.parse(json) as EditState;
     this.lastState = parsed;
     const bakeDepth = this.bakeBridge.getDepth();
@@ -376,7 +389,7 @@ class CheckpointService {
 
     editPersistenceService.restore(cp.state, img.width, img.height);
     this.activeId = id;
-    this.lastSnapshot = JSON.stringify(cp.state);             // restoring is not a new edit
+    this.lastSnapshot = snapshotKey(cp.state);             // restoring is not a new edit
     this.lastState = cp.state;
     if (this.recordTimer) { clearTimeout(this.recordTimer); this.recordTimer = null; }
     this.emit();
@@ -403,7 +416,7 @@ class CheckpointService {
           this.seq = Math.max(data.nextSeq ?? 0, this.checkpoints.reduce((m, c) => Math.max(m, c.id), 0));
           const last = this.checkpoints[this.checkpoints.length - 1];
           this.activeId = last ? last.id : null;
-          this.lastSnapshot = last ? JSON.stringify(last.state) : '';
+          this.lastSnapshot = last ? snapshotKey(last.state) : '';
           this.lastState = last ? last.state : null;
         }
       } catch (e) {

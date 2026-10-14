@@ -16,6 +16,12 @@ import { logger } from './Logger';
 
 export const ENHANCE_PREFS_KEY = 'enhancePrefs';
 const SAVE_DEBOUNCE_MS = 400;
+// v1.40.0 one-time migration: Upscale became armed-by-default, but every pre-v1.40 snapshot that
+// touched Enhance carries upscale:false (the old default) and would hide the new default forever.
+// Snapshots written by v1.40+ carry this stamp; unstamped ones lose their `upscale` key on load.
+// After that the user's own later Upscale choice is remembered as before.
+export const ENHANCE_PREFS_VERSION = 2;
+const VERSION_FIELD = 'prefsVersion';
 
 export interface EnhancePrefs {
   sharpen?: boolean;
@@ -48,7 +54,7 @@ export function saveEnhancePrefs(prefs: EnhancePrefs): void {
       const payload = pending;
       pending = null;
       if (!payload) return;
-      void window.electronAPI!.storeSet(ENHANCE_PREFS_KEY, payload)
+      void window.electronAPI!.storeSet(ENHANCE_PREFS_KEY, { ...payload, [VERSION_FIELD]: ENHANCE_PREFS_VERSION })
         .catch((e) => logger.warn('Failed to save enhance prefs:', e));
     }, SAVE_DEBOUNCE_MS);
   } catch (e) {
@@ -69,7 +75,7 @@ export function flushPendingEnhancePrefs(): void {
     pending = null;
     if (!payload) return;
     if (typeof window === 'undefined' || !window.electronAPI?.storeSet) return;
-    void window.electronAPI.storeSet(ENHANCE_PREFS_KEY, payload)
+    void window.electronAPI.storeSet(ENHANCE_PREFS_KEY, { ...payload, [VERSION_FIELD]: ENHANCE_PREFS_VERSION })
       .catch((e) => logger.warn('Failed to save enhance prefs:', e));
   } catch (e) {
     logger.warn('Failed to save enhance prefs:', e);
@@ -98,6 +104,8 @@ export async function loadEnhancePrefs(): Promise<EnhancePrefs | null> {
       if (typeof v === 'number' && Number.isFinite(v)) (out as Record<string, unknown>)[k] = v;
     }
     if (src.scale === 2 || src.scale === 4) out.scale = src.scale;
+    const stamped = typeof src[VERSION_FIELD] === 'number' && (src[VERSION_FIELD] as number) >= ENHANCE_PREFS_VERSION;
+    if (!stamped) delete out.upscale;
     return Object.keys(out).length ? out : null;
   } catch (e) {
     logger.warn('Failed to load enhance prefs:', e);

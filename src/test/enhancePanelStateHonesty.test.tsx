@@ -41,6 +41,7 @@ import { DEFAULT_ENHANCE_PARAMS, EnhanceParams } from '../utils/enhanceChain';
 import { enhanceService } from '../services/EnhanceService';
 import { imageService } from '../services/ImageService';
 import { aiDeblurClient } from '../services/AiDeblurClient';
+import { saveEnhancePrefs } from '../utils/enhancePrefsStorage';
 import { editPersistenceService } from '../services/EditPersistenceService';
 import { useAppStore } from '../stores/appStore';
 import type { ModuleCardActions } from '../components/Controls/moduleCardActions';
@@ -309,5 +310,26 @@ describe('finding 8 — header Reset neutralizes everything the panel shows as a
     act(() => { actions.current!.reset!(); });
     expect(nr.getParams().enabled).toBe(false);
     expect(onNR).toHaveBeenCalledWith({ enabled: false });
+  });
+});
+
+describe('v1.40.0 - per-photo un-arm of an already-baked upscale never writes the durable Upscale pref', () => {
+  it('opening Enhance on a baked photo un-arms the module param but never persists upscale:false', async () => {
+    mockBaked = true;
+    (saveEnhancePrefs as jest.Mock).mockClear();
+    const mod = new EnhanceModule(); // factory defaults: upscale armed
+    await renderPanel(mod, new NoiseReductionModule());
+    await act(async () => { await Promise.resolve(); });
+    expect(mod.getParams().upscale).toBe(false);
+    const saved = (saveEnhancePrefs as jest.Mock).mock.calls.map((c) => c[0]);
+    expect(saved.some((p) => p.upscale === false)).toBe(false);
+  });
+
+  it('a deliberate user un-tick still persists upscale:false', async () => {
+    const mod = new EnhanceModule();
+    await renderPanel(mod, new NoiseReductionModule());
+    (saveEnhancePrefs as jest.Mock).mockClear();
+    fireEvent.click(screen.getByRole('button', { name: /upscale/i }));
+    expect((saveEnhancePrefs as jest.Mock).mock.calls.some((c) => c[0].upscale === false)).toBe(true);
   });
 });
