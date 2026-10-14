@@ -106,6 +106,14 @@ export default function EnhanceModuleComponent({ module, noiseReductionModule, o
           if (typeof prefNrStrength === 'number') setNrStrength(prefNrStrength);
         }
       }
+      // v1.40.0: Upscale is armed by DEFAULT, so a staged (not enabled) module on an image whose
+      // upscale is already baked must be un-armed here - the post-bake remount (and a reopen of a
+      // baked photo) would otherwise offer an accidental stacked second bake. Staged only: the
+      // module is not enabled, so update() fires no reprocess and nothing runs.
+      {
+        const live = module.getParams();
+        if (!live.enabled && live.upscale && imageService.isBakedUpscaleActive()) update({ upscale: false });
+      }
       hydratedRef.current = true;
     });
     return () => { cancelled = true; };

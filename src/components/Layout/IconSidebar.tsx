@@ -21,8 +21,8 @@ const tools: Tool[] = [
   { id: 'whitebalance', icon: <Droplet size={18} strokeWidth={1.6} />, name: 'White Balance' },
   { id: 'colorbalance', icon: <Palette size={18} strokeWidth={1.6} />, name: 'Color Balance' },
   { id: 'tonecurve', icon: <Activity size={18} strokeWidth={1.6} />, name: 'Tone Curve' },
-  { id: 'enhance', icon: <Sparkles size={18} strokeWidth={1.6} />, name: 'Enhance' },
   { id: 'lenscorrections', icon: <Focus size={18} strokeWidth={1.6} />, name: 'Lens Corrections' },
+  { id: 'enhance', icon: <Sparkles size={18} strokeWidth={1.6} />, name: 'Enhance' },
   { id: 'history', icon: <History size={18} strokeWidth={1.6} />, name: 'History' },
 ];
 
