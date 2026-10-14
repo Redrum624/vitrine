@@ -1,6 +1,6 @@
 import { logger } from '../utils/Logger';
 import {
-  computeCropGeometry,
+  cropRenderGeometry,
   clampRectWedgeFree,
   autoCropRectForRotation,
   normalizeOrientation,
@@ -250,18 +250,14 @@ export class CropModule {
    * process() and getOutputDimensions() both read this, so they cannot drift.
    */
   getRenderGeometry(inW: number, inH: number, suspended = false): CropGeometry {
-    const p = this.params;
     // Drag-suspension preview (owner decision, v1.40.0 Task 9b fix 1): while a crop
     // handle is dragged on a rotated photo, show the WHOLE rotated photo — the full
     // expanded canvas, empty corners included (Lightroom-style). The backstop is
     // skipped ONLY when the pass is flagged suspended AND the rect is exactly the full
     // frame (what onDragStart writes): a flag accidentally left set never un-clamps a
     // real crop, and export/worker/normal passes never carry the flag at all.
-    if (suspended && p.x === 0 && p.y === 0 && p.width === 1 && p.height === 1) {
-      return computeCropGeometry(p, inW, inH);
-    }
-    const rect = clampRectWedgeFree({ x: p.x, y: p.y, width: p.width, height: p.height }, inW, inH, p, 'best');
-    return computeCropGeometry({ ...p, ...rect }, inW, inH);
+    // Single-sourced in cropRenderGeometry so the GPU crop pass (Task 10a) decides the same.
+    return cropRenderGeometry(this.params, inW, inH, suspended);
   }
 
   /** Clamp a candidate rect wedge-free at (inW, inH) under the CURRENT transform params. */

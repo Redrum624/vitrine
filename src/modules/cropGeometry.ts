@@ -369,3 +369,22 @@ export function frameRectOf(geom: CropGeometry): NormalizedCropRect {
     height: geom.outH / geom.expH,
   };
 }
+
+/**
+ * THE geometry a crop pass renders at (inW x inH = the ACTUAL processing dims) —
+ * single source for CropModule.getRenderGeometry (CPU) and the GPU crop pass
+ * descriptor (v1.40.0 Task 10a), so the two can never decide differently:
+ *  - the render-time backstop: the stored rect through clampRectWedgeFree ('best');
+ *  - EXCEPT the Task 9b drag-suspension preview: `suspended` AND the rect is exactly
+ *    the full frame -> the whole expanded canvas, wedges included. A stale flag never
+ *    un-clamps a real crop.
+ */
+export function cropRenderGeometry(
+  params: CropGeometryParams, inW: number, inH: number, suspended = false,
+): CropGeometry {
+  if (suspended && params.x === 0 && params.y === 0 && params.width === 1 && params.height === 1) {
+    return computeCropGeometry(params, inW, inH);
+  }
+  const rect = clampRectWedgeFree({ x: params.x, y: params.y, width: params.width, height: params.height }, inW, inH, params, 'best');
+  return computeCropGeometry({ ...params, ...rect }, inW, inH);
+}

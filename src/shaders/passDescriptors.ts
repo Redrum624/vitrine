@@ -43,6 +43,9 @@ import { computeWBGains } from '../modules/WhiteBalanceModule';
 import type { EnhanceParams } from '../utils/enhanceChain';
 import { effectiveEnhanceKernels } from '../utils/enhanceOps';
 import { MAX_GPU_ENHANCE_OUTPUT_PIXELS, ENH_GAUSS_MAXR, ENH_DENOISE_MAXR } from './enhanceGpuLimits';
+import { cropRenderGeometry, frameRectOf, normalizeOrientation } from '../modules/cropGeometry';
+import type { CropGeometry, CropGeometryParams, NormalizedCropRect } from '../modules/cropGeometry';
+import { cropUniforms, isGpuCropMethod } from './cropShader';
 
 // ── GPU capability sets ────────────────────────────────────────────────────────
 
@@ -151,6 +154,13 @@ export interface PassDescriptor {
    * `programKey`/`setUniforms` are ignored (like `subPasses`).
    */
   residentStep?: { kind: 'enhance'; params: EnhanceParams; kernelScale: number };
+  /**
+   * Geometry step (v1.40.0 Task 10a: GPU crop/straighten/orientation). Only valid at
+   * passes[0]: the pipeline draws the SOURCE texture into an outW x outH target and the
+   * rest of the chain runs at those dims. `frameRect` is the effective rendered rect
+   * (frameRectOf(geom)) — the same value the CPU crop reports as cropFrameRect.
+   */
+  geometryStep?: { kind: 'crop'; geom: CropGeometry; frameRect: NormalizedCropRect };
 }
 
 /**
@@ -244,8 +254,12 @@ export interface BuildPassOpts {
   rebuildMask?: (layerId: string, w: number, h: number) => Float32Array | null;
   /** processing/native long-edge ratio of the pass (enhance kernel scaling). Default 1. */
   kernelScale?: number;
-  /** GL MAX_TEXTURE_SIZE, when known (enhance eligibility). */
+  /** GL MAX_TEXTURE_SIZE, when known (enhance eligibility, GPU crop output cap). */
   maxTextureSize?: number;
+  /** Task 9b drag-suspension preview flag (ProcessingContext.cropSuspended) for the crop geometry. */
+  cropSuspended?: boolean;
+  /** Override of GPU_CROP_ROUTE_ENABLED (tests / Task 10b). */
+  gpuCrop?: boolean;
 }
 
 // ── Minimal PipelineModule interface (subset used here) ───────────────────────
@@ -732,6 +746,61 @@ export function enhanceResidentDescriptor(params: EnhanceParams, kernelScale: nu
   };
 }
 
+// ── GPU crop (Task 10a) ───────────────────────────────────────────────────────
+
+/**
+ * Master switch for routing an active crop to the GPU geometry step. OFF until Task 10b
+ * wires the output-dim consumers (AdjustmentPanel GPU branch publishes source dims and no
+ * frameRect today; Canvas sizing / before-after split assume an uncropped resident result).
+ * Task 10b flips this to true. BuildPassOpts.gpuCrop overrides it.
+ */
+export const GPU_CROP_ROUTE_ENABLED = false;
+
+/** Crop geometry pass (single source for buildPassList AND the selfTest probe). */
+export function cropPassDescriptor(geom: CropGeometry): PassDescriptor {
+  return {
+    id: 'crop',
+    programKey: 'crop',
+    setUniforms: (gl, prog) => cropUniforms(geom)(gl, prog),
+    geometryStep: { kind: 'crop', geom, frameRect: frameRectOf(geom) },
+  };
+}
+
+/** CropPipelineModule.isNoOp() mirror: full-frame rect and no transform. */
+function isCropIdentity(p: Record<string, unknown>): boolean {
+  return p.x === 0 && p.y === 0 && p.width === 1 && p.height === 1 &&
+    p.angle === 0 && !p.flipHorizontal && !p.flipVertical && normalizeOrientation(p.orientation) === 0;
+}
+
+/**
+ * The GPU crop descriptor for an enabled crop module, or null (-> cpuBridge) when:
+ * the route is off, render dims are unknown, the crop is not first in the chain, the
+ * module's crop is off/identity, the resample method has no shader branch, an active
+ * basicadj dehaze would read the PRE-crop source statistic (render() computes dehaze
+ * from srcData), or the output exceeds the texture cap.
+ */
+function buildCropPass(
+  params: Record<string, unknown>,
+  modules: MinimalModule[],
+  passesSoFar: number,
+  opts: BuildPassOpts | undefined,
+): PassDescriptor | null {
+  if (!opts || !(opts.gpuCrop ?? GPU_CROP_ROUTE_ENABLED)) return null;
+  if (!(opts.width > 0) || !(opts.height > 0)) return null;
+  if (passesSoFar !== 0) return null;
+  if (params.enabled !== true || isCropIdentity(params)) return null;
+  if (!isGpuCropMethod(params.resampleMethod ?? 'bicubic')) return null;
+  const basic = modules.find((m) => m.getId() === 'basicadj');
+  if (basic && basic.isEnabled !== false) {
+    const dehaze = (basic.getParams?.() ?? {}).dehaze;
+    if (typeof dehaze === 'number' && Math.abs(dehaze) > 0.001) return null;
+  }
+  const geom = cropRenderGeometry(params as unknown as CropGeometryParams, opts.width, opts.height, !!opts.cropSuspended);
+  const cap = opts.maxTextureSize || 16384;
+  if (geom.outW > cap || geom.outH > cap) return null;
+  return cropPassDescriptor(geom);
+}
+
 // ── buildPassList ──────────────────────────────────────────────────────────────
 
 /**
@@ -748,6 +817,11 @@ export function enhanceResidentDescriptor(params: EnhanceParams, kernelScale: nu
 export function buildPassList(modules: MinimalModule[], opts?: BuildPassOpts): PassList {
   const passes: PassDescriptor[] = [];
   const cpuBridges: string[] = [];
+  // Render dims seen by each pass: a GPU crop geometry step (Task 10a) changes them for
+  // everything downstream (LA masks, enhance eligibility) — like the CPU crop mutating
+  // context.width/height.
+  let curW = opts?.width ?? 0;
+  let curH = opts?.height ?? 0;
 
   for (const module of modules) {
     const id = module.getId();
@@ -768,12 +842,24 @@ export function buildPassList(modules: MinimalModule[], opts?: BuildPassOpts): P
 
     const params: Record<string, unknown> = module.getParams?.() ?? {};
 
+    if (id === 'crop') {
+      const cropPass = buildCropPass(params, modules, passes.length, opts);
+      if (cropPass) {
+        passes.push(cropPass);
+        curW = cropPass.geometryStep!.geom.outW;
+        curH = cropPass.geometryStep!.geom.outH;
+      } else {
+        cpuBridges.push(id);
+      }
+      continue;
+    }
+
     if (id === 'localadjustments') {
       // GPU only when render dims are known (opts) AND every active layer is
       // GPU-representable (has basicAdj, a baked mask, no per-layer dehaze). Otherwise
       // the whole module runs on the CPU so no layer's effect is silently dropped.
       const laPass = opts
-        ? buildLocalAdjustmentsPass(params, opts.width, opts.height, opts.rebuildMask)
+        ? buildLocalAdjustmentsPass(params, curW, curH, opts.rebuildMask)
         : null;
       if (laPass) passes.push(laPass);
       else cpuBridges.push(id);
@@ -809,7 +895,7 @@ export function buildPassList(modules: MinimalModule[], opts?: BuildPassOpts): P
       if (
         active &&
         !gpuUnsafeModuleIds.has('enhance-resident') &&
-        enhanceResidentEligible(ep, kernelScale, opts?.width, opts?.height, opts?.maxTextureSize)
+        enhanceResidentEligible(ep, kernelScale, opts ? curW : undefined, opts ? curH : undefined, opts?.maxTextureSize)
       ) {
         passes.push(enhanceResidentDescriptor(ep, kernelScale));
       } else {

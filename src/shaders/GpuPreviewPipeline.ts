@@ -35,7 +35,10 @@ import {
   FRAG_DENOISE,
 } from './sources';
 import type { PassDescriptor, PassRuntime, SubPassTexture, MaskUpload } from './passDescriptors';
-import { buildPassList, buildLocalAdjustmentsPass, getGpuUnsafeModuleIds, nrPassDescriptor, enhanceResidentDescriptor } from './passDescriptors';
+import { buildPassList, buildLocalAdjustmentsPass, getGpuUnsafeModuleIds, nrPassDescriptor, enhanceResidentDescriptor, cropPassDescriptor } from './passDescriptors';
+import { FRAG_CROP } from './cropShader';
+import type { NormalizedCropRect } from '../modules/cropGeometry';
+import { CropModule } from '../modules/CropModule';
 import { ENHANCE_PROGRAM_SOURCES } from './enhance.frag';
 import { enhanceImage, DEFAULT_ENHANCE_PARAMS } from '../utils/enhanceChain';
 import type { EnhanceParams, EnhanceResult } from '../utils/enhanceChain';
@@ -64,6 +67,12 @@ export interface PreviewRenderResult {
    * the requested result and must not be presented as such.
    */
   failedSteps?: string[];
+  /**
+   * Present only when a GPU crop geometry step ran (Task 10a): the effective rendered rect,
+   * expanded-canvas normalised — the GPU twin of the CPU crop's cropFrameRect. width/height
+   * are then the crop's output dims.
+   */
+  frameRect?: NormalizedCropRect;
 }
 
 interface PingPong {
@@ -165,6 +174,8 @@ const PROGRAM_SOURCES: Record<string, string> = {
   layerblend: FRAG_LAYER_BLEND,
   // Noise Reduction: the SAME string WebGLImageProcessor's denoise uses → parity by construction.
   denoise: FRAG_DENOISE,
+  // Crop/straighten/orientation geometry step (Task 10a) — passes[0].geometryStep only.
+  crop: FRAG_CROP,
   // Resident enhance helpers (edge-mask global max on the GPU). Deliberately NOT in
   // ENHANCE_PROGRAM_SOURCES: that set's all-compiled loop gates the bake-time enhance chain.
   enh_edge_mag: FRAG_ENH_EDGE_MAG,
@@ -271,6 +282,11 @@ export class GpuPreviewPipeline {
 
   private srcTexture: WebGLTexture | null = null;
   private srcData: Float32Array | null = null;
+  /** Source texture dims (setSource). Kept apart from width/height: a crop geometry step
+   *  renders the chain — and the result — at its output dims. */
+  private srcWidth = 0;
+  private srcHeight = 0;
+  /** WORKING dims: the ping-pong FBOs, the chain, the resident result, readback/getSize. */
   private width = 0;
   private height = 0;
 
@@ -600,6 +616,8 @@ export class GpuPreviewPipeline {
     this.srcTexture = this.makeTexture(gl, width, height, data);
 
     this.srcData = data;
+    this.srcWidth = width;
+    this.srcHeight = height;
     this.width = width;
     this.height = height;
     this.resultTexture = this.srcTexture; // identity until render() runs
@@ -683,8 +701,38 @@ export class GpuPreviewPipeline {
     if (!gl) throw new Error('[GPU-PIPELINE] render called before a successful attach()');
     if (!this.srcTexture) throw new Error('[GPU-PIPELINE] render called before setSource()');
 
-    const width = this.width;
-    const height = this.height;
+    // ── Geometry step (Task 10a GPU crop) ──────────────────────────────────────
+    // Only valid at passes[0] (it reads the SOURCE texture, never the chain). It sets the
+    // working dims for the whole frame; without it (or if it cannot run) the frame works at
+    // the source dims. A geometry step that cannot run is reported, never silently dropped.
+    const failedSteps: string[] = [];
+    let geometryPass: PassDescriptor | null = null;
+    for (let i = 0; i < passes.length; i++) {
+      const step = passes[i].geometryStep;
+      if (!step) continue;
+      if (i !== 0) {
+        failedSteps.push(step.kind);
+      } else if (!this.programs.get(passes[i].programKey)) {
+        logger.warn(`[GPU-PIPELINE] no program for geometry step '${passes[i].id}' — frame stays at source dims`);
+        failedSteps.push(step.kind);
+      } else if (step.geom.inW !== this.srcWidth || step.geom.inH !== this.srcHeight) {
+        logger.warn(`[GPU-PIPELINE] geometry step built for ${step.geom.inW}x${step.geom.inH} != source ${this.srcWidth}x${this.srcHeight}`);
+        failedSteps.push(step.kind);
+      } else {
+        geometryPass = passes[i];
+      }
+    }
+    const geom = geometryPass?.geometryStep?.geom;
+    const width = geom ? geom.outW : this.srcWidth;
+    const height = geom ? geom.outH : this.srcHeight;
+    // Resize BEFORE recording the dims (ensureFramebuffers' no-op check reads this.width):
+    // a resize also drops the scratch FBO and the enhance pools (size-bound invariants).
+    this.ensureFramebuffers(gl, width, height);
+    this.width = width;
+    this.height = height;
+    const sized = (r: PreviewRenderResult): PreviewRenderResult => (geometryPass
+      ? { ...r, frameRect: geometryPass.geometryStep!.frameRect }
+      : r);
 
     // One PassRuntime per render. Dehaze is computed from the source pixels via the
     // shared single-source estimator on WebGLImageProcessor (no formula copy). The
@@ -698,7 +746,6 @@ export class GpuPreviewPipeline {
     // A frame without a resident enhance step frees its intermediate pools (VRAM is only
     // held while enhance is actually live in the preview chain).
     if (!passes.some((p) => p.residentStep)) this.freeEnhancePools(gl);
-    const failedSteps: string[] = [];
 
     // If there are no runnable passes, the result is the source itself.
     if (passes.length === 0) {
@@ -713,7 +760,27 @@ export class GpuPreviewPipeline {
     let idx = 0;
     let drew = false;
 
+    if (geometryPass) {
+      // srcTexture (srcWidth x srcHeight) -> ping[0] at the output dims.
+      const prog = this.programs.get(geometryPass.programKey)!;
+      const dst = this.ping[idx]!;
+      gl.bindFramebuffer(gl.FRAMEBUFFER, dst.framebuffer);
+      gl.viewport(0, 0, width, height);
+      gl.useProgram(prog);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, inputTexture);
+      gl.uniform1i(gl.getUniformLocation(prog, 'u_image'), 0);
+      geometryPass.setUniforms(gl, prog, rt);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      inputTexture = dst.texture;
+      idx = 1 - idx;
+      drew = true;
+    }
+
     for (const pass of passes) {
+      // Geometry steps were handled (or reported as failed) above.
+      if (pass.geometryStep) continue;
+
       // ── Multi-pass module step (subPasses) ──────────────────────────────────
       // Executed as one logical step: chainInput is preserved, intermediates go to
       // the scratch FBO, the net output becomes the chain texture for the next module.
@@ -798,8 +865,9 @@ export class GpuPreviewPipeline {
     gl.bindVertexArray(null);
 
     // If every pass was skipped (no matching program), fall back to the source.
+    // (A geometry step always draws, so a source fallback is only possible at source dims.)
     this.resultTexture = drew ? inputTexture : this.srcTexture;
-    return failedSteps.length > 0 ? { width, height, failedSteps } : { width, height };
+    return sized(failedSteps.length > 0 ? { width, height, failedSteps } : { width, height });
   }
 
   /**
@@ -1163,7 +1231,8 @@ export class GpuPreviewPipeline {
       return { active: false, hazeStrength: 0, hazeDivisor: 1 };
     }
     // Single source of truth: reuse WebGLImageProcessor's estimator (no formula copy).
-    return webGLImageProcessor.computeDehazeState(this.srcData, this.width, this.height, this.dehazeParam);
+    // srcData is the SOURCE buffer — its dims, not the (possibly cropped) working dims.
+    return webGLImageProcessor.computeDehazeState(this.srcData, this.srcWidth, this.srcHeight, this.dehazeParam);
   }
 
   /** Current render dimensions (set by setSource; 0 before first setSource call). */
@@ -1243,6 +1312,8 @@ export class GpuPreviewPipeline {
     // attach() wrap the NEW context it creates. No un-wrapping needed.
     this.rawGetUniformLocation = null;
     this.attached = false;
+    this.srcWidth = 0;
+    this.srcHeight = 0;
     this.width = 0;
     this.height = 0;
     this.presentFrames = 0;
@@ -2228,8 +2299,42 @@ export class GpuPreviewPipeline {
       const enhResOk = enhResMaxDiff < ENH_SHARPEN_EPS;
       logger.info(`[GPU-PIPELINE] enhance-resident self-test maxDiff=${enhResMaxDiff.toExponential(2)} (native=${enhResA.toExponential(2)} scale0.5=${enhResB.toExponential(2)} chained=${enhResC.toExponential(2)}) ${enhResOk ? 'PASS' : 'FAIL'}`);
 
-      const ok = basicAdjOk && exposureOk && shOk && hrOk && laOk && wbOk && tcOk && cbOk && vigOk && enhSharpenOk && enhUpOk && nrOk && enhResOk;
-      const maxDiff = Math.max(basicAdjMaxDiff, exposureMaxDiff, shMaxDiff, hrMaxDiff, laMaxDiff, wbMaxDiff, tcMaxDiff, cbMaxDiff, vigMaxDiff, enhSharpenMaxDiff, enhUpMaxDiff, nrMaxDiff, enhResMaxDiff);
+      // ── 14. crop geometry sub-test (Task 10a: GPU crop vs CropModule.process) ──
+      // 37x23 synthetic, 3.3 deg + orientation 90 + flipH, bicubic: exercises the un-orient /
+      // un-flip tap mapping, the fine rotation and Catmull-Rom with tap clamping, plus the
+      // size change (the frame renders at the crop's output dims). The descriptor is the
+      // SAME factory buildPassList uses, fed the module's render geometry (backstop included).
+      const cropW = 37, cropH = 23;
+      const cropData = new Float32Array(cropW * cropH * 4);
+      for (let yy = 0; yy < cropH; yy++) {
+        for (let xx = 0; xx < cropW; xx++) {
+          const i = (yy * cropW + xx) * 4;
+          cropData[i] = xx / cropW;
+          cropData[i + 1] = yy / cropH;
+          cropData[i + 2] = ((xx * 7 + yy * 3) % 11) / 11;
+          cropData[i + 3] = 1;
+        }
+      }
+      const cropModule = new CropModule();
+      cropModule.setParams({ enabled: true, angle: 3.3, orientation: 90, flipHorizontal: true, resampleMethod: 'bicubic' });
+      const cropGeom = cropModule.getRenderGeometry(cropW, cropH);
+      this.setSource(cropData, cropW, cropH);
+      const cropRes = this.render([cropPassDescriptor(cropGeom)]);
+      const gpuCrop = this.readback();
+      const refCrop = cropModule.process(new Float32Array(cropData), { width: cropW, height: cropH, channels: 4 });
+      const cropDimsOk = !cropRes.failedSteps &&
+        cropRes.width === cropGeom.outW && cropRes.height === cropGeom.outH &&
+        gpuCrop.length === refCrop.length && refCrop.length === cropGeom.outW * cropGeom.outH * 4;
+      let cropMaxDiff = Infinity;
+      if (cropDimsOk) {
+        cropMaxDiff = 0;
+        for (let i = 0; i < refCrop.length; i++) cropMaxDiff = Math.max(cropMaxDiff, Math.abs(gpuCrop[i] - refCrop[i]));
+      }
+      const cropOk = cropDimsOk && cropMaxDiff < 1e-3;
+      logger.info(`[GPU-PIPELINE] crop self-test ${cropRes.width}x${cropRes.height} (ref ${cropGeom.outW}x${cropGeom.outH}) maxDiff=${cropMaxDiff.toExponential(2)} ${cropOk ? 'PASS' : 'FAIL'}`);
+
+      const ok = basicAdjOk && exposureOk && shOk && hrOk && laOk && wbOk && tcOk && cbOk && vigOk && enhSharpenOk && enhUpOk && nrOk && enhResOk && cropOk;
+      const maxDiff = Math.max(basicAdjMaxDiff, exposureMaxDiff, shMaxDiff, hrMaxDiff, laMaxDiff, wbMaxDiff, tcMaxDiff, cbMaxDiff, vigMaxDiff, enhSharpenMaxDiff, enhUpMaxDiff, nrMaxDiff, enhResMaxDiff, cropMaxDiff);
 
       // Map each failed sub-test to the MODULE ID buildPassList uses, so a broken GPU shader
       // is routed to the CPU bridge (proven path) instead of corrupting the image (e.g. the
@@ -2255,6 +2360,8 @@ export class GpuPreviewPipeline {
       // honoured by buildPassList, NOT by runEnhanceChain (which gates on 'enhance' only).
       if (!nrOk) unsafe.push('noise-reduction');
       if (!enhResOk) unsafe.push('enhance-resident');
+      // GPU crop geometry step (buildPassList routes an unsafe 'crop' to the CPU bridge).
+      if (!cropOk) unsafe.push('crop');
 
       return { ok, maxDiff, unsafe };
     } catch (e) {
@@ -2264,7 +2371,7 @@ export class GpuPreviewPipeline {
       return {
         ok: false,
         maxDiff: Infinity,
-        unsafe: ['basicadj', 'exposure', 'shadowshighlights', 'highlightrecovery', 'localadjustments', 'temperature', 'tonecurve', 'colorbalance', 'lenscorrections', 'enhance', 'enhance-upscale', 'noise-reduction', 'enhance-resident'],
+        unsafe: ['basicadj', 'exposure', 'shadowshighlights', 'highlightrecovery', 'localadjustments', 'temperature', 'tonecurve', 'colorbalance', 'lenscorrections', 'enhance', 'enhance-upscale', 'noise-reduction', 'enhance-resident', 'crop'],
       };
     }
   }

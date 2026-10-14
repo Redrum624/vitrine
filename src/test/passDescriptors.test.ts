@@ -1,4 +1,4 @@
-import { buildPassList, buildLocalAdjustmentsPass, computeWBGains, GPU_MODULE_IDS, OPT_IN_GPU_MODULE_IDS, setGpuUnsafeModuleIds, getGpuUnsafeModuleIds, enhanceResidentEligible } from '../shaders/passDescriptors';
+import { buildPassList, buildLocalAdjustmentsPass, computeWBGains, GPU_MODULE_IDS, OPT_IN_GPU_MODULE_IDS, setGpuUnsafeModuleIds, getGpuUnsafeModuleIds, enhanceResidentEligible, GPU_CROP_ROUTE_ENABLED } from '../shaders/passDescriptors';
 import type { MaskUpload } from '../shaders/passDescriptors';
 import { nrStrengthToH } from '../utils/nrCurve';
 import { ENH_DENOISE_MAXR } from '../shaders/enhanceGpuLimits';
@@ -9,6 +9,8 @@ import { BasicAdjustmentsModule } from '../modules/BasicAdjustmentsModule';
 import { ToneCurvePipelineModule } from '../modules/ToneCurvePipelineModule';
 import { ExposureModule } from '../modules/ExposureModule';
 import { ShadowsHighlightsModule } from '../modules/ShadowsHighlightsModule';
+import { CropModule } from '../modules/CropModule';
+import { frameRectOf } from '../modules/cropGeometry';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -870,5 +872,100 @@ describe('NR + enhance resident passes', () => {
     const p = { ...DEFAULT_ENHANCE_PARAMS, enabled: true, psfSigma: 0, rlIters: 12 };
     expect(enhanceResidentEligible(p, 1, 1000, 1000)).toBe(true);
     expect(enhanceResidentEligible({ ...p, psfSigma: 8 }, 1, 1000, 1000)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v1.40.0 Task 10a — GPU crop/rotate/orientation pass
+// ---------------------------------------------------------------------------
+
+describe('GPU crop pass (Task 10a)', () => {
+  const cropView = (over: Record<string, unknown> = {}, isEnabled = true) => {
+    const m = new CropModule();
+    m.setParams({ enabled: true, angle: 2, orientation: 90, flipHorizontal: true, x: 0.1, y: 0.05, width: 0.8, height: 0.9, ...over } as never);
+    return { getId: () => 'crop', isEnabled, getParams: () => m.getParams() as Record<string, unknown>, module: m };
+  };
+  const basicView = (dehaze = 0) => ({
+    getId: () => 'basicadj', isEnabled: true,
+    getParams: () => ({ exposure: 0.2, dehaze } as Record<string, unknown>),
+  });
+  const GPU_OPTS = { width: 640, height: 480, gpuCrop: true };
+
+  afterEach(() => setGpuUnsafeModuleIds([]));
+
+  test('the GPU crop route is OFF by default (Task 10b flips GPU_CROP_ROUTE_ENABLED)', () => {
+    expect(GPU_CROP_ROUTE_ENABLED).toBe(false);
+    const { passes, cpuBridges } = buildPassList([cropView(), basicView()], { width: 640, height: 480 });
+    expect(passes.map((p) => p.id)).toEqual(['basicadj']);
+    expect(cpuBridges).toEqual(['crop']);
+  });
+
+  test('active crop -> passes[0] is the crop geometry step; cpuBridges excludes crop', () => {
+    const view = cropView();
+    const { passes, cpuBridges } = buildPassList([view, basicView()], GPU_OPTS);
+    expect(passes.map((p) => p.id)).toEqual(['crop', 'basicadj']);
+    expect(cpuBridges).not.toContain('crop');
+    const step = passes[0].geometryStep!;
+    expect(step.kind).toBe('crop');
+    // The SAME geometry the CPU module renders (backstop clamp included).
+    expect(step.geom).toEqual(view.module.getRenderGeometry(640, 480));
+    expect(step.frameRect).toEqual(frameRectOf(step.geom));
+  });
+
+  test('drag suspension mirrors CropModule: full-frame rect renders the whole expanded canvas', () => {
+    const view = cropView({ x: 0, y: 0, width: 1, height: 1 });
+    const susp = buildPassList([view], { ...GPU_OPTS, cropSuspended: true }).passes[0].geometryStep!;
+    expect(susp.geom).toEqual(view.module.getRenderGeometry(640, 480, true));
+    expect([susp.geom.outW, susp.geom.outH]).toEqual([susp.geom.expW, susp.geom.expH]);
+    const normal = buildPassList([view], GPU_OPTS).passes[0].geometryStep!;
+    expect(normal.geom).toEqual(view.module.getRenderGeometry(640, 480, false));
+    expect(normal.geom.outW).toBeLessThan(normal.geom.expW);
+  });
+
+  test('gpu-unsafe crop -> cpuBridge', () => {
+    setGpuUnsafeModuleIds(['crop']);
+    const { passes, cpuBridges } = buildPassList([cropView(), basicView()], GPU_OPTS);
+    expect(passes.map((p) => p.id)).toEqual(['basicadj']);
+    expect(cpuBridges).toEqual(['crop']);
+  });
+
+  test('basicadj dehaze != 0 -> crop cpuBridge (dehaze statistic reads pre-crop source)', () => {
+    const { passes, cpuBridges } = buildPassList([cropView(), basicView(0.3)], GPU_OPTS);
+    expect(passes.map((p) => p.id)).toEqual(['basicadj']);
+    expect(cpuBridges).toEqual(['crop']);
+  });
+
+  test('unsupported resample method -> cpuBridge', () => {
+    const { passes, cpuBridges } = buildPassList([cropView({ resampleMethod: 'lanczos' })], GPU_OPTS);
+    expect(passes).toHaveLength(0);
+    expect(cpuBridges).toEqual(['crop']);
+  });
+
+  test('no render dims, identity crop, disabled crop, or output over the texture cap -> no crop pass', () => {
+    expect(buildPassList([cropView()]).cpuBridges).toEqual(['crop']);
+    const identity = cropView({ angle: 0, orientation: 0, flipHorizontal: false, x: 0, y: 0, width: 1, height: 1 });
+    expect(buildPassList([identity], GPU_OPTS).passes).toHaveLength(0);
+    expect(buildPassList([cropView({ enabled: false })], GPU_OPTS).passes).toHaveLength(0);
+    expect(buildPassList([cropView({}, false)], GPU_OPTS).passes).toHaveLength(0);
+    expect(buildPassList([cropView()], { ...GPU_OPTS, maxTextureSize: 300 }).passes).toHaveLength(0);
+  });
+
+  test('a crop that is not first in the chain stays on the CPU', () => {
+    const { passes, cpuBridges } = buildPassList([basicView(), cropView()], GPU_OPTS);
+    expect(passes.map((p) => p.id)).toEqual(['basicadj']);
+    expect(cpuBridges).toEqual(['crop']);
+  });
+
+  test('downstream passes are built at the post-crop dims (local-adjustment masks)', () => {
+    const view = cropView();
+    const geom = view.module.getRenderGeometry(640, 480);
+    const rebuildMask = jest.fn((_id: string, w: number, h: number) => new Float32Array(w * h).fill(0.5));
+    const la = {
+      getId: () => 'localadjustments', isEnabled: true,
+      getParams: () => ({ layers: [{ id: 'L1', enabled: true, opacity: 1, basicAdj: { exposure: 0.3 }, mask: new Float32Array(640 * 480) }] }),
+    };
+    const { passes } = buildPassList([view, la], { ...GPU_OPTS, rebuildMask });
+    expect(passes.map((p) => p.id)).toEqual(['crop', 'localadjustments']);
+    expect(rebuildMask).toHaveBeenCalledWith('L1', geom.outW, geom.outH);
   });
 });
