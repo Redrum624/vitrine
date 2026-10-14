@@ -10,6 +10,9 @@ const { app, BrowserWindow, Menu, dialog, ipcMain, shell } = require('electron')
 // injects productName into the packaged manifest.
 app.setName('photo_app');
 
+const { createCloseGuard } = require('./closeGuard.cjs');
+const { createUpdater, registerUpdaterIpc } = require('./updater.cjs');
+
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -42,6 +45,18 @@ const RAW_FORMATS = [
 // Keep a global reference of the window objects
 let mainWindow;
 let splashWindow;
+
+// Self-update from GitHub Releases (electron/updater.cjs): created in
+// app.whenReady, started once the main window is shown, disposed on will-quit.
+let updater = null;
+
+// Lets the updater's "Restart and install now" through the async 'close'
+// handler below (see closeGuard.cjs). requestAppClose/performAppCleanup are
+// function declarations further down, hoisted.
+const closeGuard = createCloseGuard({
+  requestAppClose: () => requestAppClose(),
+  performAppCleanup: () => performAppCleanup(),
+});
 
 // Better development detection - check if dist/index.html exists for production mode
 const distPath = path.join(__dirname, '../dist/index.html');
@@ -94,6 +109,7 @@ function closeSplashAndShowMain() {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.maximize();
     mainWindow.show();
+    if (updater) updater.start();
   }
 
   if (splashWindow && !splashWindow.isDestroyed()) {
@@ -164,20 +180,7 @@ function createWindow() {
   });
 
   // Handle window close request
-  mainWindow.on('close', async (event) => {
-    event.preventDefault(); // Prevent immediate close
-
-    // Ask the renderer to prepare for closing
-    const shouldClose = await requestAppClose();
-
-    if (shouldClose) {
-      // Perform cleanup
-      await performAppCleanup();
-
-      // Actually close the window
-      mainWindow.destroy();
-    }
-  });
+  mainWindow.on('close', (event) => closeGuard.handleClose(mainWindow, event));
 
   // Emitted when the window is closed
   mainWindow.on('closed', () => {
@@ -1224,6 +1227,27 @@ ipcMain.handle('base-cache-write', async (event, filePath, options, payload) => 
 
 // App event handlers
 app.whenReady().then(() => {
+  updater = createUpdater({
+    // A getter: reading electron-updater's autoUpdater constructs it, and the
+    // disabled gates must never call into electron-updater.
+    get autoUpdater() {
+      return require('electron-updater').autoUpdater;
+    },
+    isPackaged: app.isPackaged,
+    isWindowsStore: process.windowsStore === true,
+    portableDir: process.env.PORTABLE_EXECUTABLE_DIR,
+    resourcesPath: process.resourcesPath,
+    fs: require('node:fs'),
+    dialog,
+    getWindow: () => (mainWindow && !mainWindow.isDestroyed() ? mainWindow : null),
+    confirmQuit: () => closeGuard.confirmQuit(),
+    disarmQuit: () => closeGuard.disarmQuit(),
+    logFile: path.join(app.getPath('userData'), 'logs', 'updater.log'),
+    productName: 'Vitrine',
+    currentVersion: app.getVersion(),
+  });
+  registerUpdaterIpc(ipcMain, updater);
+
   // Create splash screen first
   createSplashWindow();
 
@@ -1269,6 +1293,12 @@ app.whenReady().then(() => {
       setTimeout(() => createWindow(), 300);
     }
   });
+});
+
+// dispose() removes only the updater's own listeners (electron-updater's own
+// 'error' listener must stay).
+app.on('will-quit', () => {
+  if (updater) updater.dispose();
 });
 
 app.on('window-all-closed', () => {

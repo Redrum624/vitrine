@@ -35,3 +35,14 @@ describe('MenuBar — Help ("?") menu / About', () => {
     expect(window.electronAPI!.openExternalUrl).toHaveBeenCalledWith('https://github.com/Redrum624/vitrine');
   });
 });
+
+describe('MenuBar — Help menu / Check for Updates', () => {
+  it('shows Check for Updates… and calls electronAPI.checkForUpdates', () => {
+    const checkForUpdates = jest.fn().mockResolvedValue('up-to-date');
+    (window as unknown as { electronAPI: Record<string, unknown> }).electronAPI.checkForUpdates = checkForUpdates;
+    render(<MenuBar />);
+    fireEvent.click(screen.getByRole('button', { name: 'Help' }));
+    fireEvent.click(screen.getByText('Check for Updates…'));
+    expect(checkForUpdates).toHaveBeenCalledTimes(1);
+  });
+});

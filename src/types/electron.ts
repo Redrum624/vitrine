@@ -287,6 +287,8 @@ export interface ElectronAPI {
     arch: string;
   }>;
   openExternalUrl: (url: string) => Promise<boolean>;
+  /** Help > Check for Updates...: resolves to the updater state (e.g. 'up-to-date', 'disabled-portable'). */
+  checkForUpdates: () => Promise<string>;
   onSplashProgress: (callback: (data: { progress?: number; message?: string; error?: string }) => void) => void;
 
   // AI super-resolution upscale

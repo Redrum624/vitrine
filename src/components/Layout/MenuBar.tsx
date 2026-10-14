@@ -259,6 +259,7 @@ export function MenuBar({
       id: 'help', label: '?', ariaLabel: 'Help', items: [
         { label: 'Keyboard Shortcuts', shortcut: 'F1', onSelect: onWindowHelp },
         { label: 'View on GitHub', onSelect: () => openExternal('https://github.com/Redrum624/vitrine') },
+        { label: 'Check for Updates…', onSelect: () => { void window.electronAPI?.checkForUpdates?.(); } },
         'separator',
         { label: 'About Vitrine', onSelect: openAbout },
       ],
