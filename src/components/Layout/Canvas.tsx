@@ -90,6 +90,10 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
   const isProcessing = useAppStore((s) => s.isProcessing);
   const renderMode = useAppStore((s) => s.renderMode);
   const gpuResultVersion = useAppStore((s) => s.gpuResultVersion);
+  // v1.40.0 Task 10b: the resident GPU result's size + crop frame, published synchronously
+  // with each GPU render (a GPU crop changes the result dims). Preferred in gpu mode over
+  // processedImageData, whose histogram readback lags ~150 ms.
+  const gpuResultGeometry = useAppStore((s) => s.gpuResultGeometry);
   const setRenderMode = useAppStore((s) => s.setRenderMode);
   // Whether attach() succeeded on this canvas (WebGL2 present available). When false the
   // app behaves exactly as before: GL canvas stays hidden and renderMode is forced 'cpu'.
@@ -315,6 +319,16 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
             // Fall back to original image dimensions
             console.warn('Canvas: Cannot infer preview dimensions, using original image size');
           }
+        }
+      }
+
+      // GPU mode: the resident result IS what is displayed — size from its geometry
+      // (post-crop when the GPU crops; Task 10b), never from a lagging readback.
+      if (renderMode === 'gpu' && glAvailable) {
+        const gpuGeom = useAppStore.getState().gpuResultGeometry;
+        if (gpuGeom && gpuGeom.width > 0 && gpuGeom.height > 0) {
+          dataWidth = gpuGeom.width;
+          dataHeight = gpuGeom.height;
         }
       }
 
@@ -1319,9 +1333,19 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
                 : (isCropHandleDragging && preDragRectRef.current
                   ? { ...baseParams, ...preDragRectRef.current }
                   : baseParams);
-              const displayFrame = (processedImageData && typeof processedImageData === 'object' && 'frameRect' in processedImageData)
-                ? processedImageData.frameRect ?? null
-                : null;
+              // GPU mode (Task 10b): the frame + dims of the resident result on screen.
+              const gpuShown = renderMode === 'gpu' && glAvailable ? gpuResultGeometry : null;
+              const displayFrame = gpuShown
+                ? gpuShown.frameRect ?? null
+                : (processedImageData && typeof processedImageData === 'object' && 'frameRect' in processedImageData)
+                  ? processedImageData.frameRect ?? null
+                  : null;
+              const shownWidth = gpuShown
+                ? gpuShown.width
+                : (processedImageData && typeof processedImageData === 'object' && 'width' in processedImageData) ? processedImageData.width : (imageService.getCurrentImage()?.width || 0);
+              const shownHeight = gpuShown
+                ? gpuShown.height
+                : (processedImageData && typeof processedImageData === 'object' && 'height' in processedImageData) ? processedImageData.height : (imageService.getCurrentImage()?.height || 0);
               // Drag bounds = the whole expanded canvas (owner decision, Task 9b fix 1:
               // the suspended drag shows the WHOLE rotated photo, Lightroom-style). The
               // handles may go anywhere that stays wedge-free — clampRect (below) clamps
@@ -1332,8 +1356,8 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
               return (
               <>
                 <CropTransformOverlay
-                  imageWidth={(processedImageData && typeof processedImageData === 'object' && 'width' in processedImageData) ? processedImageData.width : (imageService.getCurrentImage()?.width || 0)}
-                  imageHeight={(processedImageData && typeof processedImageData === 'object' && 'height' in processedImageData) ? processedImageData.height : (imageService.getCurrentImage()?.height || 0)}
+                  imageWidth={shownWidth}
+                  imageHeight={shownHeight}
                   originalWidth={imageService.getCurrentImage()?.width || 0}
                   originalHeight={imageService.getCurrentImage()?.height || 0}
                   cropParams={displayParams}
@@ -1461,7 +1485,10 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
                       const s = Math.min(1, cap / Math.max(img.width, img.height));
                       const bw = Math.max(1, Math.round(img.width * s));
                       const bh = Math.max(1, Math.round(img.height * s));
-                      la.setLayerGeometry(layer.id, geom, bw, bh);
+                      // Masks apply AFTER crop (CPU and GPU alike), over the post-crop
+                      // frame the overlay is drawn on — bake at those dims (Task 10b).
+                      const baked = cropModule ? cropModule.getOutputDimensions(bw, bh) : { width: bw, height: bh };
+                      la.setLayerGeometry(layer.id, geom, baked.width, baked.height);
                     }
                     imageProcessingPipeline.invalidateModuleCache('localadjustments');
                     triggerReprocessing();

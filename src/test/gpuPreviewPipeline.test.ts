@@ -204,7 +204,9 @@ function mockGlCanvas(failShader?: RegExp) {
     texImage: [] as Array<{ tex: object; w: number; h: number }>,
     readPixels: [] as Array<[number, number]>,
     viewport: [] as Array<[number, number]>,
+    binds: [] as Array<{ unit: unknown; tex: object | null }>,
   };
+  let activeUnit: unknown = 'TEXTURE0';
   const shaderSrc = new Map<object, string>();
   let boundTex: object | null = null;
   const overrides: Record<string, (...a: unknown[]) => unknown> = {
@@ -216,7 +218,8 @@ function mockGlCanvas(failShader?: RegExp) {
     getAttribLocation: () => 0,
     getUniformLocation: (_p, name) => name,
     checkFramebufferStatus: () => 'FRAMEBUFFER_COMPLETE',
-    bindTexture: (_t, tex) => { boundTex = tex as object; },
+    activeTexture: (u) => { activeUnit = u; },
+    bindTexture: (_t, tex) => { boundTex = tex as object; log.binds.push({ unit: activeUnit, tex: tex as object | null }); },
     texImage2D: (...a) => { log.texImage.push({ tex: boundTex as object, w: a[3] as number, h: a[4] as number }); },
     readPixels: (...a) => { log.readPixels.push([a[2] as number, a[3] as number]); },
     viewport: (...a) => { log.viewport.push([a[2] as number, a[3] as number]); },
@@ -286,6 +289,29 @@ describe('geometry step: GPU crop resizes the working frame (Task 10a)', () => {
     pipeline.setSource(new Float32Array(W * H * 4), W, H);
     const res = pipeline.render([exposurePass, cropPassDescriptor(geomFor())]);
     expect(res).toEqual({ width: W, height: H, failedSteps: ['crop'] });
+  });
+
+  it('present() never pairs the uncropped source with a cropped result in the before/after split (Task 10b)', () => {
+    const { canvas, log } = mockGlCanvas();
+    const pipeline = new GpuPreviewPipeline();
+    expect(pipeline.attach(canvas)).toBe(true);
+    pipeline.setSource(new Float32Array(W * H * 4), W, H);
+    const lastBind = (unit: string) => [...log.binds].reverse().find((b) => b.unit === unit)?.tex;
+
+    // Cropped result: the "original" unit samples the result itself (same geometry), never
+    // the source texture (different dims and orientation -> misaligned split).
+    pipeline.render([cropPassDescriptor(geomFor()), exposurePass]);
+    log.binds.length = 0;
+    pipeline.present({ zoom: 1, panX: 0, panY: 0, splitX: 5 });
+    const result = lastBind('TEXTURE0');
+    expect(result).toBeTruthy();
+    expect(lastBind('TEXTURE1')).toBe(result);
+
+    // Uncropped result: the split keeps the source as the "before".
+    pipeline.render([exposurePass]);
+    log.binds.length = 0;
+    pipeline.present({ zoom: 1, panX: 0, panY: 0, splitX: 5 });
+    expect(lastBind('TEXTURE1')).not.toBe(lastBind('TEXTURE0'));
   });
 
   it('selfTest probes crop with the shared descriptor and gates it (incl. the catch-all)', () => {

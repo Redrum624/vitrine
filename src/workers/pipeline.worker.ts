@@ -66,8 +66,8 @@ interface ProcessTileMessage {
     tileHeight: number;
     tileX: number;
     tileY: number;
-    /** Full-image dimensions sent by the caller; unused here — tiles are processed
-     *  as standalone images (see NOTE below). */
+    /** Full-image dimensions sent by the caller. Tiles are processed as standalone images
+     *  (see NOTE below); these only become the context's PASS dims (size gates). */
     fullWidth?: number;
     fullHeight?: number;
     channels?: number;
@@ -101,13 +101,21 @@ async function runPipeline(
   config: WorkerModuleConfig[],
   edgeMaskGlobalMax?: number,
   kernelScale?: number,
+  passWidth?: number,
+  passHeight?: number,
 ): Promise<Float32Array> {
   pipeline.applyWorkerConfig(config);
   // edgeMaskGlobalMax rides on the context (undefined unless the tiled caller computed it) so the
   // enhance module's edgeMask normalises by the full-image max instead of this tile's local max.
   // kernelScale (C5) rides the same way: the FULL-pass processing/native ratio for the WYSIWYG
   // enhance kernel compensation — undefined → native semantics (scale 1).
-  const context: ProcessingContext = { width, height, channels, edgeMaskGlobalMax, kernelScale };
+  // inWorker: no WebGL here — modules gate their O(n^2) CPU fallbacks on it (v1.40.0 R4: NR's
+  // CPU denoise hung the worker past its timeout). passWidth/Height: the whole PASS (the full
+  // image for a tile), never the tile's padded dims.
+  const context: ProcessingContext = {
+    width, height, channels, edgeMaskGlobalMax, kernelScale,
+    inWorker: true, passWidth: passWidth ?? width, passHeight: passHeight ?? height,
+  };
   // useWebWorkers=false → CPU in-worker, NO nested workers (no recursion).
   return pipeline.processImage(data, context, { useWebWorkers: false });
 }
@@ -140,6 +148,10 @@ ctx.addEventListener('message', async (event: MessageEvent) => {
           kernelScale: imageData.kernelScale,
           // Task 9b fix 1: drag-suspension preview flag (never set by export passes).
           cropSuspended: imageData.cropSuspended,
+          // Task 10b (R4): worker context — no WebGL; the pass dims are the PRE-crop input dims.
+          inWorker: true,
+          passWidth: imageData.width,
+          passHeight: imageData.height,
         };
         pipeline.applyWorkerConfig(pipelineConfig);
         const result = await pipeline.processImage(imageData.data, context, { useWebWorkers: false });
@@ -164,7 +176,7 @@ ctx.addEventListener('message', async (event: MessageEvent) => {
 
       case 'PROCESS_TILE': {
         const startTime = performance.now();
-        const { tileData, tileWidth, tileHeight, tileX, tileY, channels, edgeMaskGlobalMax, kernelScale, pipeline: pipelineConfig } = msg.data;
+        const { tileData, tileWidth, tileHeight, tileX, tileY, channels, edgeMaskGlobalMax, kernelScale, fullWidth, fullHeight, pipeline: pipelineConfig } = msg.data;
         // Tiles are processed as standalone images. The caller (WebWorkerImageProcessor.processTile)
         // grows each tile by an APRON of neighbour pixels sized to the enabled modules' summed kernel
         // radius (spatialApron), so every INTERIOR pixel already has full kernel context here; the
@@ -174,10 +186,11 @@ ctx.addEventListener('message', async (event: MessageEvent) => {
         // geometric warps (lens distortion/perspective/CA, crop rotation — displacement scales with
         // image size). The enhance edgeMask's global `mmax` statistic IS handled — out-of-band via
         // edgeMaskGlobalMax on the ProcessingContext (threaded below), so it is not an apron gap.
-        // tileWidth/tileHeight are the PADDED dims; fullWidth/fullHeight remain informational only.
+        // tileWidth/tileHeight are the PADDED dims; fullWidth/fullHeight are the PASS dims (size gates).
         const resolvedChannels = channels ?? 4;
         const result = await runPipeline(
           tileData, tileWidth, tileHeight, resolvedChannels, pipelineConfig, edgeMaskGlobalMax, kernelScale,
+          fullWidth, fullHeight,
         );
         const processingTime = performance.now() - startTime;
         ctx.postMessage(

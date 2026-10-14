@@ -45,10 +45,20 @@ export interface TileProcessingResult extends ProcessingResult {
   tileHeight: number;
 }
 
+/** A message the worker has not answered within this window is abandoned: the worker is
+ *  terminated and replaced (v1.40.0 Task 10b — never hand a still-busy worker back to the pool). */
+export const WORKER_MESSAGE_TIMEOUT_MS = 30_000;
+/** How long a job waits for a free worker before failing (its caller then falls back to the
+ *  main thread). Two message timeouts: every busy worker either answers or is recycled within one. */
+export const WORKER_ACQUIRE_DEADLINE_MS = 2 * WORKER_MESSAGE_TIMEOUT_MS;
+
 export class WebWorkerImageProcessor {
   private static instance: WebWorkerImageProcessor;
   private workers: Worker[] = [];
   private availableWorkers: Worker[] = [];
+  // Jobs waiting for a free worker (FIFO). A released worker goes straight to the oldest
+  // waiter instead of the pool, so a waiter never polls.
+  private workerWaiters: Array<{ resolve: (w: Worker) => void; reject: (e: Error) => void }> = [];
   private isInitialized = false;
   // Sticky failure flag: once initialization fails (e.g. the worker bundle
   // crashed at module evaluation), do NOT retry on every frame — each retry
@@ -58,6 +68,8 @@ export class WebWorkerImageProcessor {
   private pendingMessages = new Map<number, {
     resolve: (value: unknown) => void;
     reject: (reason?: unknown) => void;
+    worker: Worker;
+    timer: ReturnType<typeof setTimeout>;
   }>();
 
   // Configuration - optimized for 30MP+ processing
@@ -131,11 +143,11 @@ export class WebWorkerImageProcessor {
       }
 
       this.pendingMessages.delete(id);
+      clearTimeout(pendingMessage.timer);
 
-      // Return worker to available pool
-      if (!this.availableWorkers.includes(worker)) {
-        this.availableWorkers.push(worker);
-      }
+      // Return worker to available pool (only a worker still in the pool — a recycled
+      // worker's late answer must never re-enter it).
+      if (this.workers.includes(worker)) this.releaseWorker(worker);
 
       switch (type) {
         case 'INITIALIZE_COMPLETE':
@@ -188,6 +200,7 @@ export class WebWorkerImageProcessor {
       // immediately instead of waiting out the 30s message timeout.
       const message = (error && (error as ErrorEvent).message) || 'Worker crashed';
       for (const [id, pending] of this.pendingMessages) {
+        clearTimeout(pending.timer);
         pending.reject(new Error(`Worker error: ${message}`));
         this.pendingMessages.delete(id);
       }
@@ -197,7 +210,6 @@ export class WebWorkerImageProcessor {
   private sendMessage(worker: Worker, type: string, data: unknown): Promise<unknown> {
     return new Promise((resolve, reject) => {
       const id = ++this.messageId;
-      this.pendingMessages.set(id, { resolve, reject });
 
       // Remove worker from available pool
       const workerIndex = this.availableWorkers.indexOf(worker);
@@ -205,29 +217,78 @@ export class WebWorkerImageProcessor {
         this.availableWorkers.splice(workerIndex, 1);
       }
 
+      // Safety timeout. The worker is still BUSY (a long synchronous pass cannot be
+      // interrupted), so it is terminated and replaced — returning it to the pool made every
+      // later job queue behind it for another full timeout (v1.40.0 R4 cascade).
+      const timer = setTimeout(() => {
+        if (!this.pendingMessages.has(id)) return;
+        this.pendingMessages.delete(id);
+        reject(new Error('Worker timeout'));
+        this.recycleWorker(worker, `no answer to ${type} within ${WORKER_MESSAGE_TIMEOUT_MS}ms`, type !== 'INITIALIZE');
+      }, WORKER_MESSAGE_TIMEOUT_MS);
+
+      this.pendingMessages.set(id, { resolve, reject, worker, timer });
       worker.postMessage({ type, id, data });
-
-      // Set timeout for safety
-      setTimeout(() => {
-        if (this.pendingMessages.has(id)) {
-          this.pendingMessages.delete(id);
-          reject(new Error('Worker timeout'));
-
-          // Return worker to pool on timeout
-          if (!this.availableWorkers.includes(worker)) {
-            this.availableWorkers.push(worker);
-          }
-        }
-      }, 30000); // 30 second timeout
     });
   }
 
-  private async getAvailableWorker(): Promise<Worker> {
-    // Wait for an available worker
-    while (this.availableWorkers.length === 0) {
-      await new Promise(resolve => setTimeout(resolve, 10));
+  /**
+   * Terminate a hung worker, drop it from the pool (and fail anything else it still owed),
+   * then spawn a replacement so the pool stays at maxWorkers. A replacement that itself
+   * hangs on INITIALIZE is not respawned again (no spawn loop).
+   */
+  private recycleWorker(worker: Worker, reason: string, respawn: boolean): void {
+    logger.warn(`Recycling pipeline worker: ${reason}`);
+    try { worker.terminate(); } catch { /* already dead */ }
+    this.workers = this.workers.filter((w) => w !== worker);
+    this.availableWorkers = this.availableWorkers.filter((w) => w !== worker);
+    for (const [id, pending] of this.pendingMessages) {
+      if (pending.worker !== worker) continue;
+      clearTimeout(pending.timer);
+      this.pendingMessages.delete(id);
+      pending.reject(new Error('Worker terminated'));
     }
-    return this.availableWorkers[0];
+    if (!respawn || !this.isInitialized) return;
+    void (async () => {
+      try {
+        const replacement = await createPipelineWorker();
+        // dispose() may have run meanwhile: never resurrect a disposed pool.
+        if (!this.isInitialized) { replacement.terminate(); return; }
+        this.setupWorkerEventHandlers(replacement);
+        this.workers.push(replacement);
+        // Pooled by the INITIALIZE_COMPLETE handler (sendMessage takes it out until then).
+        await this.sendMessage(replacement, 'INITIALIZE', {});
+        logger.info(`Replacement pipeline worker ready (${this.workers.length}/${this.maxWorkers})`);
+      } catch (error) {
+        logger.warn('Replacement pipeline worker failed to start:', error instanceof Error ? error.message : String(error));
+      }
+    })();
+  }
+
+  /** Hand a free worker to the oldest waiting job, or back to the pool. */
+  private releaseWorker(worker: Worker): void {
+    if (this.availableWorkers.includes(worker)) return;
+    const waiter = this.workerWaiters.shift();
+    if (waiter) waiter.resolve(worker);
+    else this.availableWorkers.push(worker);
+  }
+
+  /** Claim a free worker (removed from the pool at once, so two jobs never share one).
+   *  Fails after `deadlineMs` instead of waiting forever on an empty pool. */
+  private getAvailableWorker(deadlineMs = WORKER_ACQUIRE_DEADLINE_MS): Promise<Worker> {
+    const free = this.availableWorkers.shift();
+    if (free) return Promise.resolve(free);
+    return new Promise<Worker>((resolve, reject) => {
+      const waiter = {
+        resolve: (w: Worker) => { clearTimeout(timer); resolve(w); },
+        reject: (e: Error) => { clearTimeout(timer); reject(e); },
+      };
+      const timer = setTimeout(() => {
+        this.workerWaiters = this.workerWaiters.filter((x) => x !== waiter);
+        reject(new Error(`No worker available within ${deadlineMs}ms`));
+      }, deadlineMs);
+      this.workerWaiters.push(waiter);
+    });
   }
 
   async processImage(imageData: WorkerImageData, pipeline: WorkerModuleConfig[]): Promise<ProcessingResult> {
@@ -482,7 +543,8 @@ export class WebWorkerImageProcessor {
   dispose(): void {
     logger.info('Disposing Web Worker image processor...');
 
-    // Clear pending messages
+    // Clear pending messages (and their timeout timers)
+    for (const pending of this.pendingMessages.values()) clearTimeout(pending.timer);
     this.pendingMessages.clear();
 
     // Terminate workers
@@ -492,6 +554,8 @@ export class WebWorkerImageProcessor {
 
     this.workers = [];
     this.availableWorkers = [];
+    for (const waiter of this.workerWaiters) waiter.reject(new Error('Worker pool disposed'));
+    this.workerWaiters = [];
     this.isInitialized = false;
   }
 }

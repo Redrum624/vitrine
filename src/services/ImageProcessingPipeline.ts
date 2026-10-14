@@ -106,6 +106,14 @@ export interface ProcessingContext {
    *  is suspending the crop (the store's drag-suspension flag) — the crop module then renders the whole
    *  expanded canvas for a full-frame rect. Never set by export / bake / history / restore. */
   cropSuspended?: boolean;
+  /** v1.40.0 Task 10b (R4): this pass runs inside a pipeline Web Worker (no WebGL). Set ONLY by
+   *  pipeline.worker.ts. Modules gate their slow CPU-only fallbacks on it (NR's denoiseSync). */
+  inWorker?: boolean;
+  /** v1.40.0 Task 10b: the dims the PASS started at — before crop mutated width/height. Stamped
+   *  by processImage (or the worker entry: the full image for a tile). Size gates read these:
+   *  a post-crop 998x498 frame of a 1280x960 pass costs the whole pass, not 0.5 MP. */
+  passWidth?: number;
+  passHeight?: number;
 }
 
 /** Trailing options for {@link ImageProcessingPipeline.processImage}. Replaces the
@@ -558,6 +566,11 @@ export class ImageProcessingPipeline {
     options: ProcessImageOptions = {},
   ): Promise<Float32Array> {
     const { useWebWorkers = true, onProgress, cacheResults = true } = options;
+    // Task 10b: record the PASS dims before any module (crop) mutates context.width/height.
+    if (context.passWidth === undefined || context.passHeight === undefined) {
+      context.passWidth = context.width;
+      context.passHeight = context.height;
+    }
     const imageData = {
       width: context.width,
       height: context.height,

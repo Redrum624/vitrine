@@ -92,9 +92,7 @@ describe('routing decision (cpuBridges gate)', () => {
     expect(cpuBridges).toEqual([]);
   });
 
-  it('an active crop forces the cpu path (crop is a cpuBridge, never GPU)', () => {
-    // Crop is not in GPU_MODULE_IDS, so an enabled crop module lands in cpuBridges →
-    // cpuBridges.length !== 0 → AdjustmentPanel keeps renderMode = cpu.
+  it('an active crop without render dims is a cpuBridge (the GPU geometry step needs them)', () => {
     const cropView = {
       getId: () => 'crop',
       isEnabled: true,
@@ -103,6 +101,19 @@ describe('routing decision (cpuBridges gate)', () => {
     const { passes, cpuBridges } = buildPassList([cropView]);
     expect(passes).toEqual([]);
     expect(cpuBridges).toContain('crop');
+  });
+
+  it('an active crop WITH render dims is the GPU geometry step at passes[0] (Task 10b)', () => {
+    // AdjustmentPanel always passes the preview dims, so a cropped photo stays on the GPU.
+    const cropView = {
+      getId: () => 'crop',
+      isEnabled: true,
+      getParams: () => ({ enabled: true, x: 0.1, y: 0.1, width: 0.8, height: 0.8, angle: 2 }),
+    };
+    const { passes, cpuBridges } = buildPassList([cropView], { width: 640, height: 480 });
+    expect(passes.map((p) => p.id)).toEqual(['crop']);
+    expect(passes[0].geometryStep?.kind).toBe('crop');
+    expect(cpuBridges).not.toContain('crop');
   });
 
   it('local adjustments active forces the cpu path', () => {
@@ -187,7 +198,7 @@ describe('isModuleActive() + activeCpuBridges gate (faithful to the CPU processI
     expect(imageProcessingPipeline.isModuleActive('crop')).toBe(true);
   });
 
-  it('activating a CPU-only module (crop) makes it appear in the ACTIVE cpu bridges', () => {
+  it('activating crop with no render dims makes it appear in the ACTIVE cpu bridges', () => {
     const crop = imageProcessingPipeline.getModule<CropPipelineModule>('crop')!;
     crop.setCropRegion(0.1, 0.1, 0.8, 0.8); // enables crop with a non-identity region
     expect(imageProcessingPipeline.isModuleActive('crop')).toBe(true);

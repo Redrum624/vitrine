@@ -79,6 +79,15 @@ export function previewStateSignature(): string {
   );
 }
 
+/** Two crop frames (ProcessedImageData.frameRect) are the same; both absent = full frame. */
+function sameFrameRect(
+  a: { x: number; y: number; width: number; height: number } | undefined,
+  b: { x: number; y: number; width: number; height: number } | undefined,
+): boolean {
+  if (!a || !b) return !a && !b;
+  return a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
+}
+
 interface AdjustmentPanelProps {
   selectedModule?: string | null;
   // Required so tsc guarantees App threads its live selection down to the
@@ -127,9 +136,9 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
   // The whole point of the resident pipeline is to upload the source ONCE and then
   // re-run only the cheap GPU passes per slider tick. We re-upload setSource() ONLY
   // when the source identity changes (new image, or preview dims changed). Re-uploading
-  // every tick would defeat that win. Crop is handled by the CPU path (crop active ⇒
-  // it lands in cpuBridges ⇒ GPU mode is skipped), so the source here is always the
-  // raw decoded image downsampled to the preview — no crop baked in.
+  // every tick would defeat that win. The source is always the raw decoded image
+  // downsampled to the preview — no crop baked in: an active crop runs ON the GPU as the
+  // geometry step at passes[0] (Task 10b), which reads this uncropped source each frame.
   const lastGpuSourceKeyRef = useRef<string | null>(null);
   // ── Preview-source memo (downsample gating) ───────────────────────────────────
   // The area-averaged box downsample is O(source pixels) — ~50-150ms on a 24-45MP
@@ -387,9 +396,13 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
       // (Task 10) can bake/upload masks at the preview resolution. rebuildMask reuses the
       // module's OWN setLayerGeometry (no geometry→mask reimplementation) and returns the
       // freshly-baked mask for the layer, or null when the layer has no geometry.
+      // width/height are the PRE-crop source dims: buildPassList derives the post-crop dims
+      // itself (crop geometry step at passes[0]) and builds LA masks / enhance eligibility
+      // at those. cropSuspended: the 9b drag preview (whole expanded canvas while dragging).
       const { passes, cpuBridges } = buildPassList(orderedModules, {
         width: previewWidth,
         height: previewHeight,
+        cropSuspended,
         // Same kernelScale as the CPU contexts (never a second derivation) + GL texture cap
         // (0 pre-attach → buildPassList falls back to 16384).
         kernelScale,
@@ -414,9 +427,9 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
       logger.debug(`Preview route: ${previewPath} (${previewReason})`);
 
       if (previewPath === 'gpu') {
-        // Source identity: image path + preview dims. Crop never contributes here
-        // (active crop ⇒ activeCpuBridges non-empty ⇒ this branch is skipped), so the
-        // source is the raw downsampled image and only changes on image switch / dim change,
+        // Source identity: image path + preview dims. Crop never contributes here (the GPU
+        // crop reads the uncropped source every frame), so the source is the raw
+        // downsampled image and only changes on image switch / dim change,
         // OR when the base pixels are replaced in place at the same path+dims (a RAW
         // re-decode / flip) — baseImageVersion folds that in so we re-upload the new pixels.
         const baseImageVersion = useAppStore.getState().baseImageVersion;
@@ -436,26 +449,38 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
         gpuPreviewPipeline.setDehazeParam(basicAdjDehaze);
 
         const renderResult = gpuPreviewPipeline.render(passes);
-        if (renderResult?.failedSteps?.includes('enhance')) {
-          // Resident enhance failed at render time: mark it unsafe ONCE and re-run this frame,
-          // which now routes the enhance to the CPU bridge. The guard stops a second retry.
-          const unsafe = getGpuUnsafeModuleIds();
-          if (!unsafe.has('enhance-resident')) {
-            setGpuUnsafeModuleIds([...unsafe, 'enhance-resident']);
-            logger.warn('Resident enhance failed on GPU; marked enhance-resident unsafe, re-running frame on CPU');
-            // Past the 50ms rapid-fire throttle so the re-run is not dropped.
-            if (gpuRetryTimerRef.current) clearTimeout(gpuRetryTimerRef.current);
-            gpuRetryTimerRef.current = setTimeout(() => {
-              gpuRetryTimerRef.current = null;
-              useAppStore.getState().triggerReprocessing();
-            }, 60);
-            return;
-          }
+        // A GPU step that failed at render time (resident enhance / crop geometry): mark it
+        // unsafe ONCE and re-run this frame, which now routes that module to the CPU bridge
+        // (-> the CPU route). The guard stops a second retry. The failed frame is not shown.
+        const failed = renderResult?.failedSteps ?? [];
+        const unsafe = getGpuUnsafeModuleIds();
+        const newlyUnsafe = [
+          ...(failed.includes('enhance') && !unsafe.has('enhance-resident') ? ['enhance-resident'] : []),
+          ...(failed.includes('crop') && !unsafe.has('crop') ? ['crop'] : []),
+        ];
+        if (newlyUnsafe.length > 0) {
+          setGpuUnsafeModuleIds([...unsafe, ...newlyUnsafe]);
+          logger.warn(`GPU step(s) failed at render time; marked ${newlyUnsafe.join(', ')} unsafe, re-running frame on CPU`);
+          // Past the 50ms rapid-fire throttle so the re-run is not dropped.
+          if (gpuRetryTimerRef.current) clearTimeout(gpuRetryTimerRef.current);
+          gpuRetryTimerRef.current = setTimeout(() => {
+            gpuRetryTimerRef.current = null;
+            useAppStore.getState().triggerReprocessing();
+          }, 60);
+          return;
         }
+        // The RESULT geometry (Task 10b): a GPU crop makes the resident result post-crop sized
+        // (== CropModule.getOutputDimensions at the preview dims) and reports the frame it
+        // rendered. Never the pre-crop preview dims.
+        const resultWidth = renderResult?.width ?? previewWidth;
+        const resultHeight = renderResult?.height ?? previewHeight;
+        const resultFrameRect = renderResult?.frameRect;
         useAppStore.getState().setRenderMode('gpu');
-        useAppStore.getState().bumpGpuResult();
+        // Size + frame published synchronously with the bump: Canvas sizes the GL fit-rect
+        // from it instead of the ~150ms-lagged histogram readback.
+        useAppStore.getState().bumpGpuResult({ width: resultWidth, height: resultHeight, frameRect: resultFrameRect });
 
-        // Histogram stays live in gpu mode via a trailing, throttled GPU→CPU readback
+        // Histogram stays live in gpu mode via a trailing, throttled GPU->CPU readback
         // (~150ms). This does NOT gate the present path (which reads the resident texture
         // directly) — it only refreshes processedImageData for the histogram consumers.
         const publishReadback = () => {
@@ -463,10 +488,11 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
             const rb = gpuPreviewPipeline.readback();
             useAppStore.getState().setProcessedImageData({
               data: rb,
-              width: previewWidth,
-              height: previewHeight,
+              width: resultWidth,
+              height: resultHeight,
               isPreview: true,
-              // GPU route ⇒ crop is identity ⇒ the full frame is displayed (no frameRect).
+              // The crop frame this GPU result shows (absent: no crop ran, full frame).
+              frameRect: resultFrameRect,
             });
           } catch (e) {
             logger.warn('GPU histogram readback failed:', e instanceof Error ? e.message : String(e));
@@ -474,14 +500,15 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
         };
         if (gpuReadbackTimerRef.current) clearTimeout(gpuReadbackTimerRef.current);
         gpuReadbackTimerRef.current = null;
-        // Task 9b fix 2: when the GPU takes over from a frame of DIFFERENT geometry (a CPU
-        // crop frame → the full frame at a no-angle drag-start suspension), publish NOW:
+        // Task 9b fix 2: when the GPU result's geometry differs from the frame on screen (a
+        // crop apply / drag-start suspension / a CPU frame of other dims), publish NOW:
         // canvas sizing and the crop overlay/handles read processedImageData's dims and
         // frameRect, and a 150ms-late readback made the handles (and the GL fit-rect) jump.
         // Same-geometry GPU ticks (slider drags) keep the throttled readback.
         const shown = useAppStore.getState().processedImageData;
         const geometryChanged = !shown || shown instanceof Float32Array ||
-          shown.width !== previewWidth || shown.height !== previewHeight || !!shown.frameRect;
+          shown.width !== resultWidth || shown.height !== resultHeight ||
+          !sameFrameRect(shown.frameRect, resultFrameRect);
         if (geometryChanged) {
           publishReadback();
         } else {
@@ -501,7 +528,7 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
           active: pipelineStats.enabledModules,
           total: pipelineStats.moduleCount,
         });
-        logger.debug(`GPU preview render completed in ${processTime.toFixed(2)}ms (${passes.length} passes), size: ${previewWidth}x${previewHeight}`);
+        logger.debug(`GPU preview render completed in ${processTime.toFixed(2)}ms (${passes.length} passes), size: ${resultWidth}x${resultHeight}`);
         return; // GL canvas presents from the resident result — skip the CPU blit path.
       }
 

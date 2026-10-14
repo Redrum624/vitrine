@@ -749,12 +749,12 @@ export function enhanceResidentDescriptor(params: EnhanceParams, kernelScale: nu
 // ── GPU crop (Task 10a) ───────────────────────────────────────────────────────
 
 /**
- * Master switch for routing an active crop to the GPU geometry step. OFF until Task 10b
- * wires the output-dim consumers (AdjustmentPanel GPU branch publishes source dims and no
- * frameRect today; Canvas sizing / before-after split assume an uncropped resident result).
- * Task 10b flips this to true. BuildPassOpts.gpuCrop overrides it.
+ * Master switch for routing an active crop to the GPU geometry step. ON since Task 10b:
+ * AdjustmentPanel publishes the render's post-crop dims + frameRect, Canvas sizes from them,
+ * and failedSteps ['crop'] marks the crop GPU-unsafe for the session. BuildPassOpts.gpuCrop
+ * overrides it (tests).
  */
-export const GPU_CROP_ROUTE_ENABLED = false;
+export const GPU_CROP_ROUTE_ENABLED = true;
 
 /** Crop geometry pass (single source for buildPassList AND the selfTest probe). */
 export function cropPassDescriptor(geom: CropGeometry): PassDescriptor {

@@ -307,6 +307,9 @@ export class GpuPreviewPipeline {
 
   // The output texture of the most recent render() (NOT read back).
   private resultTexture: WebGLTexture | null = null;
+  /** The resident result went through a geometry step (GPU crop): its pixels no longer line
+   *  up with srcTexture, so present()'s before/after split must not sample the source. */
+  private resultHasGeometry = false;
 
   // Cache of uploaded LUT textures, keyed by Float32Array identity. Re-uploaded
   // only when the LUT array reference changes.
@@ -621,6 +624,7 @@ export class GpuPreviewPipeline {
     this.width = width;
     this.height = height;
     this.resultTexture = this.srcTexture; // identity until render() runs
+    this.resultHasGeometry = false;
 
     // Diagnostic: confirm the uploaded buffer is real image data (not all-zero / wrong
     // length / a single-channel ramp), which would explain a red/garbage present.
@@ -748,6 +752,7 @@ export class GpuPreviewPipeline {
     if (!passes.some((p) => p.residentStep)) this.freeEnhancePools(gl);
 
     // If there are no runnable passes, the result is the source itself.
+    this.resultHasGeometry = false;
     if (passes.length === 0) {
       this.resultTexture = this.srcTexture;
       return { width, height };
@@ -867,6 +872,7 @@ export class GpuPreviewPipeline {
     // If every pass was skipped (no matching program), fall back to the source.
     // (A geometry step always draws, so a source fallback is only possible at source dims.)
     this.resultTexture = drew ? inputTexture : this.srcTexture;
+    this.resultHasGeometry = !!geometryPass;
     return sized(failedSteps.length > 0 ? { width, height, failedSteps } : { width, height });
   }
 
@@ -1305,6 +1311,7 @@ export class GpuPreviewPipeline {
     this.srcTexture = null;
     this.srcData = null;
     this.resultTexture = null;
+    this.resultHasGeometry = false;
     this.vao = null;
     this.quadBuffer = null;
     this.gl = null;
@@ -1349,6 +1356,7 @@ export class GpuPreviewPipeline {
    *
    * Before/after split: fragments with canvas-pixel x < splitX sample srcTexture
    * (original); others sample resultTexture (processed). Pass splitX < 0 to disable.
+   * A GPU-cropped result never pairs with the uncropped source (see the unit-1 bind).
    */
   present(opts: {
     zoom: number;
@@ -1463,8 +1471,12 @@ export class GpuPreviewPipeline {
 
     // Bind source/original → unit 1 (u_original); fall back to resultTexture if no
     // source is available (split will show the same image on both sides, harmless).
+    // A geometry-stepped (GPU-cropped) result has other dims/orientation than the source:
+    // sampling the source at the same uv would show a misaligned "before" (Task 10b), so the
+    // split then shows the result on both sides. (Canvas passes splitX -1 anyway: the
+    // before/after view is the dedicated OriginalPane.)
     gl.activeTexture(gl.TEXTURE1);
-    gl.bindTexture(gl.TEXTURE_2D, this.srcTexture ?? this.resultTexture);
+    gl.bindTexture(gl.TEXTURE_2D, this.resultHasGeometry ? this.resultTexture : (this.srcTexture ?? this.resultTexture));
     gl.uniform1i(this.presentUniforms.u_original, 1);
 
     // Before/after split: pass canvas-pixel x, or -1 to disable.

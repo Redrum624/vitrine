@@ -59,6 +59,7 @@ jest.mock('../shaders/GpuPreviewPipeline', () => ({
 }));
 
 import { Canvas } from '../components/Layout/Canvas';
+import { gpuPreviewPipeline } from '../shaders/GpuPreviewPipeline';
 import { useAppStore } from '../stores/appStore';
 import { FULL_FRAME } from '../components/Canvas/cropFrameMapping';
 
@@ -113,6 +114,32 @@ describe('Canvas crop wiring (Task 9b)', () => {
     expect(captured.overlay?.displayFrame).toBe(frame);
     expect(captured.handles?.displayFrame).toBe(frame);
     expect(captured.handles?.boundsRect).toBe(FULL_FRAME);
+  });
+
+  test('gpu mode (Task 10b): overlay + fit come from the synchronously published GPU result geometry', async () => {
+    (gpuPreviewPipeline.attach as jest.Mock).mockReturnValue(true);
+    try {
+      await mount();
+      // A stale readback frame of other dims/frame is still in processedImageData...
+      await act(async () => {
+        useAppStore.getState().setProcessedImageData({
+          data: new Float32Array(64 * 48 * 4), width: 64, height: 48, isPreview: true, frameRect: { x: 0, y: 0, width: 1, height: 1 },
+        });
+      });
+      // ...when a GPU crop render lands: 60x30 post-crop result, frame F.
+      const frame = { x: 0.2, y: 0.1, width: 0.5, height: 0.4 };
+      await act(async () => {
+        useAppStore.getState().setRenderMode('gpu');
+        useAppStore.getState().bumpGpuResult({ width: 60, height: 30, frameRect: frame });
+      });
+      expect(captured.overlay?.displayFrame).toBe(frame);
+      expect(captured.handles?.displayFrame).toBe(frame);
+      expect([captured.overlay?.imageWidth, captured.overlay?.imageHeight]).toEqual([60, 30]);
+      // Fit-rect from the 2:1 GPU result in the 1000x800 region (not the stale 4:3 readback).
+      expect(useAppStore.getState().mainCanvasFit).toEqual({ width: 1000, height: 500 });
+    } finally {
+      (gpuPreviewPipeline.attach as jest.Mock).mockReturnValue(false);
+    }
   });
 
   test('drag start suspends (flag + one trigger); release clears the flag, supersedes and applies', async () => {

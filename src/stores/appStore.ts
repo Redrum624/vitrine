@@ -104,7 +104,11 @@ interface AppStore extends AppState {
   setRenderMode: (mode: RenderMode) => void;
   // Bumped every time a GPU render completes so the Canvas re-presents the new result.
   gpuResultVersion: number;
-  bumpGpuResult: () => void;
+  // v1.40.0 Task 10b: the resident GPU result's size + the crop frame it shows, published
+  // SYNCHRONOUSLY with the bump (the histogram readback lags ~150 ms). A GPU crop changes the
+  // result dims, so Canvas sizing / overlays read this in gpu mode. null before a GPU frame.
+  gpuResultGeometry: { width: number; height: number; frameRect?: { x: number; y: number; width: number; height: number } } | null;
+  bumpGpuResult: (geometry?: { width: number; height: number; frameRect?: { x: number; y: number; width: number; height: number } }) => void;
   // Bumped when the working BASE image pixels are replaced in place (RAW re-decode,
   // upscale, rotate/flip). Path AND dimensions can stay the same across such a swap
   // (a re-decode changes neither), so consumers that key a cache off path+dims — e.g.
@@ -231,6 +235,7 @@ export const useAppStore = create<AppStore>((set) => ({
   developing: false,
   renderMode: 'cpu',
   gpuResultVersion: 0,
+  gpuResultGeometry: null,
   baseImageVersion: 0,
   originalSnapshotVersion: 0,
   alignmentAxisX: null,
@@ -294,7 +299,9 @@ export const useAppStore = create<AppStore>((set) => ({
 
   setRenderMode: (mode) => set({ renderMode: mode }),
 
-  bumpGpuResult: () => set((state) => ({ gpuResultVersion: state.gpuResultVersion + 1 })),
+  bumpGpuResult: (geometry) => set((state) => (geometry
+    ? { gpuResultVersion: state.gpuResultVersion + 1, gpuResultGeometry: geometry }
+    : { gpuResultVersion: state.gpuResultVersion + 1 })),
 
   bumpBaseImageVersion: () => set((state) => ({ baseImageVersion: state.baseImageVersion + 1 })),
 

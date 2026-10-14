@@ -893,11 +893,14 @@ describe('GPU crop pass (Task 10a)', () => {
 
   afterEach(() => setGpuUnsafeModuleIds([]));
 
-  test('the GPU crop route is OFF by default (Task 10b flips GPU_CROP_ROUTE_ENABLED)', () => {
-    expect(GPU_CROP_ROUTE_ENABLED).toBe(false);
-    const { passes, cpuBridges } = buildPassList([cropView(), basicView()], { width: 640, height: 480 });
-    expect(passes.map((p) => p.id)).toEqual(['basicadj']);
-    expect(cpuBridges).toEqual(['crop']);
+  test('the GPU crop route is ON by default (Task 10b); gpuCrop:false still forces the CPU bridge', () => {
+    expect(GPU_CROP_ROUTE_ENABLED).toBe(true);
+    const on = buildPassList([cropView(), basicView()], { width: 640, height: 480 });
+    expect(on.passes.map((p) => p.id)).toEqual(['crop', 'basicadj']);
+    expect(on.cpuBridges).toEqual([]);
+    const off = buildPassList([cropView(), basicView()], { width: 640, height: 480, gpuCrop: false });
+    expect(off.passes.map((p) => p.id)).toEqual(['basicadj']);
+    expect(off.cpuBridges).toEqual(['crop']);
   });
 
   test('active crop -> passes[0] is the crop geometry step; cpuBridges excludes crop', () => {
