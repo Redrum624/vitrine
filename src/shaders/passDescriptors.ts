@@ -713,6 +713,25 @@ export function enhanceResidentEligible(
   return true;
 }
 
+/** Resident NR pass (single source for buildPassList AND the selfTest probe). */
+export function nrPassDescriptor(strength: number): PassDescriptor {
+  return {
+    id: 'noise-reduction',
+    programKey: 'denoise',
+    setUniforms: (gl, prog, rt) => denoiseUniforms(rt.width, rt.height, strength)(gl, prog),
+  };
+}
+
+/** Resident enhance-sharpen pass (single source for buildPassList AND the selfTest probe). */
+export function enhanceResidentDescriptor(params: EnhanceParams, kernelScale: number): PassDescriptor {
+  return {
+    id: 'enhance',
+    programKey: 'enhance:resident', // ignored — residentStep present
+    setUniforms: () => undefined,
+    residentStep: { kind: 'enhance', params, kernelScale },
+  };
+}
+
 // ── buildPassList ──────────────────────────────────────────────────────────────
 
 /**
@@ -776,12 +795,7 @@ export function buildPassList(modules: MinimalModule[], opts?: BuildPassOpts): P
       // Only an explicitly enabled NR is a GPU pass; strength -> h goes through denoiseUniforms
       // (nrStrengthToH), never inline.
       if (params.enabled === true && typeof params.strength === 'number') {
-        const strength = params.strength;
-        passes.push({
-          id: 'noise-reduction',
-          programKey: 'denoise',
-          setUniforms: (gl, prog, rt) => denoiseUniforms(rt.width, rt.height, strength)(gl, prog),
-        });
+        passes.push(nrPassDescriptor(params.strength));
       } else {
         cpuBridges.push(id);
       }
@@ -797,12 +811,7 @@ export function buildPassList(modules: MinimalModule[], opts?: BuildPassOpts): P
         !gpuUnsafeModuleIds.has('enhance-resident') &&
         enhanceResidentEligible(ep, kernelScale, opts?.width, opts?.height, opts?.maxTextureSize)
       ) {
-        passes.push({
-          id: 'enhance',
-          programKey: 'enhance:resident', // ignored — residentStep present
-          setUniforms: () => undefined,
-          residentStep: { kind: 'enhance', params: ep, kernelScale },
-        });
+        passes.push(enhanceResidentDescriptor(ep, kernelScale));
       } else {
         cpuBridges.push(id);
       }

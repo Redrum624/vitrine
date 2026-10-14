@@ -35,14 +35,14 @@ import {
   FRAG_DENOISE,
 } from './sources';
 import type { PassDescriptor, PassRuntime, SubPassTexture, MaskUpload } from './passDescriptors';
-import { buildPassList, buildLocalAdjustmentsPass, getGpuUnsafeModuleIds } from './passDescriptors';
+import { buildPassList, buildLocalAdjustmentsPass, getGpuUnsafeModuleIds, nrPassDescriptor, enhanceResidentDescriptor } from './passDescriptors';
 import { ENHANCE_PROGRAM_SOURCES } from './enhance.frag';
 import { enhanceImage, DEFAULT_ENHANCE_PARAMS } from '../utils/enhanceChain';
 import type { EnhanceParams, EnhanceResult } from '../utils/enhanceChain';
 import { casPeak, effectiveEnhanceKernels } from '../utils/enhanceOps';
 import { MAX_GPU_ENHANCE_OUTPUT_PIXELS, ENH_GAUSS_MAXR, ENH_DENOISE_MAXR } from './enhanceGpuLimits';
 import { computeGlobalEdgeMax } from '../utils/enhanceOps';
-import { basicAdjUniforms, exposureUniforms, shadowsHighlightsUniforms, highlightRecoveryUniforms, gainsUniforms, colorBalanceUniforms, vignetteUniforms, denoiseUniforms } from './uniforms';
+import { basicAdjUniforms, exposureUniforms, shadowsHighlightsUniforms, highlightRecoveryUniforms, gainsUniforms, colorBalanceUniforms, vignetteUniforms } from './uniforms';
 import type { ShadowsHighlightsUniformParams } from './uniforms';
 import { recoverHighlights } from '../modules/HighlightRecoveryModule';
 import type { DehazeState } from '../services/WebGLImageProcessor';
@@ -2164,12 +2164,8 @@ export class GpuPreviewPipeline {
         }
       }
       const nrStrength = 50;
-      const nrPass: PassDescriptor = {
-        id: 'noise-reduction',
-        programKey: 'denoise',
-        setUniforms: (gl, prog, rt) => denoiseUniforms(rt.width, rt.height, nrStrength)(gl, prog),
-      };
-      let nrMaxDiff = Infinity, nrOk = false;
+      const nrPass = nrPassDescriptor(nrStrength);
+      let nrMaxDiff = Infinity, nrEffect = 0, nrOk = false;
       this.setSource(nrData, enhW, enhH);
       this.render([nrPass]);
       const gpuNr = this.readback();
@@ -2178,10 +2174,15 @@ export class GpuPreviewPipeline {
         logger.warn('[GPU-PIPELINE] noise-reduction self-test: CPU reference returned null');
       } else {
         nrMaxDiff = 0;
-        for (let i = 0; i < refNr.length; i++) nrMaxDiff = Math.max(nrMaxDiff, Math.abs(gpuNr[i] - refNr[i]));
-        nrOk = nrMaxDiff < 1e-4;
+        for (let i = 0; i < refNr.length; i++) {
+          nrMaxDiff = Math.max(nrMaxDiff, Math.abs(gpuNr[i] - refNr[i]));
+          nrEffect = Math.max(nrEffect, Math.abs(nrData[i] - refNr[i]));
+        }
+        // A skipped 'denoise' pass would leave the noisy fixture untouched; require the
+        // reference to actually differ from the input so that cannot PASS.
+        nrOk = nrMaxDiff < 1e-4 && nrEffect > 1e-4;
       }
-      logger.info(`[GPU-PIPELINE] noise-reduction self-test maxDiff=${nrMaxDiff.toExponential(2)} ${nrOk ? 'PASS' : 'FAIL'}`);
+      logger.info(`[GPU-PIPELINE] noise-reduction self-test maxDiff=${nrMaxDiff.toExponential(2)} effect=${nrEffect.toExponential(2)} ${nrOk ? 'PASS' : 'FAIL'}`);
 
       // ── 13. enhance-resident sub-test (in-chain residentStep vs CPU enhanceImage) ──
       // (a) native, (b) kernelScale 0.5, (c) [+1 EV exposure, enhance] — proves the edge max
@@ -2201,12 +2202,7 @@ export class GpuPreviewPipeline {
         for (let i = 0; i < ref.enhanced.length; i++) m = Math.max(m, Math.abs(gpu[i] - ref.enhanced[i]));
         return m;
       };
-      const mkEnhResPass = (kernelScale: number): PassDescriptor => ({
-        id: 'enhance',
-        programKey: 'enhance:resident', // ignored — residentStep present
-        setUniforms: () => undefined,
-        residentStep: { kind: 'enhance', params: enhBaseParams, kernelScale },
-      });
+      const mkEnhResPass = (kernelScale: number): PassDescriptor => enhanceResidentDescriptor(enhBaseParams, kernelScale);
       const exposure1EvPass: PassDescriptor = {
         id: 'exposure',
         programKey: 'exposure',

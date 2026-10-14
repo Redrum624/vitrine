@@ -164,7 +164,7 @@ describe('self-test gates noise-reduction + enhance-resident (v1.40.0 Task 3)', 
     expect(b).toBeGreaterThan(a);
     const nr = st.slice(a, b);
     expect(nr).toContain('webGLImageProcessor.denoise(');
-    expect(nr).toContain("id: 'noise-reduction'");
+    expect(nr).toContain('nrPassDescriptor(');
     expect(nr).toContain('1e-4');
     expect(nr).toMatch(/!refNr|refNr\s*===\s*null|refNr\s*\?/);
   });
@@ -187,7 +187,21 @@ describe('self-test gates noise-reduction + enhance-resident (v1.40.0 Task 3)', 
   it('runEnhanceChain still gates on enhance / enhance-upscale only', () => {
     const start = lf.indexOf('runEnhanceChain(');
     const body = lf.slice(start, start + 3000);
+    // Positive anchor: the window really is the gate body (so the negative below can fail).
+    expect(start).toBeGreaterThan(-1);
+    expect(body).toContain("unsafeIds.has('enhance')");
     expect(body).not.toContain('enhance-resident');
+    // And enhance-resident is consumed only by buildPassList, never by GpuPreviewPipeline gates.
+    expect(lf.replace(/\/\/.*$/gm, '')).not.toMatch(/unsafeIds\.has\('enhance-resident'\)/);
+  });
+
+  it('probe uses the shared descriptor factories and requires the NR reference to differ from the input', () => {
+    expect(st).toContain('nrPassDescriptor(nrStrength)');
+    expect(st).toContain('enhanceResidentDescriptor(enhBaseParams, kernelScale)');
+    expect(st).toContain('nrEffect > 1e-4');
+    const pd = readFileSync(join(__dirname, '..', 'shaders', 'passDescriptors.ts'), 'utf8');
+    expect(pd).toContain('passes.push(nrPassDescriptor(params.strength))');
+    expect(pd).toContain('passes.push(enhanceResidentDescriptor(ep, kernelScale))');
   });
 });
 
