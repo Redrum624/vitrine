@@ -71,7 +71,7 @@ async function stage(name, fn) {
       const grab = async (name) => { const f = path.join(OUT, `sp-${name}.png`); await win.screenshot({ path: f, timeout: 120000, clip: { x: 500, y: 250, width: 800, height: 450 } }); return f; };
       const diff = async (a, b) => { const A = await sharp(a).removeAlpha().raw().toBuffer(); const B = await sharp(b).removeAlpha().raw().toBuffer(); let x = 0; for (let i = 0; i < A.length; i++) x += Math.abs(A[i] - B[i]); return +(x / A.length).toFixed(4); };
       const off = await grab('off');
-      let n0 = logSize();
+      logSize();
       await stage('sp-sharpen-tile-on', async () => { await tiles.Sharpen.click(); await delay(4000); });
       const on = await grab('on');
       console.log('SP tile on diff', await diff(off, on), 'tilepressed', await tiles.Sharpen.getAttribute('aria-pressed'));
