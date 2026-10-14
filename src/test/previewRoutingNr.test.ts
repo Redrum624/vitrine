@@ -20,7 +20,7 @@ describe('choosePreviewRoute NR guard', () => {
     expect(choosePreviewRoute({ ...base })).toEqual({ path: 'worker', reason: 'worker' });
   });
   it('NR active + unhealthy workers -> main', () => {
-    expect(choosePreviewRoute({ ...base, nrActive: true, workersHealthy: false }).path).toBe('main');
+    expect(choosePreviewRoute({ ...base, nrActive: true, workersHealthy: false })).toEqual({ path: 'main', reason: 'nr-needs-renderer-gpu' });
   });
   it('non-NR reasons', () => {
     expect(choosePreviewRoute({ ...base, workersHealthy: false })).toEqual({ path: 'main', reason: 'workers-unhealthy' });

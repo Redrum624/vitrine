@@ -329,13 +329,19 @@ describe('kernelScale threading — source pins (jsdom cannot boot real workers/
     expect(hits.length).toBeGreaterThanOrEqual(3);
   });
 
-  it('AdjustmentPanel: buildPassList opts carry the SAME kernelScale (resident enhance parity) and maxTextureSize', () => {
-    const src = read('../components/Panels/AdjustmentPanel.tsx');
-    const m = src.match(/buildPassList\(orderedModules,\s*\{[\s\S]*?rebuildMask/);
-    expect(m).not.toBeNull();
-    expect(m![0]).toMatch(/kernelScale/);
-    expect(m![0]).toMatch(/maxTextureSize/);
-    expect((src.match(/enhanceKernelScale\(/g) ?? []).length).toBe(1);
+  it('AdjustmentPanel: buildPassList opts pass the SAME kernelScale variable as the CPU context, plus maxTextureSize', () => {
+    // Strip comments so a mention in prose can never satisfy the pin.
+    const src = read('../components/Panels/AdjustmentPanel.tsx')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/^\s*\/\/.*$/gm, '');
+    const opts = src.match(/buildPassList\(orderedModules,\s*\{([\s\S]*?)rebuildMask/);
+    expect(opts).not.toBeNull();
+    // Shorthand `kernelScale,` only: `kernelScale: 1` (or any other expression) fails.
+    expect(opts![1]).toMatch(/^\s*kernelScale,\s*$/m);
+    expect(opts![1]).toMatch(/maxTextureSize:\s*gpuPreviewPipeline\.getMaxTextureSize\(\)/);
+    // That identifier is the single enhanceKernelScale() derivation, also used by the CPU context.
+    expect((src.match(/const kernelScale = enhanceKernelScale\(/g) ?? []).length).toBe(1);
+    expect(src).toMatch(/const processingContext = \{[^}]*\bkernelScale\b[^}]*\}/);
   });
 
   it('tiled apron stays sized from NATIVE params — the C5 preview scaling must never shrink it', () => {

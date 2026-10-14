@@ -102,6 +102,8 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
   // Trailing throttle for the GPU→CPU histogram readback (keeps the histogram live in
   // gpu mode without blocking the present path). Cleared on unmount.
   const gpuReadbackTimerRef = useRef<NodeJS.Timeout | null>(null);
+  // Pending re-run after a resident-enhance render failure (cleared on unmount).
+  const gpuRetryTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Connect the processing pipeline to image service for auto-adjustments
   useEffect(() => {
@@ -378,7 +380,11 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
             setGpuUnsafeModuleIds([...unsafe, 'enhance-resident']);
             logger.warn('Resident enhance failed on GPU; marked enhance-resident unsafe, re-running frame on CPU');
             // Past the 50ms rapid-fire throttle so the re-run is not dropped.
-            setTimeout(() => useAppStore.getState().triggerReprocessing(), 60);
+            if (gpuRetryTimerRef.current) clearTimeout(gpuRetryTimerRef.current);
+            gpuRetryTimerRef.current = setTimeout(() => {
+              gpuRetryTimerRef.current = null;
+              useAppStore.getState().triggerReprocessing();
+            }, 60);
             return;
           }
         }
@@ -639,6 +645,10 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
       if (gpuReadbackTimerRef.current) {
         clearTimeout(gpuReadbackTimerRef.current);
         gpuReadbackTimerRef.current = null;
+      }
+      if (gpuRetryTimerRef.current) {
+        clearTimeout(gpuRetryTimerRef.current);
+        gpuRetryTimerRef.current = null;
       }
     };
   }, []);
