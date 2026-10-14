@@ -417,6 +417,11 @@ export class GpuPreviewPipeline {
     return this.gl !== null;
   }
 
+  /** GL_MAX_TEXTURE_SIZE cached at attach(); 0 before attach. */
+  getMaxTextureSize(): number {
+    return this.maxTextureSize;
+  }
+
   /** Compile one WebGLProgram per programKey from PROGRAM_SOURCES, cache in programs map. */
   private compilePrograms(gl: WebGL2RenderingContext): void {
     for (const [key, frag] of Object.entries(PROGRAM_SOURCES)) {

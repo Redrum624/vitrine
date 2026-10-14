@@ -329,6 +329,15 @@ describe('kernelScale threading — source pins (jsdom cannot boot real workers/
     expect(hits.length).toBeGreaterThanOrEqual(3);
   });
 
+  it('AdjustmentPanel: buildPassList opts carry the SAME kernelScale (resident enhance parity) and maxTextureSize', () => {
+    const src = read('../components/Panels/AdjustmentPanel.tsx');
+    const m = src.match(/buildPassList\(orderedModules,\s*\{[\s\S]*?rebuildMask/);
+    expect(m).not.toBeNull();
+    expect(m![0]).toMatch(/kernelScale/);
+    expect(m![0]).toMatch(/maxTextureSize/);
+    expect((src.match(/enhanceKernelScale\(/g) ?? []).length).toBe(1);
+  });
+
   it('tiled apron stays sized from NATIVE params — the C5 preview scaling must never shrink it', () => {
     const src = read('../utils/tiledPipeline.ts');
     expect(src).toMatch(/kernelScale/); // the explicit do-not-shrink statement in moduleApron's enhance case

@@ -44,6 +44,7 @@ jest.mock('../services/ImageProcessingPipeline', () => ({ imageProcessingPipelin
 
 jest.mock('../shaders/GpuPreviewPipeline', () => ({ gpuPreviewPipeline: {
   isAvailable: jest.fn(() => false),
+  getMaxTextureSize: jest.fn(() => 16384),
   setSource: jest.fn(),
   setDehazeParam: jest.fn(),
   render: jest.fn(),
@@ -52,6 +53,8 @@ jest.mock('../shaders/GpuPreviewPipeline', () => ({ gpuPreviewPipeline: {
 
 jest.mock('../shaders/passDescriptors', () => ({
   buildPassList: jest.fn(() => ({ passes: [], cpuBridges: [] })),
+  getGpuUnsafeModuleIds: jest.fn(() => new Set<string>()),
+  setGpuUnsafeModuleIds: jest.fn(),
 }));
 
 jest.mock('../services/WebWorkerImageProcessor', () => ({

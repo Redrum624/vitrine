@@ -35,11 +35,11 @@ import { progressivePreviewService } from '../../services/ProgressivePreviewServ
 import { adaptiveDebounceService } from '../../services/AdaptiveDebounceService';
 import { useAppStore } from '../../stores/appStore';
 import { gpuPreviewPipeline } from '../../shaders/GpuPreviewPipeline';
-import { buildPassList } from '../../shaders/passDescriptors';
+import { buildPassList, getGpuUnsafeModuleIds, setGpuUnsafeModuleIds } from '../../shaders/passDescriptors';
 import { logger } from '../../utils/Logger';
 import { webWorkerImageProcessor } from '../../services/WebWorkerImageProcessor';
 import type { WorkerModuleConfig } from '../../services/WebWorkerImageProcessor';
-import { choosePreviewPath } from '../../services/previewRouting';
+import { choosePreviewRoute } from '../../services/previewRouting';
 
 interface AdjustmentPanelProps {
   selectedModule?: string | null;
@@ -324,6 +324,10 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
       const { passes, cpuBridges } = buildPassList(orderedModules, {
         width: previewWidth,
         height: previewHeight,
+        // Same kernelScale as the CPU contexts (never a second derivation) + GL texture cap
+        // (0 pre-attach → buildPassList falls back to 16384).
+        kernelScale,
+        maxTextureSize: gpuPreviewPipeline.getMaxTextureSize() || undefined,
         rebuildMask: (layerId, w, h) => {
           const laMod = imageProcessingPipeline.getModule('localadjustments') as LocalAdjustmentsPipelineModule | undefined;
           return laMod?.rebuildMask(layerId, w, h) ?? null;
@@ -331,7 +335,8 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
       });
       const activeCpuBridges = cpuBridges.filter((id) => imageProcessingPipeline.isModuleActive(id));
 
-      const previewPath = choosePreviewPath({
+      const { path: previewPath, reason: previewReason } = choosePreviewRoute({
+        nrActive: imageProcessingPipeline.isModuleActive('noise-reduction'),
         workersHealthy: webWorkerImageProcessor.isHealthy(),
         gpuAvailable: gpuPreviewPipeline.isAvailable(),
         activeCpuBridgeCount: activeCpuBridges.length,
@@ -339,6 +344,8 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
         width: previewWidth,
         height: previewHeight,
       });
+
+      logger.debug(`Preview route: ${previewPath} (${previewReason})`);
 
       if (previewPath === 'gpu') {
         // Source identity: image path + preview dims. Crop never contributes here
@@ -362,7 +369,19 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
         })();
         gpuPreviewPipeline.setDehazeParam(basicAdjDehaze);
 
-        gpuPreviewPipeline.render(passes);
+        const renderResult = gpuPreviewPipeline.render(passes);
+        if (renderResult?.failedSteps?.includes('enhance')) {
+          // Resident enhance failed at render time: mark it unsafe ONCE and re-run this frame,
+          // which now routes the enhance to the CPU bridge. The guard stops a second retry.
+          const unsafe = getGpuUnsafeModuleIds();
+          if (!unsafe.has('enhance-resident')) {
+            setGpuUnsafeModuleIds([...unsafe, 'enhance-resident']);
+            logger.warn('Resident enhance failed on GPU; marked enhance-resident unsafe, re-running frame on CPU');
+            // Past the 50ms rapid-fire throttle so the re-run is not dropped.
+            setTimeout(() => useAppStore.getState().triggerReprocessing(), 60);
+            return;
+          }
+        }
         useAppStore.getState().setRenderMode('gpu');
         useAppStore.getState().bumpGpuResult();
 

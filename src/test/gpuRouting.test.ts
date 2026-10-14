@@ -11,6 +11,9 @@
  */
 import { imageProcessingPipeline } from '../services/ImageProcessingPipeline';
 import type { PipelineModule } from '../services/ImageProcessingPipeline';
+import type { NoiseReductionModule } from '../modules/NoiseReductionModule';
+import type { EnhanceModule } from '../modules/EnhanceModule';
+import { choosePreviewPath } from '../services/previewRouting';
 import { buildPassList } from '../shaders/passDescriptors';
 import { LensCorrectionsPipelineModule } from '../modules/LensCorrectionsPipelineModule';
 import { CropPipelineModule } from '../modules/CropPipelineModule';
@@ -264,5 +267,46 @@ describe('ShadowsHighlights neutral identity (T9b)', () => {
     expect(sh.isNoOp()).toBe(true); // defaults → identity
     sh.setParams({ shadows: 70 });
     expect(sh.isNoOp()).toBe(false); // non-neutral → active
+  });
+});
+
+describe('resident NR + enhance sharpen route to GPU (v1.40.0)', () => {
+  afterEach(() => {
+    imageProcessingPipeline.getModule<NoiseReductionModule>('noise-reduction')?.resetParams();
+    imageProcessingPipeline.getModule<EnhanceModule>('enhance')?.resetParams();
+  });
+
+  it('NR enabled + enhance sharpen: no active cpu bridges, denoise then enhance pass, path gpu', () => {
+    const nr = imageProcessingPipeline.getModule<NoiseReductionModule>('noise-reduction')!;
+    const en = imageProcessingPipeline.getModule<EnhanceModule>('enhance')!;
+    nr.setParams({ enabled: true, strength: 50 });
+    en.setParams({ enabled: true, sharpen: true, upscale: false });
+
+    const { passes, cpuBridges } = buildPassList(imageProcessingPipeline.getOrderedModules(), {
+      width: 961,
+      height: 1280,
+      kernelScale: 1,
+      maxTextureSize: 16384,
+    });
+    const active = cpuBridges.filter((id) => imageProcessingPipeline.isModuleActive(id));
+    expect(imageProcessingPipeline.isModuleActive('noise-reduction')).toBe(true);
+    expect(active).not.toContain('noise-reduction');
+    expect(active).not.toContain('enhance');
+    const ids = passes.map((p) => p.id);
+    expect(ids).toContain('noise-reduction');
+    expect(passes.find((p) => p.programKey === 'denoise')).toBeDefined();
+    const enhIdx = ids.indexOf('enhance');
+    expect(enhIdx).toBeGreaterThan(ids.indexOf('noise-reduction'));
+    expect(passes[enhIdx].residentStep?.kind).toBe('enhance');
+    expect(
+      choosePreviewPath({
+        gpuAvailable: true,
+        activeCpuBridgeCount: active.length,
+        passCount: passes.length,
+        width: 961,
+        height: 1280,
+        nrActive: true,
+      }),
+    ).toBe('gpu');
   });
 });
