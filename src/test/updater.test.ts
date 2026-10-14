@@ -67,6 +67,20 @@ describe('updater gates', () => {
     expect(au.checkForUpdates).not.toHaveBeenCalled();
   });
 
+  it('dev gate beats no-config when both hold', () => {
+    const noConfigFs = { existsSync: () => false, mkdirSync: jest.fn(), appendFileSync: jest.fn(), statSync: jest.fn(() => ({ size: 0 })), truncateSync: jest.fn() };
+    const { updater, getter } = make({ isPackaged: false, fs: noConfigFs });
+    updater.start();
+    expect(updater.getState()).toBe('disabled-dev');
+    expect(getter).not.toHaveBeenCalled();
+  });
+
+  it('portable box names the product', async () => {
+    const { updater, dialog } = make({ portableDir: '/p' });
+    await updater.checkNow();
+    expect(dialog.showMessageBox.mock.calls[0][1]?.message).toMatch(/Vitrine releases page/);
+  });
+
   it('checks gates in order: store beats portable beats dev', () => {
     const a = make({ isWindowsStore: true, portableDir: 'x', isPackaged: false });
     a.updater.start();
@@ -103,6 +117,19 @@ describe('updater enabled path', () => {
     expect(opts.buttons).toEqual(['Restart and install now', 'Later']);
     expect(confirmQuit).toHaveBeenCalledTimes(1);
     expect(au.quitAndInstall).toHaveBeenCalledTimes(1);
+    expect(confirmQuit.mock.invocationCallOrder[0]).toBeLessThan(
+      (au.quitAndInstall as jest.Mock).mock.invocationCallOrder[0],
+    );
+  });
+
+  it('an error event raised by quitAndInstall re-arms the guard', async () => {
+    const { updater, au, disarmQuit } = make();
+    (au.quitAndInstall as jest.Mock).mockImplementation(() => { au.emit('error', new Error('spawn failed')); });
+    updater.start();
+    au.emit('update-downloaded', { version: '1.41.0' });
+    await flush();
+    expect(disarmQuit).toHaveBeenCalled();
+    expect(updater.getState()).toBe('error');
   });
 
   it('Later does not install or confirm', async () => {
@@ -134,6 +161,27 @@ describe('updater enabled path', () => {
     await flush();
     expect(disarmQuit).toHaveBeenCalled();
     expect(updater.getState()).toBe('error');
+  });
+
+  it('with the real close guard: failed quitAndInstall re-arms, no cleanup ran, next close asks normally', async () => {
+    const { createCloseGuard } = require('../../electron/closeGuard.cjs');
+    const requestAppClose = jest.fn(async () => true);
+    const performAppCleanup = jest.fn(async () => undefined);
+    const guard = createCloseGuard({ requestAppClose, performAppCleanup });
+    const { updater, au } = make({
+      confirmQuit: () => guard.confirmQuit(),
+      disarmQuit: () => guard.disarmQuit(),
+    });
+    (au.quitAndInstall as jest.Mock).mockImplementation(() => { throw new Error('boom'); });
+    updater.start();
+    au.emit('update-downloaded', { version: '1.41.0' });
+    await flush();
+    expect(performAppCleanup).not.toHaveBeenCalled();
+    expect(requestAppClose).toHaveBeenCalledTimes(1);
+    const win = { isDestroyed: () => false, destroy: jest.fn() };
+    await guard.handleClose(win, { preventDefault: jest.fn() });
+    expect(requestAppClose).toHaveBeenCalledTimes(2);
+    expect(performAppCleanup).toHaveBeenCalledTimes(1);
   });
 
   it('dispose restores listener counts to baseline', () => {

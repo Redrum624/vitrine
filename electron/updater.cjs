@@ -7,7 +7,7 @@
  * `resources/app-update.yml`; nothing here names an owner, a repository or a
  * token.
  *
- *   start()     once, from the main window's first 'ready-to-show' (so a
+ *   start()     once, from main.cjs after the main window is shown (so a
  *               prompt always has a parent). An unpackaged run is
  *               `disabled-dev` and a build without app-update.yml is
  *               `disabled-no-config`: both are logged and neither calls into
@@ -57,7 +57,7 @@
  * The log (`<userData>/logs/updater.log`) holds one line per event,
  * `ISO-8601 LEVEL message`. The lines listed at createUpdater are an
  * interface: tools that check a packaged app match them verbatim, so they
- * change only together with those tools (updater.test.cjs case 14 pins each).
+ * change only together with those tools (src/test/updater.test.ts pins them).
  * electron-updater's own messages go to the same file through the logger
  * adapter, first line only (its errors carry response headers, cookies
  * included, and stack frames with local paths). Logging never throws.
@@ -65,7 +65,7 @@
  * No timers: the check runs at launch and on request, nothing else.
  *
  * Every dependency is injected, so jest runs this without Electron
- * (updater.test.cjs); main.cjs wires the real ones.
+ * (src/test/updater.test.ts); main.cjs wires the real ones.
  */
 
 const path = require('node:path');
@@ -456,7 +456,7 @@ function createUpdater(deps) {
         await tell('info', 'Updates for this build come through the Microsoft Store.');
         return state;
       case 'disabled-portable':
-        await tell('info', 'The portable build does not update itself. Download the latest version from the Vitrine releases page.');
+        await tell('info', 'The portable build does not update itself. Download the latest version from the ' + productName + ' releases page.');
         return state;
       case 'disabled-dev':
         await tell('info', 'Updates are checked only in an installed build.');

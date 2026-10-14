@@ -32,32 +32,44 @@ describe('closeGuard', () => {
     const { guard, requestAppClose, performAppCleanup, win, event } = setup(false);
     expect(await guard.confirmQuit()).toBe(false);
     expect(performAppCleanup).not.toHaveBeenCalled();
-    const e = event();
-    await guard.handleClose(win, e);
-    expect(e.preventDefault).toHaveBeenCalled();
+    await guard.handleClose(win, event());
     expect(requestAppClose).toHaveBeenCalledTimes(2);
   });
 
-  it('after confirmQuit true the next close passes through without asking again', async () => {
+  it('confirmQuit true runs no cleanup; the bypassed close asks nothing, cleans up once and destroys', async () => {
     const { guard, requestAppClose, performAppCleanup, win, event } = setup();
     expect(await guard.confirmQuit()).toBe(true);
     expect(requestAppClose).toHaveBeenCalledTimes(1);
-    expect(performAppCleanup).toHaveBeenCalledTimes(1);
-    const e = event();
-    await guard.handleClose(win, e);
-    expect(e.preventDefault).not.toHaveBeenCalled();
+    expect(performAppCleanup).not.toHaveBeenCalled();
+    await guard.handleClose(win, event());
     expect(requestAppClose).toHaveBeenCalledTimes(1);
-    expect(win.destroy).not.toHaveBeenCalled();
+    expect(performAppCleanup).toHaveBeenCalledTimes(1);
+    expect(win.destroy).toHaveBeenCalledTimes(1);
   });
 
-  it('disarmQuit restores the normal guarded close', async () => {
-    const { guard, requestAppClose, win, event } = setup();
+  it('disarmQuit re-arms: cleanup never ran, and a later close asks normally', async () => {
+    const { guard, requestAppClose, performAppCleanup, win, event } = setup();
     await guard.confirmQuit();
-    guard.disarmQuit();
+    guard.disarmQuit(); // the install failed
+    expect(performAppCleanup).not.toHaveBeenCalled();
+    await guard.handleClose(win, event());
+    expect(requestAppClose).toHaveBeenCalledTimes(2);
+    expect(performAppCleanup).toHaveBeenCalledTimes(1);
+  });
+
+  it('a close during confirmQuit is prevented and ignored', async () => {
+    const { guard, requestAppClose, performAppCleanup, win, event } = setup();
+    let answer: (v: boolean) => void = () => undefined;
+    requestAppClose.mockImplementationOnce(() => new Promise<boolean>((r) => { answer = r; }));
+    const pending = guard.confirmQuit();
     const e = event();
     await guard.handleClose(win, e);
     expect(e.preventDefault).toHaveBeenCalled();
-    expect(requestAppClose).toHaveBeenCalledTimes(2);
+    expect(requestAppClose).toHaveBeenCalledTimes(1);
+    expect(performAppCleanup).not.toHaveBeenCalled();
+    answer(true);
+    expect(await pending).toBe(true);
+    expect(win.destroy).not.toHaveBeenCalled();
   });
 
   it('a second confirmQuit while one is running resolves false', async () => {
