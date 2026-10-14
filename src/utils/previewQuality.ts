@@ -20,6 +20,41 @@ export const BASE_PREVIEW_CAP = 1024;
 export const MAX_PREVIEW_CAP = 4096;
 const QUANTUM = 256;
 
+// Memory preset (v1.40.0): the ceiling the ratchet may reach. Balanced keeps MAX_PREVIEW_CAP;
+// High/Max raise it to min(native, GL maxTextureSize) — the caller passes the already-clamped
+// value. Module state, read IMPERATIVELY (like previewQualityCap), so a preset change applies
+// to the next ratchet decision without any React plumbing.
+let previewCapCeiling = MAX_PREVIEW_CAP;
+let keepGpuBuffers = false;
+
+export function setPreviewCapCeiling(ceiling: number): void {
+  previewCapCeiling = Number.isFinite(ceiling) && ceiling >= BASE_PREVIEW_CAP ? Math.floor(ceiling) : MAX_PREVIEW_CAP;
+}
+export function getPreviewCapCeiling(): number {
+  return previewCapCeiling;
+}
+/** Whether resident GPU intermediate buffers stay allocated between frames (memory preset). */
+export function setKeepGpuBuffers(keep: boolean): void {
+  keepGpuBuffers = keep;
+}
+export function getKeepGpuBuffers(): boolean {
+  return keepGpuBuffers;
+}
+
+/** The device's WebGL2 MAX_TEXTURE_SIZE, or null when no context can be created (tests, no GPU). */
+export function probeMaxTextureSize(): number | null {
+  try {
+    if (typeof document === 'undefined') return null;
+    const gl = document.createElement('canvas').getContext('webgl2');
+    if (!gl) return null;
+    const v = gl.getParameter(gl.MAX_TEXTURE_SIZE) as number;
+    gl.getExtension('WEBGL_lose_context')?.loseContext();
+    return Number.isFinite(v) && v > 0 ? v : null;
+  } catch {
+    return null;
+  }
+}
+
 export function computeRequiredPreviewCap(args: {
   /** Current viewport zoom (1 = fit). */
   zoom: number;
@@ -32,6 +67,6 @@ export function computeRequiredPreviewCap(args: {
   const frac = Math.min(1, Math.max(args.cropFraction || 1, 0.05));
   const needed = (BASE_PREVIEW_CAP * zoom) / frac;
   const quantized = Math.ceil(needed / QUANTUM) * QUANTUM;
-  const nativeClamp = args.nativeLongEdge > 0 ? Math.max(BASE_PREVIEW_CAP, args.nativeLongEdge) : MAX_PREVIEW_CAP;
-  return Math.max(BASE_PREVIEW_CAP, Math.min(quantized, MAX_PREVIEW_CAP, nativeClamp));
+  const nativeClamp = args.nativeLongEdge > 0 ? Math.max(BASE_PREVIEW_CAP, args.nativeLongEdge) : previewCapCeiling;
+  return Math.max(BASE_PREVIEW_CAP, Math.min(quantized, previewCapCeiling, nativeClamp));
 }

@@ -200,6 +200,21 @@ async function remove(key) {
 }
 
 /**
+ * Change the disk budget at runtime (memory preset) and evict down to it immediately,
+ * oldest-first. Returns the number of entries evicted. A falsy/invalid budget restores the default.
+ * @param {number} [budget]
+ * @returns {Promise<number>}
+ */
+async function setBudget(budget) {
+  budgetBytes = Number.isFinite(budget) && budget > 0 ? budget : DEFAULT_BUDGET_BYTES;
+  const all = [];
+  for (const [k, v] of index.entries()) all.push({ key: k, size: v.size, lastAccess: v.lastAccess });
+  const victims = selectEvictions(all, 0, budgetBytes);
+  for (const k of victims) await remove(k);
+  return victims.length;
+}
+
+/**
  * Read a persisted base for (path, options), or null on a miss. Invalidates (deletes) the entry
  * when the live source file's mtime/size no longer match the sidecar, or when the stored buffer is
  * torn (byte length ≠ declared geometry). Returns the SAME shape the `decode-raw-file` IPC returns
@@ -336,6 +351,8 @@ module.exports = {
   read,
   write,
   remove,
+  setBudget,
+  getBudget: () => budgetBytes,
   DEFAULT_BUDGET_BYTES,
   DEFAULT_OPTIONS,
 };

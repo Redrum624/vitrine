@@ -17,6 +17,7 @@
  * framebuffers so GPU self-checks stay meaningful.
  */
 import { logger } from '../utils/Logger';
+import { getKeepGpuBuffers } from '../utils/previewQuality';
 import {
   VERT_SRC,
   VERT_PRESENT,
@@ -749,7 +750,8 @@ export class GpuPreviewPipeline {
 
     // A frame without a resident enhance step frees its intermediate pools (VRAM is only
     // held while enhance is actually live in the preview chain).
-    if (!passes.some((p) => p.residentStep)) this.freeEnhancePools(gl);
+    // The High/Max memory presets keep them allocated (no re-allocation hitch when enhance toggles).
+    if (!getKeepGpuBuffers() && !passes.some((p) => p.residentStep)) this.freeEnhancePools(gl);
 
     // If there are no runnable passes, the result is the source itself.
     this.resultHasGeometry = false;

@@ -10,6 +10,14 @@ const { app, BrowserWindow, Menu, dialog, ipcMain, shell } = require('electron')
 // injects productName into the packaged manifest.
 app.setName('photo_app');
 
+// MEMORY PRESET (v1.40.0): read synchronously so the disk-cache budget is right from init.
+// MEASURED (Electron 43): a js-flags --max-old-space-size above ~3.5 GB does NOT raise the
+// renderer heap limit (V8 pointer-compression cage; default already 3586 MB), so no heap flag is
+// shipped. The limit is still logged at startup (see did-finish-load) to keep that visible.
+const memoryHeap = require('./memoryPresetMain.cjs');
+const memoryPresetAtStart = memoryHeap.readPresetSync(require('path').join(app.getPath('userData'), 'store'));
+let measuredHeapLimitMB = null;
+
 const { createCloseGuard } = require('./closeGuard.cjs');
 const { createUpdater, registerUpdaterIpc } = require('./updater.cjs');
 
@@ -142,6 +150,20 @@ function createWindow() {
     icon: path.join(__dirname, '../assets/icon.ico'),
     show: false, // Don't show until ready
     backgroundColor: '#282828' // Match our dark theme
+  });
+
+  // Memory preset verification (v1.40.0): measure the renderer's REAL heap limit once loaded and
+  // log it, so the (non-raisable) limit is visible in the log.
+  mainWindow.webContents.once('did-finish-load', async () => {
+    try {
+      const bytes = await mainWindow.webContents.executeJavaScript('performance.memory ? performance.memory.jsHeapSizeLimit : 0');
+      measuredHeapLimitMB = bytes > 0 ? Math.round(bytes / (1024 * 1024)) : null;
+      const line = `[memory] preset=${memoryPresetAtStart} rendererHeapLimitMB=${measuredHeapLimitMB} totalRamMB=${Math.round(os.totalmem() / 1048576)}`;
+      console.log(line);
+      fs.appendFileSync(logFile, `${new Date().toISOString()} ${line}\n`);
+    } catch (e) {
+      console.warn('heap limit probe failed:', e && e.message);
+    }
   });
 
   // Load the app
@@ -397,6 +419,15 @@ ipcMain.handle('app-ready', () => {
   closeSplashAndShowMain();
 });
 
+ipcMain.handle('memory-info', () => ({
+  totalRamBytes: os.totalmem(),
+  measuredHeapLimitMB,
+}));
+ipcMain.handle('memory-set-disk-budget', async (event, preset) => {
+  if (!memoryHeap.isPreset(preset)) return false;
+  await require('./baseCache.cjs').setBudget(memoryHeap.diskBudget(preset));
+  return true;
+});
 ipcMain.handle('get-app-version', () => {
   const packageJson = require('../package.json');
   return packageJson.version;
@@ -1268,7 +1299,7 @@ app.whenReady().then(() => {
   // wrapped in try/catch so a broken cache dir can never break startup. Must run after app-ready
   // (userData path is only valid then).
   try {
-    const indexed = require('./baseCache.cjs').init(path.join(app.getPath('userData'), 'base-cache'));
+    const indexed = require('./baseCache.cjs').init(path.join(app.getPath('userData'), 'base-cache'), { budget: memoryHeap.diskBudget(memoryPresetAtStart) });
     console.log(`Base cache (L2) initialised: ${indexed} persisted RAW base(s) indexed`);
   } catch (baseCacheInitError) {
     console.warn('Base cache init failed (continuing without disk cache):', baseCacheInitError.message);

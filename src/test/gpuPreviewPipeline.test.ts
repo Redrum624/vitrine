@@ -178,8 +178,9 @@ describe('resident enhance step (v1.40.0 Task 2)', () => {
     expect(body).toContain('this.runResidentEnhance(gl, inputTexture, this.ping[idx]!, ');
     expect(body).toContain("failedSteps.push('enhance')");
     // Pools are dropped ONLY on a render with no enhance step — freeing on an enhance frame
-    // would re-allocate ~1 GB of FBOs every frame. Every call in render() must be guarded.
-    const guarded = 'if (!passes.some((p) => p.residentStep)) this.freeEnhancePools(gl);';
+    // would re-allocate ~1 GB of FBOs every frame. Every call in render() must be guarded; the
+    // High/Max memory presets add the keep-buffers condition on top, never replace the guard.
+    const guarded = 'if (!getKeepGpuBuffers() && !passes.some((p) => p.residentStep)) this.freeEnhancePools(gl);';
     expect(body).toContain(guarded);
     expect(body.split('this.freeEnhancePools(gl)').length - 1).toBe(1);
   });
