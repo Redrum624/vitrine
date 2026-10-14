@@ -17,6 +17,8 @@ import { checkpointService } from '../../services/CheckpointService';
 import { CropPipelineModule } from '../../modules/CropPipelineModule';
 import { LocalAdjustmentsPipelineModule } from '../../modules/LocalAdjustmentsPipelineModule';
 import { LocalAdjustmentMaskOverlay } from '../Canvas/LocalAdjustmentMaskOverlay';
+import { applyMaskGeometry } from '../Canvas/maskGeometryApply';
+import { requestLivePreview } from '../../utils/livePreviewRequest';
 import { notificationService } from '../../services/NotificationService';
 import { gpuPreviewPipeline } from '../../shaders/GpuPreviewPipeline';
 import { DEFAULT_RAW_DECODE_OPTIONS } from '../../types/electron';
@@ -1467,6 +1469,11 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
               if (!layer || (layer.type !== 'radial_gradient' && layer.type !== 'linear_gradient') || !layer.geometry) {
                 return null;
               }
+              const maskGeometryHooks = {
+                invalidateModuleCache: (id: string) => imageProcessingPipeline.invalidateModuleCache(id),
+                requestLivePreview,
+                triggerReprocessing,
+              };
               return (
                 <LocalAdjustmentMaskOverlay
                   viewport={viewport}
@@ -1474,25 +1481,12 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
                   contentHeight={contentDimensions.height}
                   layerType={layer.type}
                   geometry={layer.geometry}
-                  onGeometryChange={(geom) => {
-                    const img = imageService.getCurrentImage();
-                    if (img) {
-                      // Bake the mask at PREVIEW resolution (capped long-edge), not the
-                      // full 20MP — the full-res bake stalls the drag for ~1s. The
-                      // pipeline rebuilds the mask at its actual processing size when it
-                      // differs (incl. full-res export), so correctness is preserved.
-                      const cap = 1024;
-                      const s = Math.min(1, cap / Math.max(img.width, img.height));
-                      const bw = Math.max(1, Math.round(img.width * s));
-                      const bh = Math.max(1, Math.round(img.height * s));
-                      // Masks apply AFTER crop (CPU and GPU alike), over the post-crop
-                      // frame the overlay is drawn on — bake at those dims (Task 10b).
-                      const baked = cropModule ? cropModule.getOutputDimensions(bw, bh) : { width: bw, height: bh };
-                      la.setLayerGeometry(layer.id, geom, baked.width, baked.height);
-                    }
-                    imageProcessingPipeline.invalidateModuleCache('localadjustments');
-                    triggerReprocessing();
-                  }}
+                  // Live during the drag (one per frame) + the final commit on release.
+                  // No pre-bake: the render rebakes the mask once at its own (post-crop)
+                  // size on both routes (Task 12c). Only the commit bumps processingVersion
+                  // (History checkpoint + persistence).
+                  onGeometryPreview={(geom) => applyMaskGeometry(la, layer.id, geom, 'live', maskGeometryHooks)}
+                  onGeometryChange={(geom) => applyMaskGeometry(la, layer.id, geom, 'commit', maskGeometryHooks)}
                   onDeselect={() => {
                     // Clicking off the mask hides it: clear the active layer + signal the
                     // panel (externalParamsVersion) to drop its selection. Both this

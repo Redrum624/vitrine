@@ -41,6 +41,7 @@ import { logger } from '../../utils/Logger';
 import { webWorkerImageProcessor } from '../../services/WebWorkerImageProcessor';
 import type { WorkerModuleConfig } from '../../services/WebWorkerImageProcessor';
 import { choosePreviewRoute } from '../../services/previewRouting';
+import { onLivePreviewRequest } from '../../utils/livePreviewRequest';
 
 // ── Preview state signature (v1.40.0 Task 9b — single apply) ─────────────────
 // Everything a preview pass's pixels depend on: the live module config (the same
@@ -126,6 +127,9 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
   // `pending` so it re-runs once the current one finishes (no lost edits).
   const isProcessingRef = useRef<boolean>(false);
   const pendingReprocessRef = useRef<boolean>(false);
+  // True when a NON-live trigger armed the pending replay; a replay armed only by live drag
+  // frames (Task 12c) re-runs directly, without a processingVersion bump (History/persistence).
+  const pendingNonLiveRef = useRef<boolean>(false);
   // The pass that OWNS the in-flight slot (Task 9b). `supersedeAt` = the store's
   // previewSupersedeVersion at its start; `awaitingWorker` = parked on a worker (the
   // only stage that may be abandoned; the main thread is never run concurrently).
@@ -181,7 +185,7 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
   const noiseReductionModule = imageProcessingPipeline.getModule<NoiseReductionModule>('noise-reduction');
   const enhanceModuleInstance = imageProcessingPipeline.getModule<EnhanceModule>('enhance');
 
-  const processCurrentImageRealTime = useCallback(async (opts?: { queueIfBusy?: boolean }) => {
+  const processCurrentImageRealTime = useCallback(async (opts?: { queueIfBusy?: boolean; live?: boolean }) => {
     const currentImage = imageService.getCurrentImage();
     console.log('AdjustmentPanel: processCurrentImageRealTime called, currentImage:', currentImage ? `${currentImage.width}x${currentImage.height}` : 'null');
 
@@ -214,12 +218,14 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
       inFlightRef.current = null;
       isProcessingRef.current = false;
       pendingReprocessRef.current = false;
+      pendingNonLiveRef.current = false;
       superseded = true;
       logger.debug('Superseding the in-flight worker pass: starting the latest pass now');
     }
     if (isProcessingRef.current) {
       if (opts?.queueIfBusy !== false) {
         pendingReprocessRef.current = true;
+        if (!opts?.live) pendingNonLiveRef.current = true;
         logger.debug('Skipping processing - already in progress (queued)');
       } else {
         logger.debug('Skipping processing - already in progress (not queued)');
@@ -237,7 +243,10 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
         if (throttleTimerRef.current) clearTimeout(throttleTimerRef.current);
         throttleTimerRef.current = setTimeout(() => {
           throttleTimerRef.current = null;
-          useAppStore.getState().triggerReprocessing();
+          // A live drag frame (Task 12c) re-fires itself: a processingVersion bump would
+          // record History / save edits mid-drag and go through the adaptive debounce.
+          if (opts?.live) processCallbackRef.current({ live: true });
+          else useAppStore.getState().triggerReprocessing();
         }, Math.max(1, 50 - (now - lastProcessingTime)) + 1);
       }
       logger.debug('Deferring processing - too soon since last processing (50ms throttle)');
@@ -617,6 +626,7 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
             logger.warn('Worker fallback skipped: live state changed since the pass was posted');
             // Arm the replay so the latest state paints even without a pending trigger.
             pendingReprocessRef.current = true;
+            pendingNonLiveRef.current = true;
             return;
           }
           processedData = await imageProcessingPipeline.processImage(previewData, processingContext, { useWebWorkers: false });
@@ -688,8 +698,11 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
         // re-rendered the identical frame, the owner's "second applying").
         if (pendingReprocessRef.current) {
           pendingReprocessRef.current = false;
+          const nonLive = pendingNonLiveRef.current;
+          pendingNonLiveRef.current = false;
           if (previewStateSignature() !== signature) {
-            useAppStore.getState().triggerReprocessing();
+            if (nonLive) useAppStore.getState().triggerReprocessing();
+            else void processCallbackRef.current({ live: true });
           } else {
             logger.debug('Replay skipped: state unchanged since the pass started');
           }
@@ -828,6 +841,10 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
       }
     };
   }, []);
+
+  // Live drag frames (Task 12c, mask move): reprocess NOW — no adaptive debounce, no
+  // processingVersion bump (History / persistence follow the release's triggerReprocessing).
+  useEffect(() => onLivePreviewRequest(() => { void processCallbackRef.current({ live: true }); }), []);
 
   // Watch for external processing triggers (e.g., from Canvas crop handles)
   useEffect(() => {

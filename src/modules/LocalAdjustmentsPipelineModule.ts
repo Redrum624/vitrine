@@ -233,6 +233,15 @@ export class LocalAdjustmentsPipelineModule implements PipelineModule {
     return success;
   }
 
+  /** Geometry without a bake: the next render rebakes the mask at its own size (Task 12c). */
+  setLayerGeometryDeferred(layerId: string, geom: MaskGeometry): boolean {
+    const success = localAdjustmentsModule.setLayerGeometryDeferred(layerId, geom);
+    if (success) {
+      this.syncLayersFromModule();
+    }
+    return success;
+  }
+
   updateLayerBasicAdj(layerId: string, params: Partial<BasicAdjParams>): boolean {
     const success = localAdjustmentsModule.updateLayerBasicAdj(layerId, params);
     if (success) {

@@ -324,6 +324,9 @@ export class GpuPreviewPipeline {
   // Bounded to MAX_MASK_TEXTURES entries (LRU eviction: least-recently-used entry is
   // the first key in the insertion-ordered Map).
   private maskCache = new Map<string, WebGLTexture>();
+  // layerId → that layer's current maskCache key (Task 12c). A drag mints a new key every
+  // frame; the layer's previous texture is evicted on upload instead of filling the LRU.
+  private maskKeyByLayer = new Map<string, string>();
 
   /**
    * Create the WebGL2 context (on the given canvas, or an internally-created one for
@@ -679,7 +682,18 @@ export class GpuPreviewPipeline {
       this.maskCache.set(upload.key, cached);
       return cached;
     }
-    // Cache miss: evict the oldest entry (first key) when at capacity.
+    // Cache miss for this layer: its previous mask is superseded (moved / rebaked) —
+    // free it now so per-frame keys during a drag never churn the cache (Task 12c).
+    if (upload.layerId !== undefined) {
+      const prevKey = this.maskKeyByLayer.get(upload.layerId);
+      const prevTex = prevKey !== undefined ? this.maskCache.get(prevKey) : undefined;
+      if (prevKey !== undefined && prevTex) {
+        gl.deleteTexture(prevTex);
+        this.maskCache.delete(prevKey);
+      }
+      this.maskKeyByLayer.set(upload.layerId, upload.key);
+    }
+    // Evict the oldest entry (first key) when still at capacity.
     if (this.maskCache.size >= MAX_MASK_TEXTURES) {
       const firstKey = this.maskCache.keys().next().value as string;
       const evicted = this.maskCache.get(firstKey)!;
@@ -1290,6 +1304,7 @@ export class GpuPreviewPipeline {
       this.lutTextures.clear();
       for (const tex of this.maskCache.values()) gl.deleteTexture(tex);
       this.maskCache.clear();
+      this.maskKeyByLayer.clear();
       if (this.srcTexture) gl.deleteTexture(this.srcTexture);
       if (this.scratch) {
         gl.deleteFramebuffer(this.scratch.framebuffer);

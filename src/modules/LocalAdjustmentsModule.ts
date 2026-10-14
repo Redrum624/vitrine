@@ -221,6 +221,21 @@ export class LocalAdjustmentsModule {
     return true;
   }
 
+  /**
+   * Store a gradient layer's geometry WITHOUT baking its mask (Task 12c). The mask is
+   * replaced by an empty buffer, so the next render rebakes it exactly once at its own
+   * size (GPU: buildLocalAdjustmentsPass → rebuildMask; CPU: processImage), which is
+   * also the post-crop frame when a crop is active. A fresh buffer (never an in-place
+   * mutation) keeps the preview state signature / GPU mask key honest.
+   */
+  setLayerGeometryDeferred(layerId: string, geom: MaskGeometry): boolean {
+    const layer = this.getLayer(layerId);
+    if (!layer) return false;
+    layer.geometry = { ...geom };
+    layer.mask = new Float32Array(0);
+    return true;
+  }
+
   // Remove a layer
   removeLayer(layerId: string): boolean {
     const index = this.layers.findIndex(layer => layer.id === layerId);

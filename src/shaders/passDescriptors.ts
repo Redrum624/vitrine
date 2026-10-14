@@ -211,6 +211,8 @@ export interface MaskUpload {
   key: string;
   width: number;
   height: number;
+  /** Owning layer: a new key for the same layer evicts its previous texture (Task 12c). */
+  layerId?: string;
 }
 
 /**
@@ -588,17 +590,27 @@ function isLayerActive(layer: LayerView): boolean {
   return Object.values(adj).some((v) => typeof v === 'number' && Math.abs(v) > 1e-6);
 }
 
-/** Stable cache key for a layer's mask: id + dims + a hash of the baked values.
- *  The mask is rebuilt (and its reference replaced) whenever geometry/dims change, so a
- *  cheap strided sample hash is enough to detect a re-bake without scanning every pixel. */
-function maskCacheKey(layer: LayerView, width: number, height: number): string {
-  const m = layer.mask!;
+/** Stable cache key for a layer's mask: id + dims + geometry signature + a hash of the
+ *  values of the mask ACTUALLY uploaded (the rebuilt one when the pass rebaked it — Task 12c).
+ *  The strided value hash alone collided for small moves (a 1-px shift barely touches 64
+ *  samples), so the GPU kept the old texture; the geometry signature (full precision)
+ *  makes every move a new key. GpuPreviewPipeline.uploadMask evicts the layer's previous
+ *  texture on a new key, so per-frame keys during a drag never churn the cache. */
+export function maskCacheKey(
+  layer: { id?: string; geometry?: object },
+  mask: Float32Array,
+  width: number,
+  height: number,
+): string {
   let h = 0;
-  const step = Math.max(1, Math.floor(m.length / 64));
-  for (let i = 0; i < m.length; i += step) {
-    h = (h * 31 + Math.round(m[i] * 1000)) | 0;
+  const step = Math.max(1, Math.floor(mask.length / 64));
+  for (let i = 0; i < mask.length; i += step) {
+    h = (h * 31 + Math.round(mask[i] * 1000)) | 0;
   }
-  return `${layer.id ?? 'layer'}:${width}x${height}:${m.length}:${h}`;
+  const geomSig = layer.geometry
+    ? Object.entries(layer.geometry).sort(([a], [b]) => (a < b ? -1 : 1)).map(([k, v]) => `${k}=${String(v)}`).join(',')
+    : '';
+  return `${layer.id ?? 'layer'}:${width}x${height}:${mask.length}:${h}:${geomSig}`;
 }
 
 /**
@@ -656,7 +668,8 @@ export function buildLocalAdjustmentsPass(
     const adj = layer.basicAdj!;
     const opacity = typeof layer.opacity === 'number' ? layer.opacity : 1;
     const maskUpload: MaskUpload = {
-      kind: 'mask', data: mask, key: maskCacheKey(layer, width, height), width, height,
+      kind: 'mask', data: mask, key: maskCacheKey(layer, mask, width, height), width, height,
+      layerId: layer.id,
     };
 
     // dehaze is INACTIVE for GPU-representable layers (dehaze!=0 routes to CPU above), so

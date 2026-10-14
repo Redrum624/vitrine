@@ -10,7 +10,11 @@ interface Props {
   contentHeight?: number;
   layerType: 'radial_gradient' | 'linear_gradient';
   geometry: MaskGeometry;
+  /** Final commit on release (History / persistence follow it). */
   onGeometryChange: (geom: MaskGeometry) => void;
+  /** Live geometry during a drag: at most one call per animation frame, always the latest
+   *  value; never called after the release (onGeometryChange carries the final one). */
+  onGeometryPreview?: (geom: MaskGeometry) => void;
   onDragStart?: () => void;
   onDragEnd?: () => void;
   onDeselect?: () => void;
@@ -27,7 +31,7 @@ type LinearMode = 'create' | 'move' | 'rotate';
  * inside the overlay box at box*zoom, centred + panned).
  */
 export function LocalAdjustmentMaskOverlay({
-  viewport, contentWidth, contentHeight, layerType, geometry, onGeometryChange, onDragStart, onDragEnd, onDeselect,
+  viewport, contentWidth, contentHeight, layerType, geometry, onGeometryChange, onGeometryPreview, onDragStart, onDragEnd, onDeselect,
 }: Props) {
   // Box + pointer origin come from THIS overlay's own root element, not the 2D
   // <canvas>: in GPU render mode that canvas is display:none (offsetWidth/rect = 0),
@@ -44,6 +48,13 @@ export function LocalAdjustmentMaskOverlay({
   // (not recreated on every setLiveGeom) and avoid re-render churn mid-drag.
   const liveGeomRef = useRef(liveGeom);
   useEffect(() => { liveGeomRef.current = liveGeom; }, [liveGeom]);
+
+  // Latest preview callback behind a ref: the drag's rAF flush always calls the current one.
+  const onPreviewRef = useRef(onGeometryPreview);
+  onPreviewRef.current = onGeometryPreview;
+  // Tears down an in-flight drag (window listeners + pending frame) — also on unmount.
+  const dragCleanupRef = useRef<(() => void) | null>(null);
+  useEffect(() => () => { dragCleanupRef.current?.(); }, []);
 
   const metrics = () => {
     const root = rootRef.current;
@@ -117,9 +128,17 @@ export function LocalAdjustmentMaskOverlay({
     // No clamping: masks may extend outside the image (still within the canvas).
     const start = { nx: p.nx, ny: p.ny };
     const startGeom = { ...liveGeomRef.current };
+    dragCleanupRef.current?.();
     draggingRef.current = true;
     onDragStart?.();
     let latest = startGeom;
+    // Live push (Task 12c): coalesce moves to one onGeometryPreview per animation frame,
+    // carrying the latest geometry.
+    let frameId: number | null = null;
+    const flushFrame = () => {
+      frameId = null;
+      onPreviewRef.current?.(latest);
+    };
 
     const move = (ev: MouseEvent) => {
       const cur = toNorm(ev.clientX, ev.clientY);
@@ -172,15 +191,22 @@ export function LocalAdjustmentMaskOverlay({
         }
       }
       latest = next;
-      setLiveGeom(next); // instant outline; the (heavier) mask reprocess is committed on mouseup
+      setLiveGeom(next); // instant outline
+      if (frameId === null && onPreviewRef.current) frameId = requestAnimationFrame(flushFrame);
     };
-    const up = () => {
+    const teardown = () => {
       draggingRef.current = false;
+      if (frameId !== null) { cancelAnimationFrame(frameId); frameId = null; }
       window.removeEventListener('mousemove', move);
       window.removeEventListener('mouseup', up);
-      onGeometryChange(latest); // commit + reprocess once, so dragging stays smooth
+      dragCleanupRef.current = null;
+    };
+    const up = () => {
+      teardown();
+      onGeometryChange(latest); // the final commit (History / persistence ride this one)
       onDragEnd?.();
     };
+    dragCleanupRef.current = teardown;
     window.addEventListener('mousemove', move);
     window.addEventListener('mouseup', up);
   }, [layerType, onGeometryChange, onDragStart, onDragEnd, onDeselect, viewport]);
