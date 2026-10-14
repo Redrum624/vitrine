@@ -682,6 +682,9 @@ export function buildLocalAdjustmentsPass(
  * Pure mirror of GpuPreviewPipeline.runEnhanceChain's radius/size guards (non-upscale case),
  * evaluated BEFORE render. Radii derive from the EFFECTIVE sigmas; the RL gate uses the RAW
  * psfSigma; chroma (sigma 1.2) and edge-blur (sigma 2.0) radii are fixed.
+ *
+ * Callers MUST pass width, height and maxTextureSize: omitting w/h skips the size checks
+ * entirely, and an omitted maxTextureSize falls back to 16384 like the pipeline does.
  */
 export function enhanceResidentEligible(
   params: EnhanceParams,
@@ -692,7 +695,9 @@ export function enhanceResidentEligible(
 ): boolean {
   if (w !== undefined && h !== undefined) {
     if (w <= 0 || h <= 0) return false;
-    if (maxTextureSize !== undefined && (w > maxTextureSize || h > maxTextureSize)) return false;
+    // Same fallback as runEnhanceChain (`this.maxTextureSize || 16384`).
+    const maxDim = maxTextureSize || 16384;
+    if (w > maxDim || h > maxDim) return false;
     if (w * h > MAX_GPU_ENHANCE_OUTPUT_PIXELS) return false;
   }
   const eff = effectiveEnhanceKernels(params.psfSigma, params.hpSigma, kernelScale);

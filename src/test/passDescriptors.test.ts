@@ -1,6 +1,7 @@
 import { buildPassList, buildLocalAdjustmentsPass, computeWBGains, GPU_MODULE_IDS, OPT_IN_GPU_MODULE_IDS, setGpuUnsafeModuleIds, getGpuUnsafeModuleIds, enhanceResidentEligible } from '../shaders/passDescriptors';
 import type { MaskUpload } from '../shaders/passDescriptors';
 import { nrStrengthToH } from '../utils/nrCurve';
+import { ENH_DENOISE_MAXR } from '../shaders/enhanceGpuLimits';
 import { DEFAULT_ENHANCE_PARAMS } from '../utils/enhanceChain';
 import { LocalAdjustmentsModule } from '../modules/LocalAdjustmentsModule';
 import { WhiteBalanceModule } from '../modules/WhiteBalanceModule';
@@ -824,5 +825,34 @@ describe('NR + enhance resident passes', () => {
     expect(enhanceResidentEligible(p, 1, 1000, 1000)).toBe(true);
     expect(enhanceResidentEligible(p, 1, 20000, 20000)).toBe(false);
     expect(enhanceResidentEligible({ ...p, denoiseStrength: 100 }, 1)).toBe(false);
+  });
+
+  test('enhanceResidentEligible defaults maxTextureSize to 16384 like the pipeline', () => {
+    const p = { ...DEFAULT_ENHANCE_PARAMS, enabled: true };
+    expect(enhanceResidentEligible(p, 1, 16384, 100)).toBe(true);
+    expect(enhanceResidentEligible(p, 1, 16385, 100)).toBe(false);
+    expect(enhanceResidentEligible(p, 1, 16385, 100, 32768)).toBe(true);
+  });
+
+  test('buildPassList uses opts width/height for enhance eligibility', () => {
+    const { passes, cpuBridges } = buildPassList([enh()], { width: 20000, height: 20000, kernelScale: 1 });
+    expect(passes).toHaveLength(0);
+    expect(cpuBridges).toEqual(['enhance']);
+  });
+
+  test('denoiseStrength boundary derived from ENH_DENOISE_MAXR', () => {
+    const p = { ...DEFAULT_ENHANCE_PARAMS, enabled: true };
+    const radius = (d: number) => Math.max(1, Math.ceil((0.4 + 0.12 * d) * 3));
+    let last = 0;
+    while (radius(last + 1) <= ENH_DENOISE_MAXR) last++;
+    expect(last).toBeGreaterThan(0);
+    expect(enhanceResidentEligible({ ...p, denoiseStrength: last }, 1)).toBe(true);
+    expect(enhanceResidentEligible({ ...p, denoiseStrength: last + 1 }, 1)).toBe(false);
+  });
+
+  test('psfSigma 0 with rlIters > 0 -> RL gate off, eligible', () => {
+    const p = { ...DEFAULT_ENHANCE_PARAMS, enabled: true, psfSigma: 0, rlIters: 12 };
+    expect(enhanceResidentEligible(p, 1, 1000, 1000)).toBe(true);
+    expect(enhanceResidentEligible({ ...p, psfSigma: 8 }, 1, 1000, 1000)).toBe(false);
   });
 });
