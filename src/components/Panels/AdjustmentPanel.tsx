@@ -129,7 +129,9 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
   // The pass that OWNS the in-flight slot (Task 9b). `supersedeAt` = the store's
   // previewSupersedeVersion at its start; `awaitingWorker` = parked on a worker (the
   // only stage that may be abandoned; the main thread is never run concurrently).
-  const inFlightRef = useRef<{ seq: number; supersedeAt: number; awaitingWorker: boolean } | null>(null);
+  const inFlightRef = useRef<{ seq: number; supersedeAt: number; awaitingWorker: boolean; signature: string } | null>(null);
+  // Re-fires a trigger that landed inside the 50 ms throttle window (Task 12b: last value wins).
+  const throttleTimerRef = useRef<NodeJS.Timeout | null>(null);
   // NOTE: Removed lastProcessedImagePathRef - was blocking param change reprocessing
 
   // ── GPU resident-texture preview: source-reupload gating ──────────────────────
@@ -194,17 +196,19 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
     const inflight = inFlightRef.current;
     if (
       isProcessingRef.current && opts?.queueIfBusy !== false && inflight?.awaitingWorker &&
-      useAppStore.getState().previewSupersedeVersion !== inflight.supersedeAt
+      (useAppStore.getState().previewSupersedeVersion !== inflight.supersedeAt ||
+        previewStateSignature() !== inflight.signature)
     ) {
-      // Single apply (Task 9b): a crop release superseded the pass parked on a worker
-      // (the drag-start suspension pass). Mark it stale (it will never paint, fall
-      // back or replay) and start the release pass NOW instead of queueing behind it.
+      // Last value wins (Tasks 9b/12b): ANY new trigger whose state differs from the pass
+      // parked on a worker (a crop release, a mouse-wheel/slider value) marks that pass
+      // stale (it will never paint, fall back or replay) and starts the new pass NOW
+      // instead of queueing behind it. The worker is never terminated for this.
       previewSeqRef.current++;
       inFlightRef.current = null;
       isProcessingRef.current = false;
       pendingReprocessRef.current = false;
       superseded = true;
-      logger.debug('Superseding the in-flight worker pass (crop release): starting the release pass now');
+      logger.debug('Superseding the in-flight worker pass: starting the latest pass now');
     }
     if (isProcessingRef.current) {
       if (opts?.queueIfBusy !== false) {
@@ -221,7 +225,15 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
     const lastProcessingTime = lastProcessingTimeRef.current;
 
     if (!superseded && lastProcessingTime && (now - lastProcessingTime) < 50) {
-      logger.debug('Skipping processing - too soon since last processing (50ms throttle)');
+      // Never drop the last value: re-fire the trigger once the window has passed.
+      if (opts?.queueIfBusy !== false) {
+        if (throttleTimerRef.current) clearTimeout(throttleTimerRef.current);
+        throttleTimerRef.current = setTimeout(() => {
+          throttleTimerRef.current = null;
+          useAppStore.getState().triggerReprocessing();
+        }, Math.max(1, 50 - (now - lastProcessingTime)) + 1);
+      }
+      logger.debug('Deferring processing - too soon since last processing (50ms throttle)');
       return;
     }
 
@@ -245,7 +257,7 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
     const seq = ++previewSeqRef.current;
     // Snapshot of the state this pass renders (Task 9b), see previewStateSignature.
     const signature = previewStateSignature();
-    inFlightRef.current = { seq, supersedeAt: useAppStore.getState().previewSupersedeVersion, awaitingWorker: false };
+    inFlightRef.current = { seq, supersedeAt: useAppStore.getState().previewSupersedeVersion, awaitingWorker: false, signature };
     try {
       setIsProcessing(true);
       const startTime = performance.now();
@@ -795,6 +807,10 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
       if (gpuReadbackTimerRef.current) {
         clearTimeout(gpuReadbackTimerRef.current);
         gpuReadbackTimerRef.current = null;
+      }
+      if (throttleTimerRef.current) {
+        clearTimeout(throttleTimerRef.current);
+        throttleTimerRef.current = null;
       }
       if (gpuRetryTimerRef.current) {
         clearTimeout(gpuRetryTimerRef.current);

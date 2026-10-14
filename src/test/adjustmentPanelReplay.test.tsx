@@ -273,4 +273,46 @@ describe('AdjustmentPanel single apply (replay signature)', () => {
     expect(workerProcess).toHaveBeenCalledTimes(2);
     expect(mainProcess).not.toHaveBeenCalled();
   });
+
+  // ── Task 12b: last value wins ────────────────────────────────────────────────
+  test('12b: ANY changed-state trigger supersedes a pass parked on a worker; stale result never paints', async () => {
+    mockRoute.path = 'worker';
+    let resolveStuck: (v: unknown) => void = () => {};
+    workerProcess.mockImplementationOnce((img: { data: Float32Array; width: number; height: number }) =>
+      new Promise((res) => { resolveStuck = () => res({ success: true, data: img.data, processingTime: 1, width: img.width, height: img.height }); }));
+    workerProcess.mockImplementation(async (img: { data: Float32Array; width: number; height: number }) =>
+      ({ success: true, data: img.data, processingTime: 1, width: img.width, height: img.height }));
+
+    await mountPanel();
+    expect(workerProcess).toHaveBeenCalledTimes(1);
+    liveParams.value = 9; // the latest wheel value
+    await act(async () => { useAppStore.getState().triggerReprocessing(); });
+    await flush(200);
+    // The latest value paints next, without waiting for the stuck pass.
+    expect(workerProcess).toHaveBeenCalledTimes(2);
+    expect(workerProcess.mock.calls[1][1][0].params).toEqual({ exposure: 9 });
+    expect(setProcessed).toHaveBeenCalledTimes(1);
+
+    await act(async () => { resolveStuck(undefined); });
+    await flush(1000);
+    expect(setProcessed).toHaveBeenCalledTimes(1); // stale result dropped
+    expect(workerProcess).toHaveBeenCalledTimes(2);
+  });
+
+  test('12b: a trigger inside the 50ms window with no pass in flight still renders the latest value', async () => {
+    mockRoute.path = 'main';
+    mainProcess.mockImplementation(async (d: Float32Array) => d); // instant passes
+    await mountPanel();
+    await flush(100);
+    const before = mainProcess.mock.calls.length;
+    liveParams.value = 5;
+    // Call straight after a pass finished: inside the throttle window.
+    await act(async () => { useAppStore.getState().triggerReprocessing(); });
+    await flush(600);
+    expect(mainProcess.mock.calls.length).toBeGreaterThan(before);
+    mainProcess.mockImplementation(async (d: Float32Array) => {
+      await new Promise((r) => setTimeout(r, 500));
+      return d;
+    });
+  });
 });
