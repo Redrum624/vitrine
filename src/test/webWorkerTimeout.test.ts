@@ -14,7 +14,9 @@ type Listener = (event: { data: Record<string, unknown> }) => void;
 class FakeWorker {
   static created: FakeWorker[] = [];
   hang = false;
+  failInit = false;
   terminated = false;
+  lastProcessId = -1;
   posted: string[] = [];
   private listeners: Listener[] = [];
   terminate = jest.fn(() => { this.terminated = true; });
@@ -26,8 +28,10 @@ class FakeWorker {
     if (this.terminated) return;
     this.posted.push(msg.type);
     if (msg.type === 'INITIALIZE') {
-      Promise.resolve().then(() => this.emit({ type: 'INITIALIZE_COMPLETE', id: msg.id, success: true }));
-    } else if (msg.type === 'PROCESS_IMAGE' && !this.hang) {
+      const ok = !this.failInit;
+      Promise.resolve().then(() => this.emit({ type: 'INITIALIZE_COMPLETE', id: msg.id, success: ok, error: ok ? undefined : 'boot failed' }));
+    } else if (msg.type === 'PROCESS_IMAGE') this.lastProcessId = msg.id;
+    if (msg.type === 'PROCESS_IMAGE' && !this.hang) {
       const img = msg.data.imageData!;
       Promise.resolve().then(() => this.emit({
         type: 'PROCESS_COMPLETE', id: msg.id, success: true, data: img.data, processingTime: 1,
@@ -39,13 +43,23 @@ class FakeWorker {
     if (this.terminated) return;
     for (const l of this.listeners) l({ data });
   }
+  /** A message already in flight when terminate() ran (bypasses the terminated guard). */
+  lateAnswer(): void {
+    const data = new Float32Array(8 * 8 * 4);
+    for (const l of this.listeners) {
+      l({ data: { type: 'PROCESS_COMPLETE', id: this.lastProcessId, success: true, data, processingTime: 1, outputWidth: 8, outputHeight: 8 } });
+    }
+  }
 }
 
-const mockSpawn = { fail: false };
+const mockSpawn = { fail: false, failInit: false, gate: null as Promise<void> | null };
 jest.mock('../workers/createPipelineWorker', () => ({
   createPipelineWorker: jest.fn(async () => {
+    if (mockSpawn.gate) await mockSpawn.gate;
     if (mockSpawn.fail) throw new Error('spawn refused');
-    return new FakeWorker();
+    const w = new FakeWorker();
+    w.failInit = mockSpawn.failInit;
+    return w;
   }),
 }));
 
@@ -60,6 +74,8 @@ describe('WebWorkerImageProcessor timeout recycling (Task 10b)', () => {
     jest.useFakeTimers();
     FakeWorker.created = [];
     mockSpawn.fail = false;
+    mockSpawn.failInit = false;
+    mockSpawn.gate = null;
   });
   afterEach(() => jest.useRealTimers());
 
@@ -112,15 +128,85 @@ describe('WebWorkerImageProcessor timeout recycling (Task 10b)', () => {
     await Promise.all(busy);
   });
 
-  it('a late answer from a terminated worker is ignored (no double settle, not re-pooled)', async () => {
+  it('a late answer from a terminated worker is ignored (settled once, never re-pooled)', async () => {
+    const p = await ready();
+    const maxWorkers = p.getStats().maxWorkers;
+    const hung = FakeWorker.created[0];
+    hung.hang = true;
+    const settle = jest.fn();
+    const job = p.processImage(img(), []).then((r) => { settle(r.success); return r; });
+    await jest.advanceTimersByTimeAsync(WORKER_MESSAGE_TIMEOUT_MS + 10);
+    await job;
+    expect(hung.terminated).toBe(true);
+    // The answer that was already in flight arrives after terminate().
+    hung.lateAnswer();
+    await jest.advanceTimersByTimeAsync(10);
+    expect(settle).toHaveBeenCalledTimes(1);
+    expect(settle).toHaveBeenCalledWith(false);
+    const stats = p.getStats();
+    expect(stats.availableWorkers).toBe(maxWorkers);
+    expect(stats.availableWorkers + stats.busyWorkers).toBe(maxWorkers);
+    expect(stats.pendingMessages).toBe(0);
+    // Saturate the pool: no job ever lands on the dead worker.
+    await Promise.all(Array.from({ length: maxWorkers * 2 }, () => p.processImage(img(), [])));
+    expect(hung.posted.filter((t) => t === 'PROCESS_IMAGE')).toHaveLength(1);
+  });
+
+  it('a replacement that fails INITIALIZE is terminated and never pooled', async () => {
     const p = await ready();
     const maxWorkers = p.getStats().maxWorkers;
     FakeWorker.created[0].hang = true;
+    mockSpawn.failInit = true;
     const job = p.processImage(img(), []);
     await jest.advanceTimersByTimeAsync(WORKER_MESSAGE_TIMEOUT_MS + 10);
     await job;
+    const replacement = FakeWorker.created[maxWorkers];
+    expect(replacement).toBeDefined();
+    expect(replacement.terminated).toBe(true);
+    const stats = p.getStats();
+    expect(stats.availableWorkers + stats.busyWorkers).toBe(maxWorkers - 1);
+    for (let i = 0; i < maxWorkers; i++) {
+      expect((await p.processImage(img(), [])).success).toBe(true);
+    }
+    expect(replacement.posted.filter((t) => t === 'PROCESS_IMAGE')).toHaveLength(0);
+  });
+
+  it('a drained pool (respawns failing) reports unhealthy and fails jobs fast', async () => {
+    const p = await ready();
+    const maxWorkers = p.getStats().maxWorkers;
+    for (const w of FakeWorker.created) w.hang = true;
+    mockSpawn.fail = true;
+    const busy = Array.from({ length: maxWorkers }, () => p.processImage(img(), []));
+    await jest.advanceTimersByTimeAsync(WORKER_MESSAGE_TIMEOUT_MS + 10);
+    await Promise.all(busy);
+    expect(p.getStats().availableWorkers + p.getStats().busyWorkers).toBe(0);
+    expect(p.isHealthy()).toBe(false);
+    // No 60 s acquire wait: the job fails at once.
+    const settled = jest.fn();
+    const job = p.processImage(img(), []).then((r) => { settled(r.success); });
+    await jest.advanceTimersByTimeAsync(0);
+    await Promise.resolve();
+    expect(settled).toHaveBeenCalledWith(false);
+    await job;
+  });
+
+  it('dispose() + re-initialize() racing a pending respawn never adds an extra worker', async () => {
+    const p = await ready();
+    const maxWorkers = p.getStats().maxWorkers;
+    FakeWorker.created[0].hang = true;
+    let open!: () => void;
+    mockSpawn.gate = new Promise<void>((r) => { open = r; });
+    const job = p.processImage(img(), []);
+    await jest.advanceTimersByTimeAsync(WORKER_MESSAGE_TIMEOUT_MS + 10);
+    await job; // the respawn is now parked inside createPipelineWorker
+    p.dispose();
+    mockSpawn.gate = null;
+    await p.initialize();
+    expect(p.getStats().availableWorkers).toBe(maxWorkers);
+    open(); // the stale respawn completes AFTER the new generation is up
+    await jest.advanceTimersByTimeAsync(10);
     const stats = p.getStats();
     expect(stats.availableWorkers + stats.busyWorkers).toBe(maxWorkers);
-    expect(stats.pendingMessages).toBe(0);
+    expect(FakeWorker.created[FakeWorker.created.length - 1].terminated).toBe(true);
   });
 });

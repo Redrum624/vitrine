@@ -64,6 +64,10 @@ export class WebWorkerImageProcessor {
   // crashed at module evaluation), do NOT retry on every frame — each retry
   // costs the caller the full init sequence. Callers route to the main thread.
   private initFailed = false;
+  // Bumped by dispose(): a respawn started under an older generation never joins the pool.
+  private generation = 0;
+  // Replacements being spawned/initialised for the CURRENT generation (pool may refill).
+  private respawnsInFlight = 0;
   private messageId = 0;
   private pendingMessages = new Map<number, {
     resolve: (value: unknown) => void;
@@ -89,7 +93,22 @@ export class WebWorkerImageProcessor {
   /** False once initialization has failed — preview routing then keeps ≥1MP
    *  frames on the main thread instead of paying dead-worker timeouts. */
   isHealthy(): boolean {
-    return !this.initFailed;
+    return !this.initFailed && !this.isDrained();
+  }
+
+  /** Initialised, but every worker is gone and none is being respawned: the pool can never
+   *  refill, so jobs must fail fast (callers fall back to the main thread). */
+  private isDrained(): boolean {
+    return this.isInitialized && this.workers.length === 0 && this.respawnsInFlight === 0;
+  }
+
+  /** The pool just drained: fail every waiting job now instead of at its deadline. */
+  private failWaitersIfDrained(): void {
+    if (!this.isDrained()) return;
+    logger.warn('Pipeline worker pool drained (respawns failed); previews fall back to the main thread');
+    const waiters = this.workerWaiters;
+    this.workerWaiters = [];
+    for (const w of waiters) w.reject(new Error('No worker available (pool drained)'));
   }
 
   async initialize(): Promise<void> {
@@ -145,9 +164,17 @@ export class WebWorkerImageProcessor {
       this.pendingMessages.delete(id);
       clearTimeout(pendingMessage.timer);
 
-      // Return worker to available pool (only a worker still in the pool — a recycled
-      // worker's late answer must never re-enter it).
-      if (this.workers.includes(worker)) this.releaseWorker(worker);
+      // A worker that failed to boot is never pooled: terminate and drop it.
+      if (type === 'INITIALIZE_COMPLETE' && !success) {
+        logger.warn('Pipeline worker failed INITIALIZE; terminating it:', error || 'no reason given');
+        try { worker.terminate(); } catch { /* already dead */ }
+        this.workers = this.workers.filter((w) => w !== worker);
+        this.availableWorkers = this.availableWorkers.filter((w) => w !== worker);
+      } else if (this.workers.includes(worker)) {
+        // Return worker to available pool (only a worker still in the pool — a recycled
+        // worker's late answer must never re-enter it).
+        this.releaseWorker(worker);
+      }
 
       switch (type) {
         case 'INITIALIZE_COMPLETE':
@@ -248,12 +275,21 @@ export class WebWorkerImageProcessor {
       this.pendingMessages.delete(id);
       pending.reject(new Error('Worker terminated'));
     }
-    if (!respawn || !this.isInitialized) return;
+    if (!respawn || !this.isInitialized) {
+      this.failWaitersIfDrained();
+      return;
+    }
+    const gen = this.generation;
+    this.respawnsInFlight++;
     void (async () => {
+      let replacement: Worker | null = null;
       try {
-        const replacement = await createPipelineWorker();
-        // dispose() may have run meanwhile: never resurrect a disposed pool.
-        if (!this.isInitialized) { replacement.terminate(); return; }
+        replacement = await createPipelineWorker();
+        // dispose() (and maybe a re-initialize()) ran meanwhile: never join a newer pool.
+        if (gen !== this.generation || !this.isInitialized) {
+          replacement.terminate();
+          return;
+        }
         this.setupWorkerEventHandlers(replacement);
         this.workers.push(replacement);
         // Pooled by the INITIALIZE_COMPLETE handler (sendMessage takes it out until then).
@@ -261,6 +297,16 @@ export class WebWorkerImageProcessor {
         logger.info(`Replacement pipeline worker ready (${this.workers.length}/${this.maxWorkers})`);
       } catch (error) {
         logger.warn('Replacement pipeline worker failed to start:', error instanceof Error ? error.message : String(error));
+        if (replacement && gen === this.generation) {
+          try { replacement.terminate(); } catch { /* already dead */ }
+          this.workers = this.workers.filter((w) => w !== replacement);
+          this.availableWorkers = this.availableWorkers.filter((w) => w !== replacement);
+        }
+      } finally {
+        if (gen === this.generation) {
+          this.respawnsInFlight--;
+          this.failWaitersIfDrained();
+        }
       }
     })();
   }
@@ -278,6 +324,7 @@ export class WebWorkerImageProcessor {
   private getAvailableWorker(deadlineMs = WORKER_ACQUIRE_DEADLINE_MS): Promise<Worker> {
     const free = this.availableWorkers.shift();
     if (free) return Promise.resolve(free);
+    if (this.isDrained()) return Promise.reject(new Error('No worker available (pool drained)'));
     return new Promise<Worker>((resolve, reject) => {
       const waiter = {
         resolve: (w: Worker) => { clearTimeout(timer); resolve(w); },
@@ -543,8 +590,15 @@ export class WebWorkerImageProcessor {
   dispose(): void {
     logger.info('Disposing Web Worker image processor...');
 
-    // Clear pending messages (and their timeout timers)
-    for (const pending of this.pendingMessages.values()) clearTimeout(pending.timer);
+    // A respawn still in flight belongs to this (now dead) generation.
+    this.generation++;
+    this.respawnsInFlight = 0;
+
+    // Fail pending messages (and clear their timeout timers) so no caller hangs forever.
+    for (const pending of this.pendingMessages.values()) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error('Worker pool disposed'));
+    }
     this.pendingMessages.clear();
 
     // Terminate workers
