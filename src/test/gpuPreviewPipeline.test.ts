@@ -174,8 +174,11 @@ describe('resident enhance step (v1.40.0 Task 2)', () => {
     expect(lookup).toBeGreaterThan(resident);
     expect(body).toContain('this.runResidentEnhance(gl, inputTexture, this.ping[idx]!, ');
     expect(body).toContain("failedSteps.push('enhance')");
-    // Pools are dropped at the end of a render with no enhance step.
-    expect(body).toContain('this.freeEnhancePools(gl)');
+    // Pools are dropped ONLY on a render with no enhance step — freeing on an enhance frame
+    // would re-allocate ~1 GB of FBOs every frame. Every call in render() must be guarded.
+    const guarded = 'if (!passes.some((p) => p.residentStep)) this.freeEnhancePools(gl);';
+    expect(body).toContain(guarded);
+    expect(body.split('this.freeEnhancePools(gl)').length - 1).toBe(1);
   });
 
   it('frees the enhance pools on resize and destroy', () => {

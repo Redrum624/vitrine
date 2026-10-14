@@ -219,6 +219,84 @@ describe('runResidentEnhance structure (v1.40.0 Task 2 — in-chain resident sha
   });
 });
 
+describe('runResidentEnhance wiring parity with runEnhanceChain', () => {
+  // Order-only pins would miss a swapped sampler (graft u_running/u_detail), swapped
+  // estA/estB, or a wrong u_twoSigma2. This extracts every draw target, sampler binding,
+  // uniform expression, gauss call and chain-state assignment from BOTH bodies, normalises
+  // naming-only differences, and asserts the sequences are identical — excluding Lanczos /
+  // base readback (runEnhanceChain only) and the GPU edge-max reduction (resident only).
+  const lf = pipelineSrc.replace(/\r\n/g, '\n');
+  const methodBody = (sig: string): string => {
+    const s = lf.indexOf(sig);
+    expect(s).toBeGreaterThan(-1);
+    return lf.slice(s, lf.indexOf('\n  }\n', s));
+  };
+  const cut = (text: string, from: string, to: string): string => {
+    const a = text.indexOf(from);
+    const b = text.indexOf(to, a);
+    expect(a).toBeGreaterThan(-1);
+    expect(b).toBeGreaterThan(a);
+    return text.slice(0, a) + text.slice(b + to.length);
+  };
+  const RENAMES: Array<[RegExp, string]> = [
+    [/\.(tex|texture|framebuffer)\b/g, ''],
+    [/\bsrcTex\b/g, 'input'],
+    [/\bcurFinal\b/g, 'cur'],
+    [/\benhFbo\b/g, 'dst'],
+    [/\bout\b/g, 'dst'],
+    [/\b(dw|ww)\b/g, 'w'],
+    [/\b(dh|hh)\b/g, 'h'],
+    [/\bfreeRes\b/g, 'release'],
+    [/allocFbo\(\w+, \w+\)/g, 'acquire()'],
+  ];
+  const EVENT = new RegExp([
+    String.raw`draw\('(?<dkey>\w+)', (?<ddst>\w+), w, h`,
+    String.raw`\{ tex: (?<btex>\w+), sampler: '(?<bs>\w+)' \}`,
+    String.raw`gl\.uniform\w+\(loc\(prog, '(?<un>\w+)'\), (?<ue>[^;]+)\);`,
+    String.raw`gauss\((?<gargs>\w+, (?:w, h, )?\w+, (?:true|false), \w+, [^)]+)\)`,
+    String.raw`const (?<cn>two\w+|sSigma|yccTex|estNext|finalEst|estA) = (?<ce>[^;]+);`,
+    String.raw`(?<an>curEst|running|casTex|chromaTex) = (?<ae>\w+);`,
+    String.raw`if \((?<cond>runRL|runDenoise|params\.sharpness > 0|params\.chromaClean)\)`,
+    String.raw`release\((?<rel>[^)]+)\)`,
+  ].join('|'), 'g');
+  const events = (body: string): string[] => {
+    let t = body;
+    for (const [re, to] of RENAMES) t = t.replace(re, to);
+    const out: string[] = [];
+    for (const m of t.matchAll(EVENT)) {
+      const g = m.groups!;
+      if (g.dkey) out.push(`draw ${g.dkey} -> ${g.ddst}`);
+      else if (g.bs) out.push(`  bind ${g.bs} = ${g.btex}`);
+      else if (g.un) out.push(`  uniform ${g.un} = ${g.ue}`);
+      else if (g.gargs) out.push(`gauss(${g.gargs.replace(/, w, h, /, ', ')})`);
+      else if (g.cn) out.push(`const ${g.cn} = ${g.ce}`);
+      else if (g.an) out.push(`${g.an} = ${g.ae}`);
+      else if (g.cond) out.push(`if ${g.cond}`);
+      // `release r` = runEnhanceChain's finally-loop teardown of its private allocations;
+      // the resident pool persists across frames by design, so it has no counterpart.
+      else if (g.rel && g.rel !== 'r') out.push(`release ${g.rel}`);
+    }
+    return out;
+  };
+
+  const chain = cut(
+    methodBody('runEnhanceChain(rgba: Float32Array'),
+    'const lanczos = ', '// ── Phase 3',
+  );
+  const resident = cut(
+    methodBody('private runResidentEnhance('),
+    'const mag = acquire();', 'const mmax = Math.max(1e-6, px[0]);',
+  );
+
+  it('extracts a substantial event list from both bodies', () => {
+    expect(events(chain).length).toBeGreaterThan(60);
+  });
+
+  it('every draw target, sampler binding, uniform and chain assignment matches stage by stage', () => {
+    expect(events(resident)).toEqual(events(chain));
+  });
+});
+
 describe('resident helper shaders', () => {
   it('enh_edge_mag is the exact FRAG_ENH_SOBEL stencil without pow/normalisation', () => {
     expect(FRAG_ENH_EDGE_MAG.startsWith('#version 300 es')).toBe(true);
