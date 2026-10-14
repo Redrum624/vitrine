@@ -39,6 +39,7 @@ import { ENHANCE_PROGRAM_SOURCES } from './enhance.frag';
 import { enhanceImage, DEFAULT_ENHANCE_PARAMS } from '../utils/enhanceChain';
 import type { EnhanceParams, EnhanceResult } from '../utils/enhanceChain';
 import { casPeak, effectiveEnhanceKernels } from '../utils/enhanceOps';
+import { MAX_GPU_ENHANCE_OUTPUT_PIXELS, ENH_GAUSS_MAXR, ENH_DENOISE_MAXR } from './enhanceGpuLimits';
 import { computeGlobalEdgeMax } from '../utils/enhanceOps';
 import { basicAdjUniforms, exposureUniforms, shadowsHighlightsUniforms, highlightRecoveryUniforms, gainsUniforms, colorBalanceUniforms, vignetteUniforms } from './uniforms';
 import type { ShadowsHighlightsUniformParams } from './uniforms';
@@ -88,17 +89,9 @@ const TONECURVE_LUT_NAMES = ['u_master', 'u_red', 'u_green', 'u_blue'] as const;
 /** Maximum number of mask textures kept in maskCache before LRU eviction. */
 const MAX_MASK_TEXTURES = 32;
 
-/**
- * Cap (output pixels) on the GPU deterministic enhance chain. Above this the CPU worker
- * path — which tiles >48MP with the apron — handles it: the GPU chain holds several
- * RGBA32F buffers at output resolution, so an unbounded output would exhaust VRAM.
- * runEnhanceChain also fails gracefully (returns null → CPU) if any FBO alloc is incomplete.
- */
-const MAX_GPU_ENHANCE_OUTPUT_PIXELS = 96_000_000;
-/** Max Gaussian radius the enh_gauss shader's constant loop (MAXR) supports. */
-const ENH_GAUSS_MAXR = 16;
-/** Max joint-bilateral chroma-denoise radius the enh_denoise_chroma shader supports. */
-const ENH_DENOISE_MAXR = 5;
+// MAX_GPU_ENHANCE_OUTPUT_PIXELS / ENH_GAUSS_MAXR / ENH_DENOISE_MAXR live in ./enhanceGpuLimits
+// (shared with passDescriptors.enhanceResidentEligible). runEnhanceChain also fails gracefully
+// (returns null → CPU) if any FBO alloc is incomplete.
 
 /**
  * Self-test epsilons for the GPU enhance chain vs the CPU enhanceImage reference. Despite

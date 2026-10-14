@@ -1,5 +1,7 @@
-import { buildPassList, buildLocalAdjustmentsPass, computeWBGains, GPU_MODULE_IDS, OPT_IN_GPU_MODULE_IDS, setGpuUnsafeModuleIds, getGpuUnsafeModuleIds } from '../shaders/passDescriptors';
+import { buildPassList, buildLocalAdjustmentsPass, computeWBGains, GPU_MODULE_IDS, OPT_IN_GPU_MODULE_IDS, setGpuUnsafeModuleIds, getGpuUnsafeModuleIds, enhanceResidentEligible } from '../shaders/passDescriptors';
 import type { MaskUpload } from '../shaders/passDescriptors';
+import { nrStrengthToH } from '../utils/nrCurve';
+import { DEFAULT_ENHANCE_PARAMS } from '../utils/enhanceChain';
 import { LocalAdjustmentsModule } from '../modules/LocalAdjustmentsModule';
 import { WhiteBalanceModule } from '../modules/WhiteBalanceModule';
 import { BasicAdjustmentsModule } from '../modules/BasicAdjustmentsModule';
@@ -731,4 +733,96 @@ test('buildLocalAdjustmentsPass setUniforms have arity 2/3 and do not throw with
   for (const sp of pass.subPasses!) {
     expect(() => sp.setUniforms(makeGl(), DUMMY_PROG, DEFAULT_RT)).not.toThrow();
   }
+});
+
+// ---------------------------------------------------------------------------
+// NR + enhance resident passes (v1.40.0 Task 1)
+// ---------------------------------------------------------------------------
+
+describe('NR + enhance resident passes', () => {
+  afterEach(() => setGpuUnsafeModuleIds([]));
+  const nr = (params: Record<string, unknown>) => fakeModule('noise-reduction', true, params);
+  const enh = (over: Record<string, unknown> = {}) =>
+    fakeModule('enhance', true, { ...DEFAULT_ENHANCE_PARAMS, enabled: true, ...over });
+  const OPTS = { width: 800, height: 600, kernelScale: 0.4 };
+
+  test('NR enabled -> denoise pass, not a cpuBridge', () => {
+    const { passes, cpuBridges } = buildPassList([nr({ enabled: true, strength: 37 })], OPTS);
+    expect(passes.map((p) => p.id)).toEqual(['noise-reduction']);
+    expect(passes[0].programKey).toBe('denoise');
+    expect(cpuBridges).toEqual([]);
+  });
+
+  test('NR enabled false/undefined -> cpuBridge', () => {
+    for (const params of [{ enabled: false, strength: 37 }, { strength: 37 }]) {
+      const { passes, cpuBridges } = buildPassList([nr(params)], OPTS);
+      expect(passes).toHaveLength(0);
+      expect(cpuBridges).toEqual(['noise-reduction']);
+    }
+  });
+
+  test('NR uniforms derive from nrStrengthToH via denoiseUniforms', () => {
+    const { passes } = buildPassList([nr({ enabled: true, strength: 37 })], OPTS);
+    const calls: Record<string, number[]> = {};
+    const gl = {
+      getUniformLocation: (_p: unknown, name: string) => name,
+      uniform1f: (n: string, v: number) => { calls[n] = [v]; },
+      uniform2f: (n: string, a: number, b: number) => { calls[n] = [a, b]; },
+    } as unknown as WebGL2RenderingContext;
+    const rt = { width: 640, height: 480, dehaze: DEFAULT_RT.dehaze };
+    passes[0].setUniforms(gl, DUMMY_PROG, rt);
+    const h = nrStrengthToH(37);
+    expect(calls.u_h2[0]).toBeCloseTo(h * h * 27, 12);
+    expect(calls.u_texel).toEqual([1 / 640, 1 / 480]);
+  });
+
+  test('enhance sharpen -> residentStep carrying kernelScale', () => {
+    const { passes, cpuBridges } = buildPassList([enh()], OPTS);
+    expect(cpuBridges).toEqual([]);
+    expect(passes).toHaveLength(1);
+    expect(passes[0].id).toBe('enhance');
+    expect(passes[0].residentStep?.kind).toBe('enhance');
+    expect(passes[0].residentStep?.kernelScale).toBe(0.4);
+    expect(passes[0].residentStep?.params.sharpen).toBe(true);
+  });
+
+  test('enhance upscale / disabled / psfSigma 8 -> cpuBridge', () => {
+    // psfSigma 8 only exceeds the shader radius cap at native scale (8*0.4 -> radius 10 is
+    // eligible at kernelScale 0.4, exactly as runEnhanceChain computes it), so use scale 1.
+    const cases: [Record<string, unknown>, number][] = [
+      [{ upscale: true }, 0.4], [{ enabled: false }, 0.4], [{ psfSigma: 8 }, 1], [{ psfSigma: 20 }, 0.4],
+    ];
+    for (const [over, kernelScale] of cases) {
+      const { passes, cpuBridges } = buildPassList([enh(over)], { ...OPTS, kernelScale });
+      expect(passes).toHaveLength(0);
+      expect(cpuBridges).toEqual(['enhance']);
+    }
+    expect(buildPassList([enh({ psfSigma: 8 })], OPTS).passes).toHaveLength(1);
+  });
+
+  test('unsafe enhance / enhance-resident / noise-reduction -> cpuBridge', () => {
+    for (const unsafe of ['enhance', 'enhance-resident']) {
+      setGpuUnsafeModuleIds([unsafe]);
+      expect(buildPassList([enh()], OPTS).cpuBridges).toEqual(['enhance']);
+    }
+    setGpuUnsafeModuleIds(['noise-reduction']);
+    expect(buildPassList([nr({ enabled: true, strength: 37 })], OPTS).cpuBridges).toEqual(['noise-reduction']);
+  });
+
+  test('pass order follows module order', () => {
+    const { passes } = buildPassList([
+      fakeModule('exposure', true, { exposure: 1 }),
+      nr({ enabled: true, strength: 20 }),
+      enh(),
+      fakeModule('highlightrecovery', true, { strength: 0.5 }),
+    ], OPTS);
+    expect(passes.map((p) => p.id)).toEqual(['exposure', 'noise-reduction', 'enhance', 'highlightrecovery']);
+  });
+
+  test('enhanceResidentEligible mirrors runEnhanceChain limits', () => {
+    const p = { ...DEFAULT_ENHANCE_PARAMS, enabled: true };
+    expect(enhanceResidentEligible(p, 1, 1000, 1000)).toBe(true);
+    expect(enhanceResidentEligible(p, 1, 20000, 20000)).toBe(false);
+    expect(enhanceResidentEligible({ ...p, denoiseStrength: 100 }, 1)).toBe(false);
+  });
 });

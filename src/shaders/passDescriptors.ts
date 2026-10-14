@@ -7,6 +7,13 @@
  *   - `cpuBridges` — module IDs that must run on the CPU (disabled GPU modules,
  *                    CPU-only modules, or lenscorrections when no GPU sub-effect fires).
  *
+ * Beyond GPU_MODULE_IDS, two explicit branches (checked before the GPU_MODULE_IDS test):
+ *   - 'noise-reduction' -> a single 'denoise' pass when params.enabled === true.
+ *   - 'enhance'         -> a `residentStep` descriptor (sharpen only, no upscale) when
+ *                          enhanceResidentEligible() passes; the pipeline renders it in-chain.
+ *                          Eligibility is decided here, pre-render, so a render-time decline
+ *                          can never present an un-enhanced frame.
+ *
  * All module IDs in GPU_MODULE_IDS match the REAL values returned by each module's
  * getId() — WhiteBalanceModule.getId() returns 'temperature', not 'whitebalance'.
  *
@@ -28,10 +35,14 @@ import {
   shadowsHighlightsUniforms,
   highlightRecoveryUniforms,
   layerBlendUniforms,
+  denoiseUniforms,
 } from './uniforms';
 import type { ShadowsHighlightsUniformParams } from './uniforms';
 import type { BasicAdjustmentsParams, DehazeState } from '../services/WebGLImageProcessor';
 import { computeWBGains } from '../modules/WhiteBalanceModule';
+import type { EnhanceParams } from '../utils/enhanceChain';
+import { effectiveEnhanceKernels } from '../utils/enhanceOps';
+import { MAX_GPU_ENHANCE_OUTPUT_PIXELS, ENH_GAUSS_MAXR, ENH_DENOISE_MAXR } from './enhanceGpuLimits';
 
 // ── GPU capability sets ────────────────────────────────────────────────────────
 
@@ -135,6 +146,11 @@ export interface PassDescriptor {
    * A descriptor WITHOUT subPasses behaves exactly as before (single draw call).
    */
   subPasses?: SubPass[];
+  /**
+   * Resident enhance step (sharpen chain run on the resident textures). When set,
+   * `programKey`/`setUniforms` are ignored (like `subPasses`).
+   */
+  residentStep?: { kind: 'enhance'; params: EnhanceParams; kernelScale: number };
 }
 
 /**
@@ -226,6 +242,10 @@ export interface BuildPassOpts {
   width: number;
   height: number;
   rebuildMask?: (layerId: string, w: number, h: number) => Float32Array | null;
+  /** processing/native long-edge ratio of the pass (enhance kernel scaling). Default 1. */
+  kernelScale?: number;
+  /** GL MAX_TEXTURE_SIZE, when known (enhance eligibility). */
+  maxTextureSize?: number;
 }
 
 // ── Minimal PipelineModule interface (subset used here) ───────────────────────
@@ -656,6 +676,38 @@ export function buildLocalAdjustmentsPass(
   };
 }
 
+// ── Resident enhance eligibility ──────────────────────────────────────────────
+
+/**
+ * Pure mirror of GpuPreviewPipeline.runEnhanceChain's radius/size guards (non-upscale case),
+ * evaluated BEFORE render. Radii derive from the EFFECTIVE sigmas; the RL gate uses the RAW
+ * psfSigma; chroma (sigma 1.2) and edge-blur (sigma 2.0) radii are fixed.
+ */
+export function enhanceResidentEligible(
+  params: EnhanceParams,
+  kernelScale: number,
+  w?: number,
+  h?: number,
+  maxTextureSize?: number,
+): boolean {
+  if (w !== undefined && h !== undefined) {
+    if (w <= 0 || h <= 0) return false;
+    if (maxTextureSize !== undefined && (w > maxTextureSize || h > maxTextureSize)) return false;
+    if (w * h > MAX_GPU_ENHANCE_OUTPUT_PIXELS) return false;
+  }
+  const eff = effectiveEnhanceKernels(params.psfSigma, params.hpSigma, kernelScale);
+  const runRL = params.rlIters > 0 && params.psfSigma > 0;
+  const psfRadius = runRL ? Math.max(1, Math.ceil(eff.psfSigma * 3)) : 0;
+  const hpRadius = Math.max(1, Math.ceil(eff.hpSigma * 3));
+  const chromaRadius = Math.max(1, Math.ceil(1.2 * 3));
+  const edgeBlurRadius = Math.max(1, Math.ceil(2.0 * 3));
+  if (Math.max(psfRadius, hpRadius, chromaRadius, edgeBlurRadius) > ENH_GAUSS_MAXR) return false;
+  const runDenoise = params.denoiseStrength > 0;
+  const denRadius = runDenoise ? Math.max(1, Math.ceil((0.4 + 0.12 * params.denoiseStrength) * 3)) : 0;
+  if (denRadius > ENH_DENOISE_MAXR) return false;
+  return true;
+}
+
 // ── buildPassList ──────────────────────────────────────────────────────────────
 
 /**
@@ -710,6 +762,43 @@ export function buildPassList(modules: MinimalModule[], opts?: BuildPassOpts): P
         passes.push(...subPasses);
       } else {
         // All sub-effects are identity/disabled — nothing for GPU to do.
+        cpuBridges.push(id);
+      }
+      continue;
+    }
+
+    if (id === 'noise-reduction') {
+      // Only an explicitly enabled NR is a GPU pass; strength -> h goes through denoiseUniforms
+      // (nrStrengthToH), never inline.
+      if (params.enabled === true && typeof params.strength === 'number') {
+        const strength = params.strength;
+        passes.push({
+          id: 'noise-reduction',
+          programKey: 'denoise',
+          setUniforms: (gl, prog, rt) => denoiseUniforms(rt.width, rt.height, strength)(gl, prog),
+        });
+      } else {
+        cpuBridges.push(id);
+      }
+      continue;
+    }
+
+    if (id === 'enhance') {
+      const kernelScale = opts?.kernelScale ?? 1;
+      const ep = params as unknown as EnhanceParams;
+      const active = ep.enabled === true && ep.sharpen === true && ep.upscale !== true;
+      if (
+        active &&
+        !gpuUnsafeModuleIds.has('enhance-resident') &&
+        enhanceResidentEligible(ep, kernelScale, opts?.width, opts?.height, opts?.maxTextureSize)
+      ) {
+        passes.push({
+          id: 'enhance',
+          programKey: 'enhance:resident', // ignored — residentStep present
+          setUniforms: () => undefined,
+          residentStep: { kind: 'enhance', params: ep, kernelScale },
+        });
+      } else {
         cpuBridges.push(id);
       }
       continue;
