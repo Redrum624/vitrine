@@ -87,6 +87,16 @@ describe('views honour exact mode', () => {
     expect(document.querySelector('[data-image-id="img3"]')).not.toBeInTheDocument();
   });
 
+  it('filmstrip counter reflects exact mode, and undefined mode behaves as min', () => {
+    const { unmount } = render(<ThumbnailPanel images={images} selectedImage={images[1]} onImageSelect={jest.fn()} onClose={jest.fn()} visible={true} />);
+    expect(screen.getByText('1 / 1')).toBeInTheDocument();
+    unmount();
+    useAppStore.setState({ ratingFilter: 3, ratingFilterMode: undefined as unknown as 'min' });
+    render(<ThumbnailPanel images={images} selectedImage={images[1]} onImageSelect={jest.fn()} onClose={jest.fn()} visible={true} />);
+    expect(screen.getByText('2 / 2')).toBeInTheDocument();
+    expect(document.querySelector('[data-image-id="img1"]')).toBeInTheDocument();
+  });
+
   it('gallery shows only the exact-3 photos', () => {
     render(<GalleryView images={images} onImageSelect={jest.fn()} visible={true} />);
     expect(document.querySelector('[data-image-id="img2"]')).toBeInTheDocument();

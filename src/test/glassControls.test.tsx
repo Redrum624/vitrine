@@ -160,6 +160,31 @@ describe('Segmented', () => {
     expect(onChange).toHaveBeenCalledTimes(1);
     expect(onChange).toHaveBeenCalledWith('hue');
   });
+
+  it('active click with onReselect fires onReselect only', () => {
+    const onChange = jest.fn();
+    const onReselect = jest.fn();
+    render(<Segmented value="saturation" onChange={onChange} onReselect={onReselect} options={options} />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Saturation' }));
+    expect(onReselect).toHaveBeenCalledWith('saturation');
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('active click without onReselect still fires onChange (legacy contract)', () => {
+    const onChange = jest.fn();
+    render(<Segmented value="saturation" onChange={onChange} options={options} />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Saturation' }));
+    expect(onChange).toHaveBeenCalledWith('saturation');
+  });
+
+  it('inactive click fires onChange, not onReselect', () => {
+    const onChange = jest.fn();
+    const onReselect = jest.fn();
+    render(<Segmented value="saturation" onChange={onChange} onReselect={onReselect} options={options} />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Hue' }));
+    expect(onChange).toHaveBeenCalledWith('hue');
+    expect(onReselect).not.toHaveBeenCalled();
+  });
 });
 
 describe('SliderRow', () => {

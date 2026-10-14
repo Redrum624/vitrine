@@ -10,8 +10,8 @@ interface SegmentedProps<T extends string> {
   options: SegmentedOption<T>[];
   value: T;
   onChange: (value: T) => void;
-  /** Fired when the ALREADY-active segment is clicked (onChange does not fire
-   * then). Lets a control cycle states by re-clicking the same chip. */
+  /** Fired INSTEAD of onChange when the already-active segment is clicked
+   * (without it, onChange still fires on re-click). Lets a control cycle states by re-clicking the same chip. */
   onReselect?: (value: T) => void;
   className?: string;
   /** Smaller 22px segments for dense panels (default 24px). */
@@ -119,7 +119,7 @@ export function Segmented<T extends string>({ options, value, onChange, onResele
             aria-selected={active}
             tabIndex={active ? 0 : -1}
             className="segmented-tab"
-            onClick={() => (active ? onReselect?.(option.value) : onChange(option.value))}
+            onClick={() => (active && onReselect ? onReselect(option.value) : onChange(option.value))}
             onKeyDown={(event) => handleKeyDown(event, index)}
             style={{
               position: 'relative',
