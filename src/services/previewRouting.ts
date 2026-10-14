@@ -30,7 +30,7 @@ export interface PreviewRoutingOpts {
 /** Mirrors WebWorkerImageProcessor.largeImageThreshold / exportRouting.EXPORT_TILED_MIN_PIXELS. */
 export const WORKER_TILED_MIN_PIXELS = 8000 * 6000;
 
-export type PreviewRouteReason = 'gpu' | 'worker' | 'small-main' | 'workers-unhealthy' | 'nr-needs-renderer-gpu' | 'la-not-tile-safe';
+export type PreviewRouteReason = 'gpu' | 'worker' | 'small-main' | 'workers-unhealthy' | 'nr-needs-renderer-gpu' | 'la-not-tile-safe' | 'not-tile-safe';
 
 export function choosePreviewRoute(opts: PreviewRoutingOpts): { path: 'gpu' | 'worker' | 'main'; reason: PreviewRouteReason } {
   const { gpuAvailable, activeCpuBridgeCount, passCount, width, height, workersHealthy = true, nrActive = false, laActive = false } = opts;
@@ -50,6 +50,13 @@ export function choosePreviewRoute(opts: PreviewRoutingOpts): { path: 'gpu' | 'w
 
   if (laActive && width * height > WORKER_TILED_MIN_PIXELS) {
     return { path: 'main', reason: 'la-not-tile-safe' };
+  }
+
+  // Any frame above the tiled threshold would hit the pool's TILED path, where crop/lens warps/
+  // dehaze run per tile and the result carries no width/height/frameRect (garbled, mis-sized
+  // preview). Reachable once the High/Max memory preset lifts the preview cap to native.
+  if (width * height > WORKER_TILED_MIN_PIXELS) {
+    return { path: 'main', reason: 'not-tile-safe' };
   }
 
   if (width * height >= WORKER_MIN_PIXELS) {

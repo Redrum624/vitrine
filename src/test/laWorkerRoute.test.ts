@@ -142,9 +142,9 @@ describe('LocalAdjustmentsModule.replaceLayers', () => {
 
 describe('LA is kept off the TILED (> 48 MP) worker path', () => {
   const base = { gpuAvailable: false, activeCpuBridgeCount: 1, passCount: 1 };
-  it('preview: LA active above 48 MP → main; below → worker; LA off → worker', () => {
+  it('preview: LA active above 48 MP → main; below → worker; LA off above 48 MP → main (not-tile-safe)', () => {
     expect(choosePreviewRoute({ ...base, width: 10000, height: 6000, laActive: true })).toEqual({ path: 'main', reason: 'la-not-tile-safe' });
     expect(choosePreviewRoute({ ...base, width: 8000, height: 6000, laActive: true }).path).toBe('worker');
-    expect(choosePreviewRoute({ ...base, width: 10000, height: 6000 }).path).toBe('worker');
+    expect(choosePreviewRoute({ ...base, width: 10000, height: 6000 })).toEqual({ path: 'main', reason: 'not-tile-safe' });
   });
 });
