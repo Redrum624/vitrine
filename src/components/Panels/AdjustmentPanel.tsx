@@ -272,10 +272,15 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
       if (processingGenRef.current === gen) useAppStore.getState().setIsProcessing(true);
     }, 800);
     const seq = ++previewSeqRef.current;
-    // Snapshot of the state this pass renders (Task 9b), see previewStateSignature.
-    const signature = previewStateSignature();
+    // Claim the in-flight slot BEFORE anything can throw, so the finally below always
+    // releases it (a throw that skipped the finally would wedge every later preview).
+    let signature = '';
     inFlightRef.current = { seq, supersedeAt: useAppStore.getState().previewSupersedeVersion, awaitingWorker: false, signature };
     try {
+      // Snapshot of the state this pass renders (Task 9b), see previewStateSignature. Inside
+      // the try: a module getParams() that throws must not leave isProcessingRef stuck true.
+      signature = previewStateSignature();
+      inFlightRef.current.signature = signature;
       setIsProcessing(true);
       const startTime = performance.now();
 
