@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useAppStore } from '../../stores/appStore';
 import { SectionLabel } from '../Controls/SectionLabel';
 import { ChipButton } from '../Controls/ChipButton';
@@ -55,12 +55,17 @@ export function SettingsPanel() {
   const [memoryPreset, setMemoryPreset] = useState<MemoryPreset>(DEFAULT_MEMORY_PRESET);
   const [totalRam, setTotalRam] = useState(0);
 
+  // A pick made before the mount-time load resolves must win over the (stale) stored value.
+  const userPicked = useRef(false);
+  // Rapid clicks apply strictly in order, so the last pick wins.
+  const applyQueue = useRef<Promise<void>>(Promise.resolve());
+
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       const [stored, ram] = await Promise.all([loadStoredPreset(), getTotalRamBytes()]);
       if (cancelled) return;
-      setMemoryPreset(stored);
+      if (!userPicked.current) setMemoryPreset(stored);
       setTotalRam(ram);
     })();
     return () => { cancelled = true; };
@@ -69,8 +74,9 @@ export function SettingsPanel() {
   // Live-applicable: caches, pipeline budget, preview cap and GPU buffers change at once (a
   // smaller budget evicts immediately). No restart: there is no JS-heap setting (see memoryPreset.ts).
   const changeMemoryPreset = (preset: MemoryPreset) => {
+    userPicked.current = true;
     setMemoryPreset(preset);
-    void (async () => {
+    applyQueue.current = applyQueue.current.then(async () => {
       try {
         await window.electronAPI?.storeSet?.(MEMORY_PRESET_KEY, preset);
         await applyMemoryPreset(preset);
@@ -78,7 +84,7 @@ export function SettingsPanel() {
       } catch (e) {
         logger.warn('Failed to apply memory preset:', e);
       }
-    })();
+    });
   };
 
   useEffect(() => {

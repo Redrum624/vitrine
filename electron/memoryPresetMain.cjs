@@ -1,7 +1,8 @@
 'use strict';
 /**
- * Main-process mirror of src/utils/memoryPreset.ts for the numbers main needs at init (disk cache budget). src/test/memoryPresetParity.test.ts keeps the two
- * in step.
+ * Main-process mirror of src/utils/memoryPreset.ts for the numbers main needs at init (disk cache
+ * budget). The 'main-process disk budget mirrors the renderer table' case in
+ * src/test/memoryPreset.test.ts keeps the two in step.
  */
 const fs = require('fs');
 const path = require('path');

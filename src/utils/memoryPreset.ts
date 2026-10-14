@@ -57,13 +57,16 @@ export function computeMemoryBudgets(preset: MemoryPreset, totalRamBytes: number
   }
   const ram = Math.max(0, totalRamBytes || 0);
   const high = preset === 'high';
-  const baseCacheBytes = Math.round(Math.min(ram * (high ? 0.25 : 0.4), (high ? 4 : 8) * GB));
+  // The preset's RAM fraction bounds base cache + pipeline cache TOGETHER, split in today's
+  // 700:500 proportion; the base cache keeps its absolute cap (4 / 8 GB).
+  const pool = ram * (high ? 0.25 : 0.4);
+  const baseShare = pool * (BALANCED_BASE_CACHE_BYTES / (BALANCED_BASE_CACHE_BYTES + BALANCED_PIPELINE_BYTES));
   // Never below today's Balanced figure (tiny-RAM machines: a "High" that shrinks would be absurd).
-  const base = Math.max(baseCacheBytes, BALANCED_BASE_CACHE_BYTES);
+  const base = Math.floor(Math.max(Math.min(baseShare, (high ? 4 : 8) * GB), BALANCED_BASE_CACHE_BYTES));
   return {
     preset,
     baseCacheBytes: base,
-    pipelineBytes: Math.round(BALANCED_PIPELINE_BYTES * (base / BALANCED_BASE_CACHE_BYTES)),
+    pipelineBytes: Math.floor(BALANCED_PIPELINE_BYTES * (base / BALANCED_BASE_CACHE_BYTES)),
     diskCacheBytes: (high ? 4 : 8) * GB,
     previewCapMax: UNBOUNDED_PREVIEW_CAP,
     keepGpuBuffers: true,

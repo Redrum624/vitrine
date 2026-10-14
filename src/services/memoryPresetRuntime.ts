@@ -5,8 +5,9 @@
 import { imageCacheService } from './ImageCacheService';
 import { imageProcessingPipeline } from './ImageProcessingPipeline';
 import { logger } from '../utils/Logger';
+import { useAppStore } from '../stores/appStore';
 import {
-  computeMemoryBudgets, DEFAULT_MEMORY_PRESET, isMemoryPreset, MEMORY_PRESET_KEY,
+  BALANCED_PREVIEW_CAP, computeMemoryBudgets, DEFAULT_MEMORY_PRESET, isMemoryPreset, MEMORY_PRESET_KEY,
   type MemoryBudgets, type MemoryPreset,
 } from '../utils/memoryPreset';
 import { BASE_PREVIEW_CAP, probeMaxTextureSize, setKeepGpuBuffers, setPreviewCapCeiling } from '../utils/previewQuality';
@@ -35,15 +36,28 @@ export function budgetsFor(preset: MemoryPreset, ramBytes: number): MemoryBudget
 }
 
 /** Apply `preset`'s live limits. Returns the budgets. */
-export async function applyMemoryPreset(preset: MemoryPreset): Promise<MemoryBudgets> {
+export async function applyMemoryPreset(
+  preset: MemoryPreset,
+  probeGl: () => number | null = probeMaxTextureSize,
+): Promise<MemoryBudgets> {
   const ram = await getTotalRamBytes();
   const budgets = computeMemoryBudgets(preset, ram);
 
   imageCacheService.setBaseBudget(budgets.baseCacheBytes);
   imageProcessingPipeline.setCacheBudget(budgets.pipelineBytes);
-  const glMax = probeMaxTextureSize();
-  const ceiling = preset === 'balanced' ? budgets.previewCapMax : Math.max(BASE_PREVIEW_CAP, Math.min(budgets.previewCapMax, glMax ?? budgets.previewCapMax));
+  // Balanced never probes (no throwaway GL context at startup). High/Max clamp to the device's
+  // MAX_TEXTURE_SIZE; with no WebGL2 (CPU fallback) the cap stays at today's 4096.
+  const glMax = preset === 'balanced' ? null : probeGl();
+  const ceiling = preset === 'balanced' || glMax == null
+    ? BALANCED_PREVIEW_CAP
+    : Math.max(BASE_PREVIEW_CAP, Math.min(budgets.previewCapMax, glMax));
   setPreviewCapCeiling(ceiling);
+  // An already-ratcheted cap above a lowered ceiling comes down with it (and re-renders).
+  const st = useAppStore.getState();
+  if (st.previewQualityCap > ceiling) {
+    st.setPreviewQualityCap(ceiling);
+    st.triggerReprocessing();
+  }
   setKeepGpuBuffers(budgets.keepGpuBuffers);
   try {
     await window.electronAPI?.setDiskCacheBudget?.(preset);

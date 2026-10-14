@@ -152,6 +152,11 @@ export class ImageProcessingPipeline {
   // LRU cache with 100 entry limit and 500MB memory limit (prevents memory leaks)
   private moduleCache: LRUCache<{ params: string; result: Float32Array; context: ProcessingContext }>;
 
+  /** Current module-result cache budget in bytes. */
+  getCacheBudget(): number {
+    return this.moduleCache.getStats().maxMemory;
+  }
+
   /** Resize the module-result cache budget (memory preset); evicts LRU entries to fit. */
   setCacheBudget(bytes: number): void {
     this.moduleCache.setMaxMemory(bytes);

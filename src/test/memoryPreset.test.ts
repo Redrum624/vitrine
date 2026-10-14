@@ -25,23 +25,32 @@ describe('memoryPreset budgets', () => {
     expect(BALANCED_PREVIEW_CAP).toBe(4096);
   });
 
-  test('high: min(25% RAM, 4 GB) base cache; scales with RAM and respects the cap', () => {
-    expect(computeMemoryBudgets('high', 8 * GB).baseCacheBytes).toBe(2 * GB);
-    expect(computeMemoryBudgets('high', 16 * GB).baseCacheBytes).toBe(4 * GB);
-    expect(computeMemoryBudgets('high', 64 * GB).baseCacheBytes).toBe(4 * GB);
+  test.each([
+    ['high', 0.25],
+    ['max', 0.4],
+  ] as const)('%s: base + pipeline TOGETHER never exceed %d of RAM (8/16/64 GB)', (preset, frac) => {
+    for (const ram of [8 * GB, 16 * GB, 64 * GB]) {
+      const b = computeMemoryBudgets(preset, ram);
+      expect(b.baseCacheBytes + b.pipelineBytes).toBeLessThanOrEqual(Math.ceil(ram * frac));
+      // split in today's 700:500 proportion
+      expect(b.pipelineBytes / b.baseCacheBytes).toBeCloseTo(500 / 700, 3);
+      expect(b.baseCacheBytes).toBeLessThanOrEqual((preset === 'high' ? 4 : 8) * GB);
+      expect(b.baseCacheBytes).toBeGreaterThanOrEqual(700 * MB);
+    }
+  });
+
+  test('exact fixtures: the combined pool is the preset fraction until the absolute cap bites', () => {
+    const h8 = computeMemoryBudgets('high', 8 * GB); // pool 2 GB
+    expect(h8.baseCacheBytes).toBe(Math.floor(2 * GB * (7 / 12)));
+    const m16 = computeMemoryBudgets('max', 16 * GB); // pool 6.4 GB
+    expect(m16.baseCacheBytes + m16.pipelineBytes).toBeCloseTo(16 * GB * 0.4, -2);
+    expect(computeMemoryBudgets('high', 64 * GB).baseCacheBytes).toBe(4 * GB); // cap
+    expect(computeMemoryBudgets('max', 64 * GB).baseCacheBytes).toBe(8 * GB); // cap
+    expect(computeMemoryBudgets('max', 64 * GB).diskCacheBytes).toBe(8 * GB);
     expect(computeMemoryBudgets('high', 64 * GB).diskCacheBytes).toBe(4 * GB);
   });
 
-  test('max: min(40% RAM, 8 GB) base cache; disk 8 GB', () => {
-    expect(computeMemoryBudgets('max', 8 * GB).baseCacheBytes).toBe(Math.round(8 * GB * 0.4));
-    expect(computeMemoryBudgets('max', 16 * GB).baseCacheBytes).toBe(Math.round(16 * GB * 0.4));
-    expect(computeMemoryBudgets('max', 64 * GB).baseCacheBytes).toBe(8 * GB);
-    expect(computeMemoryBudgets('max', 64 * GB).diskCacheBytes).toBe(8 * GB);
-  });
-
-  test('pipeline budget scales by the same factor as the base cache; never below Balanced', () => {
-    const b = computeMemoryBudgets('high', 16 * GB);
-    expect(b.pipelineBytes).toBe(Math.round(500 * MB * ((4 * GB) / (700 * MB))));
+  test('never below Balanced on tiny-RAM machines', () => {
     const tiny = computeMemoryBudgets('high', 1 * GB);
     expect(tiny.baseCacheBytes).toBe(700 * MB);
     expect(tiny.pipelineBytes).toBe(500 * MB);
