@@ -233,6 +233,10 @@ export function Toolbar({ onExport, onPrint, onBatchProcess, onUndo: _onUndo, on
   const actionsRef = useRef<HTMLDivElement>(null);
   const fullWidthRef = useRef(0);
   const [collapsed, setCollapsed] = useState(false);
+  // Leftward shift (px) that centers the actions group on the WINDOW's
+  // horizontal center rather than right-aligning it in the canvas column.
+  // Applied as a transform so it never feeds back into the layout measured here.
+  const [centerShift, setCenterShift] = useState(0);
 
   useLayoutEffect(() => {
     if (viewMode !== 'develop') return;
@@ -240,11 +244,20 @@ export function Toolbar({ onExport, onPrint, onBatchProcess, onUndo: _onUndo, on
       const bar = barRef.current;
       const actions = actionsRef.current;
       if (!bar || !actions) return;
-      const barWidth = bar.getBoundingClientRect().width;
+      const barRect = bar.getBoundingClientRect();
+      const barWidth = barRect.width;
       if (barWidth === 0) { // jsdom / not laid out yet
         setCollapsed(window.innerWidth < COLLAPSE_INNERWIDTH_FALLBACK);
         return;
       }
+      // Center on the app width, clamped so the group never slides under the
+      // filename label (8px gap) nor past its right-aligned resting position.
+      const actionsWidth = actions.getBoundingClientRect().width;
+      const restingLeft = barRect.right - 8 - actionsWidth; // bar's right padding
+      const centeredLeft = (window.innerWidth - actionsWidth) / 2;
+      const leadingRight = leadingRef.current?.getBoundingClientRect().right ?? barRect.left;
+      const maxShift = Math.max(0, restingLeft - (leadingRight + 8));
+      setCenterShift(Math.round(Math.min(Math.max(0, restingLeft - centeredLeft), maxShift)));
       if (!collapsed) fullWidthRef.current = actions.scrollWidth; // cache only the expanded width
       // The leading label shrinks (and ellipsizes) under pressure, so measure its
       // NATURAL width — and give it up to LEADING_RESERVE px before the actions
@@ -321,7 +334,7 @@ export function Toolbar({ onExport, onPrint, onBatchProcess, onUndo: _onUndo, on
     <div ref={barRef} className="no-select" style={barStyle} role="toolbar" aria-label="Develop">
       {leadingSlot}
       <div style={{ flex: 1, minWidth: 8 }} />
-      <div ref={actionsRef} className="flex items-center" style={{ gap: 2, flex: 'none' }}>
+      <div ref={actionsRef} className="flex items-center" style={{ gap: 2, flex: 'none', transform: centerShift ? `translateX(-${centerShift}px)` : undefined }}>
         <button onClick={() => electronService.openFile()} className="glass-pill-btn" style={pillBtn} title="Open Image">
           Open
         </button>
