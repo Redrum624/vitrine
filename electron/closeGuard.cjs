@@ -19,12 +19,17 @@
  *   disarmQuit()   drops the bypass (re-arms the guard) when the install did
  *                  not happen after all.
  *
+ * requestInstallClose (optional) is the question confirmQuit asks instead of
+ * requestAppClose: it resolves { ok, reason } and treats an unanswered request
+ * as NO (closeRequest.cjs). A refusal that carries a reason (for example
+ * 'export-in-progress') resolves { ok: false, reason } so the updater can say why.
+ *
  * A close that arrives while confirmQuit is awaiting the renderer is prevented
  * and ignored: the question is already being asked, and the answer decides.
  *
  * Dependencies are injected, so jest runs this without Electron.
  */
-function createCloseGuard({ requestAppClose, performAppCleanup }) {
+function createCloseGuard({ requestAppClose, requestInstallClose, performAppCleanup }) {
   let quitConfirmed = false;
   let confirming = false;
   let cleaningUp = false;
@@ -45,14 +50,19 @@ function createCloseGuard({ requestAppClose, performAppCleanup }) {
     if (win && !win.isDestroyed()) win.destroy();
   }
 
-  /** Resolves true when the app may quit now (and arms the bypass), false when
-   * the renderer vetoed or a confirmation is already running. */
+  /** Resolves true when the app may quit now (and arms the bypass); false (or
+   * { ok: false, reason } when the refusal carries a reason) when the renderer
+   * vetoed, did not answer, or a confirmation is already running. */
   async function confirmQuit() {
     if (confirming || cleaningUp) return false;
     confirming = true;
     try {
-      const ok = await requestAppClose();
-      if (ok !== true) return false;
+      const answer = requestInstallClose ? await requestInstallClose() : await requestAppClose();
+      const ok = answer === true || (answer !== null && typeof answer === 'object' && answer.ok === true);
+      if (!ok) {
+        if (answer !== null && typeof answer === 'object' && answer.reason) return { ok: false, reason: answer.reason };
+        return false;
+      }
       quitConfirmed = true;
       return true;
     } catch {

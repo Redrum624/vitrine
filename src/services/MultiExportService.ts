@@ -4,6 +4,7 @@ import { exportService, ExportOptions } from './ExportService';
 import { decideExportProcessing } from './exportRouting';
 import { suffixedName, baseNameOf } from '../utils/exportFilename';
 import { logger } from '../utils/Logger';
+import { trackExport } from './exportActivity';
 
 export interface MultiExportSummary {
   /** Output filenames that were written successfully. */
@@ -64,7 +65,16 @@ interface DecodedForExport {
  * N+1's edits. Do not "optimize" the restore into the decode-ahead stage.
  */
 class MultiExportService {
-  async exportMany(
+  /** The whole run counts as one export in progress (exportActivity): no quit mid-batch. */
+  exportMany(
+    paths: string[],
+    options: Partial<ExportOptions>,
+    controls: MultiExportControls,
+  ): Promise<MultiExportSummary> {
+    return trackExport(() => this.exportManyUntracked(paths, options, controls));
+  }
+
+  private async exportManyUntracked(
     paths: string[],
     options: Partial<ExportOptions>,
     controls: MultiExportControls,

@@ -25,6 +25,7 @@ import { multiExportService } from '../../services/MultiExportService';
 import { decideExportProcessing } from '../../services/exportRouting';
 import { useAppStore } from '../../stores/appStore';
 import { notificationService } from '../../services/NotificationService';
+import { beginExport } from '../../services/exportActivity';
 import { logger } from '../../utils/Logger';
 
 interface ExportDialogProps {
@@ -303,6 +304,9 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
       singleOptions = { ...baseOptions, overwritePolicy: choice };
     }
     onClose();
+    // In progress from here (decode + pipeline + write): the app refuses to quit until the
+    // finally below ends it (exportActivity; final-review fix 2).
+    const endExport = beginExport();
     useAppStore.getState().startExportProgress(1);
     const setProgress = (frac: number) =>
       useAppStore.getState().updateExportProgress(Math.max(0, Math.min(1, frac)), exportName);
@@ -421,6 +425,7 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
       onExportComplete(false);
     } finally {
       useAppStore.getState().endExportProgress();
+      endExport();
     }
   }, [imageData, imageWidth, imageHeight, exportOptions, originalFilePath, validationErrors, onExportComplete, onClose, multiPaths, outputDirectory, askOverwrite]);
 

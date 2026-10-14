@@ -37,6 +37,7 @@ jest.mock('../services/ExportService', () => ({
 }));
 
 import { multiExportService } from '../services/MultiExportService';
+import { isExportInProgress } from '../services/exportActivity';
 
 const fileExists = jest.fn();
 
@@ -58,6 +59,16 @@ beforeEach(() => {
   getSavedEditState.mockResolvedValue(null);
   restoreState.mockReturnValue(true);
   exportImage.mockResolvedValue({ success: true, outputPath: 'out' });
+});
+
+describe('exportMany — export in progress (final-review fix 2)', () => {
+  it('the whole run counts as an export in progress, released after', async () => {
+    const seen: boolean[] = [];
+    exportImage.mockImplementation(async () => { seen.push(isExportInProgress()); return { success: true, outputPath: 'out' }; });
+    await multiExportService.exportMany(['/i/a.jpg', '/i/b.png'], okOptions, controls());
+    expect(seen).toEqual([true, true]);
+    expect(isExportInProgress()).toBe(false);
+  });
 });
 
 describe('exportMany — per-image edits', () => {

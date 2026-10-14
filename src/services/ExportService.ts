@@ -1,4 +1,5 @@
 import { logger } from '../utils/Logger';
+import { trackExport } from './exportActivity';
 import { EXPORT_SUFFIX } from '../utils/exportFilename';
 import { isElectron, EmbeddableMetadata } from '../types/electron';
 import { COLOR_SPACE_CONVERSIONS } from './colorSpaceMatrices';
@@ -178,12 +179,23 @@ export class ExportService {
     }
   ];
 
-  // Export processed image with given options
-  async exportImage(
+  // Export processed image with given options. Counted as an export in progress (exportActivity)
+  // so the app refuses to quit while the file is being written.
+  exportImage(
     imageData: Float32Array,
     originalWidth: number,
     originalHeight: number,
     options: Partial<ExportOptions> = {},
+    originalFilePath?: string
+  ): Promise<ExportResult> {
+    return trackExport(() => this.exportImageUntracked(imageData, originalWidth, originalHeight, options, originalFilePath));
+  }
+
+  private async exportImageUntracked(
+    imageData: Float32Array,
+    originalWidth: number,
+    originalHeight: number,
+    options: Partial<ExportOptions>,
     originalFilePath?: string
   ): Promise<ExportResult> {
     const startTime = performance.now();

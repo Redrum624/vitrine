@@ -19,6 +19,7 @@ const memoryPresetAtStart = memoryHeap.readPresetSync(require('path').join(app.g
 let measuredHeapLimitMB = null;
 
 const { createCloseGuard } = require('./closeGuard.cjs');
+const { createCloseRequester } = require('./closeRequest.cjs');
 const { createUpdater, registerUpdaterIpc } = require('./updater.cjs');
 
 const path = require('path');
@@ -61,8 +62,15 @@ let updater = null;
 // Lets the updater's "Restart and install now" through the async 'close'
 // handler below (see closeGuard.cjs). requestAppClose/performAppCleanup are
 // function declarations further down, hoisted.
+const closeRequester = createCloseRequester({
+  ipcMain,
+  getWindow: () => mainWindow,
+});
 const closeGuard = createCloseGuard({
   requestAppClose: () => requestAppClose(),
+  // "Restart and install now": an unanswered question is a NO (the install stays
+  // queued for a normal quit) and an export in progress refuses with its reason.
+  requestInstallClose: () => closeRequester.request({ fallback: false }),
   performAppCleanup: () => performAppCleanup(),
 });
 
@@ -1369,40 +1377,11 @@ app.on('web-contents-created', (event, contents) => {
 
 // App closing cycle functions
 async function requestAppClose() {
-  try {
-    if (!mainWindow || mainWindow.isDestroyed()) {
-      return true;
-    }
-
-    console.log('Requesting app close from renderer...');
-
-    // Send close request to renderer and wait for response
-    const result = await new Promise((resolve) => {
-      // Set up timeout in case renderer doesn't respond
-      const timeout = global.setTimeout(() => {
-        console.warn('Renderer did not respond to close request, proceeding with close');
-        resolve(true);
-      }, 5000); // 5 second timeout
-
-      // Set up response listener
-      const handleCloseResponse = (event, shouldClose, reason) => {
-        global.clearTimeout(timeout);
-        ipcMain.removeListener('app-close-response', handleCloseResponse);
-        console.log(`Renderer close response: ${shouldClose ? 'proceed' : 'cancel'} - ${reason || 'no reason'}`);
-        resolve(shouldClose);
-      };
-
-      ipcMain.on('app-close-response', handleCloseResponse);
-
-      // Send the close request
-      mainWindow.webContents.send('app-close-request');
-    });
-
-    return result;
-  } catch (error) {
-    console.error('Error during close request:', error);
-    return true; // Default to allowing close on error
-  }
+  // A normal window close: a renderer that does not answer within 5 s (or a
+  // failed round trip) still lets the window close (closeRequest.cjs).
+  console.log('Requesting app close from renderer...');
+  const answer = await closeRequester.request({ fallback: true });
+  return answer.ok;
 }
 
 async function performAppCleanup() {

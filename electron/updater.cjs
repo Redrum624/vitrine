@@ -117,7 +117,7 @@ function errorCode(err) {
  * @param {object} deps.fs node:fs (existsSync, mkdirSync, appendFileSync, statSync, truncateSync)
  * @param {object} deps.dialog Electron's dialog (showMessageBox)
  * @param {() => object | null} deps.getWindow the main window, the parent of every box
- * @param {(win: object | null) => Promise<boolean>} deps.confirmQuit the close guard's
+ * @param {(win: object | null) => Promise<boolean | { ok: false, reason: string }>} deps.confirmQuit the close guard's
  * @param {() => void} deps.disarmQuit the close guard's
  * @param {string} deps.logFile `<userData>/logs/updater.log`
  * @param {string} deps.productName package.json productName
@@ -342,8 +342,11 @@ function createUpdater(deps) {
       }
       write('INFO', 'prompt answer now');
       let ok;
+      let refusal;
       try {
-        ok = (await confirmQuit(getWindow())) === true;
+        const answer = await confirmQuit(getWindow());
+        ok = answer === true;
+        refusal = answer !== null && typeof answer === 'object' ? answer.reason : undefined;
       } catch (err) {
         // Outside the guard's contract (it resolves true or false). Fail
         // closed: no install now, and no bypass left behind.
@@ -354,7 +357,21 @@ function createUpdater(deps) {
       }
       if (!ok) {
         defer(version); // treated as Later: installs at the next quit
-        write('INFO', 'install postponed: unsaved work');
+        if (refusal === 'export-in-progress') {
+          // Quitting now would kill the export mid-write (truncated file, or a
+          // lost original under "Replace").
+          write('INFO', 'install postponed: export in progress');
+          await showBox({
+            type: 'info',
+            title: 'Update ready',
+            message: 'An export is in progress — the update will install when you quit.',
+            noLink: true,
+          });
+        } else if (refusal === 'timeout') {
+          write('INFO', 'install postponed: the app did not answer the quit request');
+        } else {
+          write('INFO', 'install postponed: unsaved work');
+        }
         return;
       }
       state = 'installing';
