@@ -226,6 +226,25 @@ describe('InteractiveCropHandles', () => {
     expect(onDragEnd).toHaveBeenCalledTimes(1);
   });
 
+  test('unmounting mid-drag still ends the drag (no stuck suspension flag)', () => {
+    const onDragEnd = jest.fn();
+    const { container, unmount } = renderHandles({ onDragEnd });
+    const el = container.querySelector('[data-testid="crop-handle-se"]')!;
+    fireEvent.mouseDown(el, { clientX: 600, clientY: 450 });
+    act(() => {
+      fireEvent.mouseMove(document, { clientX: 620, clientY: 470 });
+    });
+    unmount();
+    expect(onDragEnd).toHaveBeenCalledTimes(1);
+  });
+
+  test('unmounting while idle does not call onDragEnd', () => {
+    const onDragEnd = jest.fn();
+    const { unmount } = renderHandles({ onDragEnd });
+    unmount();
+    expect(onDragEnd).not.toHaveBeenCalled();
+  });
+
   describe('wedge-free clamp (v1.40.0)', () => {
     // 4000x3000 photo straightened by 5 deg; the crop starts at the inscribed rect.
     const ANGLE = 5;

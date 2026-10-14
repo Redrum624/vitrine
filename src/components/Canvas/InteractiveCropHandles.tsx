@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { CropParams } from '../../modules/CropModule';
 import type { CropClampAnchor, NormalizedCropRect } from '../../modules/cropGeometry';
 import { mapBoxToRect, mapRectToBox, resolveFrame } from './cropFrameMapping';
@@ -120,6 +120,17 @@ export function InteractiveCropHandles({
   const [anchorParams, setAnchorParams] = useState<{
     x: number; y: number; width: number; height: number;
   } | null>(null);
+
+  // Unmounted mid-drag (e.g. a tool-switch shortcut): the mouseup listener is gone, so end
+  // the drag here — otherwise the parent's crop-drag suspension stays set and the render-time
+  // wedge-free backstop is skipped for an angled full-frame rect.
+  const isDraggingRef = useRef(false);
+  isDraggingRef.current = isDragging;
+  const onDragEndRef = useRef(onDragEnd);
+  onDragEndRef.current = onDragEnd;
+  useEffect(() => () => {
+    if (isDraggingRef.current) onDragEndRef.current?.();
+  }, []);
 
   const frame = resolveFrame(displayFrame);
   const bounds = boundsRect ?? null;
