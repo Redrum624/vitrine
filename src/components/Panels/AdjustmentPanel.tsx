@@ -26,6 +26,7 @@ import { Sun, Droplet, Palette, Activity, Crop, Sparkles, Focus, History as Hist
 import type { ReactNode } from 'react';
 import type { ImageFileInfo } from '../../services/FileSystemService';
 import { imageProcessingPipeline } from '../../services/ImageProcessingPipeline';
+import type { ProcessingContext } from '../../services/ImageProcessingPipeline';
 import { imageService } from '../../services/ImageService';
 import { notificationService } from '../../services/NotificationService';
 import { guardDeveloping } from '../../utils/developingGuard';
@@ -40,6 +41,43 @@ import { logger } from '../../utils/Logger';
 import { webWorkerImageProcessor } from '../../services/WebWorkerImageProcessor';
 import type { WorkerModuleConfig } from '../../services/WebWorkerImageProcessor';
 import { choosePreviewRoute } from '../../services/previewRouting';
+
+// ── Preview state signature (v1.40.0 Task 9b — single apply) ─────────────────
+// Everything a preview pass's pixels depend on: the live module config (the same
+// {id, enabled, params} the worker is posted), the preview quality cap, the base
+// pixels (baseImageVersion + the source buffer's identity) and the image itself.
+// A pass snapshots it at start; the finally replay fires only if it changed, and
+// the worker-failure fallback renders only while live still equals the posted state.
+// Conservative by construction: a typed array inside params (a baked mask) gets a
+// fresh token on every call, so such state never compares equal and always replays
+// (the pre-9b behaviour) rather than risk skipping a real edit.
+const bufferIds = new WeakMap<object, number>();
+let nextBufferId = 0;
+let volatileToken = 0;
+function bufferId(buf: object): number {
+  let id = bufferIds.get(buf);
+  if (id === undefined) { id = ++nextBufferId; bufferIds.set(buf, id); }
+  return id;
+}
+function signatureReplacer(key: string, value: unknown): unknown {
+  if (key === 'moduleStats') return undefined; // runtime counters, not params
+  if (ArrayBuffer.isView(value)) return `#volatile${++volatileToken}`;
+  return value;
+}
+export function previewStateSignature(): string {
+  const img = imageService.getCurrentImage();
+  if (!img) return 'no-image';
+  const st = useAppStore.getState();
+  const config = imageProcessingPipeline.getOrderedModules().map((m) => [
+    m.getId(),
+    m.isEnabled !== false,
+    typeof m.getParams === 'function' ? m.getParams() : null,
+  ]);
+  return JSON.stringify(
+    [img.filePath ?? '', img.width, img.height, bufferId(img.data), st.previewQualityCap, st.baseImageVersion, config],
+    signatureReplacer,
+  );
+}
 
 interface AdjustmentPanelProps {
   selectedModule?: string | null;
@@ -79,6 +117,10 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
   // `pending` so it re-runs once the current one finishes (no lost edits).
   const isProcessingRef = useRef<boolean>(false);
   const pendingReprocessRef = useRef<boolean>(false);
+  // The pass that OWNS the in-flight slot (Task 9b). `supersedeAt` = the store's
+  // previewSupersedeVersion at its start; `awaitingWorker` = parked on a worker (the
+  // only stage that may be abandoned; the main thread is never run concurrently).
+  const inFlightRef = useRef<{ seq: number; supersedeAt: number; awaitingWorker: boolean } | null>(null);
   // NOTE: Removed lastProcessedImagePathRef - was blocking param change reprocessing
 
   // ── GPU resident-texture preview: source-reupload gating ──────────────────────
@@ -139,6 +181,22 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
     // but ONLY for a real new trigger (param change / processingVersion bump / image load).
     // Non-trigger callers (the mount effect) pass queueIfBusy:false; queuing those made the
     // finally-block triggerReprocessing() feed the next pass forever.
+    let superseded = false;
+    const inflight = inFlightRef.current;
+    if (
+      isProcessingRef.current && opts?.queueIfBusy !== false && inflight?.awaitingWorker &&
+      useAppStore.getState().previewSupersedeVersion !== inflight.supersedeAt
+    ) {
+      // Single apply (Task 9b): a crop release superseded the pass parked on a worker
+      // (the drag-start suspension pass). Mark it stale (it will never paint, fall
+      // back or replay) and start the release pass NOW instead of queueing behind it.
+      previewSeqRef.current++;
+      inFlightRef.current = null;
+      isProcessingRef.current = false;
+      pendingReprocessRef.current = false;
+      superseded = true;
+      logger.debug('Superseding the in-flight worker pass (crop release): starting the release pass now');
+    }
     if (isProcessingRef.current) {
       if (opts?.queueIfBusy !== false) {
         pendingReprocessRef.current = true;
@@ -153,7 +211,7 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
     const now = performance.now();
     const lastProcessingTime = lastProcessingTimeRef.current;
 
-    if (lastProcessingTime && (now - lastProcessingTime) < 50) {
+    if (!superseded && lastProcessingTime && (now - lastProcessingTime) < 50) {
       logger.debug('Skipping processing - too soon since last processing (50ms throttle)');
       return;
     }
@@ -175,8 +233,11 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
     const slowSpinnerTimer = setTimeout(() => {
       if (processingGenRef.current === gen) useAppStore.getState().setIsProcessing(true);
     }, 800);
+    const seq = ++previewSeqRef.current;
+    // Snapshot of the state this pass renders (Task 9b), see previewStateSignature.
+    const signature = previewStateSignature();
+    inFlightRef.current = { seq, supersedeAt: useAppStore.getState().previewSupersedeVersion, awaitingWorker: false };
     try {
-      const seq = ++previewSeqRef.current;
       setIsProcessing(true);
       const startTime = performance.now();
 
@@ -438,6 +499,8 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
       let processedData: Float32Array;
       let outputWidth = previewWidth;
       let outputHeight = previewHeight;
+      // The effective crop rect this pass rendered (undefined: crop did not run, full frame).
+      let frameRect: ProcessingContext['cropFrameRect'];
 
       if (previewPath === 'worker') {
         // Build WorkerModuleConfig from the LIVE pipeline state (same source the GPU
@@ -450,6 +513,7 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
         }));
 
         try {
+          if (inFlightRef.current?.seq === seq) inFlightRef.current.awaitingWorker = true;
           const workerResult = await webWorkerImageProcessor.processImage(
             // kernelScale: same pass-level C5 scale as the main-thread context above (the worker
             // path forwards it to every tile verbatim — never re-derived from tile dims).
@@ -463,6 +527,7 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
             // (the worker's local ProcessingContext was mutated by CropModule).
             outputWidth  = workerResult.width  ?? previewWidth;
             outputHeight = workerResult.height ?? previewHeight;
+            frameRect = workerResult.frameRect;
             logger.debug(`CPU-worker preview completed in ${workerResult.processingTime.toFixed(2)}ms, out: ${outputWidth}x${outputHeight}`);
           } else {
             throw new Error(workerResult.error ?? 'Worker returned failure');
@@ -470,9 +535,22 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
         } catch (workerErr) {
           // Worker failed (URL resolution, crash, timeout) → graceful main-thread fallback.
           logger.warn('Worker processing failed, falling back to main thread:', workerErr instanceof Error ? workerErr.message : String(workerErr));
+          // Superseded while parked on the worker: stale, no fallback render.
+          if (previewSeqRef.current !== seq) return;
+          // The fallback runs the LIVE main-thread pipeline, so it renders the POSTED
+          // state only while live still equals it (Task 9b). Otherwise drop this result:
+          // painting live params under a stale pass was the visible "second apply" (R2);
+          // the replay in finally renders the live state once.
+          if (previewStateSignature() !== signature) {
+            logger.warn('Worker fallback skipped: live state changed since the pass was posted');
+            return;
+          }
           processedData = await imageProcessingPipeline.processImage(previewData, processingContext, { useWebWorkers: false });
           outputWidth  = processingContext.width;
           outputHeight = processingContext.height;
+          frameRect = (processingContext as ProcessingContext).cropFrameRect;
+        } finally {
+          if (inFlightRef.current?.seq === seq) inFlightRef.current.awaitingWorker = false;
         }
       } else {
         // Tiny preview — keep it on the main thread (worker overhead not worth it).
@@ -480,6 +558,7 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
         // CRITICAL: CropModule mutates processingContext.width/height in place.
         outputWidth  = processingContext.width;
         outputHeight = processingContext.height;
+        frameRect = (processingContext as ProcessingContext).cropFrameRect;
       }
 
       // Discard stale results if a newer preview has already started.
@@ -491,6 +570,7 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
         width: outputWidth,
         height: outputHeight,
         isPreview: true,
+        frameRect,
       });
 
       const processTime = performance.now() - startTime;
@@ -516,12 +596,22 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
       // Only the latest run clears the store spinner, so an older run completing can't
       // wipe a newer run's spinner (and the newest run's finally always clears it).
       if (processingGenRef.current === gen) useAppStore.getState().setIsProcessing(false);
-      setIsProcessing(false);
-      isProcessingRef.current = false;
-      // An edit arrived while we were busy — reprocess the latest state now.
-      if (pendingReprocessRef.current) {
-        pendingReprocessRef.current = false;
-        useAppStore.getState().triggerReprocessing();
+      // A superseded pass no longer owns the in-flight slot: its successor does.
+      if (inFlightRef.current?.seq === seq) {
+        inFlightRef.current = null;
+        setIsProcessing(false);
+        isProcessingRef.current = false;
+        // A trigger arrived while we were busy: replay ONLY if the state actually
+        // changed since this pass snapshotted it (Task 9b: an unchanged-state replay
+        // re-rendered the identical frame, the owner's "second applying").
+        if (pendingReprocessRef.current) {
+          pendingReprocessRef.current = false;
+          if (previewStateSignature() !== signature) {
+            useAppStore.getState().triggerReprocessing();
+          } else {
+            logger.debug('Replay skipped: state unchanged since the pass started');
+          }
+        }
       }
     }
     // NOTE: deps deliberately exclude the isProcessing STATE — the body never reads it

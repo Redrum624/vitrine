@@ -9,6 +9,7 @@ import { clampPan } from '../../utils/panBounds';
 import { computeRequiredPreviewCap, BASE_PREVIEW_CAP } from '../../utils/previewQuality';
 import { CropTransformOverlay } from '../Canvas/CropTransformOverlay';
 import { InteractiveCropHandles } from '../Canvas/InteractiveCropHandles';
+import { FULL_FRAME } from '../Canvas/cropFrameMapping';
 import { imageProcessingPipeline } from '../../services/ImageProcessingPipeline';
 import { editPersistenceService } from '../../services/EditPersistenceService';
 import { checkpointService } from '../../services/CheckpointService';
@@ -1301,18 +1302,33 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
             {cropModule && displayImage && canvasDimensions.width > 0 && (() => {
               // Get base params from module, override with live params during drag for real-time feedback
               const baseParams = cropModule.getCropModule().getParams();
-              // While a crop is APPLIED (adapter enabled, no drag in progress) the
-              // displayed content IS the cropped image — the rect (normalized to the
-              // FULL image) would mis-map onto it. Render a full-frame rect instead:
-              // handles sit on the cropped image's edges; grabbing one suspends the
-              // crop (onDragStart below), the full picture returns and the rect
-              // snaps back to its true position (the drag anchors on the REAL
-              // params via anchorCropParams).
-              const cropIsApplied =
-                cropModule.getEnabled() && baseParams.enabled && !isCropHandleDragging;
-              const displayParams = cropIsApplied
-                ? { ...baseParams, x: 0, y: 0, width: 1, height: 1 }
-                : (liveCropParams ? { ...baseParams, ...liveCropParams } : baseParams);
+              // v1.40.0 Task 9b — overlay == result. The overlay and handles always
+              // draw the REAL rect, mapped through the frame the displayed image
+              // ACTUALLY shows (processedImageData.frameRect — the effective clamped
+              // rect the last pass rendered; full frame when crop did not run). This
+              // replaces the old "applied crop ⇒ draw a full-frame rect" hack, which
+              // mis-mapped whenever the frame on screen was stale (drag start before
+              // the suspension pass landed: overlay 82% of the result area).
+              // Between mousedown and the first move the module rect is zeroed for the
+              // suspension — keep drawing the pre-drag rect (the drag anchor) meanwhile.
+              const displayParams = liveCropParams
+                ? { ...baseParams, ...liveCropParams }
+                : (isCropHandleDragging && preDragRectRef.current
+                  ? { ...baseParams, ...preDragRectRef.current }
+                  : baseParams);
+              const displayFrame = (processedImageData && typeof processedImageData === 'object' && 'frameRect' in processedImageData)
+                ? processedImageData.frameRect ?? null
+                : null;
+              // Drag bounds = the drag-SUSPENSION frame: onDragStart zeroes the rect to
+              // the full frame, and with an angle set the render backstop renders the
+              // INSCRIBED (wedge-free) full frame — that is what the suspended preview
+              // shows (decision, Task 9b: consistent with the owner's "overlay ==
+              // result" invariant), so the handles are bounded to it and can never
+              // frame area the preview does not show. No angle ⇒ the full frame.
+              const nativeImg = imageService.getCurrentImage();
+              const dragBoundsRect = nativeImg?.width && nativeImg?.height
+                ? cropModule.getCropModule().clampRectWedgeFree(FULL_FRAME, nativeImg.width, nativeImg.height, 'best')
+                : null;
 
               return (
               <>
@@ -1329,6 +1345,7 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
                   contentHeight={contentDimensions.height}
                   showOverlay={showCropOverlay}
                   showRotationGrid={isAdjustingRotation}
+                  displayFrame={displayFrame}
                 />
 
                 {/* Interactive Crop Handles - drag to resize crop */}
@@ -1378,6 +1395,10 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
                   }}
                   onDragEnd={() => {
                     setIsCropHandleDragging(false);
+                    // Single apply (Task 9b): a drag-start suspension pass still in
+                    // flight is now stale — mark it so the release pass starts at once
+                    // instead of queueing behind it (and the stale result never paints).
+                    useAppStore.getState().supersedeInFlightPreview();
                     // A plain click (no movement) must not lose the crop: the rect
                     // was zeroed for the drag — put the pre-drag rect back first.
                     if (!cropDragChangedRef.current && preDragRectRef.current) {
@@ -1394,6 +1415,8 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
                   showHandles={showCropOverlay}
                   aspectRatio={cropModule.getCropModule().getAspectRatioValue()}
                   canvasRef={canvasRef}
+                  displayFrame={displayFrame}
+                  boundsRect={dragBoundsRect}
                   clampRect={(rect, anchor) => {
                     // Wedge-free live during the drag, at the NATIVE dims (the
                     // render backstop re-clamps at each pass's actual dims).

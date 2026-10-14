@@ -1,4 +1,5 @@
 import { logger } from '../utils/Logger';
+import type { NormalizedCropRect } from '../modules/cropGeometry';
 import { LRUCache } from '../utils/LRUCache';
 import { CropPipelineModule } from '../modules/CropPipelineModule';
 import { ExposureModule } from '../modules/ExposureModule';
@@ -98,6 +99,9 @@ export interface ProcessingContext {
    *  full-buffer O(n) loops that are pure logging; at export resolution that is measurable waste.
    *  Never changes pixel output. */
   isExport?: boolean;
+  /** v1.40.0 Task 9b: set by the crop module — the effective rect the pass rendered, normalised
+   *  to the expanded (rotated) canvas. Absent when crop did not run (full frame displayed). */
+  cropFrameRect?: NormalizedCropRect;
 }
 
 /** Trailing options for {@link ImageProcessingPipeline.processImage}. Replaces the
@@ -637,6 +641,7 @@ export class ImageProcessingPipeline {
       }
       context.width = outW;
       context.height = outH;
+      if (result.frameRect) context.cropFrameRect = result.frameRect;
       return result.data;
 
     } catch (error) {
@@ -717,6 +722,7 @@ export class ImageProcessingPipeline {
           // Use cached result
           logger.debug(`Module ${module.getName()} used cached result`);
           currentData = new Float32Array(cached.result);
+          if (moduleId === 'crop' && cached.context.cropFrameRect) context.cropFrameRect = cached.context.cropFrameRect;
           await reportProgress(false);
           continue;
         }

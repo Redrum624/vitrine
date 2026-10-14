@@ -152,6 +152,8 @@ ctx.addEventListener('message', async (event: MessageEvent) => {
             processingTime,
             outputWidth: context.width,
             outputHeight: context.height,
+            // Task 9b: the effective crop rect rendered (undefined when crop did not run).
+            frameRect: context.cropFrameRect,
           },
           [result.buffer],
         );

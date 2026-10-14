@@ -22,6 +22,12 @@ interface AppStore extends AppState {
   // Processing trigger - increments to signal that reprocessing is needed
   processingVersion: number;
   triggerReprocessing: () => void;
+  // v1.40.0 Task 9b (single apply): bumped at crop-handle release. A preview pass that
+  // started BEFORE the bump and is still awaiting its worker is stale — the panel
+  // abandons it (never paints, never falls back, never replays) and starts the
+  // release pass at once instead of queueing behind it.
+  previewSupersedeVersion: number;
+  supersedeInFlightPreview: () => void;
   // Preview quality cap (long-edge px) the AdjustmentPanel downsamples the
   // source to. Base 1024; Canvas RATCHETS it up when zoom exceeds the image's
   // previous farthest zoom or a crop apply raises effective magnification
@@ -203,6 +209,7 @@ export const useAppStore = create<AppStore>((set) => ({
   sidebarCollapsed: false,
   isAdjustingRotation: false,
   processingVersion: 0,
+  previewSupersedeVersion: 0,
   previewQualityCap: 1024,
   externalParamsVersion: 0,
   isProcessing: false,
@@ -251,6 +258,10 @@ export const useAppStore = create<AppStore>((set) => ({
 
   triggerReprocessing: () => set((state) => ({
     processingVersion: state.processingVersion + 1
+  })),
+
+  supersedeInFlightPreview: () => set((state) => ({
+    previewSupersedeVersion: state.previewSupersedeVersion + 1
   })),
 
   setPreviewQualityCap: (cap) => set({ previewQualityCap: cap }),

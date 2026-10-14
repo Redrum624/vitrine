@@ -354,3 +354,18 @@ export function autoCropRectForRotation(
   const rect = { x: (1.0 - width) / 2, y: (1.0 - height) / 2, width, height };
   return clampRectWedgeFree(rect, frameW, frameH, { angle: angleDeg, orientation: 0, expandCanvas }, 'center');
 }
+
+/**
+ * The rect a geometry ACTUALLY renders, normalised to its expanded canvas
+ * (v1.40.0 Task 9b): the pixel-quantised crop (cropX/expW, ...). Overlays map
+ * the stored rect through this "displayed frame" so what they draw is what the
+ * pass rendered, whatever the render backstop clamped.
+ */
+export function frameRectOf(geom: CropGeometry): NormalizedCropRect {
+  return {
+    x: geom.cropX / geom.expW,
+    y: geom.cropY / geom.expH,
+    width: geom.outW / geom.expW,
+    height: geom.outH / geom.expH,
+  };
+}

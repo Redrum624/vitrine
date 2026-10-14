@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { CropParams } from '../../modules/CropModule';
 import type { CropClampAnchor, NormalizedCropRect } from '../../modules/cropGeometry';
+import { mapBoxToRect, mapRectToBox, resolveFrame } from './cropFrameMapping';
 
 interface InteractiveCropHandlesProps {
   // Image dimensions (processed dimensions)
@@ -57,6 +58,18 @@ interface InteractiveCropHandlesProps {
   // side ('move' for the centre drag). Canvas passes CropModule's clamp at the
   // native dims; absent ⇒ no extra clamp.
   clampRect?: (rect: NormalizedCropRect, anchor: CropClampAnchor) => NormalizedCropRect;
+
+  // v1.40.0 Task 9b: the frame the displayed image ACTUALLY shows (processedImageData
+  // .frameRect, expanded-canvas normalised). Handle positions and drag deltas map
+  // through it (screen = box + (r - d.xy)/d.wh * box), so they stay true while a
+  // stale frame is on screen (drag start before the suspension pass lands, release
+  // before the applied pass lands). Absent ⇒ full frame.
+  displayFrame?: NormalizedCropRect | null;
+
+  // Drag bounds (expanded-canvas normalised): the frame the drag works within — the
+  // drag-suspension frame (inscribed wedge-free full frame under an angle), so the user
+  // can never frame area the suspended preview does not show. Absent ⇒ displayFrame.
+  boundsRect?: NormalizedCropRect | null;
 }
 
 type HandleType = 'nw' | 'ne' | 'sw' | 'se' | 'n' | 's' | 'e' | 'w' | 'center';
@@ -93,7 +106,9 @@ export function InteractiveCropHandles({
   aspectRatio = null,
   anchorCropParams,
   canvasRef,
-  clampRect
+  clampRect,
+  displayFrame,
+  boundsRect
 }: InteractiveCropHandlesProps) {
   // Content base for image scaling (fit-rect); the box stays canvasDisplay* (viewport).
   const contentW = contentWidth ?? canvasDisplayWidth;
@@ -106,33 +121,29 @@ export function InteractiveCropHandles({
     x: number; y: number; width: number; height: number;
   } | null>(null);
 
-  // Current image placement in canvas pixels.
+  const frame = resolveFrame(displayFrame);
+  const bounds = boundsRect ?? null;
+
+  // Current image placement in canvas pixels, plus normalised<->pixel mapping
+  // through the displayed frame and the drag bounds in pixels.
   const getImageBox = useCallback(() => {
     const scaledW = contentW * viewport.zoom;
     const scaledH = contentH * viewport.zoom;
     const left = (canvasDisplayWidth - scaledW) / 2 + viewport.panX;
     const top = (canvasDisplayHeight - scaledH) / 2 + viewport.panY;
-    return { left, top, right: left + scaledW, bottom: top + scaledH, scaledW, scaledH };
-  }, [viewport, canvasDisplayWidth, canvasDisplayHeight, contentW, contentH]);
+    const box = { left, top, width: scaledW, height: scaledH };
+    const toPx = (r: NormalizedCropRect) => {
+      const m = mapRectToBox(r, frame, box);
+      return { left: m.left, top: m.top, right: m.left + m.width, bottom: m.top + m.height };
+    };
+    const b = bounds ? toPx(bounds) : { left, top, right: left + scaledW, bottom: top + scaledH };
+    return { box, scaledW, scaledH, toPx, b };
+  }, [viewport, canvasDisplayWidth, canvasDisplayHeight, contentW, contentH, frame, bounds]);
 
   // Calculate crop region in canvas pixel coordinates
   const getCropRect = useCallback(() => {
-    const img = getImageBox();
-    const { x: cropX, y: cropY, width: cropWidth, height: cropHeight } = cropParams;
-
-    const cropLeft = img.left + cropX * img.scaledW;
-    const cropTop = img.top + cropY * img.scaledH;
-    const cropRight = cropLeft + cropWidth * img.scaledW;
-    const cropBottom = cropTop + cropHeight * img.scaledH;
-
-    return {
-      left: cropLeft,
-      top: cropTop,
-      right: cropRight,
-      bottom: cropBottom,
-      width: cropRight - cropLeft,
-      height: cropBottom - cropTop,
-    };
+    const r = getImageBox().toPx(cropParams);
+    return { ...r, width: r.right - r.left, height: r.bottom - r.top };
   }, [cropParams, getImageBox]);
 
   // Handle mouse down on handles
@@ -175,17 +186,14 @@ export function InteractiveCropHandles({
       const deltaX = e.clientX - dragStart.x;
       const deltaY = e.clientY - dragStart.y;
 
-      const img = getImageBox();
-      if (img.scaledW <= 0 || img.scaledH <= 0) return;
+      const geo = getImageBox();
+      if (geo.scaledW <= 0 || geo.scaledH <= 0) return;
+      // `img` = the drag BOUNDS in pixels (the suspension frame, or the displayed box).
+      const img = geo.b;
 
-      // Anchor rect in CURRENT pixel space (recomputed every move — geometry
-      // may have flipped cropped→full-frame since mousedown).
-      const a = {
-        left: img.left + anchorParams.x * img.scaledW,
-        top: img.top + anchorParams.y * img.scaledH,
-        right: img.left + (anchorParams.x + anchorParams.width) * img.scaledW,
-        bottom: img.top + (anchorParams.y + anchorParams.height) * img.scaledH,
-      };
+      // Anchor rect in CURRENT pixel space (recomputed every move — the displayed
+      // frame may have flipped cropped→suspended since mousedown).
+      const a = geo.toPx(anchorParams);
 
       let newLeft = a.left;
       let newTop = a.top;
@@ -279,12 +287,7 @@ export function InteractiveCropHandles({
         newBottom = newTop + finalH;
       }
 
-      const rect = {
-        x: (newLeft - img.left) / img.scaledW,
-        y: (newTop - img.top) / img.scaledH,
-        width: (newRight - newLeft) / img.scaledW,
-        height: (newBottom - newTop) / img.scaledH,
-      };
+      const rect = mapBoxToRect({ left: newLeft, top: newTop, right: newRight, bottom: newBottom }, frame, geo.box);
       onCropChange(clampRect ? clampRect(rect, dragHandle === 'center' ? 'move' : dragHandle) : rect);
     };
 
@@ -303,7 +306,7 @@ export function InteractiveCropHandles({
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [isDragging, dragHandle, dragStart, anchorParams, getImageBox, onCropChange, aspectRatio, canvasRef, onDragEnd, clampRect]);
+  }, [isDragging, dragHandle, dragStart, anchorParams, getImageBox, onCropChange, aspectRatio, canvasRef, onDragEnd, clampRect, frame]);
 
   if (!showHandles || imageWidth === 0 || imageHeight === 0) {
     return null;

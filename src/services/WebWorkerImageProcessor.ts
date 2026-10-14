@@ -31,6 +31,9 @@ export interface ProcessingResult {
   width?: number;
   /** True output height after processing (may differ from input when CropModule is active). */
   height?: number;
+  /** v1.40.0 Task 9b: the effective crop rect the pass rendered (expanded-canvas normalised);
+   *  absent when crop did not run. */
+  frameRect?: { x: number; y: number; width: number; height: number };
 }
 
 export interface TileProcessingResult extends ProcessingResult {
@@ -145,13 +148,16 @@ export class WebWorkerImageProcessor {
           if (success) {
             // Include outputWidth/outputHeight from the worker so callers can use the
             // TRUE post-crop dims (CropModule mutates the worker-local context).
-            const { outputWidth, outputHeight } = event.data as { outputWidth?: number; outputHeight?: number };
+            const { outputWidth, outputHeight, frameRect } = event.data as {
+              outputWidth?: number; outputHeight?: number; frameRect?: ProcessingResult['frameRect'];
+            };
             pendingMessage.resolve({
               success: true,
               data,
               processingTime,
               width: outputWidth,
               height: outputHeight,
+              frameRect,
             });
           } else {
             pendingMessage.reject(new Error(error || 'Processing failed'));

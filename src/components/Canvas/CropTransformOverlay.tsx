@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { CropParams } from '../../modules/CropModule';
-import { autoCropRectForRotation, normalizeOrientation } from '../../modules/cropGeometry';
+import { autoCropRectForRotation, normalizeOrientation, type NormalizedCropRect } from '../../modules/cropGeometry';
+import { mapRectToBox, normToScreenX, normToScreenY, resolveFrame } from './cropFrameMapping';
 
 interface CropTransformOverlayProps {
   // Image dimensions (processed dimensions after any transforms)
@@ -35,6 +36,11 @@ interface CropTransformOverlayProps {
 
   // Show just the 3x3 grid during rotation adjustment (without darkened areas)
   showRotationGrid?: boolean;
+
+  // v1.40.0 Task 9b: the frame the displayed image ACTUALLY shows (processedImageData
+  // .frameRect, expanded-canvas normalised). Every rect is mapped through it:
+  // screen = box + (r - d.xy)/d.wh * box. Absent ⇒ full frame.
+  displayFrame?: NormalizedCropRect | null;
 }
 
 /**
@@ -60,7 +66,8 @@ export function CropTransformOverlay({
   contentWidth,
   contentHeight,
   showOverlay,
-  showRotationGrid = false
+  showRotationGrid = false,
+  displayFrame
 }: CropTransformOverlayProps) {
   // Content base for image scaling (fit-rect); the box stays canvasDisplay* (viewport).
   const contentW = contentWidth ?? canvasDisplayWidth;
@@ -142,11 +149,19 @@ export function CropTransformOverlay({
       }
     }
 
-    // Convert normalized crop coordinates to canvas pixel coordinates
-    const cropLeft = imageX + gridCropX * scaledImageWidth;
-    const cropTop = imageY + gridCropY * scaledImageHeight;
-    const cropRight = cropLeft + gridCropWidth * scaledImageWidth;
-    const cropBottom = cropTop + gridCropHeight * scaledImageHeight;
+    // Convert normalized crop coordinates to canvas pixels THROUGH THE DISPLAYED
+    // FRAME (Task 9b): the image box shows frame d, not the whole expanded
+    // canvas — e.g. the inscribed frame while straightening or drag-suspended,
+    // or a stale previous crop while the next pass runs.
+    const frame = resolveFrame(displayFrame);
+    const box = { left: imageX, top: imageY, width: scaledImageWidth, height: scaledImageHeight };
+    const mapped = mapRectToBox(
+      { x: gridCropX, y: gridCropY, width: gridCropWidth, height: gridCropHeight }, frame, box,
+    );
+    const cropLeft = mapped.left;
+    const cropTop = mapped.top;
+    const cropRight = cropLeft + mapped.width;
+    const cropBottom = cropTop + mapped.height;
 
     const cropDisplayWidth = cropRight - cropLeft;
     const cropDisplayHeight = cropBottom - cropTop;
@@ -243,8 +258,9 @@ export function CropTransformOverlay({
       ctx.restore();
 
       // Draw rotation center point indicator (small crosshair at image center)
-      const centerX = imageX + scaledImageWidth / 2;
-      const centerY = imageY + scaledImageHeight / 2;
+      // Rotation centre = the expanded canvas centre, through the displayed frame.
+      const centerX = normToScreenX(0.5, frame, box);
+      const centerY = normToScreenY(0.5, frame, box);
 
       ctx.save();
       ctx.strokeStyle = 'rgba(100, 200, 255, 0.8)';
@@ -326,7 +342,8 @@ export function CropTransformOverlay({
     contentH,
     showOverlay,
     showRotationGrid,
-    shouldShow
+    shouldShow,
+    displayFrame
   ]);
 
   if (!shouldShow) {
