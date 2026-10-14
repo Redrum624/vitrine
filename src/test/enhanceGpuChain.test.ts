@@ -132,6 +132,65 @@ describe('runEnhanceChain structure', () => {
   });
 });
 
+describe('self-test gates noise-reduction + enhance-resident (v1.40.0 Task 3)', () => {
+  const lf = pipelineSrc.replace(/\r\n/g, '\n');
+  const stStart = lf.indexOf('selfTest(): {');
+  const st = lf.slice(stStart);
+
+  it('pushes both ids unsafe on sub-test failure', () => {
+    expect(st).toContain("if (!nrOk) unsafe.push('noise-reduction')");
+    expect(st).toContain("if (!enhResOk) unsafe.push('enhance-resident')");
+    // existing gates untouched
+    expect(st).toContain("if (!enhSharpenOk) unsafe.push('enhance')");
+    expect(st).toContain("if (!enhUpOk) unsafe.push('enhance-upscale')");
+  });
+
+  it('catch-all list contains both ids', () => {
+    const catchList = lf.slice(lf.indexOf('A thrown self-test means'));
+    expect(catchList).toContain("'noise-reduction'");
+    expect(catchList).toContain("'enhance-resident'");
+  });
+
+  it('both sub-tests feed ok / maxDiff and log PASS/FAIL lines', () => {
+    expect(st).toMatch(/const ok = [^;]*nrOk[^;]*enhResOk/);
+    expect(st).toContain('[GPU-PIPELINE] noise-reduction self-test');
+    expect(st).toContain('[GPU-PIPELINE] enhance-resident self-test');
+  });
+
+  it('NR sub-test compares against webGLImageProcessor.denoise at 1e-4 and fails on a null reference', () => {
+    const a = st.indexOf('12. noise-reduction');
+    const b = st.indexOf('13. enhance-resident');
+    expect(a).toBeGreaterThan(-1);
+    expect(b).toBeGreaterThan(a);
+    const nr = st.slice(a, b);
+    expect(nr).toContain('webGLImageProcessor.denoise(');
+    expect(nr).toContain("id: 'noise-reduction'");
+    expect(nr).toContain('1e-4');
+    expect(nr).toMatch(/!refNr|refNr\s*===\s*null|refNr\s*\?/);
+  });
+
+  it('enhance-resident sub-test covers native, kernelScale 0.5, and an exposure pass before enhance', () => {
+    const b = st.indexOf('13. enhance-resident');
+    const c = st.indexOf('const ok = ', b);
+    const body = st.slice(b, c);
+    expect(body).toContain('residentStep');
+    expect(body).toContain('enhanceImage(');
+    expect(body).toContain('0.5');
+    expect(body).toContain('failedSteps');
+    expect(body).toContain('ENH_SHARPEN_EPS');
+    const exp = body.indexOf('exposure1EvPass');
+    expect(body).toMatch(/\(\[\s*exposure1EvPass,\s*enhResPass\s*\]/);
+    expect(exp).toBeGreaterThan(-1);
+    expect(body).toContain('new ExposureModule()');
+  });
+
+  it('runEnhanceChain still gates on enhance / enhance-upscale only', () => {
+    const start = lf.indexOf('runEnhanceChain(');
+    const body = lf.slice(start, start + 3000);
+    expect(body).not.toContain('enhance-resident');
+  });
+});
+
 describe('runEnhanceChain graceful degradation (no WebGL2 in jsdom)', () => {
   it('returns null (→ CPU worker) when the pipeline is not attached', () => {
     const pipeline = new GpuPreviewPipeline();

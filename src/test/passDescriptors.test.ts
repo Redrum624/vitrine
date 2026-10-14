@@ -810,6 +810,22 @@ describe('NR + enhance resident passes', () => {
     expect(buildPassList([nr({ enabled: true, strength: 37 })], OPTS).cpuBridges).toEqual(['noise-reduction']);
   });
 
+  test('enhance-resident unsafe alone -> enhance cpuBridge, NR + other passes unaffected', () => {
+    setGpuUnsafeModuleIds(['enhance-resident']);
+    const r = buildPassList([nr({ enabled: true, strength: 20 }), enh()], OPTS);
+    expect(r.cpuBridges).toEqual(['enhance']);
+    expect(r.passes.map((p) => p.id)).toEqual(['noise-reduction']);
+  });
+
+  test('runEnhanceChain gates on enhance ids only, never enhance-resident', () => {
+    const { readFileSync } = require('fs');
+    const { join } = require('path');
+    const src = readFileSync(join(__dirname, '..', 'shaders', 'GpuPreviewPipeline.ts'), 'utf8') as string;
+    const body = src.slice(src.indexOf('runEnhanceChain('), src.indexOf('runEnhanceChain(') + 3000);
+    expect(body).toContain("unsafeIds.has('enhance')");
+    expect(body).not.toContain('enhance-resident');
+  });
+
   test('pass order follows module order', () => {
     const { passes } = buildPassList([
       fakeModule('exposure', true, { exposure: 1 }),

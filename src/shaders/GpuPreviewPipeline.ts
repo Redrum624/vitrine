@@ -42,7 +42,7 @@ import type { EnhanceParams, EnhanceResult } from '../utils/enhanceChain';
 import { casPeak, effectiveEnhanceKernels } from '../utils/enhanceOps';
 import { MAX_GPU_ENHANCE_OUTPUT_PIXELS, ENH_GAUSS_MAXR, ENH_DENOISE_MAXR } from './enhanceGpuLimits';
 import { computeGlobalEdgeMax } from '../utils/enhanceOps';
-import { basicAdjUniforms, exposureUniforms, shadowsHighlightsUniforms, highlightRecoveryUniforms, gainsUniforms, colorBalanceUniforms, vignetteUniforms } from './uniforms';
+import { basicAdjUniforms, exposureUniforms, shadowsHighlightsUniforms, highlightRecoveryUniforms, gainsUniforms, colorBalanceUniforms, vignetteUniforms, denoiseUniforms } from './uniforms';
 import type { ShadowsHighlightsUniformParams } from './uniforms';
 import { recoverHighlights } from '../modules/HighlightRecoveryModule';
 import type { DehazeState } from '../services/WebGLImageProcessor';
@@ -2147,8 +2147,88 @@ export class GpuPreviewPipeline {
       }
       logger.info(`[GPU-PIPELINE] enhance-upscale self-test maxDiff=${enhUpMaxDiff.toExponential(2)} ${enhUpOk ? 'PASS' : 'FAIL'}`);
 
-      const ok = basicAdjOk && exposureOk && shOk && hrOk && laOk && wbOk && tcOk && cbOk && vigOk && enhSharpenOk && enhUpOk;
-      const maxDiff = Math.max(basicAdjMaxDiff, exposureMaxDiff, shMaxDiff, hrMaxDiff, laMaxDiff, wbMaxDiff, tcMaxDiff, cbMaxDiff, vigMaxDiff, enhSharpenMaxDiff, enhUpMaxDiff);
+      // ── 12. noise-reduction sub-test (resident NLM 'denoise' pass vs CPU-side reference) ──
+      // Same 40x32 fixture + deterministic noise (LCG, no Math.random) so the NLM kernel has
+      // real structure to average. A null reference counts as FAIL.
+      const nrData = new Float32Array(enhData);
+      let nrSeed = 12345;
+      for (let i = 0; i < enhW * enhH; i++) {
+        for (let c = 0; c < 3; c++) {
+          nrSeed = (Math.imul(nrSeed, 1664525) + 1013904223) >>> 0;
+          nrData[i * 4 + c] = cl01(nrData[i * 4 + c] + ((nrSeed / 4294967296) - 0.5) * 0.1);
+        }
+      }
+      const nrStrength = 50;
+      const nrPass: PassDescriptor = {
+        id: 'noise-reduction',
+        programKey: 'denoise',
+        setUniforms: (gl, prog, rt) => denoiseUniforms(rt.width, rt.height, nrStrength)(gl, prog),
+      };
+      let nrMaxDiff = Infinity, nrOk = false;
+      this.setSource(nrData, enhW, enhH);
+      this.render([nrPass]);
+      const gpuNr = this.readback();
+      const refNr = webGLImageProcessor.denoise(new Float32Array(nrData), enhW, enhH, nrStrength);
+      if (!refNr) {
+        logger.warn('[GPU-PIPELINE] noise-reduction self-test: CPU reference returned null');
+      } else {
+        nrMaxDiff = 0;
+        for (let i = 0; i < refNr.length; i++) nrMaxDiff = Math.max(nrMaxDiff, Math.abs(gpuNr[i] - refNr[i]));
+        nrOk = nrMaxDiff < 1e-4;
+      }
+      logger.info(`[GPU-PIPELINE] noise-reduction self-test maxDiff=${nrMaxDiff.toExponential(2)} ${nrOk ? 'PASS' : 'FAIL'}`);
+
+      // ── 13. enhance-resident sub-test (in-chain residentStep vs CPU enhanceImage) ──
+      // (a) native, (b) kernelScale 0.5, (c) [+1 EV exposure, enhance] — proves the edge max
+      // is taken from the CHAIN INPUT, not the source. A failed step (failedSteps) is a FAIL.
+      const runResident = (
+        passes: PassDescriptor[],
+        src: Float32Array,
+      ): Float32Array | null => {
+        this.setSource(src, enhW, enhH);
+        const res = this.render(passes);
+        if (res.failedSteps && res.failedSteps.length > 0) return null;
+        return this.readback();
+      };
+      const resMaxDiff = (gpu: Float32Array | null, ref: EnhanceResult): number => {
+        if (!gpu) return Infinity;
+        let m = 0;
+        for (let i = 0; i < ref.enhanced.length; i++) m = Math.max(m, Math.abs(gpu[i] - ref.enhanced[i]));
+        return m;
+      };
+      const mkEnhResPass = (kernelScale: number): PassDescriptor => ({
+        id: 'enhance',
+        programKey: 'enhance:resident', // ignored — residentStep present
+        setUniforms: () => undefined,
+        residentStep: { kind: 'enhance', params: enhBaseParams, kernelScale },
+      });
+      const exposure1EvPass: PassDescriptor = {
+        id: 'exposure',
+        programKey: 'exposure',
+        setUniforms: (_gl, _prog) => exposureUniforms(2, 0)(_gl, _prog),
+      };
+      const enhResA = resMaxDiff(
+        runResident([mkEnhResPass(1)], enhData),
+        enhanceImage(new Float32Array(enhData), enhW, enhH, enhBaseParams),
+      );
+      const enhResB = resMaxDiff(
+        runResident([mkEnhResPass(0.5)], enhData),
+        enhanceImage(new Float32Array(enhData), enhW, enhH, enhBaseParams, undefined, 0.5),
+      );
+      const exp1Module = new ExposureModule();
+      exp1Module.setCurrentParams({ exposure: 1, black: 0 });
+      const enhExposed = exp1Module.process(new Float32Array(enhData), { width: enhW, height: enhH, channels: 4 });
+      const enhResPass = mkEnhResPass(1);
+      const enhResC = resMaxDiff(
+        runResident([exposure1EvPass, enhResPass], enhData),
+        enhanceImage(new Float32Array(enhExposed), enhW, enhH, enhBaseParams),
+      );
+      const enhResMaxDiff = Math.max(enhResA, enhResB, enhResC);
+      const enhResOk = enhResMaxDiff < ENH_SHARPEN_EPS;
+      logger.info(`[GPU-PIPELINE] enhance-resident self-test maxDiff=${enhResMaxDiff.toExponential(2)} (native=${enhResA.toExponential(2)} scale0.5=${enhResB.toExponential(2)} chained=${enhResC.toExponential(2)}) ${enhResOk ? 'PASS' : 'FAIL'}`);
+
+      const ok = basicAdjOk && exposureOk && shOk && hrOk && laOk && wbOk && tcOk && cbOk && vigOk && enhSharpenOk && enhUpOk && nrOk && enhResOk;
+      const maxDiff = Math.max(basicAdjMaxDiff, exposureMaxDiff, shMaxDiff, hrMaxDiff, laMaxDiff, wbMaxDiff, tcMaxDiff, cbMaxDiff, vigMaxDiff, enhSharpenMaxDiff, enhUpMaxDiff, nrMaxDiff, enhResMaxDiff);
 
       // Map each failed sub-test to the MODULE ID buildPassList uses, so a broken GPU shader
       // is routed to the CPU bridge (proven path) instead of corrupting the image (e.g. the
@@ -2170,6 +2250,10 @@ export class GpuPreviewPipeline {
       // only the Lanczos-upscale route to CPU (sharpen-only can still run on GPU).
       if (!enhSharpenOk) unsafe.push('enhance');
       if (!enhUpOk) unsafe.push('enhance-upscale');
+      // Resident (in-chain) paths: NR 'denoise' pass and the enhance residentStep. These ids are
+      // honoured by buildPassList, NOT by runEnhanceChain (which gates on 'enhance' only).
+      if (!nrOk) unsafe.push('noise-reduction');
+      if (!enhResOk) unsafe.push('enhance-resident');
 
       return { ok, maxDiff, unsafe };
     } catch (e) {
@@ -2179,7 +2263,7 @@ export class GpuPreviewPipeline {
       return {
         ok: false,
         maxDiff: Infinity,
-        unsafe: ['basicadj', 'exposure', 'shadowshighlights', 'highlightrecovery', 'localadjustments', 'temperature', 'tonecurve', 'colorbalance', 'lenscorrections', 'enhance', 'enhance-upscale'],
+        unsafe: ['basicadj', 'exposure', 'shadowshighlights', 'highlightrecovery', 'localadjustments', 'temperature', 'tonecurve', 'colorbalance', 'lenscorrections', 'enhance', 'enhance-upscale', 'noise-reduction', 'enhance-resident'],
       };
     }
   }
