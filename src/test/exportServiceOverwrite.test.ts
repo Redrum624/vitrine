@@ -6,11 +6,12 @@ import { exportService } from '../services/ExportService';
 import { batchProcessingService } from '../services/BatchProcessingService';
 
 describe('batch presets colour space', () => {
-  it('no batch preset defaults to adobergb', () => {
-    for (const p of batchProcessingService.getPresets()) {
+  it('only the named print preset uses adobergb', () => {
+    for (const p of batchProcessingService.getPresets().filter((x) => x.id !== 'print_batch')) {
       expect(p.exportOptions.colorSpace).not.toBe('adobergb');
     }
-    expect(batchProcessingService.getPreset('print_batch')?.exportOptions.colorSpace).toBe('srgb');
+    // ...except the named Print Preparation preset, a deliberate wide-gamut choice.
+    expect(batchProcessingService.getPreset('print_batch')?.exportOptions.colorSpace).toBe('adobergb');
   });
 });
 

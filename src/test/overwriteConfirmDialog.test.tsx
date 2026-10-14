@@ -141,6 +141,70 @@ describe('ExportDialog overwrite prompt - single export', () => {
   });
 });
 
+describe('ExportDialog overwrite prompt - re-entry, focus, remembered folder (fix round 1)', () => {
+  const onClose = jest.fn();
+  const renderSingle = () => render(
+    <ExportDialog
+      isOpen onClose={onClose}
+      imageData={new Float32Array(4 * 4 * 4)} imageWidth={4} imageHeight={4}
+      originalFilePath="C:/p/photo.orf" onExportComplete={jest.fn()}
+    />,
+  );
+  const exportBtn = () => screen.getAllByRole('button').find((b) => /^\s*export\s*$/i.test(b.textContent || ''))!;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockExportImage.mockResolvedValue({ success: true, outputPath: 'C:/out/photo_VIT.jpg' });
+  });
+  afterEach(() => { cleanup(); localStorage.clear(); delete (window as unknown as { electronAPI?: unknown }).electronAPI; });
+
+  it('a second Export click while the prompt is open does not replace the pending choice', async () => {
+    mockExists.mockResolvedValue(true);
+    renderSingle();
+    await act(async () => { fireEvent.click(exportBtn()); });
+    await screen.findByText('File already exists');
+    await act(async () => { fireEvent.click(exportBtn()); });
+    expect(screen.getByText('File already exists')).toBeInTheDocument();
+    await act(async () => { fireEvent.click(promptBtn('Replace')); });
+    await waitFor(() => expect(mockExportImage).toHaveBeenCalledTimes(1));
+    expect(mockExportImage.mock.calls[0][3].overwritePolicy).toBe('replace');
+  });
+
+  it('Tab stays inside the prompt', async () => {
+    mockExists.mockResolvedValue(true);
+    renderSingle();
+    await act(async () => { fireEvent.click(exportBtn()); });
+    await screen.findByText('File already exists');
+    expect(promptBtn('Keep both')).toHaveFocus();
+    fireEvent.keyDown(document, { key: 'Tab' });
+    expect(promptBtn('Cancel')).toHaveFocus();
+    fireEvent.keyDown(document, { key: 'Tab', shiftKey: true });
+    expect(promptBtn('Keep both')).toHaveFocus();
+  });
+
+  it('reopened dialog: single export targets the remembered folder it displays', async () => {
+    localStorage.setItem('photo_editor_export_settings', JSON.stringify({ version: 2, options: {}, outputDirectory: 'C:/remembered' }));
+    mockExists.mockResolvedValue(false);
+    renderSingle();
+    await act(async () => { fireEvent.click(exportBtn()); });
+    await waitFor(() => expect(mockExportImage).toHaveBeenCalledTimes(1));
+    expect(mockExportImage.mock.calls[0][3].outputDirectory).toBe('C:/remembered');
+    expect(exportService.getPlannedOutputPath).toHaveBeenCalledWith('C:/p/photo.orf', expect.objectContaining({ outputDirectory: 'C:/remembered' }));
+  });
+
+  it('a remembered folder that no longer exists falls back visibly to the original folder', async () => {
+    localStorage.setItem('photo_editor_export_settings', JSON.stringify({ version: 2, options: {}, outputDirectory: 'C:/gone' }));
+    (window as unknown as { electronAPI: unknown }).electronAPI = { fileExists: jest.fn() };
+    mockExists.mockResolvedValue(false);
+    renderSingle();
+    fireEvent.click(screen.getByRole('button', { name: 'Color & Metadata' }));
+    expect(await screen.findByText('Same folder as original')).toBeInTheDocument();
+    await act(async () => { fireEvent.click(exportBtn()); });
+    await waitFor(() => expect(mockExportImage).toHaveBeenCalledTimes(1));
+    expect(mockExportImage.mock.calls[0][3].outputDirectory).toBeUndefined();
+  });
+});
+
 describe('ExportDialog overwrite prompt - batch export', () => {
   const paths = ['/i/a.jpg', '/i/b.jpg', '/i/c.jpg'];
   const renderMulti = () => render(

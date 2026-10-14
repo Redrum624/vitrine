@@ -23,6 +23,8 @@ interface OverwriteConfirmDialogProps {
  */
 export function OverwriteConfirmDialog({ isOpen, fileName, existingCount, total, onChoose }: OverwriteConfirmDialogProps) {
   const keepBtnRef = useRef<HTMLButtonElement>(null);
+  const cancelBtnRef = useRef<HTMLButtonElement>(null);
+  const replaceBtnRef = useRef<HTMLButtonElement>(null);
   const batch = existingCount !== undefined && total !== undefined && total > 1;
 
   useEffect(() => {
@@ -36,6 +38,17 @@ export function OverwriteConfirmDialog({ isOpen, fileName, existingCount, total,
         e.preventDefault();
         e.stopPropagation();
         onChoose('cancel');
+        return;
+      }
+      // Focus containment: Tab cycles Cancel -> Replace -> Keep both and never escapes
+      // to the Export dialog behind the prompt.
+      if (e.key === 'Tab') {
+        const order = [cancelBtnRef.current, replaceBtnRef.current, keepBtnRef.current].filter(Boolean) as HTMLButtonElement[];
+        if (order.length === 0) return;
+        e.preventDefault();
+        const i = order.indexOf(document.activeElement as HTMLButtonElement);
+        const next = e.shiftKey ? (i <= 0 ? order.length - 1 : i - 1) : (i + 1) % order.length;
+        order[next].focus();
       }
     };
     document.addEventListener('keydown', onKeyDown, true);
@@ -47,10 +60,11 @@ export function OverwriteConfirmDialog({ isOpen, fileName, existingCount, total,
 
   const footer = (
     <div className="flex justify-end" style={{ gap: 8 }}>
-      <button type="button" onClick={() => onChoose('cancel')} className="glass-modal-btn-secondary">
+      <button ref={cancelBtnRef} type="button" onClick={() => onChoose('cancel')} className="glass-modal-btn-secondary">
         Cancel
       </button>
       <button
+        ref={replaceBtnRef}
         type="button"
         onClick={() => onChoose('replace')}
         className="glass-modal-btn-secondary inline-flex items-center justify-center gap-2"

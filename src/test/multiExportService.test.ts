@@ -258,3 +258,17 @@ describe('exportMany - overwrite policy (v1.40.0)', () => {
     expect(found).toEqual(['a_VIT.jpg']);
   });
 });
+
+describe('exportMany - replace with duplicate base names (fix round 1)', () => {
+  beforeEach(() => {
+    (window as unknown as { electronAPI: unknown }).electronAPI = { fileExists };
+    fileExists.mockImplementation(async (p: string) => /a_VIT(_1)?\.jpg$/.test(p));
+  });
+  afterEach(() => { delete (window as unknown as { electronAPI?: unknown }).electronAPI; });
+
+  it('only the exact target skips the disk check; a same-run duplicate never lands on an existing _VIT_1', async () => {
+    await multiExportService.exportMany(['/i/a.jpg', '/j/a.png'], { ...okOptions, overwritePolicy: 'replace' }, controls());
+    expect(exportImage.mock.calls[0][3]).toMatchObject({ filename: 'a_VIT.jpg' });
+    expect(exportImage.mock.calls[1][3]).toMatchObject({ filename: 'a_VIT_2.jpg' });
+  });
+});

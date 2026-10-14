@@ -149,11 +149,12 @@ class MultiExportService {
           // Resolve a non-clobbering output name: <base>_VIT.<ext>, then _VIT_1, …
           // `emitted` covers names chosen this run whose files may still be encoding.
           // overwritePolicy 'replace' (user chose Replace in the overwrite prompt) skips the
-          // on-disk check so existing files are overwritten; same-run names still never collide.
+          // on-disk check ONLY for the planned exact target (index 0); same-run duplicates resolve
+          // to the next name that is free on disk, so an unrelated _VIT_N is never clobbered.
           const replace = options.overwritePolicy === 'replace';
           let index = 0;
           let name = suffixedName(baseNameOf(path), ext, index);
-          while (emitted.has(name.toLowerCase()) || (!replace && (await this.fileExists(joinPath(outputDirectory, name))))) {
+          while (emitted.has(name.toLowerCase()) || ((!replace || index > 0) && (await this.fileExists(joinPath(outputDirectory, name))))) {
             index++;
             name = suffixedName(baseNameOf(path), ext, index);
           }
