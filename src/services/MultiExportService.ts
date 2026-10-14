@@ -148,9 +148,12 @@ class MultiExportService {
 
           // Resolve a non-clobbering output name: <base>_VIT.<ext>, then _VIT_1, …
           // `emitted` covers names chosen this run whose files may still be encoding.
+          // overwritePolicy 'replace' (user chose Replace in the overwrite prompt) skips the
+          // on-disk check so existing files are overwritten; same-run names still never collide.
+          const replace = options.overwritePolicy === 'replace';
           let index = 0;
           let name = suffixedName(baseNameOf(path), ext, index);
-          while (emitted.has(name.toLowerCase()) || (await this.fileExists(joinPath(outputDirectory, name)))) {
+          while (emitted.has(name.toLowerCase()) || (!replace && (await this.fileExists(joinPath(outputDirectory, name))))) {
             index++;
             name = suffixedName(baseNameOf(path), ext, index);
           }
@@ -197,6 +200,25 @@ class MultiExportService {
     }
 
     return summary;
+  }
+
+  /**
+   * Which of the default (`_VIT`) target files for `paths` already exist in
+   * `outputDirectory`. Used to ask ONE overwrite question for the whole batch.
+   * Same-run name collisions (two sources with one base name) are not "existing".
+   */
+  async findExistingTargets(paths: string[], format: string | undefined, outputDirectory: string): Promise<string[]> {
+    const ext = extForFormat(format);
+    const existing: string[] = [];
+    const seen = new Set<string>();
+    for (const p of paths) {
+      const name = suffixedName(baseNameOf(p), ext, 0);
+      const key = name.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      if (await this.fileExists(joinPath(outputDirectory, name))) existing.push(name);
+    }
+    return existing;
   }
 
   private async fileExists(path: string): Promise<boolean> {

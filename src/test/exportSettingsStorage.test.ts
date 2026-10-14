@@ -80,3 +80,30 @@ describe('exportSettingsStorage', () => {
     expect(loaded.outputDirectory).toBe('');
   });
 });
+
+describe('exportSettingsStorage - v1.40.0 sRGB default migration', () => {
+  beforeEach(() => localStorage.clear());
+
+  test('legacy (unversioned) stored adobergb migrates to srgb; other fields untouched', () => {
+    localStorage.setItem(EXPORT_SETTINGS_KEY, JSON.stringify({
+      options: { format: 'tiff', quality: 61, colorSpace: 'adobergb' },
+      outputDirectory: 'D:/x',
+    }));
+    const loaded = loadExportSettings(defaults());
+    expect(loaded.options.colorSpace).toBe('srgb');
+    expect(loaded.options.format).toBe('tiff');
+    expect(loaded.options.quality).toBe(61);
+    expect(loaded.outputDirectory).toBe('D:/x');
+  });
+
+  test('legacy stored prophoto is NOT migrated', () => {
+    localStorage.setItem(EXPORT_SETTINGS_KEY, JSON.stringify({ options: { colorSpace: 'prophoto' } }));
+    expect(loadExportSettings(defaults()).options.colorSpace).toBe('prophoto');
+  });
+
+  test('adobergb saved after the migration (versioned) is remembered', () => {
+    saveExportSettings({ ...defaults(), colorSpace: 'adobergb' }, undefined);
+    expect(JSON.parse(localStorage.getItem(EXPORT_SETTINGS_KEY)!).version).toBeGreaterThanOrEqual(2);
+    expect(loadExportSettings(defaults()).options.colorSpace).toBe('adobergb');
+  });
+});

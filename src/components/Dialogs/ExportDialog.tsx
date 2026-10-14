@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   Download,
   Image,
@@ -9,6 +9,7 @@ import {
   FolderOpen
 } from 'lucide-react';
 import { GlassModal } from './GlassModal';
+import { OverwriteConfirmDialog, OverwriteChoice } from './OverwriteConfirmDialog';
 import { ChipButton } from '../Controls/ChipButton';
 import { AccentButton } from '../Controls/AccentButton';
 import { SectionLabel } from '../Controls/SectionLabel';
@@ -57,6 +58,23 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
   multiPaths
 }) => {
   const isMulti = (multiPaths?.length ?? 0) > 0;
+  // Overwrite prompt (v1.40.0): handleExport awaits the user's choice through a promise.
+  const [overwritePrompt, setOverwritePrompt] = useState<{ fileName?: string; existingCount?: number; total?: number } | null>(null);
+  const overwriteResolver = useRef<((c: OverwriteChoice) => void) | null>(null);
+  const askOverwrite = useCallback(
+    (info: { fileName?: string; existingCount?: number; total?: number }) =>
+      new Promise<OverwriteChoice>((resolve) => {
+        overwriteResolver.current = resolve;
+        setOverwritePrompt(info);
+      }),
+    [],
+  );
+  const answerOverwrite = useCallback((choice: OverwriteChoice) => {
+    const resolve = overwriteResolver.current;
+    overwriteResolver.current = null;
+    setOverwritePrompt(null);
+    resolve?.(choice);
+  }, []);
   // Progressive RAW open: while the background full 16-bit decode is running, imageWidth/imageHeight
   // above are seeded from the fast embedded PREVIEW (e.g. 2048px), not the true dims. The export
   // pixel path itself always resolves the full-res source (resolveExportSource), so it's safe —
@@ -194,10 +212,19 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
         setOutputDirectory(dir);
       }
 
+      // Ask ONCE if any target already exists; the answer applies to the whole batch.
+      let batchOptions = exportOptions;
+      const existing = await multiExportService.findExistingTargets(multiPaths, exportOptions.format, dir);
+      if (existing.length > 0) {
+        const choice = await askOverwrite({ existingCount: existing.length, total: multiPaths.length });
+        if (choice === 'cancel') return;
+        batchOptions = { ...exportOptions, overwritePolicy: choice };
+      }
+
       setIsExporting(true);
       useAppStore.getState().startExportProgress(multiPaths.length);
       try {
-        const summary = await multiExportService.exportMany(multiPaths, exportOptions, {
+        const summary = await multiExportService.exportMany(multiPaths, batchOptions, {
           outputDirectory: dir,
           onProgress: (current, name) => useAppStore.getState().updateExportProgress(current, name),
           isCancelled: () => !!useAppStore.getState().exportProgress?.cancelRequested,
@@ -246,6 +273,14 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
     // pipeline still runs on the main thread, but it now yields between modules
     // (via the onProgress hook) so the window stays responsive and the bar moves.
     const exportName = (originalFilePath ? originalFilePath.split(/[/\\]/).pop() : undefined) || 'image';
+    // Ask BEFORE closing so Cancel leaves the export dialog open.
+    let singleOptions = exportOptions;
+    const planned = exportService.getPlannedOutputPath(originalFilePath, exportOptions);
+    if (await exportService.outputExists(planned)) {
+      const choice = await askOverwrite({ fileName: planned.split(/[/\\]/).pop() });
+      if (choice === 'cancel') return;
+      singleOptions = { ...exportOptions, overwritePolicy: choice };
+    }
     onClose();
     useAppStore.getState().startExportProgress(1);
     const setProgress = (frac: number) =>
@@ -347,7 +382,7 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
         exportImageData,
         exportWidth,
         exportHeight,
-        exportOptions,
+        singleOptions,
         originalFilePath
       );
       setProgress(1);
@@ -366,7 +401,7 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
     } finally {
       useAppStore.getState().endExportProgress();
     }
-  }, [imageData, imageWidth, imageHeight, exportOptions, originalFilePath, validationErrors, onExportComplete, onClose, multiPaths, outputDirectory]);
+  }, [imageData, imageWidth, imageHeight, exportOptions, originalFilePath, validationErrors, onExportComplete, onClose, multiPaths, outputDirectory, askOverwrite]);
 
   const formatFileSize = (bytes: number): string => {
     if (bytes < 1024) return `${bytes} B`;
@@ -752,6 +787,7 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
   );
 
   return (
+    <>
     <GlassModal
       isOpen={isOpen}
       onClose={onClose}
@@ -798,6 +834,14 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
         </div>
       </div>
     </GlassModal>
+    <OverwriteConfirmDialog
+      isOpen={overwritePrompt !== null}
+      fileName={overwritePrompt?.fileName}
+      existingCount={overwritePrompt?.existingCount}
+      total={overwritePrompt?.total}
+      onChoose={answerOverwrite}
+    />
+    </>
   );
 };
 

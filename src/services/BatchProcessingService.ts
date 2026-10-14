@@ -117,7 +117,7 @@ export class BatchProcessingService {
       exportOptions: {
         format: 'tiff',
         compression: 'lzw',
-        colorSpace: 'adobergb',
+        colorSpace: 'srgb',
         bitDepth: 16,
         outputSharpening: {
           enabled: true,

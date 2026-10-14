@@ -23,7 +23,17 @@ const PERSISTED_FIELDS = [
 
 type PersistedKey = typeof PERSISTED_FIELDS[number];
 
+/**
+ * Schema version of the stored payload. v2 (v1.40.0): the default colour space
+ * changed from Adobe RGB to sRGB. Payloads without `version` predate that and
+ * saved the old default on every export, so a stored 'adobergb' there almost
+ * always means "never changed" and is migrated to 'srgb'. Saves always write
+ * the current version, so a deliberately re-chosen Adobe RGB is remembered.
+ */
+export const EXPORT_SETTINGS_VERSION = 2;
+
 export interface StoredExportSettings {
+  version?: number;
   options: Partial<Pick<ExportOptions, PersistedKey>>;
   outputDirectory?: string;
 }
@@ -34,7 +44,7 @@ export function saveExportSettings(options: ExportOptions, outputDirectory: stri
     for (const key of PERSISTED_FIELDS) {
       if (options[key] !== undefined) subset[key] = options[key];
     }
-    const payload: StoredExportSettings = { options: subset, outputDirectory: outputDirectory || undefined };
+    const payload: StoredExportSettings = { version: EXPORT_SETTINGS_VERSION, options: subset, outputDirectory: outputDirectory || undefined };
     localStorage.setItem(EXPORT_SETTINGS_KEY, JSON.stringify(payload));
   } catch (e) {
     logger.warn('Failed to save export settings:', e);
@@ -55,7 +65,8 @@ export function loadExportSettings(defaults: ExportOptions): { options: ExportOp
       return { options: { ...defaults }, outputDirectory: '' };
     }
 
-    const src = parsed.options as Record<string, unknown>;
+    const src = { ...(parsed.options as Record<string, unknown>) };
+    if ((parsed.version ?? 1) < 2 && src.colorSpace === 'adobergb') src.colorSpace = 'srgb';
     const out: ExportOptions = { ...defaults };
     const enums: Record<string, unknown[]> = {
       format: ['jpeg', 'png', 'tiff', 'webp'],

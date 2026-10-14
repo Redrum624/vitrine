@@ -8,9 +8,9 @@ import { exportService } from '../services/ExportService';
  *    top-left bar animates and the renderer stays responsive instead of freezing.
  */
 describe('Export default options', () => {
-  test('default to Adobe RGB, 16-bit, original dimensions', () => {
+  test('default to sRGB, 16-bit, original dimensions', () => {
     const opts = exportService.getDefaultOptions();
-    expect(opts.colorSpace).toBe('adobergb');
+    expect(opts.colorSpace).toBe('srgb');
     expect(opts.bitDepth).toBe(16); // highest the default format (PNG) supports
     // No width/height set => export at the original dimensions (no resize).
     expect(opts.width).toBeUndefined();

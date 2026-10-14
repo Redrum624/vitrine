@@ -235,3 +235,26 @@ describe('exportMany — editor state restore', () => {
     expect(restore).toHaveBeenCalledWith({ snapshot: 'CURRENT' }, 200, 120);
   });
 });
+
+describe('exportMany - overwrite policy (v1.40.0)', () => {
+  beforeEach(() => {
+    (window as unknown as { electronAPI: unknown }).electronAPI = { fileExists };
+    fileExists.mockImplementation(async (p: string) => p.endsWith('a_VIT.jpg'));
+  });
+  afterEach(() => { delete (window as unknown as { electronAPI?: unknown }).electronAPI; });
+
+  it('default (keep both) bumps an existing target to _VIT_1', async () => {
+    await multiExportService.exportMany(['/i/a.jpg'], okOptions, controls());
+    expect(exportImage.mock.calls[0][3]).toMatchObject({ filename: 'a_VIT_1.jpg' });
+  });
+
+  it('replace targets the exact existing name', async () => {
+    await multiExportService.exportMany(['/i/a.jpg'], { ...okOptions, overwritePolicy: 'replace' }, controls());
+    expect(exportImage.mock.calls[0][3]).toMatchObject({ filename: 'a_VIT.jpg', overwritePolicy: 'replace' });
+  });
+
+  it('findExistingTargets lists only the default targets already on disk', async () => {
+    const found = await multiExportService.findExistingTargets(['/i/a.jpg', '/i/b.jpg'], 'jpeg', 'C:/out');
+    expect(found).toEqual(['a_VIT.jpg']);
+  });
+});
