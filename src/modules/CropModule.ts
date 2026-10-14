@@ -241,19 +241,20 @@ export class CropModule {
 
   /**
    * The geometry this module renders at (inW x inH = the ACTUAL processing
-   * dims): the stored rect passed through clampRectWedgeFree (centre anchor)
+   * dims): the stored rect passed through clampRectWedgeFree ('best' anchor —
+   * largest-area of centre/corner shrinks, so one-sided overshoot keeps framing)
    * first — the render-time backstop that keeps restored edits, undo, presets,
    * the worker and export wedge-free whatever path wrote the params (v1.40.0).
    * process() and getOutputDimensions() both read this, so they cannot drift.
    */
   getRenderGeometry(inW: number, inH: number): CropGeometry {
     const p = this.params;
-    const rect = clampRectWedgeFree({ x: p.x, y: p.y, width: p.width, height: p.height }, inW, inH, p, 'center');
+    const rect = clampRectWedgeFree({ x: p.x, y: p.y, width: p.width, height: p.height }, inW, inH, p, 'best');
     return computeCropGeometry({ ...p, ...rect }, inW, inH);
   }
 
   /** Clamp a candidate rect wedge-free at (inW, inH) under the CURRENT transform params. */
-  clampRectWedgeFree(rect: NormalizedCropRect, inW: number, inH: number, anchor: CropClampAnchor = 'center'): NormalizedCropRect {
+  clampRectWedgeFree(rect: NormalizedCropRect, inW: number, inH: number, anchor: CropClampAnchor = 'best'): NormalizedCropRect {
     return clampRectWedgeFree(rect, inW, inH, this.params, anchor);
   }
 
@@ -263,12 +264,19 @@ export class CropModule {
       return input;
     }
 
+    return this.processWithGeometry(input, this.getRenderGeometry(context.width, context.height), context.channels);
+  }
+
+  /**
+   * Render an explicit geometry (no clamp) — process() feeds it the clamped
+   * render geometry; tests use it to prove the wedge predicate matches the
+   * renderer pixel-for-pixel. input must be geom.inW x geom.inH x channels.
+   */
+  processWithGeometry(input: Float32Array, geom: CropGeometry, channels: number): Float32Array {
     const startTime = performance.now();
-    const { channels } = context;
-    const geom = this.getRenderGeometry(context.width, context.height);
     let output = input;
-    let currentWidth = context.width;
-    let currentHeight = context.height;
+    let currentWidth = geom.inW;
+    let currentHeight = geom.inH;
 
     logger.debug(`CropModule.process: orientation=${geom.orientation}, angle=${geom.angle}, flipH=${geom.flipH}, flipV=${geom.flipV}`);
 
@@ -445,7 +453,7 @@ export class CropModule {
         const outDx = x + 0.5 - geom.offX;
         const srcX = outDx * cosAngle + outDy * sinAngle + baseX;
         const srcY = -outDx * sinAngle + outDy * cosAngle + baseY;
-        this.samplePixel(input, width, height, channels, srcX, srcY, output, (y * outWidth + x) * channels);
+        this.samplePixel(input, width, height, channels, srcX, srcY, output, (y * outWidth + x) * channels, geom.method);
       }
     }
 
@@ -461,14 +469,15 @@ export class CropModule {
     x: number,
     y: number,
     output: Float32Array,
-    outIndex: number
+    outIndex: number,
+    method: CropParams['resampleMethod']
   ): void {
     // Check bounds
     if (x < 0 || x >= width - 1 || y < 0 || y >= height - 1) {
       return; // Keep fill color
     }
 
-    switch (this.params.resampleMethod) {
+    switch (method) {
       case 'nearest':
         this.sampleNearest(input, width, height, channels, x, y, output, outIndex);
         break;
@@ -698,13 +707,21 @@ export class CropModule {
       });
       logger.info(`Auto-straighten applied: ${clampedCorrection.toFixed(2)}° correction (preserving existing crop)`);
     } else {
-      // No custom crop, apply auto-crop to remove black borders
-      const autoCrop = this.calculateAutoCropForRotation(width, height, clampedCorrection);
+      // No custom crop: the wedge-free inscribed rect. `width/height` here are
+      // the ANALYSED preview's dims (already oriented, possibly cropped/
+      // downscaled) — the rect must come from the NATIVE frame under the
+      // current orientation, pixel-clamped: the same helper as the crop card
+      // and Auto All (wedgeFreeCropPatch). Native dims unknown ⇒ the preview
+      // frame is the best available (it is oriented already).
+      this.setParams({ expandCanvas: true });
+      const patch = this.originalWidth > 0 && this.originalHeight > 0
+        ? this.wedgeFreeCropPatch(clampedCorrection, this.originalWidth, this.originalHeight)
+        : { angle: clampedCorrection, enabled: true, ...autoCropRectForRotation(width, height, clampedCorrection) };
       this.setParams({
+        ...patch,
         angle: clampedCorrection,
         enabled: true,
         expandCanvas: true,
-        ...autoCrop
       });
       logger.info(`Auto-straighten applied: ${clampedCorrection.toFixed(2)}° correction with auto-crop`);
     }
@@ -907,7 +924,7 @@ export class CropModule {
     // The intersection can still poke out by a pixel of quantization, or sit in
     // a wedge after the 0.05 floor — the pixel-exact clamp settles it (no-op,
     // same values, when it is already wedge-free).
-    const clamped = clampRectWedgeFree(intersection, imageWidth, imageHeight, { ...p, angle }, 'center');
+    const clamped = clampRectWedgeFree(intersection, imageWidth, imageHeight, { ...p, angle }, 'best');
     return { angle, enabled: true, ...clamped };
   }
 

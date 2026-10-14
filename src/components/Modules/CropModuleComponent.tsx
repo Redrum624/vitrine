@@ -75,8 +75,9 @@ export const CropModuleComponent: React.FC<CropModuleComponentProps> = ({
   // The module's params are in lock-step with paramsRef (updateParams writes
   // both), so the patch computed from module state matches the ref state.
   //  - default: wedgeFreeCropPatch (inscribed rect / intersection with it)
-  //  - opts.rect: keep THAT rect's framing and ratio, shrinking it about its
-  //    centre only as far as the wedges require (ratio + orientation changes)
+  //  - opts.rect: keep THAT rect's framing and ratio, shrinking it (about its
+  //    centre or a corner, whichever keeps the most) only as far as the wedges
+  //    require (ratio + orientation changes)
   const ensureWedgeFreeCrop = useCallback((
     angle: number,
     extra: Partial<CropParams> = {},
@@ -84,7 +85,7 @@ export const CropModuleComponent: React.FC<CropModuleComponentProps> = ({
   ) => {
     if (opts.rect) {
       const rect = imageWidth > 0 && imageHeight > 0
-        ? module.clampRectWedgeFree(opts.rect, imageWidth, imageHeight, 'center')
+        ? module.clampRectWedgeFree(opts.rect, imageWidth, imageHeight, 'best')
         : opts.rect;
       updateParams({ ...rect, ...extra });
       return;

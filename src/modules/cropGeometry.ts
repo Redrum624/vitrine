@@ -185,11 +185,21 @@ export function inscribedScale(frameW: number, frameH: number, angleDeg: number)
 
 /**
  * Anchors for clampRectWedgeFree:
- *  - 'center'       shrink uniformly about the rect centre (render backstop)
+ *  - 'best'         (default; render backstop) try the centre and each of the
+ *                   four corners as the fixed point, shrinking uniformly (ratio
+ *                   kept), and keep the LARGEST-AREA valid result. A rect that
+ *                   only overshoots on one side keeps its other edges — the
+ *                   owner's framing survives (v1.40.0 fix round 1).
+ *  - 'center'       shrink uniformly about the rect centre
  *  - 'move'         translation clamp, size unchanged when possible
  *  - handle names   the opposite corner/edge stays fixed while shrinking
+ * When no shrink family can work (every candidate fixed point already lies in
+ * a wedge, e.g. the rect's centre and corners are all outside the photo), the
+ * rect is TRANSLATED toward the valid region (translateIntoValid): size kept,
+ * position the closest valid one found along the way back, then x and y
+ * recovered independently toward the request.
  */
-export type CropClampAnchor = 'center' | 'move' | 'n' | 's' | 'e' | 'w' | 'nw' | 'ne' | 'sw' | 'se';
+export type CropClampAnchor = 'best' | 'center' | 'move' | 'n' | 's' | 'e' | 'w' | 'nw' | 'ne' | 'sw' | 'se';
 
 const BISECT_STEPS = 48;
 
@@ -229,7 +239,7 @@ export function clampRectWedgeFree(
   inW: number,
   inH: number,
   params: Omit<CropGeometryParams, keyof NormalizedCropRect> & Partial<NormalizedCropRect>,
-  anchor: CropClampAnchor = 'center',
+  anchor: CropClampAnchor = 'best',
 ): NormalizedCropRect {
   if (!(inW > 0) || !(inH > 0)) return rect;
   const at = (r: NormalizedCropRect) => computeCropGeometry({ ...params, ...r }, inW, inH);
@@ -244,6 +254,15 @@ export function clampRectWedgeFree(
   const cy = y + h / 2;
   const locked = params.aspectRatio !== undefined && params.aspectRatio !== 'free';
   switch (anchor) {
+    case 'best':
+      families.push(
+        { fx: cx, fy: cy, sw: true, sh: true },
+        { fx: x, fy: y, sw: true, sh: true },
+        { fx: x + w, fy: y, sw: true, sh: true },
+        { fx: x, fy: y + h, sw: true, sh: true },
+        { fx: x + w, fy: y + h, sw: true, sh: true },
+      );
+      break;
     case 'center': families.push({ fx: cx, fy: cy, sw: true, sh: true }); break;
     case 'nw': families.push({ fx: x + w, fy: y + h, sw: true, sh: true }); break;
     case 'ne': families.push({ fx: x, fy: y + h, sw: true, sh: true }); break;
@@ -268,12 +287,16 @@ export function clampRectWedgeFree(
     case 'move':
       break;
   }
+  let best: NormalizedCropRect | null = null;
   for (const f of families) {
     if (!ok(scaledRect(rect, f.fx, f.fy, f.sw, f.sh, 0))) continue;
     const t = bisect((tt) => ok(scaledRect(rect, f.fx, f.fy, f.sw, f.sh, tt)));
-    return scaledRect(rect, f.fx, f.fy, f.sw, f.sh, t);
+    const candidate = scaledRect(rect, f.fx, f.fy, f.sw, f.sh, t);
+    if (anchor !== 'best') return candidate; // ordered fallbacks: first viable wins
+    // Largest area wins; ties keep the earlier (centre first).
+    if (!best || candidate.width * candidate.height > best.width * best.height * (1 + 1e-9)) best = candidate;
   }
-  return translateIntoValid(rect, probe, ok);
+  return best ?? translateIntoValid(rect, probe, ok);
 }
 
 /**
