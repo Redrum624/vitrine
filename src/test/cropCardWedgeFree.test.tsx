@@ -24,13 +24,13 @@ const wedgeFree = (m: CropModule) => isPixelRectWedgeFree(computeCropGeometry(m.
 
 describe('CropModuleComponent — wedge-free handlers', () => {
   test('ratio change on a straightened photo keeps the ratio and lands wedge-free', () => {
-    // A tall narrow rect: the (normalized) 1:1 lock widens it to 0.9 x 0.9 — into the wedges.
+    // A tall narrow rect: the 1:1 lock widens it to a tall square — into the wedges.
     const { module } = straightened({ x: 0.05, y: 0.05, width: 0.3, height: 0.9 });
     fireEvent.click(screen.getByRole('button', { name: '1:1' }));
-    const p = module.getParams();
     expect(wedgeFree(module)).toBe(true);
-    // applyCropAspectRatio works in normalized units; the clamp keeps that ratio.
-    expect(p.width / p.height).toBeCloseTo(1, 9);
+    // The ratio holds in canvas pixels; the clamp shrinks uniformly and keeps it.
+    const g = computeCropGeometry(module.getParams(), W, H);
+    expect(g.outW / g.outH).toBeCloseTo(1, 2);
   });
 
   test('90° turn under a straighten angle lands wedge-free', () => {

@@ -210,8 +210,19 @@ export class CropModule {
     }
   }
 
-  // Apply aspect ratio constraint to crop region
-  applyCropAspectRatio(newX: number, newY: number, newWidth: number, newHeight: number, fixedEdge?: 'left' | 'right' | 'top' | 'bottom'): { x: number; y: number; width: number; height: number } {
+  // Apply aspect ratio constraint to crop region. The rect is normalized to the
+  // (expanded, oriented) canvas, so the ratio is enforced in PIXELS of that canvas:
+  // inW/inH are the pre-orientation input dims (default: setOriginalDimensions).
+  // Without dims the ratio can only be applied in normalized units.
+  //  - fixedEdge left/right: width drives, height follows (x/y kept)
+  //  - fixedEdge top/bottom: height drives, width follows (x/y kept)
+  //  - no fixedEdge (ratio chip): keep the centre and height, shrink uniformly
+  //    to fit the canvas, then translate inside it.
+  applyCropAspectRatio(
+    newX: number, newY: number, newWidth: number, newHeight: number,
+    fixedEdge?: 'left' | 'right' | 'top' | 'bottom',
+    inW: number = this.originalWidth, inH: number = this.originalHeight,
+  ): { x: number; y: number; width: number; height: number } {
     const targetRatio = this.getAspectRatioValue();
 
     if (targetRatio === null) {
@@ -219,26 +230,48 @@ export class CropModule {
       return { x: newX, y: newY, width: newWidth, height: newHeight };
     }
 
-    // Apply aspect ratio constraint
+    let cw = 1;
+    let ch = 1;
+    if (inW > 0 && inH > 0) {
+      const swapped = this.normalizedOrientation() === 90 || this.normalizedOrientation() === 270;
+      const frameW = swapped ? inH : inW;
+      const frameH = swapped ? inW : inH;
+      const canvas = rotatedCanvasSize(frameW, frameH, Number(this.params.angle) || 0, this.params.expandCanvas !== false);
+      cw = canvas.width;
+      ch = canvas.height;
+    }
+
+    let x = newX * cw;
+    let y = newY * ch;
+    let w = newWidth * cw;
+    let h = newHeight * ch;
+
     if (fixedEdge === 'left' || fixedEdge === 'right') {
-      // Width changed, adjust height
-      newHeight = newWidth / targetRatio;
+      h = w / targetRatio;
+    } else if (fixedEdge === 'top' || fixedEdge === 'bottom') {
+      w = h * targetRatio;
     } else {
-      // Height changed (or both), adjust width
-      newWidth = newHeight * targetRatio;
+      const cx = x + w / 2;
+      const cy = y + h / 2;
+      w = h * targetRatio;
+      const s = Math.min(1, cw / w, ch / h);
+      w *= s;
+      h *= s;
+      x = Math.min(Math.max(0, cx - w / 2), cw - w);
+      y = Math.min(Math.max(0, cy - h / 2), ch - h);
     }
 
     // Ensure crop stays within bounds
-    if (newX + newWidth > 1.0) {
-      newWidth = 1.0 - newX;
-      newHeight = newWidth / targetRatio;
+    if (x + w > cw) {
+      w = cw - x;
+      h = w / targetRatio;
     }
-    if (newY + newHeight > 1.0) {
-      newHeight = 1.0 - newY;
-      newWidth = newHeight * targetRatio;
+    if (y + h > ch) {
+      h = ch - y;
+      w = h * targetRatio;
     }
 
-    return { x: newX, y: newY, width: newWidth, height: newHeight };
+    return { x: x / cw, y: y / ch, width: w / cw, height: h / ch };
   }
 
   /**

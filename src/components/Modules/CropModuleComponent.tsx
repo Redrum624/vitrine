@@ -93,24 +93,22 @@ export const CropModuleComponent: React.FC<CropModuleComponentProps> = ({
     updateParams({ ...module.wedgeFreeCropPatch(angle, imageWidth, imageHeight), ...extra });
   }, [module, imageWidth, imageHeight, updateParams]);
 
-  const handleAspectRatioChange = useCallback((ratio: AspectRatio) => {
-    updateParams({ aspectRatio: ratio });
+  // Lock the current rect to the selected ratio, in canvas PIXELS (the rect is
+  // normalized, so a normalized ratio came out stretched by W/H). A ratio chip
+  // on a fresh photo must also enable the crop or it never reaches the canvas.
+  const applyRatio = useCallback((patch: Partial<CropParams>) => {
+    updateParams(patch);
+    if (module.getAspectRatioValue() === null) return;
+    const p = paramsRef.current;
+    const adjusted = module.applyCropAspectRatio(p.x, p.y, p.width, p.height, undefined, imageWidth, imageHeight);
+    // The ratio-adjusted rect can grow into a fill wedge on a straightened
+    // photo — keep the ratio, shrink about the centre as needed.
+    ensureWedgeFreeCrop(p.angle, { enabled: true }, { rect: adjusted });
+  }, [module, imageWidth, imageHeight, updateParams, ensureWedgeFreeCrop]);
 
-    if (ratio !== 'free') {
-      const targetRatio = module.getAspectRatioValue();
-      if (targetRatio !== null) {
-        const adjusted = module.applyCropAspectRatio(
-          paramsRef.current.x,
-          paramsRef.current.y,
-          paramsRef.current.width,
-          paramsRef.current.height
-        );
-        // The ratio-adjusted rect can grow into a fill wedge on a straightened
-        // photo — keep the ratio, shrink about the centre as needed.
-        ensureWedgeFreeCrop(paramsRef.current.angle, {}, { rect: adjusted });
-      }
-    }
-  }, [module, updateParams, ensureWedgeFreeCrop]);
+  const handleAspectRatioChange = useCallback((ratio: AspectRatio) => {
+    applyRatio({ aspectRatio: ratio });
+  }, [applyRatio]);
 
   const handleReset = useCallback(() => {
     module.resetParams();
@@ -271,7 +269,7 @@ export const CropModuleComponent: React.FC<CropModuleComponentProps> = ({
               <input
                 type="number"
                 value={params.customAspectWidth}
-                onChange={(e) => updateParams({ customAspectWidth: parseFloat(e.target.value) || 1 })}
+                onChange={(e) => applyRatio({ customAspectWidth: parseFloat(e.target.value) || 1 })}
                 min="0.1"
                 step="0.1"
                 style={{
@@ -289,7 +287,7 @@ export const CropModuleComponent: React.FC<CropModuleComponentProps> = ({
               <input
                 type="number"
                 value={params.customAspectHeight}
-                onChange={(e) => updateParams({ customAspectHeight: parseFloat(e.target.value) || 1 })}
+                onChange={(e) => applyRatio({ customAspectHeight: parseFloat(e.target.value) || 1 })}
                 min="0.1"
                 step="0.1"
                 style={{
