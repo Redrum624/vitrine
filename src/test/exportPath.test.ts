@@ -65,3 +65,17 @@ describe('single-export non-clobber suffix increment', () => {
     await expect(resolve('C:/out/photo_VIT.jpg')).resolves.toBe('C:/out/photo_VIT.jpg');
   });
 });
+
+describe('single-export overwrite planning (v1.40.0)', () => {
+  afterEach(() => { delete (window as unknown as { electronAPI?: unknown }).electronAPI; });
+
+  it('getPlannedOutputPath returns the un-bumped target and outputExists reports it', async () => {
+    (window as unknown as { electronAPI: unknown }).electronAPI = {
+      fileExists: async (p: string) => p === 'C:/out/photo_VIT.jpg',
+    };
+    const planned = exportService.getPlannedOutputPath('C:/p/photo.ORF', { outputDirectory: 'C:/out', format: 'jpeg' });
+    expect(planned).toBe('C:/out/photo_VIT.jpg');
+    await expect(exportService.outputExists(planned)).resolves.toBe(true);
+    await expect(exportService.outputExists('C:/out/other.jpg')).resolves.toBe(false);
+  });
+});

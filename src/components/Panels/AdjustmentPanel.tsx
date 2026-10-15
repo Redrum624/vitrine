@@ -26,6 +26,7 @@ import { Sun, Droplet, Palette, Activity, Crop, Sparkles, Focus, History as Hist
 import type { ReactNode } from 'react';
 import type { ImageFileInfo } from '../../services/FileSystemService';
 import { imageProcessingPipeline } from '../../services/ImageProcessingPipeline';
+import type { ProcessingContext } from '../../services/ImageProcessingPipeline';
 import { imageService } from '../../services/ImageService';
 import { notificationService } from '../../services/NotificationService';
 import { guardDeveloping } from '../../utils/developingGuard';
@@ -35,11 +36,49 @@ import { progressivePreviewService } from '../../services/ProgressivePreviewServ
 import { adaptiveDebounceService } from '../../services/AdaptiveDebounceService';
 import { useAppStore } from '../../stores/appStore';
 import { gpuPreviewPipeline } from '../../shaders/GpuPreviewPipeline';
-import { buildPassList } from '../../shaders/passDescriptors';
+import { buildPassList, getGpuUnsafeModuleIds, setGpuUnsafeModuleIds } from '../../shaders/passDescriptors';
 import { logger } from '../../utils/Logger';
 import { webWorkerImageProcessor } from '../../services/WebWorkerImageProcessor';
 import type { WorkerModuleConfig } from '../../services/WebWorkerImageProcessor';
-import { choosePreviewPath } from '../../services/previewRouting';
+import { choosePreviewRoute } from '../../services/previewRouting';
+import { onLivePreviewRequest } from '../../utils/livePreviewRequest';
+
+// ── Preview state signature (v1.40.0 Task 9b — single apply) ─────────────────
+// Everything a preview pass's pixels depend on: the live module config (the same
+// {id, enabled, params} the worker is posted), the preview quality cap, the base
+// pixels (baseImageVersion + the source buffer's identity) and the image itself.
+// A pass snapshots it at start; the finally replay fires only if it changed, and
+// the worker-failure fallback renders only while live still equals the posted state.
+// A typed array inside params (a baked mask) is tokenised by buffer IDENTITY (stable per
+// buffer, via the WeakMap below), so an unchanged buffer compares equal and a new/replaced
+// buffer counts as a change.
+const MAX_PAINT_STARVATION_MS = 400;
+const bufferIds = new WeakMap<object, number>();
+let nextBufferId = 0;
+function bufferId(buf: object): number {
+  let id = bufferIds.get(buf);
+  if (id === undefined) { id = ++nextBufferId; bufferIds.set(buf, id); }
+  return id;
+}
+function signatureReplacer(key: string, value: unknown): unknown {
+  if (key === 'moduleStats') return undefined; // runtime counters, not params
+  if (ArrayBuffer.isView(value)) return `#buf${bufferId(value)}`;
+  return value;
+}
+export function previewStateSignature(): string {
+  const img = imageService.getCurrentImage();
+  if (!img) return 'no-image';
+  const st = useAppStore.getState();
+  const config = imageProcessingPipeline.getOrderedModules().map((m) => [
+    m.getId(),
+    m.isEnabled !== false,
+    typeof m.getParams === 'function' ? m.getParams() : null,
+  ]);
+  return JSON.stringify(
+    [img.filePath ?? '', img.width, img.height, bufferId(img.data), st.previewQualityCap, st.baseImageVersion, st.cropDragSuspended, config],
+    signatureReplacer,
+  );
+}
 
 interface AdjustmentPanelProps {
   selectedModule?: string | null;
@@ -79,15 +118,29 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
   // `pending` so it re-runs once the current one finishes (no lost edits).
   const isProcessingRef = useRef<boolean>(false);
   const pendingReprocessRef = useRef<boolean>(false);
+  // True when a NON-live trigger armed the pending replay; a replay armed only by live drag
+  // frames (Task 12c) re-runs directly, without a processingVersion bump (History/persistence).
+  const pendingNonLiveRef = useRef<boolean>(false);
+  // The pass that OWNS the in-flight slot (Task 9b). `supersedeAt` = the store's
+  // previewSupersedeVersion at its start; `awaitingWorker` = parked on a worker (the
+  // only stage that may be abandoned; the main thread is never run concurrently).
+  const inFlightRef = useRef<{ seq: number; supersedeAt: number; awaitingWorker: boolean; signature: string } | null>(null);
+  // Re-fires a trigger that landed inside the 50 ms throttle window (Task 12b: last value wins).
+  const throttleTimerRef = useRef<NodeJS.Timeout | null>(null);
+  // Anti-starvation clock: set when a pass starts from idle and whenever a frame paints. A new
+  // trigger supersedes a worker-parked pass only while less than MAX_PAINT_STARVATION_MS has
+  // passed on this clock; beyond it the in-flight pass is allowed to paint and the latest
+  // state is queued behind it (continuous wheel/slider input still shows progress).
+  const paintClockRef = useRef<number>(0);
   // NOTE: Removed lastProcessedImagePathRef - was blocking param change reprocessing
 
   // ── GPU resident-texture preview: source-reupload gating ──────────────────────
   // The whole point of the resident pipeline is to upload the source ONCE and then
   // re-run only the cheap GPU passes per slider tick. We re-upload setSource() ONLY
   // when the source identity changes (new image, or preview dims changed). Re-uploading
-  // every tick would defeat that win. Crop is handled by the CPU path (crop active ⇒
-  // it lands in cpuBridges ⇒ GPU mode is skipped), so the source here is always the
-  // raw decoded image downsampled to the preview — no crop baked in.
+  // every tick would defeat that win. The source is always the raw decoded image
+  // downsampled to the preview — no crop baked in: an active crop runs ON the GPU as the
+  // geometry step at passes[0] (Task 10b), which reads this uncropped source each frame.
   const lastGpuSourceKeyRef = useRef<string | null>(null);
   // ── Preview-source memo (downsample gating) ───────────────────────────────────
   // The area-averaged box downsample is O(source pixels) — ~50-150ms on a 24-45MP
@@ -102,6 +155,8 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
   // Trailing throttle for the GPU→CPU histogram readback (keeps the histogram live in
   // gpu mode without blocking the present path). Cleared on unmount.
   const gpuReadbackTimerRef = useRef<NodeJS.Timeout | null>(null);
+  // Pending re-run after a resident-enhance render failure (cleared on unmount).
+  const gpuRetryTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Connect the processing pipeline to image service for auto-adjustments
   useEffect(() => {
@@ -121,7 +176,7 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
   const noiseReductionModule = imageProcessingPipeline.getModule<NoiseReductionModule>('noise-reduction');
   const enhanceModuleInstance = imageProcessingPipeline.getModule<EnhanceModule>('enhance');
 
-  const processCurrentImageRealTime = useCallback(async (opts?: { queueIfBusy?: boolean }) => {
+  const processCurrentImageRealTime = useCallback(async (opts?: { queueIfBusy?: boolean; live?: boolean }) => {
     const currentImage = imageService.getCurrentImage();
     console.log('AdjustmentPanel: processCurrentImageRealTime called, currentImage:', currentImage ? `${currentImage.width}x${currentImage.height}` : 'null');
 
@@ -137,9 +192,31 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
     // but ONLY for a real new trigger (param change / processingVersion bump / image load).
     // Non-trigger callers (the mount effect) pass queueIfBusy:false; queuing those made the
     // finally-block triggerReprocessing() feed the next pass forever.
+    let superseded = false;
+    const inflight = inFlightRef.current;
+    const nowMs = performance.now();
+    if (
+      isProcessingRef.current && opts?.queueIfBusy !== false && inflight?.awaitingWorker &&
+      nowMs - paintClockRef.current < MAX_PAINT_STARVATION_MS &&
+      (useAppStore.getState().previewSupersedeVersion !== inflight.supersedeAt ||
+        previewStateSignature() !== inflight.signature)
+    ) {
+      // Last value wins (Tasks 9b/12b): ANY new trigger whose state differs from the pass
+      // parked on a worker (a crop release, a mouse-wheel/slider value) marks that pass
+      // stale (it will never paint, fall back or replay) and starts the new pass NOW
+      // instead of queueing behind it. The worker is never terminated for this.
+      previewSeqRef.current++;
+      inFlightRef.current = null;
+      isProcessingRef.current = false;
+      pendingReprocessRef.current = false;
+      pendingNonLiveRef.current = false;
+      superseded = true;
+      logger.debug('Superseding the in-flight worker pass: starting the latest pass now');
+    }
     if (isProcessingRef.current) {
       if (opts?.queueIfBusy !== false) {
         pendingReprocessRef.current = true;
+        if (!opts?.live) pendingNonLiveRef.current = true;
         logger.debug('Skipping processing - already in progress (queued)');
       } else {
         logger.debug('Skipping processing - already in progress (not queued)');
@@ -148,17 +225,29 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
     }
 
     // Only prevent rapid-fire calls within a short time window (not based on parameter changes)
-    const now = performance.now();
+    const now = nowMs;
     const lastProcessingTime = lastProcessingTimeRef.current;
 
-    if (lastProcessingTime && (now - lastProcessingTime) < 50) {
-      logger.debug('Skipping processing - too soon since last processing (50ms throttle)');
+    if (!superseded && lastProcessingTime && (now - lastProcessingTime) < 50) {
+      // Never drop the last value: re-fire the trigger once the window has passed.
+      if (opts?.queueIfBusy !== false) {
+        if (throttleTimerRef.current) clearTimeout(throttleTimerRef.current);
+        throttleTimerRef.current = setTimeout(() => {
+          throttleTimerRef.current = null;
+          // A live drag frame (Task 12c) re-fires itself: a processingVersion bump would
+          // record History / save edits mid-drag and go through the adaptive debounce.
+          if (opts?.live) processCallbackRef.current({ live: true });
+          else useAppStore.getState().triggerReprocessing();
+        }, Math.max(1, 50 - (now - lastProcessingTime)) + 1);
+      }
+      logger.debug('Deferring processing - too soon since last processing (50ms throttle)');
       return;
     }
 
     // Track this processing attempt
     lastProcessingTimeRef.current = now;
     isProcessingRef.current = true;
+    if (!superseded) paintClockRef.current = now;
 
     // Clear any pending timeout
     if (processingTimeoutRef.current) {
@@ -173,8 +262,16 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
     const slowSpinnerTimer = setTimeout(() => {
       if (processingGenRef.current === gen) useAppStore.getState().setIsProcessing(true);
     }, 800);
+    const seq = ++previewSeqRef.current;
+    // Claim the in-flight slot BEFORE anything can throw, so the finally below always
+    // releases it (a throw that skipped the finally would wedge every later preview).
+    let signature = '';
+    inFlightRef.current = { seq, supersedeAt: useAppStore.getState().previewSupersedeVersion, awaitingWorker: false, signature };
     try {
-      const seq = ++previewSeqRef.current;
+      // Snapshot of the state this pass renders (Task 9b), see previewStateSignature. Inside
+      // the try: a module getParams() that throws must not leave isProcessingRef stuck true.
+      signature = previewStateSignature();
+      inFlightRef.current.signature = signature;
       setIsProcessing(true);
       const startTime = performance.now();
 
@@ -295,11 +392,14 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
       );
 
       // CRITICAL: Create context object to track dimension changes from rotation/crop
+      // Task 9b fix 1: crop-handle drag suspension → the crop renders the whole expanded canvas.
+      const cropSuspended = useAppStore.getState().cropDragSuspended;
       const processingContext = {
         width: previewWidth,
         height: previewHeight,
         channels: 4,
-        kernelScale
+        kernelScale,
+        cropSuspended
       };
 
       // ── GPU resident-texture fast path ──────────────────────────────────────────
@@ -321,9 +421,17 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
       // (Task 10) can bake/upload masks at the preview resolution. rebuildMask reuses the
       // module's OWN setLayerGeometry (no geometry→mask reimplementation) and returns the
       // freshly-baked mask for the layer, or null when the layer has no geometry.
+      // width/height are the PRE-crop source dims: buildPassList derives the post-crop dims
+      // itself (crop geometry step at passes[0]) and builds LA masks / enhance eligibility
+      // at those. cropSuspended: the 9b drag preview (whole expanded canvas while dragging).
       const { passes, cpuBridges } = buildPassList(orderedModules, {
         width: previewWidth,
         height: previewHeight,
+        cropSuspended,
+        // Same kernelScale as the CPU contexts (never a second derivation) + GL texture cap
+        // (0 pre-attach → buildPassList falls back to 16384).
+        kernelScale,
+        maxTextureSize: gpuPreviewPipeline.getMaxTextureSize() || undefined,
         rebuildMask: (layerId, w, h) => {
           const laMod = imageProcessingPipeline.getModule('localadjustments') as LocalAdjustmentsPipelineModule | undefined;
           return laMod?.rebuildMask(layerId, w, h) ?? null;
@@ -331,7 +439,9 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
       });
       const activeCpuBridges = cpuBridges.filter((id) => imageProcessingPipeline.isModuleActive(id));
 
-      const previewPath = choosePreviewPath({
+      const { path: previewPath, reason: previewReason } = choosePreviewRoute({
+        nrActive: imageProcessingPipeline.isModuleActive('noise-reduction'),
+        laActive: imageProcessingPipeline.isModuleActive('localadjustments'),
         workersHealthy: webWorkerImageProcessor.isHealthy(),
         gpuAvailable: gpuPreviewPipeline.isAvailable(),
         activeCpuBridgeCount: activeCpuBridges.length,
@@ -340,10 +450,12 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
         height: previewHeight,
       });
 
+      logger.debug(`Preview route: ${previewPath} (${previewReason})`);
+
       if (previewPath === 'gpu') {
-        // Source identity: image path + preview dims. Crop never contributes here
-        // (active crop ⇒ activeCpuBridges non-empty ⇒ this branch is skipped), so the
-        // source is the raw downsampled image and only changes on image switch / dim change,
+        // Source identity: image path + preview dims. Crop never contributes here (the GPU
+        // crop reads the uncropped source every frame), so the source is the raw
+        // downsampled image and only changes on image switch / dim change,
         // OR when the base pixels are replaced in place at the same path+dims (a RAW
         // re-decode / flip) — baseImageVersion folds that in so we re-upload the new pixels.
         const baseImageVersion = useAppStore.getState().baseImageVersion;
@@ -362,26 +474,74 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
         })();
         gpuPreviewPipeline.setDehazeParam(basicAdjDehaze);
 
-        gpuPreviewPipeline.render(passes);
+        const renderResult = gpuPreviewPipeline.render(passes);
+        // A GPU step that failed at render time (resident enhance / crop geometry): mark it
+        // unsafe ONCE and re-run this frame, which now routes that module to the CPU bridge
+        // (-> the CPU route). The guard stops a second retry. The failed frame is not shown.
+        const failed = renderResult?.failedSteps ?? [];
+        const unsafe = getGpuUnsafeModuleIds();
+        const newlyUnsafe = [
+          ...(failed.includes('enhance') && !unsafe.has('enhance-resident') ? ['enhance-resident'] : []),
+          ...(failed.includes('crop') && !unsafe.has('crop') ? ['crop'] : []),
+        ];
+        if (newlyUnsafe.length > 0) {
+          setGpuUnsafeModuleIds([...unsafe, ...newlyUnsafe]);
+          logger.warn(`GPU step(s) failed at render time; marked ${newlyUnsafe.join(', ')} unsafe, re-running frame on CPU`);
+          // Past the 50ms rapid-fire throttle so the re-run is not dropped.
+          if (gpuRetryTimerRef.current) clearTimeout(gpuRetryTimerRef.current);
+          gpuRetryTimerRef.current = setTimeout(() => {
+            gpuRetryTimerRef.current = null;
+            useAppStore.getState().triggerReprocessing();
+          }, 60);
+          return;
+        }
+        // The RESULT geometry (Task 10b): a GPU crop makes the resident result post-crop sized
+        // (== CropModule.getOutputDimensions at the preview dims) and reports the frame it
+        // rendered. Never the pre-crop preview dims.
+        const resultWidth = renderResult?.width ?? previewWidth;
+        const resultHeight = renderResult?.height ?? previewHeight;
+        const resultFrameRect = renderResult?.frameRect;
         useAppStore.getState().setRenderMode('gpu');
-        useAppStore.getState().bumpGpuResult();
+        // Size + frame published synchronously with the bump: Canvas sizes the GL fit-rect
+        // from it instead of the ~150ms-lagged histogram readback.
+        useAppStore.getState().bumpGpuResult({ width: resultWidth, height: resultHeight, frameRect: resultFrameRect });
 
-        // Histogram stays live in gpu mode via a trailing, throttled GPU→CPU readback
+        // Histogram stays live in gpu mode via a trailing, throttled GPU->CPU readback
         // (~150ms). This does NOT gate the present path (which reads the resident texture
         // directly) — it only refreshes processedImageData for the histogram consumers.
-        if (gpuReadbackTimerRef.current) clearTimeout(gpuReadbackTimerRef.current);
-        gpuReadbackTimerRef.current = setTimeout(() => {
+        const publishReadback = () => {
           try {
             const rb = gpuPreviewPipeline.readback();
+            paintClockRef.current = performance.now();
             useAppStore.getState().setProcessedImageData({
               data: rb,
-              width: previewWidth,
-              height: previewHeight,
+              width: resultWidth,
+              height: resultHeight,
               isPreview: true,
+              // The crop frame this GPU result shows (absent: no crop ran, full frame).
+              frameRect: resultFrameRect,
             });
           } catch (e) {
             logger.warn('GPU histogram readback failed:', e instanceof Error ? e.message : String(e));
           }
+        };
+        if (gpuReadbackTimerRef.current) clearTimeout(gpuReadbackTimerRef.current);
+        gpuReadbackTimerRef.current = null;
+        // Every GPU frame — including one whose geometry changed (crop apply, drag-start
+        // suspension, straighten tick) — keeps the pixel readback on the 150ms throttle.
+        // The geometry itself is already published synchronously above (bumpGpuResult):
+        // Canvas sizing and the crop overlay/handles read gpuResultGeometry in GPU mode, so
+        // they never wait for this readback. (Task 9b fix 2 used to force a synchronous
+        // full RGBA32F readPixels here whenever the dims changed — on a straighten/crop drag
+        // that is EVERY tick, a GPU stall plus a 2D-canvas redraw per tick: final-review
+        // fix 4.) processedImageData stays self-consistent: data, dims and frameRect are
+        // always published together, just up to 150ms late.
+        gpuReadbackTimerRef.current = setTimeout(() => {
+          gpuReadbackTimerRef.current = null;
+          // Task 9b fix 3: a newer pass started (and may have painted a CPU frame) —
+          // this pass's readback must not overwrite it.
+          if (previewSeqRef.current !== seq) return;
+          publishReadback();
         }, 150);
 
         const processTime = performance.now() - startTime;
@@ -391,7 +551,7 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
           active: pipelineStats.enabledModules,
           total: pipelineStats.moduleCount,
         });
-        logger.debug(`GPU preview render completed in ${processTime.toFixed(2)}ms (${passes.length} passes), size: ${previewWidth}x${previewHeight}`);
+        logger.debug(`GPU preview render completed in ${processTime.toFixed(2)}ms (${passes.length} passes), size: ${resultWidth}x${resultHeight}`);
         return; // GL canvas presents from the resident result — skip the CPU blit path.
       }
 
@@ -413,6 +573,8 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
       let processedData: Float32Array;
       let outputWidth = previewWidth;
       let outputHeight = previewHeight;
+      // The effective crop rect this pass rendered (undefined: crop did not run, full frame).
+      let frameRect: ProcessingContext['cropFrameRect'];
 
       if (previewPath === 'worker') {
         // Build WorkerModuleConfig from the LIVE pipeline state (same source the GPU
@@ -425,10 +587,11 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
         }));
 
         try {
+          if (inFlightRef.current?.seq === seq) inFlightRef.current.awaitingWorker = true;
           const workerResult = await webWorkerImageProcessor.processImage(
             // kernelScale: same pass-level C5 scale as the main-thread context above (the worker
             // path forwards it to every tile verbatim — never re-derived from tile dims).
-            { width: previewWidth, height: previewHeight, data: previewData, channels: 4, kernelScale },
+            { width: previewWidth, height: previewHeight, data: previewData, channels: 4, kernelScale, cropSuspended },
             workerConfig,
           );
 
@@ -438,6 +601,7 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
             // (the worker's local ProcessingContext was mutated by CropModule).
             outputWidth  = workerResult.width  ?? previewWidth;
             outputHeight = workerResult.height ?? previewHeight;
+            frameRect = workerResult.frameRect;
             logger.debug(`CPU-worker preview completed in ${workerResult.processingTime.toFixed(2)}ms, out: ${outputWidth}x${outputHeight}`);
           } else {
             throw new Error(workerResult.error ?? 'Worker returned failure');
@@ -445,9 +609,25 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
         } catch (workerErr) {
           // Worker failed (URL resolution, crash, timeout) → graceful main-thread fallback.
           logger.warn('Worker processing failed, falling back to main thread:', workerErr instanceof Error ? workerErr.message : String(workerErr));
+          // Superseded while parked on the worker: stale, no fallback render.
+          if (previewSeqRef.current !== seq) return;
+          // The fallback runs the LIVE main-thread pipeline, so it renders the POSTED
+          // state only while live still equals it (Task 9b). Otherwise drop this result:
+          // painting live params under a stale pass was the visible "second apply" (R2);
+          // the replay in finally renders the live state once.
+          if (previewStateSignature() !== signature) {
+            logger.warn('Worker fallback skipped: live state changed since the pass was posted');
+            // Arm the replay so the latest state paints even without a pending trigger.
+            pendingReprocessRef.current = true;
+            pendingNonLiveRef.current = true;
+            return;
+          }
           processedData = await imageProcessingPipeline.processImage(previewData, processingContext, { useWebWorkers: false });
           outputWidth  = processingContext.width;
           outputHeight = processingContext.height;
+          frameRect = (processingContext as ProcessingContext).cropFrameRect;
+        } finally {
+          if (inFlightRef.current?.seq === seq) inFlightRef.current.awaitingWorker = false;
         }
       } else {
         // Tiny preview — keep it on the main thread (worker overhead not worth it).
@@ -455,17 +635,27 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
         // CRITICAL: CropModule mutates processingContext.width/height in place.
         outputWidth  = processingContext.width;
         outputHeight = processingContext.height;
+        frameRect = (processingContext as ProcessingContext).cropFrameRect;
       }
 
       // Discard stale results if a newer preview has already started.
       if (previewSeqRef.current !== seq) return;
 
+      // Task 9b fix 3: an older GPU pass's pending histogram readback must not overwrite
+      // this newer CPU frame (it would also drop its frameRect).
+      if (gpuReadbackTimerRef.current) {
+        clearTimeout(gpuReadbackTimerRef.current);
+        gpuReadbackTimerRef.current = null;
+      }
+
       // Update UI once with final result — use the TRUE output dims.
+      paintClockRef.current = performance.now();
       setProcessedImageData({
         data: processedData,
         width: outputWidth,
         height: outputHeight,
         isPreview: true,
+        frameRect,
       });
 
       const processTime = performance.now() - startTime;
@@ -491,12 +681,25 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
       // Only the latest run clears the store spinner, so an older run completing can't
       // wipe a newer run's spinner (and the newest run's finally always clears it).
       if (processingGenRef.current === gen) useAppStore.getState().setIsProcessing(false);
-      setIsProcessing(false);
-      isProcessingRef.current = false;
-      // An edit arrived while we were busy — reprocess the latest state now.
-      if (pendingReprocessRef.current) {
-        pendingReprocessRef.current = false;
-        useAppStore.getState().triggerReprocessing();
+      // A superseded pass no longer owns the in-flight slot: its successor does.
+      if (inFlightRef.current?.seq === seq) {
+        inFlightRef.current = null;
+        setIsProcessing(false);
+        isProcessingRef.current = false;
+        // A trigger arrived while we were busy: replay ONLY if the state actually
+        // changed since this pass snapshotted it (Task 9b: an unchanged-state replay
+        // re-rendered the identical frame, the owner's "second applying").
+        if (pendingReprocessRef.current) {
+          pendingReprocessRef.current = false;
+          const nonLive = pendingNonLiveRef.current;
+          pendingNonLiveRef.current = false;
+          if (previewStateSignature() !== signature) {
+            if (nonLive) useAppStore.getState().triggerReprocessing();
+            else void processCallbackRef.current({ live: true });
+          } else {
+            logger.debug('Replay skipped: state unchanged since the pass started');
+          }
+        }
       }
     }
     // NOTE: deps deliberately exclude the isProcessing STATE — the body never reads it
@@ -621,8 +824,20 @@ export function AdjustmentPanel({ selectedModule, currentImage }: AdjustmentPane
         clearTimeout(gpuReadbackTimerRef.current);
         gpuReadbackTimerRef.current = null;
       }
+      if (throttleTimerRef.current) {
+        clearTimeout(throttleTimerRef.current);
+        throttleTimerRef.current = null;
+      }
+      if (gpuRetryTimerRef.current) {
+        clearTimeout(gpuRetryTimerRef.current);
+        gpuRetryTimerRef.current = null;
+      }
     };
   }, []);
+
+  // Live drag frames (Task 12c, mask move): reprocess NOW — no adaptive debounce, no
+  // processingVersion bump (History / persistence follow the release's triggerReprocessing).
+  useEffect(() => onLivePreviewRequest(() => { void processCallbackRef.current({ live: true }); }), []);
 
   // Watch for external processing triggers (e.g., from Canvas crop handles)
   useEffect(() => {

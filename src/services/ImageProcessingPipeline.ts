@@ -1,4 +1,5 @@
 import { logger } from '../utils/Logger';
+import type { NormalizedCropRect } from '../modules/cropGeometry';
 import { LRUCache } from '../utils/LRUCache';
 import { CropPipelineModule } from '../modules/CropPipelineModule';
 import { ExposureModule } from '../modules/ExposureModule';
@@ -98,6 +99,21 @@ export interface ProcessingContext {
    *  full-buffer O(n) loops that are pure logging; at export resolution that is measurable waste.
    *  Never changes pixel output. */
   isExport?: boolean;
+  /** v1.40.0 Task 9b: set by the crop module — the effective rect the pass rendered, normalised
+   *  to the expanded (rotated) canvas. Absent when crop did not run (full frame displayed). */
+  cropFrameRect?: NormalizedCropRect;
+  /** v1.40.0 Task 9b fix 1: set ONLY by the interactive preview pass while a crop handle drag
+   *  is suspending the crop (the store's drag-suspension flag) — the crop module then renders the whole
+   *  expanded canvas for a full-frame rect. Never set by export / bake / history / restore. */
+  cropSuspended?: boolean;
+  /** v1.40.0 Task 10b (R4): this pass runs inside a pipeline Web Worker (no WebGL). Set ONLY by
+   *  pipeline.worker.ts. Modules gate their slow CPU-only fallbacks on it (NR's denoiseSync). */
+  inWorker?: boolean;
+  /** v1.40.0 Task 10b: the dims the PASS started at — before crop mutated width/height. Stamped
+   *  by processImage (or the worker entry: the full image for a tile). Size gates read these:
+   *  a post-crop 998x498 frame of a 1280x960 pass costs the whole pass, not 0.5 MP. */
+  passWidth?: number;
+  passHeight?: number;
 }
 
 /** Trailing options for {@link ImageProcessingPipeline.processImage}. Replaces the
@@ -135,6 +151,16 @@ export class ImageProcessingPipeline {
   private processingOrder: string[] = [];
   // LRU cache with 100 entry limit and 500MB memory limit (prevents memory leaks)
   private moduleCache: LRUCache<{ params: string; result: Float32Array; context: ProcessingContext }>;
+
+  /** Current module-result cache budget in bytes. */
+  getCacheBudget(): number {
+    return this.moduleCache.getStats().maxMemory;
+  }
+
+  /** Resize the module-result cache budget (memory preset); evicts LRU entries to fit. */
+  setCacheBudget(bytes: number): void {
+    this.moduleCache.setMaxMemory(bytes);
+  }
 
   constructor() {
     // Initialize LRU cache with smart eviction
@@ -550,6 +576,11 @@ export class ImageProcessingPipeline {
     options: ProcessImageOptions = {},
   ): Promise<Float32Array> {
     const { useWebWorkers = true, onProgress, cacheResults = true } = options;
+    // Task 10b: record the PASS dims before any module (crop) mutates context.width/height.
+    if (context.passWidth === undefined || context.passHeight === undefined) {
+      context.passWidth = context.width;
+      context.passHeight = context.height;
+    }
     const imageData = {
       width: context.width,
       height: context.height,
@@ -609,7 +640,8 @@ export class ImageProcessingPipeline {
         channels: context.channels,
         // C5: full-pass kernel scale rides to the worker (single/tiled) so the enhance sharpen
         // kernels compensate for a sub-native preview there too. Undefined → native semantics.
-        kernelScale: context.kernelScale
+        kernelScale: context.kernelScale,
+        cropSuspended: context.cropSuspended,
       };
 
       const result = await workerPool.processImage(imageData, pipeline);
@@ -637,6 +669,7 @@ export class ImageProcessingPipeline {
       }
       context.width = outW;
       context.height = outH;
+      if (result.frameRect) context.cropFrameRect = result.frameRect;
       return result.data;
 
     } catch (error) {
@@ -713,10 +746,14 @@ export class ImageProcessingPipeline {
             // C5: a pass at the same dims but a different kernel scale (e.g. a quality-ratchet
             // native pass vs a same-size export) must not reuse a differently-sharpened result.
             cached.context.kernelScale === context.kernelScale &&
+            // Task 9b: a suspension pass (whole expanded canvas) must never reuse a clamped
+            // result, nor vice versa.
+            !!cached.context.cropSuspended === !!context.cropSuspended &&
             cached.result.length === currentData.length) {
           // Use cached result
           logger.debug(`Module ${module.getName()} used cached result`);
           currentData = new Float32Array(cached.result);
+          if (moduleId === 'crop' && cached.context.cropFrameRect) context.cropFrameRect = cached.context.cropFrameRect;
           await reportProgress(false);
           continue;
         }

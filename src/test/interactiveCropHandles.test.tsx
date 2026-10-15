@@ -15,6 +15,10 @@
 import { render, fireEvent, act } from '@testing-library/react';
 import { InteractiveCropHandles } from '../components/Canvas/InteractiveCropHandles';
 import { CropParams } from '../modules/CropModule';
+import {
+  autoCropRectForRotation, clampRectWedgeFree, computeCropGeometry, isPixelRectWedgeFree,
+  type CropClampAnchor, type NormalizedCropRect,
+} from '../modules/cropGeometry';
 
 const baseCrop: CropParams = {
   x: 0.25, y: 0.25, width: 0.5, height: 0.5,
@@ -220,5 +224,65 @@ describe('InteractiveCropHandles', () => {
     drag(container, 'se', { x: 600, y: 450 }, { x: 620, y: 470 });
     expect(onDragStart).toHaveBeenCalledTimes(1);
     expect(onDragEnd).toHaveBeenCalledTimes(1);
+  });
+
+  test('unmounting mid-drag still ends the drag (no stuck suspension flag)', () => {
+    const onDragEnd = jest.fn();
+    const { container, unmount } = renderHandles({ onDragEnd });
+    const el = container.querySelector('[data-testid="crop-handle-se"]')!;
+    fireEvent.mouseDown(el, { clientX: 600, clientY: 450 });
+    act(() => {
+      fireEvent.mouseMove(document, { clientX: 620, clientY: 470 });
+    });
+    unmount();
+    expect(onDragEnd).toHaveBeenCalledTimes(1);
+  });
+
+  test('unmounting while idle does not call onDragEnd', () => {
+    const onDragEnd = jest.fn();
+    const { unmount } = renderHandles({ onDragEnd });
+    unmount();
+    expect(onDragEnd).not.toHaveBeenCalled();
+  });
+
+  describe('wedge-free clamp (v1.40.0)', () => {
+    // 4000x3000 photo straightened by 5 deg; the crop starts at the inscribed rect.
+    const ANGLE = 5;
+    const geomParams = { ...baseCrop, angle: ANGLE, orientation: 0, expandCanvas: true, aspectRatio: 'free' as const };
+    const auto = autoCropRectForRotation(4000, 3000, ANGLE);
+    const rotatedCrop = { ...baseCrop, angle: ANGLE, ...auto } as CropParams;
+    const clampRect = (r: NormalizedCropRect, a: CropClampAnchor) => clampRectWedgeFree(r, 4000, 3000, geomParams, a);
+    const wedgeFree = (r: NormalizedCropRect) =>
+      isPixelRectWedgeFree(computeCropGeometry({ ...geomParams, ...r }, 4000, 3000));
+    // Pixel position of the rect's east edge midpoint in the 800x600 box.
+    const east = { x: (auto.x + auto.width) * 800, y: (auto.y + auto.height / 2) * 600 };
+
+    test('e-drag past the wedge stops at the inscribed edge', () => {
+      const { container, onCropChange } = renderHandles({ cropParams: rotatedCrop, clampRect });
+      drag(container, 'e', east, { x: east.x + 120, y: east.y });
+      const r = lastCall(onCropChange);
+      expect(wedgeFree(r)).toBe(true);
+      // Left edge and height untouched (free ratio: only the moving edge yields).
+      expect(r.x).toBeCloseTo(auto.x, 9);
+      expect(r.height).toBeCloseTo(auto.height, 9);
+      // ...and the east edge is held at (not short of) the inscribed boundary.
+      expect(r.width).toBeGreaterThan(auto.width - 2 / 800);
+    });
+
+    test('without clampRect the same drag reaches into the wedge (the reported bug)', () => {
+      const { container, onCropChange } = renderHandles({ cropParams: rotatedCrop });
+      drag(container, 'e', east, { x: east.x + 120, y: east.y });
+      expect(wedgeFree(lastCall(onCropChange))).toBe(false);
+    });
+
+    test('centre move into a corner wedge is translated back, size kept', () => {
+      const small = { ...rotatedCrop, x: 0.4, y: 0.4, width: 0.2, height: 0.2 } as CropParams;
+      const { container, onCropChange } = renderHandles({ cropParams: small, clampRect });
+      drag(container, 'center', { x: 400, y: 300 }, { x: 0, y: 0 });
+      const r = lastCall(onCropChange);
+      expect(wedgeFree(r)).toBe(true);
+      expect(r.width).toBeCloseTo(0.2, 9);
+      expect(r.height).toBeCloseTo(0.2, 9);
+    });
   });
 });

@@ -1,6 +1,7 @@
 import { CropModule, CropParams } from './CropModule';
 import { PipelineModule, ProcessingContext } from '../services/ImageProcessingPipeline';
 import { logger } from '../utils/Logger';
+import { frameRectOf } from './cropGeometry';
 
 /**
  * Pipeline adapter for CropModule
@@ -34,17 +35,25 @@ export class CropPipelineModule implements PipelineModule {
     const startTime = performance.now();
 
     // Create processing context for the crop module
+    const suspended = !!context.cropSuspended;
     const cropContext = {
       width: context.width,
       height: context.height,
-      channels: context.channels
+      channels: context.channels,
+      suspended,
     };
 
     // Process using the crop module
     const output = this.cropModule.process(input, cropContext);
 
+    // v1.40.0 Task 9b: report the EFFECTIVE rect this pass rendered (the render
+    // backstop's wedge-free clamp, pixel-quantised) so the overlay/handles map
+    // through the frame actually displayed. A drag-suspension pass reports the
+    // full expanded canvas (the backstop is skipped for it, see getRenderGeometry).
+    context.cropFrameRect = frameRectOf(this.cropModule.getRenderGeometry(context.width, context.height, suspended));
+
     // IMPORTANT: Update context dimensions for subsequent modules
-    const newDimensions = this.cropModule.getOutputDimensions(context.width, context.height);
+    const newDimensions = this.cropModule.getOutputDimensions(context.width, context.height, suspended);
     context.width = newDimensions.width;
     context.height = newDimensions.height;
 

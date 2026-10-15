@@ -11,6 +11,9 @@
  */
 import { imageProcessingPipeline } from '../services/ImageProcessingPipeline';
 import type { PipelineModule } from '../services/ImageProcessingPipeline';
+import type { NoiseReductionModule } from '../modules/NoiseReductionModule';
+import type { EnhanceModule } from '../modules/EnhanceModule';
+import { choosePreviewPath } from '../services/previewRouting';
 import { buildPassList } from '../shaders/passDescriptors';
 import { LensCorrectionsPipelineModule } from '../modules/LensCorrectionsPipelineModule';
 import { CropPipelineModule } from '../modules/CropPipelineModule';
@@ -89,9 +92,7 @@ describe('routing decision (cpuBridges gate)', () => {
     expect(cpuBridges).toEqual([]);
   });
 
-  it('an active crop forces the cpu path (crop is a cpuBridge, never GPU)', () => {
-    // Crop is not in GPU_MODULE_IDS, so an enabled crop module lands in cpuBridges →
-    // cpuBridges.length !== 0 → AdjustmentPanel keeps renderMode = cpu.
+  it('an active crop without render dims is a cpuBridge (the GPU geometry step needs them)', () => {
     const cropView = {
       getId: () => 'crop',
       isEnabled: true,
@@ -100,6 +101,19 @@ describe('routing decision (cpuBridges gate)', () => {
     const { passes, cpuBridges } = buildPassList([cropView]);
     expect(passes).toEqual([]);
     expect(cpuBridges).toContain('crop');
+  });
+
+  it('an active crop WITH render dims is the GPU geometry step at passes[0] (Task 10b)', () => {
+    // AdjustmentPanel always passes the preview dims, so a cropped photo stays on the GPU.
+    const cropView = {
+      getId: () => 'crop',
+      isEnabled: true,
+      getParams: () => ({ enabled: true, x: 0.1, y: 0.1, width: 0.8, height: 0.8, angle: 2 }),
+    };
+    const { passes, cpuBridges } = buildPassList([cropView], { width: 640, height: 480 });
+    expect(passes.map((p) => p.id)).toEqual(['crop']);
+    expect(passes[0].geometryStep?.kind).toBe('crop');
+    expect(cpuBridges).not.toContain('crop');
   });
 
   it('local adjustments active forces the cpu path', () => {
@@ -184,7 +198,7 @@ describe('isModuleActive() + activeCpuBridges gate (faithful to the CPU processI
     expect(imageProcessingPipeline.isModuleActive('crop')).toBe(true);
   });
 
-  it('activating a CPU-only module (crop) makes it appear in the ACTIVE cpu bridges', () => {
+  it('activating crop with no render dims makes it appear in the ACTIVE cpu bridges', () => {
     const crop = imageProcessingPipeline.getModule<CropPipelineModule>('crop')!;
     crop.setCropRegion(0.1, 0.1, 0.8, 0.8); // enables crop with a non-identity region
     expect(imageProcessingPipeline.isModuleActive('crop')).toBe(true);
@@ -264,5 +278,46 @@ describe('ShadowsHighlights neutral identity (T9b)', () => {
     expect(sh.isNoOp()).toBe(true); // defaults → identity
     sh.setParams({ shadows: 70 });
     expect(sh.isNoOp()).toBe(false); // non-neutral → active
+  });
+});
+
+describe('resident NR + enhance sharpen route to GPU (v1.40.0)', () => {
+  afterEach(() => {
+    imageProcessingPipeline.getModule<NoiseReductionModule>('noise-reduction')?.resetParams();
+    imageProcessingPipeline.getModule<EnhanceModule>('enhance')?.resetParams();
+  });
+
+  it('NR enabled + enhance sharpen: no active cpu bridges, denoise then enhance pass, path gpu', () => {
+    const nr = imageProcessingPipeline.getModule<NoiseReductionModule>('noise-reduction')!;
+    const en = imageProcessingPipeline.getModule<EnhanceModule>('enhance')!;
+    nr.setParams({ enabled: true, strength: 50 });
+    en.setParams({ enabled: true, sharpen: true, upscale: false });
+
+    const { passes, cpuBridges } = buildPassList(imageProcessingPipeline.getOrderedModules(), {
+      width: 961,
+      height: 1280,
+      kernelScale: 1,
+      maxTextureSize: 16384,
+    });
+    const active = cpuBridges.filter((id) => imageProcessingPipeline.isModuleActive(id));
+    expect(imageProcessingPipeline.isModuleActive('noise-reduction')).toBe(true);
+    expect(active).not.toContain('noise-reduction');
+    expect(active).not.toContain('enhance');
+    const ids = passes.map((p) => p.id);
+    expect(ids).toContain('noise-reduction');
+    expect(passes.find((p) => p.programKey === 'denoise')).toBeDefined();
+    const enhIdx = ids.indexOf('enhance');
+    expect(enhIdx).toBeGreaterThan(ids.indexOf('noise-reduction'));
+    expect(passes[enhIdx].residentStep?.kind).toBe('enhance');
+    expect(
+      choosePreviewPath({
+        gpuAvailable: true,
+        activeCpuBridgeCount: active.length,
+        passCount: passes.length,
+        width: 961,
+        height: 1280,
+        nrActive: true,
+      }),
+    ).toBe('gpu');
   });
 });

@@ -41,6 +41,7 @@ import { DEFAULT_ENHANCE_PARAMS, EnhanceParams } from '../utils/enhanceChain';
 import { enhanceService } from '../services/EnhanceService';
 import { imageService } from '../services/ImageService';
 import { aiDeblurClient } from '../services/AiDeblurClient';
+import { saveEnhancePrefs } from '../utils/enhancePrefsStorage';
 import { editPersistenceService } from '../services/EditPersistenceService';
 import { useAppStore } from '../stores/appStore';
 import type { ModuleCardActions } from '../components/Controls/moduleCardActions';
@@ -186,7 +187,7 @@ describe('finding 4 — silent no-op bakes must not mark applied; Apply gated wh
   it('does NOT mark applied / bump revert when the upscale bake was refused (no restore point pushed)', async () => {
     const mod = new EnhanceModule();
     await renderPanel(mod, new NoiseReductionModule());
-    fireEvent.click(screen.getByRole('button', { name: /upscale/i }));
+    // Upscale is armed by default since v1.40.0 - no toggle click needed.
     await act(async () => { fireEvent.click(screen.getByText(/Apply Enhance \(×/)); });
     expect(enhanceService.applyUpscale).toHaveBeenCalled();
     expect(enhanceService.markEnhanceApplied).not.toHaveBeenCalled();
@@ -196,7 +197,7 @@ describe('finding 4 — silent no-op bakes must not mark applied; Apply gated wh
     (enhanceService.applyUpscale as jest.Mock).mockImplementation(async () => { mockRestoreDepth = 1; });
     const mod = new EnhanceModule();
     await renderPanel(mod, new NoiseReductionModule());
-    fireEvent.click(screen.getByRole('button', { name: /upscale/i }));
+    // Upscale is armed by default since v1.40.0 - no toggle click needed.
     await act(async () => { fireEvent.click(screen.getByText(/Apply Enhance \(×/)); });
     expect(enhanceService.markEnhanceApplied).toHaveBeenCalled();
   });
@@ -229,6 +230,16 @@ describe('finding 5 — post-bake prefs re-seed must not re-arm the Upscale togg
     const mod = new EnhanceModule(); // at factory defaults after the bake's resetAllModules
     await renderPanel(mod, new NoiseReductionModule());
     expect(mod.getParams().upscale).toBe(false);
+    expect(screen.getByRole('button', { name: /upscale/i })).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('un-arms the v1.40.0 default-on toggle on mount while a baked upscale is live, even with no saved prefs', async () => {
+    mockBaked = true;
+    mockPrefs = null;
+    const mod = new EnhanceModule();
+    await renderPanel(mod, new NoiseReductionModule());
+    expect(mod.getParams().upscale).toBe(false);
+    expect(mod.getParams().enabled).toBe(false);
     expect(screen.getByRole('button', { name: /upscale/i })).toHaveAttribute('aria-pressed', 'false');
   });
 
@@ -265,13 +276,15 @@ describe('finding 8 — header Reset neutralizes everything the panel shows as a
     const nr = new NoiseReductionModule();
     await renderPanel(mod, nr, { onRegisterActions: (a) => { if (a) actions.current = a; } });
     fireEvent.click(screen.getByRole('button', { name: /noise.?reduction/i })); // NR display on (staged)
-    fireEvent.click(screen.getByRole('button', { name: /upscale/i }));           // Upscale armed
+    expect(screen.getByRole('button', { name: /upscale/i })).toHaveAttribute('aria-pressed', 'true'); // armed by default (v1.40.0)
     fireEvent.change(screen.getByLabelText('Noise reduction strength'), { target: { value: '80' } });
     expect(actions.current?.reset).toBeDefined();
     act(() => { actions.current!.reset!(); });
     expect(screen.getByRole('button', { name: /noise.?reduction/i })).toHaveAttribute('aria-pressed', 'false');
-    expect(screen.getByRole('button', { name: /upscale/i })).toHaveAttribute('aria-pressed', 'false');
-    expect(mod.getParams().upscale).toBe(false);
+    // Reset returns to the factory default, which is Upscale ARMED since v1.40.0 (nothing runs: enabled stays false).
+    expect(screen.getByRole('button', { name: /upscale/i })).toHaveAttribute('aria-pressed', 'true');
+    expect(mod.getParams().upscale).toBe(DEFAULT_ENHANCE_PARAMS.upscale);
+    expect(mod.getParams().enabled).toBe(false);
     expect(mod.getParams().sharpen).toBe(DEFAULT_ENHANCE_PARAMS.sharpen);
     expect((screen.getByLabelText('Noise reduction strength') as HTMLInputElement).value).toBe('50');
   });
@@ -297,5 +310,26 @@ describe('finding 8 — header Reset neutralizes everything the panel shows as a
     act(() => { actions.current!.reset!(); });
     expect(nr.getParams().enabled).toBe(false);
     expect(onNR).toHaveBeenCalledWith({ enabled: false });
+  });
+});
+
+describe('v1.40.0 - per-photo un-arm of an already-baked upscale never writes the durable Upscale pref', () => {
+  it('opening Enhance on a baked photo un-arms the module param but never persists upscale:false', async () => {
+    mockBaked = true;
+    (saveEnhancePrefs as jest.Mock).mockClear();
+    const mod = new EnhanceModule(); // factory defaults: upscale armed
+    await renderPanel(mod, new NoiseReductionModule());
+    await act(async () => { await Promise.resolve(); });
+    expect(mod.getParams().upscale).toBe(false);
+    const saved = (saveEnhancePrefs as jest.Mock).mock.calls.map((c) => c[0]);
+    expect(saved.some((p) => p.upscale === false)).toBe(false);
+  });
+
+  it('a deliberate user un-tick still persists upscale:false', async () => {
+    const mod = new EnhanceModule();
+    await renderPanel(mod, new NoiseReductionModule());
+    (saveEnhancePrefs as jest.Mock).mockClear();
+    fireEvent.click(screen.getByRole('button', { name: /upscale/i }));
+    expect((saveEnhancePrefs as jest.Mock).mock.calls.some((c) => c[0].upscale === false)).toBe(true);
   });
 });

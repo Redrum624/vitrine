@@ -178,7 +178,7 @@ void main() {
   outColor = vec4(rgb, src.a);
 }`;
 
-// Lens vignetting: radial correction factor (position-dependent). gl_FragCoord-0.5
+// Creative vignette (+ darkens the edges, - brightens): radial factor (position-dependent). gl_FragCoord-0.5
 // is the array pixel index (the texture round-trip preserves row order).
 export const FRAG_VIGNETTE = `#version 300 es
 precision highp float;
@@ -193,18 +193,14 @@ void main() {
   float dx = ((gl_FragCoord.x - 0.5) - cx) / cx;
   float dy = (((gl_FragCoord.y - 0.5) - cy) / cy) * (1.0 + u_roundness);
   float nd = sqrt(dx * dx + dy * dy) / sqrt(2.0);
-  float mask = 1.0;
-  if (nd > 0.0) {
-    float fs = u_midpoint * 0.5, fe = u_midpoint * 1.5;
-    if (nd > fs) {
-      float fp = min(1.0, (nd - fs) / (fe - fs));
-      float t = clamp(fp, 0.0, 1.0);
-      float sf = t * t * (3.0 - 2.0 * t);
-      float ff = fp * (1.0 - u_feather) + sf * u_feather;
-      mask = 1.0 - ff;
-    }
-  }
-  float factor = 1.0 + u_strength * (1.0 / max(0.1, mask) - 1.0);
+  // Mirror of utils/vignetteMath.ts vignetteFactor - keep in lockstep.
+  float mid = clamp(u_midpoint, 0.5, 1.5);
+  float fs = mid * 0.5, fe = mid;
+  float fp = clamp((nd - fs) / (fe - fs), 0.0, 1.0);
+  float sf = fp * fp * (3.0 - 2.0 * fp);
+  float ff = fp * (1.0 - clamp(u_feather, 0.0, 1.0)) + sf * clamp(u_feather, 0.0, 1.0);
+  float s = clamp(u_strength, -1.0, 1.0);
+  float factor = 1.0 - s * ff;
   outColor = vec4(src.rgb * factor, src.a);
 }`;
 

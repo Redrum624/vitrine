@@ -37,6 +37,22 @@ function loadData(file) {
   return JSON.parse(fs.readFileSync(file, "utf8"));
 }
 
+// Count only .exe assets (installer + portable). Installed copies fetch
+// latest.yml (and the .blockmap) on every launch, which would inflate the
+// download counter if every asset were summed.
+function sumDownloads(releases) {
+  const by_release = {};
+  let total = 0;
+  for (const rel of releases) {
+    const count = (rel.assets || [])
+      .filter((a) => /\.exe$/i.test(a.name || ""))
+      .reduce((sum, a) => sum + (a.download_count || 0), 0);
+    by_release[rel.tag_name] = count;
+    total += count;
+  }
+  return { total, by_release };
+}
+
 async function sample(args) {
   if (!args.repo || !args.data) throw new Error("sample needs --repo owner/name and --data file.json");
   const headers = { "User-Agent": "download-stats", Accept: "application/vnd.github+json" };
@@ -52,13 +68,7 @@ async function sample(args) {
     releases.push(...batch);
     if (batch.length < 100) break;
   }
-  const by_release = {};
-  let total = 0;
-  for (const rel of releases) {
-    const count = (rel.assets || []).reduce((sum, a) => sum + (a.download_count || 0), 0);
-    by_release[rel.tag_name] = count;
-    total += count;
-  }
+  const { total, by_release } = sumDownloads(releases);
   const data = loadData(args.data);
   // Newest non-draft, non-prerelease tag — the API returns releases newest-first.
   const latestRel = releases.find((r) => !r.draft && !r.prerelease);
@@ -146,6 +156,7 @@ function badges(args) {
   console.log(`rendered ${downloads} (${total}) and ${latest} (${tag})`);
 }
 
+if (require.main === module) {
 (async () => {
   try {
     const args = parseArgs(process.argv.slice(2));
@@ -158,3 +169,6 @@ function badges(args) {
     process.exit(1);
   }
 })();
+}
+
+module.exports = { sumDownloads };

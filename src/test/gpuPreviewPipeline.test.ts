@@ -9,7 +9,12 @@
  */
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { GpuPreviewPipeline, gpuPreviewPipeline, memoizeUniformLocation } from '../shaders/GpuPreviewPipeline';
+import { GpuPreviewPipeline, gpuPreviewPipeline, memoizeUniformLocation, edgeMaxReductionSizes } from '../shaders/GpuPreviewPipeline';
+import type { PassDescriptor } from '../shaders/passDescriptors';
+import { cropPassDescriptor } from '../shaders/passDescriptors';
+import { CropModule } from '../modules/CropModule';
+import { frameRectOf } from '../modules/cropGeometry';
+import { DEFAULT_ENHANCE_PARAMS } from '../utils/enhanceChain';
 
 describe('GpuPreviewPipeline (no WebGL2 in jsdom)', () => {
   it('attach() returns false gracefully when WebGL2 is unavailable', () => {
@@ -126,5 +131,196 @@ describe('memoizeUniformLocation', () => {
     expect(memo(programA, 'u_unused')).toBeNull();
     expect(memo(programA, 'u_unused')).toBeNull();
     expect(raw).toHaveBeenCalledTimes(1); // null is cached via map.has(), not truthiness
+  });
+});
+
+describe('resident enhance step (v1.40.0 Task 2)', () => {
+  // Normalise CRLF so the 2-space method-closing brace is a stable end anchor.
+  const src = readFileSync(join(__dirname, '..', 'shaders', 'GpuPreviewPipeline.ts'), 'utf8').replace(/\r\n/g, '\n');
+  const methodBody = (signature: string): string => {
+    const start = src.indexOf(signature);
+    expect(start).toBeGreaterThan(-1);
+    // Class methods close with a 2-space-indented brace; nested closures sit deeper.
+    const end = src.indexOf('\n  }\n', start);
+    expect(end).toBeGreaterThan(start);
+    return src.slice(start, end);
+  };
+
+  it('edgeMaxReductionSizes chains ceil(/4) down to 1x1', () => {
+    expect(edgeMaxReductionSizes(961, 1280)).toEqual([[241, 320], [61, 80], [16, 20], [4, 5], [1, 2], [1, 1]]);
+    expect(edgeMaxReductionSizes(1, 1)).toEqual([[1, 1]]);
+    expect(edgeMaxReductionSizes(4, 4)).toEqual([[1, 1]]);
+    expect(edgeMaxReductionSizes(5, 1)).toEqual([[2, 1], [1, 1]]);
+  });
+
+  it('render([enhancePass]) throws the before-attach error in jsdom (no crash)', () => {
+    const pipeline = new GpuPreviewPipeline();
+    pipeline.attach();
+    const pass: PassDescriptor = {
+      id: 'enhance',
+      programKey: 'enhance:resident',
+      setUniforms: () => undefined,
+      residentStep: { kind: 'enhance', params: { ...DEFAULT_ENHANCE_PARAMS, enabled: true, sharpen: true }, kernelScale: 1 },
+    };
+    expect(() => pipeline.render([pass])).toThrow(/before a successful attach/);
+  });
+
+  it('registers the NR denoise program with the SAME source WebGLImageProcessor uses', () => {
+    expect(src).toMatch(/^\s+denoise: FRAG_DENOISE,$/m);
+  });
+
+  it('render() dispatches residentStep BEFORE the programs.get(pass.programKey) lookup', () => {
+    const body = methodBody('render(passes: PassDescriptor[]): PreviewRenderResult {');
+    const resident = body.indexOf('pass.residentStep');
+    const lookup = body.indexOf('this.programs.get(pass.programKey)');
+    expect(resident).toBeGreaterThan(-1);
+    expect(lookup).toBeGreaterThan(resident);
+    expect(body).toContain('this.runResidentEnhance(gl, inputTexture, this.ping[idx]!, ');
+    expect(body).toContain("failedSteps.push('enhance')");
+    // Pools are dropped ONLY on a render with no enhance step — freeing on an enhance frame
+    // would re-allocate ~1 GB of FBOs every frame. Every call in render() must be guarded; the
+    // High/Max memory presets add the keep-buffers condition on top, never replace the guard.
+    const guarded = 'if (!getKeepGpuBuffers() && !passes.some((p) => p.residentStep)) this.freeEnhancePools(gl);';
+    expect(body).toContain(guarded);
+    expect(body.split('this.freeEnhancePools(gl)').length - 1).toBe(1);
+  });
+
+  it('frees the enhance pools on resize and destroy', () => {
+    expect(methodBody('private ensureFramebuffers(')).toContain('this.freeEnhancePools(gl)');
+    expect(methodBody('destroy(): void {')).toContain('this.freeEnhancePools(gl)');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v1.40.0 Task 10a — geometry step (GPU crop) on a mock WebGL2 context
+// ---------------------------------------------------------------------------
+
+/**
+ * A recording WebGL2 stand-in: constants resolve to their own names, every unknown method
+ * is a no-op returning a fresh handle, textures remember their texImage2D size, and a
+ * shader whose source matches `failShader` refuses to compile.
+ */
+function mockGlCanvas(failShader?: RegExp) {
+  const log = {
+    texImage: [] as Array<{ tex: object; w: number; h: number }>,
+    readPixels: [] as Array<[number, number]>,
+    viewport: [] as Array<[number, number]>,
+    binds: [] as Array<{ unit: unknown; tex: object | null }>,
+  };
+  let activeUnit: unknown = 'TEXTURE0';
+  const shaderSrc = new Map<object, string>();
+  let boundTex: object | null = null;
+  const overrides: Record<string, (...a: unknown[]) => unknown> = {
+    getExtension: () => ({}),
+    getParameter: () => 16384,
+    shaderSource: (sh, src) => { shaderSrc.set(sh as object, src as string); },
+    getShaderParameter: (sh) => !(failShader && failShader.test(shaderSrc.get(sh as object) ?? '')),
+    getProgramParameter: () => true,
+    getAttribLocation: () => 0,
+    getUniformLocation: (_p, name) => name,
+    checkFramebufferStatus: () => 'FRAMEBUFFER_COMPLETE',
+    activeTexture: (u) => { activeUnit = u; },
+    bindTexture: (_t, tex) => { boundTex = tex as object; log.binds.push({ unit: activeUnit, tex: tex as object | null }); },
+    texImage2D: (...a) => { log.texImage.push({ tex: boundTex as object, w: a[3] as number, h: a[4] as number }); },
+    readPixels: (...a) => { log.readPixels.push([a[2] as number, a[3] as number]); },
+    viewport: (...a) => { log.viewport.push([a[2] as number, a[3] as number]); },
+    getError: () => 0,
+  };
+  const gl = new Proxy({} as Record<string, unknown>, {
+    get(_t, prop: string) {
+      if (prop in overrides) return overrides[prop];
+      if (/^[A-Z0-9_]+$/.test(prop)) return prop;
+      return () => ({});
+    },
+    set() { return true; },
+  });
+  const canvas = { getContext: () => gl } as unknown as HTMLCanvasElement;
+  return { canvas, log };
+}
+
+describe('geometry step: GPU crop resizes the working frame (Task 10a)', () => {
+  const W = 37, H = 23;
+  const geomFor = () => {
+    const m = new CropModule();
+    m.setParams({ enabled: true, angle: 3.3, orientation: 90, flipHorizontal: true });
+    return m.getRenderGeometry(W, H);
+  };
+  const exposurePass: PassDescriptor = { id: 'exposure', programKey: 'exposure', setUniforms: () => undefined };
+
+  it('crop at passes[0] resizes the FBOs to out dims; getSize/readback follow; next frame restores source dims', () => {
+    const { canvas, log } = mockGlCanvas();
+    const pipeline = new GpuPreviewPipeline();
+    expect(pipeline.attach(canvas)).toBe(true);
+    pipeline.setSource(new Float32Array(W * H * 4), W, H);
+    const geom = geomFor();
+    expect([geom.outW, geom.outH]).not.toEqual([W, H]);
+    log.texImage.length = 0;
+
+    const res = pipeline.render([cropPassDescriptor(geom), exposurePass]);
+    expect(res).toEqual({ width: geom.outW, height: geom.outH, frameRect: frameRectOf(geom) });
+    // Both ping-pong targets reallocated at the output dims; every draw viewport is out-sized.
+    expect(log.texImage.filter((t) => t.w === geom.outW && t.h === geom.outH)).toHaveLength(2);
+    expect(log.viewport.length).toBeGreaterThan(0);
+    expect(log.viewport.every(([w, h]) => w === geom.outW && h === geom.outH)).toBe(true);
+    expect(pipeline.getSize()).toEqual({ width: geom.outW, height: geom.outH });
+    expect(pipeline.readback().length).toBe(geom.outW * geom.outH * 4);
+    expect(log.readPixels[log.readPixels.length - 1]).toEqual([geom.outW, geom.outH]);
+
+    // A crop-free frame on the SAME source goes back to the source dims.
+    const res2 = pipeline.render([exposurePass]);
+    expect(res2).toEqual({ width: W, height: H });
+    expect(pipeline.getSize()).toEqual({ width: W, height: H });
+    expect(pipeline.readback().length).toBe(W * H * 4);
+  });
+
+  it('a missing crop program is a reported failure and the frame stays at source dims', () => {
+    const { canvas } = mockGlCanvas(/u_cropOrigin/);
+    const pipeline = new GpuPreviewPipeline();
+    expect(pipeline.attach(canvas)).toBe(true);
+    pipeline.setSource(new Float32Array(W * H * 4), W, H);
+    const res = pipeline.render([cropPassDescriptor(geomFor()), exposurePass]);
+    expect(res).toEqual({ width: W, height: H, failedSteps: ['crop'] });
+    expect(pipeline.getSize()).toEqual({ width: W, height: H });
+  });
+
+  it('a geometry step anywhere but passes[0] is a reported failure (never drawn mid-chain)', () => {
+    const { canvas } = mockGlCanvas();
+    const pipeline = new GpuPreviewPipeline();
+    expect(pipeline.attach(canvas)).toBe(true);
+    pipeline.setSource(new Float32Array(W * H * 4), W, H);
+    const res = pipeline.render([exposurePass, cropPassDescriptor(geomFor())]);
+    expect(res).toEqual({ width: W, height: H, failedSteps: ['crop'] });
+  });
+
+  it('present() never pairs the uncropped source with a cropped result in the before/after split (Task 10b)', () => {
+    const { canvas, log } = mockGlCanvas();
+    const pipeline = new GpuPreviewPipeline();
+    expect(pipeline.attach(canvas)).toBe(true);
+    pipeline.setSource(new Float32Array(W * H * 4), W, H);
+    const lastBind = (unit: string) => [...log.binds].reverse().find((b) => b.unit === unit)?.tex;
+
+    // Cropped result: the "original" unit samples the result itself (same geometry), never
+    // the source texture (different dims and orientation -> misaligned split).
+    pipeline.render([cropPassDescriptor(geomFor()), exposurePass]);
+    log.binds.length = 0;
+    pipeline.present({ zoom: 1, panX: 0, panY: 0, splitX: 5 });
+    const result = lastBind('TEXTURE0');
+    expect(result).toBeTruthy();
+    expect(lastBind('TEXTURE1')).toBe(result);
+
+    // Uncropped result: the split keeps the source as the "before".
+    pipeline.render([exposurePass]);
+    log.binds.length = 0;
+    pipeline.present({ zoom: 1, panX: 0, panY: 0, splitX: 5 });
+    expect(lastBind('TEXTURE1')).not.toBe(lastBind('TEXTURE0'));
+  });
+
+  it('selfTest probes crop with the shared descriptor and gates it (incl. the catch-all)', () => {
+    const src = readFileSync(join(__dirname, '..', 'shaders', 'GpuPreviewPipeline.ts'), 'utf8');
+    const body = src.slice(src.indexOf('selfTest(): {'));
+    expect(body).toContain('cropPassDescriptor(');
+    expect(body).toContain("if (!cropOk) unsafe.push('crop');");
+    const catchAll = body.slice(body.indexOf('} catch (e) {'));
+    expect(catchAll).toMatch(/unsafe: \[[^\]]*'crop'[^\]]*\]/);
   });
 });

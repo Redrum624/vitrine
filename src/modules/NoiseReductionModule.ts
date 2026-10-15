@@ -34,7 +34,16 @@ export interface NoiseReductionContext {
    *  loops — two full-buffer O(n) sweeps of pure logging that are measurable at export resolution.
    *  Pixel output is identical either way. */
   isExport?: boolean;
+  /** Pass runs in a pipeline worker (ProcessingContext.inWorker): no WebGL, and the CPU denoise
+   *  is far too slow to run there for a preview (v1.40.0 R4 worker hang). */
+  inWorker?: boolean;
+  /** The PASS dims (ProcessingContext.passWidth/Height, before crop) — the CPU size gate's input. */
+  passWidth?: number;
+  passHeight?: number;
 }
+
+/** Above this many PASS pixels the O(n*window^2*patch^2) CPU denoise is not attempted. */
+const CPU_DENOISE_MAX_PASS_PIXELS = 1_000_000;
 
 export class NoiseReductionModule {
   private params: NoiseReductionParams = {
@@ -267,8 +276,18 @@ export class NoiseReductionModule {
     // PLACEHOLDER wavelet implementation that returned a quarter-resolution
     // buffer and shredded every NR export (v1.32.0 root cause) — now the
     // large-image CPU case is an honest, logged no-op instead.
-    if (width * height > 1_000_000) {
-      logger.warn(`NoiseReduction: ${width}x${height} too large for CPU denoise and no GPU available — passing through unchanged`);
+    //
+    // v1.40.0 Task 10b (R4): gate on the PASS dims, not the post-crop context dims — a 998x498
+    // crop of a 1280x960 pass slipped under the gate and the CPU denoise ran > 30 s. And a
+    // worker never runs it for a preview: the timeout used to strand a busy worker in the pool.
+    const passW = context.passWidth ?? width;
+    const passH = context.passHeight ?? height;
+    if (passW * passH > CPU_DENOISE_MAX_PASS_PIXELS || width * height > CPU_DENOISE_MAX_PASS_PIXELS) {
+      logger.warn(`NoiseReduction: pass ${passW}x${passH} too large for CPU denoise and no GPU available — passing through unchanged`);
+      return new Float32Array(input);
+    }
+    if (context.inWorker && !context.isExport) {
+      logger.warn(`NoiseReduction: no GPU in a worker and CPU denoise is export/off-worker only — preview passes through unchanged`);
       return new Float32Array(input);
     }
 

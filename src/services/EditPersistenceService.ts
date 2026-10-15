@@ -1,6 +1,7 @@
 import { imageProcessingPipeline } from './ImageProcessingPipeline';
 import { imageService } from './ImageService';
 import { LocalAdjustmentsPipelineModule } from '../modules/LocalAdjustmentsPipelineModule';
+import { EDIT_SCHEMA_CURRENT, migrateEditState } from '../utils/editSchemaMigration';
 import type { MaskGeometry, LocalAdjustmentParams } from '../modules/LocalAdjustmentsModule';
 import { logger } from '../utils/Logger';
 import { useAppStore } from '../stores/appStore';
@@ -57,6 +58,11 @@ interface SerializedLayer {
 
 interface EditState {
   version: number;
+  // Semantic-schema marker (v1.40.0): absent/1 = legacy (linear Feather inverted, Vignetting amount
+  // was a correction); 2 = current. NOT a STORE_VERSION bump (that would discard every saved edit):
+  // optional, stamped by serialize(), and consumed by migrateEditState (utils/editSchemaMigration.ts)
+  // exactly once - at getSavedEditState + restore - so a legacy edit keeps its look and direction.
+  schema?: number;
   modules: Record<string, Record<string, unknown>>;
   localAdjustments?: { enabled: boolean; layers: SerializedLayer[] };
   // RAW decode options the current image's base was decoded with. Persisted so the next
@@ -149,6 +155,7 @@ class EditPersistenceService {
 
     const state: EditState = {
       version: STORE_VERSION,
+      schema: EDIT_SCHEMA_CURRENT,
       modules,
       rawDecodeOptions: useAppStore.getState().rawDecodeOptions,
     };
@@ -186,8 +193,11 @@ class EditPersistenceService {
   }
 
   /** Apply a serialized edit state to the (already-reset) pipeline at width×height. */
-  restore(state: EditState, width: number, height: number): boolean {
-    if (!state || state.version !== STORE_VERSION) return false;
+  restore(rawState: EditState, width: number, height: number): boolean {
+    if (!rawState || rawState.version !== STORE_VERSION) return false;
+    // Legacy (unmarked) states - disk, history checkpoints, presets-as-state - are migrated once here;
+    // already-current states pass through untouched (idempotent via the schema marker).
+    const state = migrateEditState(rawState);
 
     for (const [id, params] of Object.entries(state.modules || {})) {
       // Setter ladder mirroring applyWorkerConfig / the getParams getter shapes: most modules
@@ -241,9 +251,12 @@ class EditPersistenceService {
    */
   async getSavedEditState(path: string): Promise<EditState | null> {
     try {
-      return window.electronAPI?.storeGet
+      const raw = window.electronAPI?.storeGet
         ? await window.electronAPI.storeGet<EditState>(this.keyForPath(path))
         : null;
+      // Migrate at the read funnel so post-bake edits (editsOnBakedBase) and the open flow see
+      // current-schema data; restore() migrates again, a no-op thanks to the marker.
+      return raw ? migrateEditState(raw) : null;
     } catch (e) {
       logger.warn('getSavedEditState failed', e);
       return null;
@@ -411,7 +424,7 @@ class EditPersistenceService {
    * itself persist — the caller triggers a reprocess and a flush (which the redirect path writes).
    */
   applyPostBakeEdits(edits: NonNullable<EditState['editsOnBakedBase']>, width: number, height: number): void {
-    this.restore({ version: STORE_VERSION, modules: edits.modules, localAdjustments: edits.localAdjustments }, width, height);
+    this.restore({ version: STORE_VERSION, schema: EDIT_SCHEMA_CURRENT, modules: edits.modules, localAdjustments: edits.localAdjustments }, width, height);
   }
 
   /**
@@ -526,7 +539,7 @@ class EditPersistenceService {
    * stacked). Strips any stale markers serialize() may have frozen into baseState.
    */
   private withStackMarkers(baseState: EditState, upscale?: BakedUpscaleIntent, deblur = false): EditState {
-    const out: EditState = { version: baseState.version ?? STORE_VERSION, modules: baseState.modules };
+    const out: EditState = { version: baseState.version ?? STORE_VERSION, schema: baseState.schema ?? EDIT_SCHEMA_CURRENT, modules: baseState.modules };
     if (baseState.localAdjustments) out.localAdjustments = baseState.localAdjustments;
     if (baseState.rawDecodeOptions) out.rawDecodeOptions = baseState.rawDecodeOptions;
     if (upscale) out.bakedUpscale = { scale: upscale.scale, mode: upscale.mode };

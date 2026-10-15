@@ -413,7 +413,8 @@ describe('LensCorrectionsModule', () => {
       // If difference > 5%, vignetting is enabled
       // Our test image has ~70% difference which should definitely trigger
       expect(params.vignetting.enabled).toBe(true);
-      expect(params.vignetting.amount).toBeGreaterThan(0);
+      // v1.40.0 creative convention: dark lens corners are countered with a NEGATIVE amount (brighten edges).
+      expect(params.vignetting.amount).toBeLessThan(0);
     });
 
     it('should not enable vignetting for uniform images', () => {

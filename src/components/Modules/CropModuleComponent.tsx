@@ -67,22 +67,48 @@ export const CropModuleComponent: React.FC<CropModuleComponentProps> = ({
     logger.debug('Crop params updated:', newParams);
   }, [module, onParamsChange]);
 
-  const handleAspectRatioChange = useCallback((ratio: AspectRatio) => {
-    updateParams({ aspectRatio: ratio });
-
-    if (ratio !== 'free') {
-      const targetRatio = module.getAspectRatioValue();
-      if (targetRatio !== null) {
-        const adjusted = module.applyCropAspectRatio(
-          paramsRef.current.x,
-          paramsRef.current.y,
-          paramsRef.current.width,
-          paramsRef.current.height
-        );
-        updateParams(adjusted);
-      }
+  // Straightening must ALWAYS end wedge-free (v1.34.2, user report: rotating
+  // left the exposed non-photo corners visible). One helper for every entry
+  // point (slider release, ±2°/±5° chips, Auto-Straighten, ratio change, 90°
+  // turns) — and since v1.37.0 R2 the MATH lives in CropModule (one source with
+  // Auto All's headless auto-straighten; v1.40.0: pixel-exact via cropGeometry).
+  // The module's params are in lock-step with paramsRef (updateParams writes
+  // both), so the patch computed from module state matches the ref state.
+  //  - default: wedgeFreeCropPatch (inscribed rect / intersection with it)
+  //  - opts.rect: keep THAT rect's framing and ratio, shrinking it (about its
+  //    centre or a corner, whichever keeps the most) only as far as the wedges
+  //    require (ratio + orientation changes)
+  const ensureWedgeFreeCrop = useCallback((
+    angle: number,
+    extra: Partial<CropParams> = {},
+    opts: { rect?: { x: number; y: number; width: number; height: number } } = {},
+  ) => {
+    if (opts.rect) {
+      const rect = imageWidth > 0 && imageHeight > 0
+        ? module.clampRectWedgeFree(opts.rect, imageWidth, imageHeight, 'best')
+        : opts.rect;
+      updateParams({ ...rect, ...extra });
+      return;
     }
-  }, [module, updateParams]);
+    updateParams({ ...module.wedgeFreeCropPatch(angle, imageWidth, imageHeight), ...extra });
+  }, [module, imageWidth, imageHeight, updateParams]);
+
+  // Lock the current rect to the selected ratio, in canvas PIXELS (the rect is
+  // normalized, so a normalized ratio came out stretched by W/H). A ratio chip
+  // on a fresh photo must also enable the crop or it never reaches the canvas.
+  const applyRatio = useCallback((patch: Partial<CropParams>) => {
+    updateParams(patch);
+    if (module.getAspectRatioValue() === null) return;
+    const p = paramsRef.current;
+    const adjusted = module.applyCropAspectRatio(p.x, p.y, p.width, p.height, undefined, imageWidth, imageHeight);
+    // The ratio-adjusted rect can grow into a fill wedge on a straightened
+    // photo — keep the ratio, shrink about the centre as needed.
+    ensureWedgeFreeCrop(p.angle, { enabled: true }, { rect: adjusted });
+  }, [module, imageWidth, imageHeight, updateParams, ensureWedgeFreeCrop]);
+
+  const handleAspectRatioChange = useCallback((ratio: AspectRatio) => {
+    applyRatio({ aspectRatio: ratio });
+  }, [applyRatio]);
 
   const handleReset = useCallback(() => {
     module.resetParams();
@@ -156,7 +182,7 @@ export const CropModuleComponent: React.FC<CropModuleComponentProps> = ({
     } finally {
       setIsDetecting(false);
     }
-  }, [module, onParamsChange, storeProcessedData]);
+  }, [module, storeProcessedData, ensureWedgeFreeCrop]);
 
   // Card header (Task 2): Auto ⚡ = auto-straighten, Reset ↺ = full crop reset.
   useRegisterModuleCardActions(onRegisterActions, { auto: handleAutoStraighten, reset: handleReset });
@@ -175,18 +201,13 @@ export const CropModuleComponent: React.FC<CropModuleComponentProps> = ({
     const current = Number(params.orientation ?? 0);
     const next = ((current + deltaDeg) % 360 + 360) % 360;
     updateParams({ orientation: next, enabled: true });
-  }, [params.orientation, updateParams]);
-
-  // Straightening must ALWAYS end wedge-free (v1.34.2, user report: rotating
-  // left the exposed non-photo corners visible). One helper for every entry
-  // point (slider release, ±2°/±5° chips, Auto-Straighten) — and since
-  // v1.37.0 R2 the MATH lives in CropModule.wedgeFreeCropPatch so Auto All's
-  // headless auto-straighten shares the exact same source (no logic fork).
-  // The module's params are in lock-step with paramsRef (updateParams writes
-  // both), so the patch computed from module state matches the ref state.
-  const ensureWedgeFreeCrop = useCallback((angle: number, extra: Partial<CropParams> = {}) => {
-    updateParams({ ...module.wedgeFreeCropPatch(angle, imageWidth, imageHeight), ...extra });
-  }, [module, imageWidth, imageHeight, updateParams]);
+    // A quarter turn swaps the frame: under a straighten angle the same
+    // normalized rect can land in a wedge of the new canvas.
+    if (Math.abs(paramsRef.current.angle) >= 0.01) {
+      const { x, y, width, height } = paramsRef.current;
+      ensureWedgeFreeCrop(paramsRef.current.angle, {}, { rect: { x, y, width, height } });
+    }
+  }, [params.orientation, updateParams, ensureWedgeFreeCrop]);
 
   const handleRotationChange = useCallback((newAngle: number) => {
     // Clamp to -5 to +5 range
@@ -248,7 +269,7 @@ export const CropModuleComponent: React.FC<CropModuleComponentProps> = ({
               <input
                 type="number"
                 value={params.customAspectWidth}
-                onChange={(e) => updateParams({ customAspectWidth: parseFloat(e.target.value) || 1 })}
+                onChange={(e) => applyRatio({ customAspectWidth: parseFloat(e.target.value) || 1 })}
                 min="0.1"
                 step="0.1"
                 style={{
@@ -266,7 +287,7 @@ export const CropModuleComponent: React.FC<CropModuleComponentProps> = ({
               <input
                 type="number"
                 value={params.customAspectHeight}
-                onChange={(e) => updateParams({ customAspectHeight: parseFloat(e.target.value) || 1 })}
+                onChange={(e) => applyRatio({ customAspectHeight: parseFloat(e.target.value) || 1 })}
                 min="0.1"
                 step="0.1"
                 style={{

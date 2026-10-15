@@ -23,6 +23,7 @@ import { ImageProcessingPipeline, setWorkerPool, type ProcessingContext } from '
 import type { WorkerImageData, WorkerModuleConfig, ProcessingResult } from '../services/WebWorkerImageProcessor';
 import type { BasicAdjustmentsModule } from '../modules/BasicAdjustmentsModule';
 import type { WhiteBalanceModule } from '../modules/WhiteBalanceModule';
+import type { LocalAdjustmentsPipelineModule } from '../modules/LocalAdjustmentsPipelineModule';
 import { createNoiseImage } from './testUtils';
 
 jest.mock('../utils/Logger', () => ({
@@ -43,6 +44,23 @@ class FakeWorkerPool {
     workerPipeline.applyWorkerConfig(config);
     const ctx: ProcessingContext = { width: imageData.width, height: imageData.height, channels: imageData.channels };
     // .slice() simulates the structured-clone copy the real postMessage performs.
+    const data = await workerPipeline.processImage(imageData.data.slice(), ctx, { useWebWorkers: false });
+    return { success: true, data, processingTime: 0, width: ctx.width, height: ctx.height };
+  }
+}
+
+/** Like FakeWorkerPool, but in a FRESH module graph — a real worker has its own module-level
+ *  singletons (e.g. localAdjustmentsModule), which a shared graph would silently paper over. */
+class IsolatedWorkerPool extends FakeWorkerPool {
+  async processImage(imageData: WorkerImageData, config: WorkerModuleConfig[]): Promise<ProcessingResult> {
+    this.calls++;
+    let P: typeof ImageProcessingPipeline = ImageProcessingPipeline;
+    jest.isolateModules(() => {
+      P = require('../services/ImageProcessingPipeline').ImageProcessingPipeline;
+    });
+    const workerPipeline = new P();
+    workerPipeline.applyWorkerConfig(config);
+    const ctx: ProcessingContext = { width: imageData.width, height: imageData.height, channels: imageData.channels };
     const data = await workerPipeline.processImage(imageData.data.slice(), ctx, { useWebWorkers: false });
     return { success: true, data, processingTime: 0, width: ctx.width, height: ctx.height };
   }
@@ -95,6 +113,31 @@ describe('export worker-path parity (R2)', () => {
     expect(firstMismatch(workerOut, mainOut)).toBe(-1);
     expect(workerCtx.width).toBe(mainCtx.width);
     expect(workerCtx.height).toBe(mainCtx.height);
+  });
+
+  it('with a Local Adjustments radial mask (+basicAdj) the worker route matches the main thread (Task 12c fix 1)', async () => {
+    const input = createNoiseImage(W, H, 22);
+    const pipeline = new ImageProcessingPipeline();
+    applyRepresentativeEdit(pipeline);
+    const la = pipeline.getModule<LocalAdjustmentsPipelineModule>('localadjustments')!;
+    const id = la.createLayer('radial_gradient', 'L', W, H);
+    la.updateLayerBasicAdj(id, { exposure: 0.8, saturation: 0.2 });
+    la.setLayerGeometry(id, {
+      type: 'radial', centerX: 0.4, centerY: 0.5, radiusX: 0.25, radiusY: 0.2,
+      startX: 0.5, startY: 0.3, endX: 0.5, endY: 0.7, feather: 0.4, invert: false, rotation: 0.3,
+    }, 100, 80); // baked at a preview size: both routes rebake at export size
+
+    const mainOut = await pipeline.processImage(input.slice(), { width: W, height: H, channels: 4 }, { useWebWorkers: false, cacheResults: false });
+    // Same stale preview bake for the worker leg.
+    la.setLayerGeometry(id, la.getParameters().layers[0].geometry!, 100, 80);
+    const pool = new IsolatedWorkerPool();
+    setWorkerPool(pool);
+    const workerOut = await pipeline.processImage(input.slice(), { width: W, height: H, channels: 4 }, { useWebWorkers: true, cacheResults: false });
+
+    expect(pool.calls).toBe(1);
+    let maxDiff = 0;
+    for (let i = 0; i < mainOut.length; i++) maxDiff = Math.max(maxDiff, Math.abs(mainOut[i] - workerOut[i]));
+    expect(maxDiff).toBeLessThanOrEqual(1e-5);
   });
 
   it('CROPPED export through the worker route: caller context gets the TRUE post-crop dims', async () => {

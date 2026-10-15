@@ -32,7 +32,7 @@ describe('enhancePrefsStorage', () => {
     await Promise.resolve();
     const api = (window as unknown as { electronAPI: { storeSet: jest.Mock } }).electronAPI;
     expect(api.storeSet).toHaveBeenCalledTimes(1);
-    expect(mem[ENHANCE_PREFS_KEY]).toEqual({ sharpness: 0.9, scale: 4 });
+    expect(mem[ENHANCE_PREFS_KEY]).toEqual(expect.objectContaining({ sharpness: 0.9, scale: 4 }));
   });
 
   test('round-trips a full snapshot', async () => {
@@ -71,7 +71,7 @@ describe('enhancePrefsStorage', () => {
     await Promise.resolve();
     const api = (window as unknown as { electronAPI: { storeSet: jest.Mock } }).electronAPI;
     expect(api.storeSet).toHaveBeenCalledTimes(1);
-    expect(mem[ENHANCE_PREFS_KEY]).toEqual({ sharpness: 0.7, nrStrength: 42 });
+    expect(mem[ENHANCE_PREFS_KEY]).toEqual(expect.objectContaining({ sharpness: 0.7, nrStrength: 42 }));
     // The cleared debounce timer must not double-write afterwards.
     jest.advanceTimersByTime(500);
     await Promise.resolve();
@@ -83,5 +83,20 @@ describe('enhancePrefsStorage', () => {
     await Promise.resolve();
     const api = (window as unknown as { electronAPI: { storeSet: jest.Mock } }).electronAPI;
     expect(api.storeSet).not.toHaveBeenCalled();
+  });
+
+  test('pre-v1.40 stored prefs lose their upscale key once (new default applies), other prefs kept', async () => {
+    mem[ENHANCE_PREFS_KEY] = { upscale: false, sharpness: 0.7, sharpen: true };
+    const loaded = await loadEnhancePrefs();
+    expect(loaded).toEqual({ sharpness: 0.7, sharpen: true });
+    expect(loaded).not.toHaveProperty('upscale');
+  });
+
+  test('a prefs snapshot saved by v1.40+ keeps its upscale:false', async () => {
+    saveEnhancePrefs({ upscale: false, sharpness: 0.7 });
+    jest.advanceTimersByTime(500);
+    await Promise.resolve();
+    const loaded = await loadEnhancePrefs();
+    expect(loaded).toEqual({ upscale: false, sharpness: 0.7 });
   });
 });

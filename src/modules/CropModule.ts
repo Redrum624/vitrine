@@ -1,4 +1,14 @@
 import { logger } from '../utils/Logger';
+import {
+  cropRenderGeometry,
+  clampRectWedgeFree,
+  autoCropRectForRotation,
+  normalizeOrientation,
+  rotatedCanvasSize,
+  type CropGeometry,
+  type CropClampAnchor,
+  type NormalizedCropRect,
+} from './cropGeometry';
 
 export interface HorizonLine {
   x1: number;
@@ -65,6 +75,8 @@ export interface CropProcessingContext {
   width: number;
   height: number;
   channels: number;
+  /** v1.40.0 Task 9b fix 1: crop-handle drag SUSPENSION preview — see getRenderGeometry. */
+  suspended?: boolean;
 }
 
 export class CropModule {
@@ -198,8 +210,19 @@ export class CropModule {
     }
   }
 
-  // Apply aspect ratio constraint to crop region
-  applyCropAspectRatio(newX: number, newY: number, newWidth: number, newHeight: number, fixedEdge?: 'left' | 'right' | 'top' | 'bottom'): { x: number; y: number; width: number; height: number } {
+  // Apply aspect ratio constraint to crop region. The rect is normalized to the
+  // (expanded, oriented) canvas, so the ratio is enforced in PIXELS of that canvas:
+  // inW/inH are the pre-orientation input dims (default: setOriginalDimensions).
+  // Without dims the ratio can only be applied in normalized units.
+  //  - fixedEdge left/right: width drives, height follows (x/y kept)
+  //  - fixedEdge top/bottom: height drives, width follows (x/y kept)
+  //  - no fixedEdge (ratio chip): keep the centre and height, shrink uniformly
+  //    to fit the canvas, then translate inside it.
+  applyCropAspectRatio(
+    newX: number, newY: number, newWidth: number, newHeight: number,
+    fixedEdge?: 'left' | 'right' | 'top' | 'bottom',
+    inW: number = this.originalWidth, inH: number = this.originalHeight,
+  ): { x: number; y: number; width: number; height: number } {
     const targetRatio = this.getAspectRatioValue();
 
     if (targetRatio === null) {
@@ -207,26 +230,72 @@ export class CropModule {
       return { x: newX, y: newY, width: newWidth, height: newHeight };
     }
 
-    // Apply aspect ratio constraint
+    let cw = 1;
+    let ch = 1;
+    if (inW > 0 && inH > 0) {
+      const swapped = this.normalizedOrientation() === 90 || this.normalizedOrientation() === 270;
+      const frameW = swapped ? inH : inW;
+      const frameH = swapped ? inW : inH;
+      const canvas = rotatedCanvasSize(frameW, frameH, Number(this.params.angle) || 0, this.params.expandCanvas !== false);
+      cw = canvas.width;
+      ch = canvas.height;
+    }
+
+    let x = newX * cw;
+    let y = newY * ch;
+    let w = newWidth * cw;
+    let h = newHeight * ch;
+
     if (fixedEdge === 'left' || fixedEdge === 'right') {
-      // Width changed, adjust height
-      newHeight = newWidth / targetRatio;
+      h = w / targetRatio;
+    } else if (fixedEdge === 'top' || fixedEdge === 'bottom') {
+      w = h * targetRatio;
     } else {
-      // Height changed (or both), adjust width
-      newWidth = newHeight * targetRatio;
+      const cx = x + w / 2;
+      const cy = y + h / 2;
+      w = h * targetRatio;
+      const s = Math.min(1, cw / w, ch / h);
+      w *= s;
+      h *= s;
+      x = Math.min(Math.max(0, cx - w / 2), cw - w);
+      y = Math.min(Math.max(0, cy - h / 2), ch - h);
     }
 
     // Ensure crop stays within bounds
-    if (newX + newWidth > 1.0) {
-      newWidth = 1.0 - newX;
-      newHeight = newWidth / targetRatio;
+    if (x + w > cw) {
+      w = cw - x;
+      h = w / targetRatio;
     }
-    if (newY + newHeight > 1.0) {
-      newHeight = 1.0 - newY;
-      newWidth = newHeight * targetRatio;
+    if (y + h > ch) {
+      h = ch - y;
+      w = h * targetRatio;
     }
 
-    return { x: newX, y: newY, width: newWidth, height: newHeight };
+    return { x: x / cw, y: y / ch, width: w / cw, height: h / ch };
+  }
+
+  /**
+   * The geometry this module renders at (inW x inH = the ACTUAL processing
+   * dims): the stored rect passed through clampRectWedgeFree ('best' anchor —
+   * largest-area of centre/corner shrinks, so one-sided overshoot keeps framing)
+   * first — the render-time backstop that keeps restored edits, undo, presets,
+   * the worker and export wedge-free whatever path wrote the params (v1.40.0).
+   * process() and getOutputDimensions() both read this, so they cannot drift.
+   */
+  getRenderGeometry(inW: number, inH: number, suspended = false): CropGeometry {
+    // Drag-suspension preview (owner decision, v1.40.0 Task 9b fix 1): while a crop
+    // handle is dragged on a rotated photo, show the WHOLE rotated photo — the full
+    // expanded canvas, empty corners included (Lightroom-style). The backstop is
+    // skipped ONLY when the pass is flagged suspended AND the rect is exactly the full
+    // frame (what onDragStart writes): a flag accidentally left set never un-clamps a
+    // real crop, and export/worker/normal passes never carry the flag at all.
+    // Single-sourced in cropRenderGeometry so the GPU crop pass (Task 10a) decides the same.
+    return cropRenderGeometry(this.params, inW, inH, suspended);
+  }
+
+  /** Clamp a candidate rect wedge-free at (inW, inH) under the CURRENT transform params. */
+  clampRectWedgeFree(rect: NormalizedCropRect, inW: number, inH: number, anchor: CropClampAnchor = 'best'): NormalizedCropRect {
+    return clampRectWedgeFree(rect, inW, inH, this.params, anchor);
   }
 
   // Process image with transform and crop
@@ -235,83 +304,49 @@ export class CropModule {
       return input;
     }
 
+    return this.processWithGeometry(input, this.getRenderGeometry(context.width, context.height, !!context.suspended), context.channels);
+  }
+
+  /**
+   * Render an explicit geometry (no clamp) — process() feeds it the clamped
+   * render geometry; tests use it to prove the wedge predicate matches the
+   * renderer pixel-for-pixel. input must be geom.inW x geom.inH x channels.
+   */
+  processWithGeometry(input: Float32Array, geom: CropGeometry, channels: number): Float32Array {
     const startTime = performance.now();
     let output = input;
-    let currentWidth = context.width;
-    let currentHeight = context.height;
-    const { channels } = context;
+    let currentWidth = geom.inW;
+    let currentHeight = geom.inH;
 
-    // Step 1: Apply transforms first (orientation/flip/rotate)
-    const orientation = this.normalizedOrientation();
-    const hasTransforms = orientation !== 0 || this.params.flipHorizontal || this.params.flipVertical || Math.abs(this.params.angle) > 0.01;
+    logger.debug(`CropModule.process: orientation=${geom.orientation}, angle=${geom.angle}, flipH=${geom.flipH}, flipV=${geom.flipV}`);
 
-    logger.debug(`CropModule.process: hasTransforms=${hasTransforms}, orientation=${orientation}, angle=${this.params.angle}, flipH=${this.params.flipHorizontal}, flipV=${this.params.flipVertical}`);
-
-    if (hasTransforms) {
-      // Lossless 90°-step rotation FIRST (pure pixel remap, no resampling).
-      if (orientation !== 0) {
-        output = this.rotateOrthogonal(output, currentWidth, currentHeight, channels, orientation);
-        if (orientation === 90 || orientation === 270) {
-          const t = currentWidth; currentWidth = currentHeight; currentHeight = t;
-        }
-      }
-
-      // Apply flip/mirror first (fastest operations)
-      if (this.params.flipHorizontal) {
-        output = this.flipHorizontalInternal(output, currentWidth, currentHeight, channels);
-      }
-
-      if (this.params.flipVertical) {
-        output = this.flipVerticalInternal(output, currentWidth, currentHeight, channels);
-      }
-
-      // Apply rotation if angle is significant
-      if (Math.abs(this.params.angle) > 0.01) {
-        output = this.rotate(output, currentWidth, currentHeight, channels, this.params.angle);
-
-        // Update dimensions if canvas expanded
-        if (this.params.expandCanvas) {
-          const newDims = this.getRotatedDimensions(currentWidth, currentHeight, this.params.angle);
-          currentWidth = newDims.width;
-          currentHeight = newDims.height;
-        }
-      }
+    // Step 1: transforms — lossless 90°-step orientation, flips, fine rotation.
+    if (geom.orientation !== 0) {
+      output = this.rotateOrthogonal(output, currentWidth, currentHeight, channels, geom.orientation);
+      currentWidth = geom.oriW;
+      currentHeight = geom.oriH;
+    }
+    if (geom.flipH) {
+      output = this.flipHorizontalInternal(output, currentWidth, currentHeight, channels);
+    }
+    if (geom.flipV) {
+      output = this.flipVerticalInternal(output, currentWidth, currentHeight, channels);
+    }
+    if (geom.rotated) {
+      output = this.rotate(output, geom, channels);
+      currentWidth = geom.expW;
+      currentHeight = geom.expH;
     }
 
-    // Step 2: Apply crop
-    const needsCrop = this.params.x !== 0.0 || this.params.y !== 0.0 ||
-                      this.params.width !== 1.0 || this.params.height !== 1.0;
-
-    logger.debug(`CropModule.process: needsCrop=${needsCrop}, x=${this.params.x}, y=${this.params.y}, w=${this.params.width}, h=${this.params.height}`);
-
-    if (needsCrop) {
-      // Calculate pixel coordinates
-      const cropX = Math.floor(this.params.x * currentWidth);
-      const cropY = Math.floor(this.params.y * currentHeight);
-      const cropWidth = Math.max(1, Math.floor(this.params.width * currentWidth));
-      const cropHeight = Math.max(1, Math.floor(this.params.height * currentHeight));
-
-      // Ensure we don't go out of bounds
-      const actualCropWidth = Math.min(cropWidth, currentWidth - cropX);
-      const actualCropHeight = Math.min(cropHeight, currentHeight - cropY);
-
-      logger.info(`Cropping: ${currentWidth}x${currentHeight} → ${actualCropWidth}x${actualCropHeight} at (${cropX}, ${cropY})`);
-
-      // Create output array for cropped image
-      const croppedOutput = new Float32Array(actualCropWidth * actualCropHeight * channels);
-
-      // Copy cropped region
-      for (let y = 0; y < actualCropHeight; y++) {
-        for (let x = 0; x < actualCropWidth; x++) {
-          const srcIndex = ((cropY + y) * currentWidth + (cropX + x)) * channels;
-          const dstIndex = (y * actualCropWidth + x) * channels;
-
-          for (let c = 0; c < channels; c++) {
-            croppedOutput[dstIndex + c] = output[srcIndex + c];
-          }
-        }
+    // Step 2: integer crop from the shared geometry.
+    const { cropX, cropY, outW, outH } = geom;
+    if (cropX !== 0 || cropY !== 0 || outW !== currentWidth || outH !== currentHeight) {
+      logger.info(`Cropping: ${currentWidth}x${currentHeight} → ${outW}x${outH} at (${cropX}, ${cropY})`);
+      const croppedOutput = new Float32Array(outW * outH * channels);
+      for (let y = 0; y < outH; y++) {
+        const srcRow = ((cropY + y) * currentWidth + cropX) * channels;
+        croppedOutput.set(output.subarray(srcRow, srcRow + outW * channels), y * outW * channels);
       }
-
       output = croppedOutput;
     }
 
@@ -321,36 +356,13 @@ export class CropModule {
     return output;
   }
 
-  // Get output dimensions after crop and rotation
-  getOutputDimensions(inputWidth: number, inputHeight: number): { width: number; height: number } {
+  // Get output dimensions after crop and rotation (same geometry as process()).
+  getOutputDimensions(inputWidth: number, inputHeight: number, suspended = false): { width: number; height: number } {
     if (!this.params.enabled) {
       return { width: inputWidth, height: inputHeight };
     }
-
-    let currentWidth = inputWidth;
-    let currentHeight = inputHeight;
-
-    // Step 0: 90°-step orientation swaps the frame for 90/270.
-    const orientation = this.normalizedOrientation();
-    if (orientation === 90 || orientation === 270) {
-      const t = currentWidth; currentWidth = currentHeight; currentHeight = t;
-    }
-
-    // Step 1: Apply rotation dimensions first (rotation happens before crop in process())
-    if (Math.abs(this.params.angle) > 0.01 && this.params.expandCanvas) {
-      const rotatedDims = this.getRotatedDimensions(currentWidth, currentHeight, this.params.angle);
-      currentWidth = rotatedDims.width;
-      currentHeight = rotatedDims.height;
-    }
-
-    // Step 2: Apply crop dimensions
-    const cropWidth = Math.max(1, Math.floor(this.params.width * currentWidth));
-    const cropHeight = Math.max(1, Math.floor(this.params.height * currentHeight));
-
-    return {
-      width: cropWidth,
-      height: cropHeight
-    };
+    const geom = this.getRenderGeometry(inputWidth, inputHeight, suspended);
+    return { width: geom.outW, height: geom.outH };
   }
 
   // Helper: Center crop to given dimensions while maintaining aspect ratio
@@ -433,10 +445,7 @@ export class CropModule {
 
   /** Orientation normalized into {0, 90, 180, 270} (absent/invalid ⇒ 0). */
   normalizedOrientation(): 0 | 90 | 180 | 270 {
-    const raw = Number(this.params.orientation ?? 0);
-    if (!Number.isFinite(raw)) return 0;
-    const o = ((Math.round(raw / 90) * 90) % 360 + 360) % 360;
-    return (o === 90 || o === 180 || o === 270) ? o : 0;
+    return normalizeOrientation(this.params.orientation);
   }
 
   /** Lossless orthogonal rotation (clockwise degrees ∈ {90, 180, 270}).
@@ -463,80 +472,28 @@ export class CropModule {
     return output;
   }
 
-  // Rotate image by angle (in degrees)
-  private rotate(input: Float32Array, width: number, height: number, channels: number, angleDeg: number): Float32Array {
-    const angleRad = (angleDeg * Math.PI) / 180;
-    const cosAngle = Math.cos(angleRad);
-    const sinAngle = Math.sin(angleRad);
-
-    const centerX = width / 2;
-    const centerY = height / 2;
-
-    // Calculate output dimensions
-    let outWidth = width;
-    let outHeight = height;
-    let offsetX = 0;
-    let offsetY = 0;
-
-    if (this.params.expandCanvas) {
-      // Expand canvas to fit rotated image
-      const corners = [
-        { x: 0, y: 0 },
-        { x: width, y: 0 },
-        { x: 0, y: height },
-        { x: width, y: height }
-      ];
-
-      let minX = Infinity, maxX = -Infinity;
-      let minY = Infinity, maxY = -Infinity;
-
-      for (const corner of corners) {
-        const dx = corner.x - centerX;
-        const dy = corner.y - centerY;
-        const rotX = dx * cosAngle - dy * sinAngle;
-        const rotY = dx * sinAngle + dy * cosAngle;
-
-        minX = Math.min(minX, rotX);
-        maxX = Math.max(maxX, rotX);
-        minY = Math.min(minY, rotY);
-        maxY = Math.max(maxY, rotY);
-      }
-
-      outWidth = Math.ceil(maxX - minX);
-      outHeight = Math.ceil(maxY - minY);
-      offsetX = -minX;
-      offsetY = -minY;
-    }
-
-    logger.debug(`Rotating by ${angleDeg.toFixed(2)}°: ${width}x${height} → ${outWidth}x${outHeight}`);
+  // Rotate by the geometry's fine angle into its expanded canvas. Pixel-CENTRE
+  // convention, identical to cropGeometry.mapCanvasPixelToSource (inlined for
+  // speed) — so the wedge predicate and the renderer agree to the pixel.
+  private rotate(input: Float32Array, geom: CropGeometry, channels: number): Float32Array {
+    const { oriW: width, oriH: height, expW: outWidth, expH: outHeight, cos: cosAngle, sin: sinAngle } = geom;
+    logger.debug(`Rotating by ${geom.angle.toFixed(2)}°: ${width}x${height} → ${outWidth}x${outHeight}`);
 
     const output = new Float32Array(outWidth * outHeight * channels);
-
-    // Fill with background color
+    const fill = geom.fill;
     for (let i = 0; i < output.length; i += channels) {
-      output[i] = this.params.fillColor[0];
-      output[i + 1] = this.params.fillColor[1];
-      output[i + 2] = this.params.fillColor[2];
-      if (channels === 4) {
-        output[i + 3] = this.params.fillColor[3];
-      }
+      for (let c = 0; c < channels; c++) output[i + c] = fill[Math.min(c, 3)];
     }
 
-    // Perform inverse rotation for each output pixel
+    const baseX = geom.cx - 0.5;
+    const baseY = geom.cy - 0.5;
     for (let y = 0; y < outHeight; y++) {
+      const outDy = y + 0.5 - geom.offY;
       for (let x = 0; x < outWidth; x++) {
-        // Convert output coordinates to centered coordinates
-        const outDx = x - offsetX;
-        const outDy = y - offsetY;
-
-        // Inverse rotation to find source coordinates
-        const srcDx = outDx * cosAngle + outDy * sinAngle;
-        const srcDy = -outDx * sinAngle + outDy * cosAngle;
-        const srcX = srcDx + centerX;
-        const srcY = srcDy + centerY;
-
-        // Sample from source image
-        this.samplePixel(input, width, height, channels, srcX, srcY, output, (y * outWidth + x) * channels);
+        const outDx = x + 0.5 - geom.offX;
+        const srcX = outDx * cosAngle + outDy * sinAngle + baseX;
+        const srcY = -outDx * sinAngle + outDy * cosAngle + baseY;
+        this.samplePixel(input, width, height, channels, srcX, srcY, output, (y * outWidth + x) * channels, geom.method);
       }
     }
 
@@ -552,14 +509,15 @@ export class CropModule {
     x: number,
     y: number,
     output: Float32Array,
-    outIndex: number
+    outIndex: number,
+    method: CropParams['resampleMethod']
   ): void {
     // Check bounds
     if (x < 0 || x >= width - 1 || y < 0 || y >= height - 1) {
       return; // Keep fill color
     }
 
-    switch (this.params.resampleMethod) {
+    switch (method) {
       case 'nearest':
         this.sampleNearest(input, width, height, channels, x, y, output, outIndex);
         break;
@@ -715,43 +673,8 @@ export class CropModule {
 
   // Get output dimensions after rotation
   getRotatedDimensions(width: number, height: number, angleDeg: number): { width: number; height: number } {
-    if (!this.params.expandCanvas) {
-      return { width, height };
-    }
-
-    const angleRad = (angleDeg * Math.PI) / 180;
-    const cosAngle = Math.cos(angleRad);
-    const sinAngle = Math.sin(angleRad);
-
-    const centerX = width / 2;
-    const centerY = height / 2;
-
-    const corners = [
-      { x: 0, y: 0 },
-      { x: width, y: 0 },
-      { x: 0, y: height },
-      { x: width, y: height }
-    ];
-
-    let minX = Infinity, maxX = -Infinity;
-    let minY = Infinity, maxY = -Infinity;
-
-    for (const corner of corners) {
-      const dx = corner.x - centerX;
-      const dy = corner.y - centerY;
-      const rotX = dx * cosAngle - dy * sinAngle;
-      const rotY = dx * sinAngle + dy * cosAngle;
-
-      minX = Math.min(minX, rotX);
-      maxX = Math.max(maxX, rotX);
-      minY = Math.min(minY, rotY);
-      maxY = Math.max(maxY, rotY);
-    }
-
-    return {
-      width: Math.ceil(maxX - minX),
-      height: Math.ceil(maxY - minY)
-    };
+    const c = rotatedCanvasSize(width, height, angleDeg, this.params.expandCanvas);
+    return { width: c.width, height: c.height };
   }
 
   // Auto-straighten image using 6-line analysis (3 vertical + 3 horizontal)
@@ -824,13 +747,21 @@ export class CropModule {
       });
       logger.info(`Auto-straighten applied: ${clampedCorrection.toFixed(2)}° correction (preserving existing crop)`);
     } else {
-      // No custom crop, apply auto-crop to remove black borders
-      const autoCrop = this.calculateAutoCropForRotation(width, height, clampedCorrection);
+      // No custom crop: the wedge-free inscribed rect. `width/height` here are
+      // the ANALYSED preview's dims (already oriented, possibly cropped/
+      // downscaled) — the rect must come from the NATIVE frame under the
+      // current orientation, pixel-clamped: the same helper as the crop card
+      // and Auto All (wedgeFreeCropPatch). Native dims unknown ⇒ the preview
+      // frame is the best available (it is oriented already).
+      this.setParams({ expandCanvas: true });
+      const patch = this.originalWidth > 0 && this.originalHeight > 0
+        ? this.wedgeFreeCropPatch(clampedCorrection, this.originalWidth, this.originalHeight)
+        : { angle: clampedCorrection, enabled: true, ...autoCropRectForRotation(width, height, clampedCorrection) };
       this.setParams({
+        ...patch,
         angle: clampedCorrection,
         enabled: true,
         expandCanvas: true,
-        ...autoCrop
       });
       logger.info(`Auto-straighten applied: ${clampedCorrection.toFixed(2)}° correction with auto-crop`);
     }
@@ -1025,71 +956,24 @@ export class CropModule {
     const y1 = Math.max(p.y, auto.y);
     const x2 = Math.min(p.x + p.width, auto.x + auto.width);
     const y2 = Math.min(p.y + p.height, auto.y + auto.height);
-    return {
-      angle, enabled: true,
+    const intersection = {
       x: x1, y: y1,
       width: Math.max(0.05, x2 - x1),
       height: Math.max(0.05, y2 - y1),
     };
+    // The intersection can still poke out by a pixel of quantization, or sit in
+    // a wedge after the 0.05 floor — the pixel-exact clamp settles it (no-op,
+    // same values, when it is already wedge-free).
+    const clamped = clampRectWedgeFree(intersection, imageWidth, imageHeight, { ...p, angle }, 'best');
+    return { angle, enabled: true, ...clamped };
   }
 
-  // Calculate the largest crop rectangle that fits inside a rotated image
-  // This removes black borders created by rotation
-  // IMPORTANT: Returns normalized coordinates (0-1) relative to the EXPANDED canvas
-  calculateAutoCropForRotation(originalWidth: number, originalHeight: number, angleDeg: number): {
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-  } {
-    if (Math.abs(angleDeg) < 0.01) {
-      // No rotation, no crop needed
-      return { x: 0, y: 0, width: 1.0, height: 1.0 };
-    }
-
-    const angleRad = Math.abs(angleDeg * Math.PI / 180);
-    const sin = Math.sin(angleRad);
-    const cos = Math.cos(angleRad);
-
-    // Get the expanded canvas dimensions after rotation
-    const rotatedDims = this.getRotatedDimensions(originalWidth, originalHeight, angleDeg);
-    const rotatedW = rotatedDims.width;
-    const rotatedH = rotatedDims.height;
-
-    // For a rectangle W×H rotated by θ, the largest inscribed axis-aligned rectangle
-    // (with same aspect ratio) that fits entirely within the original bounds has:
-    // scale = cos(θ) + sin(θ) * (shorter_side / longer_side)
-    const aspectRatio = originalWidth / originalHeight;
-    let scale: number;
-
-    if (aspectRatio >= 1) {
-      // Landscape or square
-      scale = cos + sin * (originalHeight / originalWidth);
-    } else {
-      // Portrait
-      scale = cos + sin * (originalWidth / originalHeight);
-    }
-
-    // The inscribed rectangle dimensions in original image pixels
-    const inscribedW = originalWidth / scale;
-    const inscribedH = originalHeight / scale;
-
-    // Convert to normalized coordinates relative to expanded canvas
-    const cropWidth = Math.min(1.0, inscribedW / rotatedW);
-    const cropHeight = Math.min(1.0, inscribedH / rotatedH);
-
-    // Center the crop on the expanded canvas
-    const cropX = (1.0 - cropWidth) / 2;
-    const cropY = (1.0 - cropHeight) / 2;
-
-    logger.debug(`Auto-crop for ${angleDeg.toFixed(2)}° rotation: inscribed ${inscribedW.toFixed(0)}×${inscribedH.toFixed(0)} in rotated ${rotatedW}×${rotatedH} = ${(cropWidth * 100).toFixed(1)}% × ${(cropHeight * 100).toFixed(1)}%`);
-
-    return {
-      x: cropX,
-      y: cropY,
-      width: cropWidth,
-      height: cropHeight
-    };
+  // The largest centred same-aspect rect inside the frame rotated by angleDeg,
+  // normalized to the EXPANDED canvas and clamped wedge-free at these pixel dims
+  // (cropGeometry.autoCropRectForRotation — scale = cos + sin * max(W/H, H/W)).
+  // originalWidth/originalHeight are the ORIENTED frame dims.
+  calculateAutoCropForRotation(originalWidth: number, originalHeight: number, angleDeg: number): NormalizedCropRect {
+    return autoCropRectForRotation(originalWidth, originalHeight, angleDeg, this.params.expandCanvas);
   }
 
   // ========== PREVIEW MODE METHODS ==========

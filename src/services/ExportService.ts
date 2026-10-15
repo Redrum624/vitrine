@@ -1,4 +1,5 @@
 import { logger } from '../utils/Logger';
+import { trackExport } from './exportActivity';
 import { EXPORT_SUFFIX } from '../utils/exportFilename';
 import { isElectron, EmbeddableMetadata } from '../types/electron';
 import { COLOR_SPACE_CONVERSIONS } from './colorSpaceMatrices';
@@ -51,6 +52,12 @@ export interface ExportOptions {
   filename?: string;
   suffix?: string;         // Added to original filename
   outputDirectory?: string;
+  /**
+   * What to do when the target file already exists (v1.40.0). 'keepBoth' (the
+   * default) bumps to the next free `_VIT_N` name; 'replace' writes the exact
+   * path. The UI asks the user first and passes the answer here.
+   */
+  overwritePolicy?: 'replace' | 'keepBoth';
 }
 
 export interface ExportResult {
@@ -77,9 +84,11 @@ export class ExportService {
     compression: 'none',
     resizeMode: 'fit',
     maintainAspectRatio: true,
-    // Defaults: original dimensions (no width/height set → no resize), Adobe RGB
-    // colour space, and the highest bit depth the default format (PNG) supports.
-    colorSpace: 'adobergb',
+    // Defaults: original dimensions (no width/height set → no resize), sRGB
+    // colour space (v1.40.0: Windows Photos showed Adobe RGB files washed out;
+    // Adobe RGB stays selectable), and the highest bit depth the default format
+    // (PNG) supports.
+    colorSpace: 'srgb',
     bitDepth: 16,
     preserveMetadata: true,
     includeProcessingHistory: false,
@@ -170,12 +179,23 @@ export class ExportService {
     }
   ];
 
-  // Export processed image with given options
-  async exportImage(
+  // Export processed image with given options. Counted as an export in progress (exportActivity)
+  // so the app refuses to quit while the file is being written.
+  exportImage(
     imageData: Float32Array,
     originalWidth: number,
     originalHeight: number,
     options: Partial<ExportOptions> = {},
+    originalFilePath?: string
+  ): Promise<ExportResult> {
+    return trackExport(() => this.exportImageUntracked(imageData, originalWidth, originalHeight, options, originalFilePath));
+  }
+
+  private async exportImageUntracked(
+    imageData: Float32Array,
+    originalWidth: number,
+    originalHeight: number,
+    options: Partial<ExportOptions>,
     originalFilePath?: string
   ): Promise<ExportResult> {
     const startTime = performance.now();
@@ -278,9 +298,10 @@ export class ExportService {
       // that doesn't exist yet — a single export must never overwrite an
       // earlier one (photo_VIT.jpg → photo_VIT_1.jpg → …), matching the
       // multi-export non-clobber behaviour.
-      const outputPath = await this.resolveNonClobberingPath(
-        this.generateOutputPath(originalFilePath, exportOptions),
-      );
+      const plannedPath = this.generateOutputPath(originalFilePath, exportOptions);
+      const outputPath = exportOptions.overwritePolicy === 'replace'
+        ? plannedPath
+        : await this.resolveNonClobberingPath(plannedPath);
 
       // Create the image file. When the resize was deferred, we pass the full-res
       // buffer dimensions plus the target dimensions so the main-process writer
@@ -622,6 +643,22 @@ export class ExportService {
       if (!(await exists(candidate))) return candidate;
     }
     return outputPath; // 999 collisions — give up and overwrite rather than loop forever
+  }
+
+  /** The path a single export with these options would target (before any
+   *  Keep-both renaming). Lets the UI ask about an overwrite up front. */
+  getPlannedOutputPath(originalFilePath: string | undefined, options: Partial<ExportOptions> = {}): string {
+    return this.generateOutputPath(originalFilePath, { ...this.defaultOptions, ...options });
+  }
+
+  /** True when a file exists at `path`. Fail-open (false) when unavailable. */
+  async outputExists(path: string): Promise<boolean> {
+    try {
+      if (isElectron() && window.electronAPI?.fileExists) {
+        return await window.electronAPI.fileExists(path);
+      }
+    } catch { /* fail-open */ }
+    return false;
   }
 
   // Generate output file path. NOTE: basenames are split on BOTH "/" and "\\" —

@@ -123,11 +123,13 @@ describe('PresetService — import shape validation (trust boundary)', () => {
 
     const stored = presetService.getPreset('h1_valid_lens')!;
     expect(stored.settings.lensCorrections).toBeDefined();
-    expect(stored.settings.lensCorrections!.vignetting.amount).toBe(40);
+    // v1.40.0: a legacy (un-stamped) preset is migrated once on import - Vignetting flipped from a
+    // correction (+ brightened) to a creative vignette (+ darkens), so 40 becomes -40 (same look).
+    expect(stored.settings.lensCorrections!.vignetting.amount).toBe(-40);
 
     expect(presetService.applyPreset('h1_valid_lens')).toBe(true);
     expect(lc.getParameters().lensCorrectionsParams.vignetting.enabled).toBe(true);
-    expect(lc.getParameters().lensCorrectionsParams.vignetting.amount).toBe(40);
+    expect(lc.getParameters().lensCorrectionsParams.vignetting.amount).toBe(-40);
     expect(lc.isEnabled).toBe(true);
 
     presetService.deletePreset('h1_valid_lens');

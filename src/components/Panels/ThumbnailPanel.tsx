@@ -186,6 +186,7 @@ export function ThumbnailPanel({
   const setSelection = useAppStore((s) => s.setSelection);
   const toggleImageSelection = useAppStore((s) => s.toggleImageSelection);
   const ratingFilterRaw = useAppStore((s) => s.ratingFilter);
+  const ratingFilterMode = useAppStore((s) => s.ratingFilterMode) ?? 'min';
   const setViewMode = useAppStore((s) => s.setViewMode);
   const setImageDimensions = useAppStore((s) => s.setImageDimensions);
   // The rating filter now lives in the store (shared with the footer's segmented
@@ -196,8 +197,8 @@ export function ThumbnailPanel({
   const selectedCount = selectedImageIds?.length ?? 0;
 
   const filteredImages = useMemo(
-    () => filterImagesByRating(images, imageRatings, ratingFilter),
-    [images, imageRatings, ratingFilter],
+    () => filterImagesByRating(images, imageRatings, ratingFilter, ratingFilterMode),
+    [images, imageRatings, ratingFilter, ratingFilterMode],
   );
 
   // Load thumbnail for an image
@@ -357,7 +358,7 @@ export function ThumbnailPanel({
       (tile as HTMLElement | null)?.scrollIntoView?.({ behavior: 'auto', inline: 'center' });
     });
     return () => cancelAnimationFrame(raf);
-  }, [ratingFilter, visible]);
+  }, [ratingFilter, ratingFilterMode, visible]);
 
   // Translate vertical mouse-wheel into horizontal filmstrip scrolling.
   // Uses a native non-passive listener so preventDefault actually works

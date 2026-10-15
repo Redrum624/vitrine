@@ -4,6 +4,37 @@ All notable changes to **Vitrine** (formerly Photo Editor Pro) are documented in
 this file. The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.40.0] - 2026-10-14
+
+### Added
+- **In-app updates.** The installed copy checks GitHub Releases at launch and from *Help > Check for Updates...*, downloads a newer version in the background and offers to restart and install it. It never installs over a running export, and a quit request that goes unanswered counts as no. The portable exe and the Microsoft Store build do not update themselves. Details in `docs/UPDATES.md`. Affects: `electron/updater.cjs` (new), `electron/closeGuard.cjs` (new), `electron/closeRequest.cjs` (new), `electron/preload.cjs`, the menu bar, `package.json` (`build.publish`).
+- **Memory setting (Balanced / High / Maximum)** in Settings. High and Maximum let the image caches use up to 25% and 40% of the computer's RAM, raise the preview resolution cap (within what the GPU allows) and keep more GPU buffers. A change that needs a restart says so. Affects: `src/utils/memoryPreset.ts` (new), `src/services/memoryPresetRuntime.ts` (new), `electron/memoryPresetMain.cjs` (new), the Settings panel.
+- **The footer rating filter cycles.** Clicking the active "≥3★" again shows exactly 3★ ("=3★"); a third click turns the filter off. Affects: `src/stores/appStore.ts`, `src/components/Controls/Segmented.tsx`, the status bar.
+
+### Changed
+- **Enhance previews on the GPU.** Why: Noise Reduction and Sharpen ran on the CPU for every preview, so each slider move took seconds. Both now run inside the GPU preview pipeline, with the CPU path kept as the fallback when a GPU self-test fails. Measured on an RTX 3080: Sharpen went from about 4 s to about 110 ms per preview, Noise Reduction about 1 ms. Affects: `src/shaders/passDescriptors.ts`, `src/shaders/GpuPreviewPipeline.ts`, `src/shaders/enhanceGpuLimits.ts` (new), `src/components/Panels/AdjustmentPanel.tsx`.
+- **Crop and straighten render on the GPU**, and a hung worker is replaced instead of blocking later previews. Affects: `src/shaders/cropShader.ts` (new), `src/modules/cropGeometry.ts` (new), `src/services/WebWorkerImageProcessor.ts`.
+- **Export defaults to sRGB.** Why: Adobe RGB exports looked desaturated and darker in viewers that ignore the colour profile, such as Windows Photos. Adobe RGB is still available. Print keeps Adobe RGB.
+- **Export asks before overwriting** an existing file: Replace, Keep both or Cancel (asked once for a batch). Exports now go to the folder shown in the dialog. Affects: `src/components/Dialogs/OverwriteConfirmDialog.tsx` (new), `src/services/ExportService.ts`.
+- **Lens Corrections sits above Enhance** in the module rail, and Enhance opens with Upscale ticked.
+- **Vignetting is a creative vignette**: + darkens the edges, − brightens them. It used to be a lens correction (+ brightened), so saved edits are migrated once and keep their direction; the new falloff reaches further into the frame, so the strength can look different. Midpoint now runs 0.5–1.5.
+- **Linear mask Feather: higher is softer**, like the radial mask. It was inverted. Saved edits and presets are migrated once so they look the same.
+- **The Develop command bar is centred** on the window width.
+- Download file names have no spaces: `Vitrine-Setup-1.40.0.exe` and `Vitrine-1.40.0-portable.exe`. Each release also carries the updater feed (`latest.yml` and the installer's `.blockmap`). The download badge now counts installers only, so its total drops once.
+
+### Fixed
+- **Straightening could leave canvas showing in the corners.** Cause: the CPU and GPU paths computed the wedge-free crop separately, and the formula took the minimum where it needed the maximum. Fix: one pixel-exact geometry module serves every straighten path (slider, chips, Auto-Straighten, Auto All, quarter turns), and the crop is clamped at render time. Affects: `src/modules/cropGeometry.ts` (new), `src/modules/CropModule.ts`.
+- **A crop applied twice, and the box drawn by hand was smaller than the result.** Cause: the overlay mapped the box through the wrong frame, and the drag end and the release both triggered an apply. Fix: the overlay maps through the displayed frame, one drag applies once, and while dragging on a straightened photo the whole rotated photo is shown with the handles bounded so no canvas can be selected. Affects: `src/components/Canvas/InteractiveCropHandles.tsx`, `src/components/Canvas/cropFrameMapping.ts` (new), `src/components/Layout/Canvas.tsx`.
+- **Crop ratio chips produced the wrong shape and could do nothing.** Cause: the ratio was applied to the normalized crop box, so the photo's own shape stretched it (1:1 on a 4:3 photo came out 4:3), and on a freshly opened photo the chip did not enable the crop. Fix: the ratio is applied in pixels and enables the crop; editing the custom ratio re-applies it. Affects: `src/modules/CropModule.ts`, `src/components/Modules/CropModuleComponent.tsx`.
+- **Exports lost their local-adjustment masks.** Cause: since 1.35.0, the worker export route rebuilt the module from parameters that did not carry the mask layers. Fix: setting the parameters rebuilds the layers. **Photos with masks exported since 1.35.0 should be re-exported.** Affects: `src/modules/LocalAdjustmentsPipelineModule.ts`.
+- **Moving a mask left its effect behind** until release. The effect now follows the mask while dragging (a reduced-size draft while moving, full size on release). Affects: `src/components/Canvas/maskGeometryApply.ts` (new), `src/modules/LocalAdjustmentsModule.ts`.
+- **Mouse-wheel slider moves queued one apply per notch.** Now only the last value applies, and a new change supersedes an apply still running. Affects: `src/components/Controls/SliderRow.tsx`, `src/utils/sliderWheel.ts` (new), `src/components/Panels/AdjustmentPanel.tsx`.
+- Vignetting did not visibly apply on the GPU preview path. Affects: `src/utils/vignetteMath.ts` (new), the vignette shader.
+- Previews of photos over 48 MP no longer go through the tiled worker path when an effect is not tile-safe.
+
+### Known issues
+- Apply Enhance on a cropped photo can freeze the window for several seconds (minutes with AI upscale) while the full-resolution pass runs. To be fixed in the next version.
+
 ## [1.39.0] - 2026-10-13
 
 ### Changed

@@ -10,7 +10,7 @@
  *
  * Format is the standard `sha256sum` layout — one `<hash>  <filename>` line per
  * file — verifiable on Windows with:
- *   CertUtil -hashfile "Vitrine Setup <version>.exe" SHA256
+ *   CertUtil -hashfile "Vitrine-Setup-<version>.exe" SHA256
  * or cross-platform with `sha256sum -c SHA256SUMS.txt`.
  */
 'use strict';
@@ -24,8 +24,8 @@ const RELEASE = path.join(ROOT, 'release');
 const VERSION = require(path.join(ROOT, 'package.json')).version;
 
 const TARGETS = [
-  `Vitrine Setup ${VERSION}.exe`,
-  `Vitrine ${VERSION} portable.exe`,
+  `Vitrine-Setup-${VERSION}.exe`,
+  `Vitrine-${VERSION}-portable.exe`,
 ];
 
 const lines = [];

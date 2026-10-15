@@ -1,11 +1,16 @@
-import { buildPassList, buildLocalAdjustmentsPass, computeWBGains, GPU_MODULE_IDS, OPT_IN_GPU_MODULE_IDS, setGpuUnsafeModuleIds, getGpuUnsafeModuleIds } from '../shaders/passDescriptors';
+import { buildPassList, buildLocalAdjustmentsPass, computeWBGains, GPU_MODULE_IDS, OPT_IN_GPU_MODULE_IDS, setGpuUnsafeModuleIds, getGpuUnsafeModuleIds, enhanceResidentEligible, GPU_CROP_ROUTE_ENABLED } from '../shaders/passDescriptors';
 import type { MaskUpload } from '../shaders/passDescriptors';
+import { nrStrengthToH } from '../utils/nrCurve';
+import { ENH_DENOISE_MAXR } from '../shaders/enhanceGpuLimits';
+import { DEFAULT_ENHANCE_PARAMS } from '../utils/enhanceChain';
 import { LocalAdjustmentsModule } from '../modules/LocalAdjustmentsModule';
 import { WhiteBalanceModule } from '../modules/WhiteBalanceModule';
 import { BasicAdjustmentsModule } from '../modules/BasicAdjustmentsModule';
 import { ToneCurvePipelineModule } from '../modules/ToneCurvePipelineModule';
 import { ExposureModule } from '../modules/ExposureModule';
 import { ShadowsHighlightsModule } from '../modules/ShadowsHighlightsModule';
+import { CropModule } from '../modules/CropModule';
+import { frameRectOf } from '../modules/cropGeometry';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -731,4 +736,239 @@ test('buildLocalAdjustmentsPass setUniforms have arity 2/3 and do not throw with
   for (const sp of pass.subPasses!) {
     expect(() => sp.setUniforms(makeGl(), DUMMY_PROG, DEFAULT_RT)).not.toThrow();
   }
+});
+
+// ---------------------------------------------------------------------------
+// NR + enhance resident passes (v1.40.0 Task 1)
+// ---------------------------------------------------------------------------
+
+describe('NR + enhance resident passes', () => {
+  afterEach(() => setGpuUnsafeModuleIds([]));
+  const nr = (params: Record<string, unknown>) => fakeModule('noise-reduction', true, params);
+  const enh = (over: Record<string, unknown> = {}) =>
+    fakeModule('enhance', true, { ...DEFAULT_ENHANCE_PARAMS, upscale: false, enabled: true, ...over });
+  const OPTS = { width: 800, height: 600, kernelScale: 0.4 };
+
+  test('NR enabled -> denoise pass, not a cpuBridge', () => {
+    const { passes, cpuBridges } = buildPassList([nr({ enabled: true, strength: 37 })], OPTS);
+    expect(passes.map((p) => p.id)).toEqual(['noise-reduction']);
+    expect(passes[0].programKey).toBe('denoise');
+    expect(cpuBridges).toEqual([]);
+  });
+
+  test('NR enabled false/undefined -> cpuBridge', () => {
+    for (const params of [{ enabled: false, strength: 37 }, { strength: 37 }]) {
+      const { passes, cpuBridges } = buildPassList([nr(params)], OPTS);
+      expect(passes).toHaveLength(0);
+      expect(cpuBridges).toEqual(['noise-reduction']);
+    }
+  });
+
+  test('NR uniforms derive from nrStrengthToH via denoiseUniforms', () => {
+    const { passes } = buildPassList([nr({ enabled: true, strength: 37 })], OPTS);
+    const calls: Record<string, number[]> = {};
+    const gl = {
+      getUniformLocation: (_p: unknown, name: string) => name,
+      uniform1f: (n: string, v: number) => { calls[n] = [v]; },
+      uniform2f: (n: string, a: number, b: number) => { calls[n] = [a, b]; },
+    } as unknown as WebGL2RenderingContext;
+    const rt = { width: 640, height: 480, dehaze: DEFAULT_RT.dehaze };
+    passes[0].setUniforms(gl, DUMMY_PROG, rt);
+    const h = nrStrengthToH(37);
+    expect(calls.u_h2[0]).toBeCloseTo(h * h * 27, 12);
+    expect(calls.u_texel).toEqual([1 / 640, 1 / 480]);
+  });
+
+  test('enhance sharpen -> residentStep carrying kernelScale', () => {
+    const { passes, cpuBridges } = buildPassList([enh()], OPTS);
+    expect(cpuBridges).toEqual([]);
+    expect(passes).toHaveLength(1);
+    expect(passes[0].id).toBe('enhance');
+    expect(passes[0].residentStep?.kind).toBe('enhance');
+    expect(passes[0].residentStep?.kernelScale).toBe(0.4);
+    expect(passes[0].residentStep?.params.sharpen).toBe(true);
+  });
+
+  test('enhance upscale / disabled / psfSigma 8 -> cpuBridge', () => {
+    // psfSigma 8 only exceeds the shader radius cap at native scale (8*0.4 -> radius 10 is
+    // eligible at kernelScale 0.4, exactly as runEnhanceChain computes it), so use scale 1.
+    const cases: [Record<string, unknown>, number][] = [
+      [{ upscale: true }, 0.4], [{ enabled: false }, 0.4], [{ psfSigma: 8 }, 1], [{ psfSigma: 20 }, 0.4],
+    ];
+    for (const [over, kernelScale] of cases) {
+      const { passes, cpuBridges } = buildPassList([enh(over)], { ...OPTS, kernelScale });
+      expect(passes).toHaveLength(0);
+      expect(cpuBridges).toEqual(['enhance']);
+    }
+    expect(buildPassList([enh({ psfSigma: 8 })], OPTS).passes).toHaveLength(1);
+  });
+
+  test('unsafe enhance / enhance-resident / noise-reduction -> cpuBridge', () => {
+    for (const unsafe of ['enhance', 'enhance-resident']) {
+      setGpuUnsafeModuleIds([unsafe]);
+      expect(buildPassList([enh()], OPTS).cpuBridges).toEqual(['enhance']);
+    }
+    setGpuUnsafeModuleIds(['noise-reduction']);
+    expect(buildPassList([nr({ enabled: true, strength: 37 })], OPTS).cpuBridges).toEqual(['noise-reduction']);
+  });
+
+  test('enhance-resident unsafe alone -> enhance cpuBridge, NR + other passes unaffected', () => {
+    setGpuUnsafeModuleIds(['enhance-resident']);
+    const r = buildPassList([nr({ enabled: true, strength: 20 }), enh()], OPTS);
+    expect(r.cpuBridges).toEqual(['enhance']);
+    expect(r.passes.map((p) => p.id)).toEqual(['noise-reduction']);
+  });
+
+  test('runEnhanceChain gates on enhance ids only, never enhance-resident', () => {
+    const { readFileSync } = require('fs');
+    const { join } = require('path');
+    const src = readFileSync(join(__dirname, '..', 'shaders', 'GpuPreviewPipeline.ts'), 'utf8') as string;
+    const body = src.slice(src.indexOf('runEnhanceChain('), src.indexOf('runEnhanceChain(') + 3000);
+    expect(body).toContain("unsafeIds.has('enhance')");
+    expect(body).not.toContain('enhance-resident');
+  });
+
+  test('pass order follows module order', () => {
+    const { passes } = buildPassList([
+      fakeModule('exposure', true, { exposure: 1 }),
+      nr({ enabled: true, strength: 20 }),
+      enh(),
+      fakeModule('highlightrecovery', true, { strength: 0.5 }),
+    ], OPTS);
+    expect(passes.map((p) => p.id)).toEqual(['exposure', 'noise-reduction', 'enhance', 'highlightrecovery']);
+  });
+
+  test('enhanceResidentEligible mirrors runEnhanceChain limits', () => {
+    const p = { ...DEFAULT_ENHANCE_PARAMS, upscale: false, enabled: true };
+    expect(enhanceResidentEligible(p, 1, 1000, 1000)).toBe(true);
+    expect(enhanceResidentEligible(p, 1, 20000, 20000)).toBe(false);
+    expect(enhanceResidentEligible({ ...p, denoiseStrength: 100 }, 1)).toBe(false);
+  });
+
+  test('enhanceResidentEligible defaults maxTextureSize to 16384 like the pipeline', () => {
+    const p = { ...DEFAULT_ENHANCE_PARAMS, upscale: false, enabled: true };
+    expect(enhanceResidentEligible(p, 1, 16384, 100)).toBe(true);
+    expect(enhanceResidentEligible(p, 1, 16385, 100)).toBe(false);
+    expect(enhanceResidentEligible(p, 1, 16385, 100, 32768)).toBe(true);
+  });
+
+  test('buildPassList uses opts width/height for enhance eligibility', () => {
+    const { passes, cpuBridges } = buildPassList([enh()], { width: 20000, height: 20000, kernelScale: 1 });
+    expect(passes).toHaveLength(0);
+    expect(cpuBridges).toEqual(['enhance']);
+  });
+
+  test('denoiseStrength boundary derived from ENH_DENOISE_MAXR', () => {
+    const p = { ...DEFAULT_ENHANCE_PARAMS, upscale: false, enabled: true };
+    const radius = (d: number) => Math.max(1, Math.ceil((0.4 + 0.12 * d) * 3));
+    let last = 0;
+    while (radius(last + 1) <= ENH_DENOISE_MAXR) last++;
+    expect(last).toBeGreaterThan(0);
+    expect(enhanceResidentEligible({ ...p, denoiseStrength: last }, 1)).toBe(true);
+    expect(enhanceResidentEligible({ ...p, denoiseStrength: last + 1 }, 1)).toBe(false);
+  });
+
+  test('psfSigma 0 with rlIters > 0 -> RL gate off, eligible', () => {
+    const p = { ...DEFAULT_ENHANCE_PARAMS, upscale: false, enabled: true, psfSigma: 0, rlIters: 12 };
+    expect(enhanceResidentEligible(p, 1, 1000, 1000)).toBe(true);
+    expect(enhanceResidentEligible({ ...p, psfSigma: 8 }, 1, 1000, 1000)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v1.40.0 Task 10a — GPU crop/rotate/orientation pass
+// ---------------------------------------------------------------------------
+
+describe('GPU crop pass (Task 10a)', () => {
+  const cropView = (over: Record<string, unknown> = {}, isEnabled = true) => {
+    const m = new CropModule();
+    m.setParams({ enabled: true, angle: 2, orientation: 90, flipHorizontal: true, x: 0.1, y: 0.05, width: 0.8, height: 0.9, ...over } as never);
+    return { getId: () => 'crop', isEnabled, getParams: () => m.getParams() as Record<string, unknown>, module: m };
+  };
+  const basicView = (dehaze = 0) => ({
+    getId: () => 'basicadj', isEnabled: true,
+    getParams: () => ({ exposure: 0.2, dehaze } as Record<string, unknown>),
+  });
+  const GPU_OPTS = { width: 640, height: 480, gpuCrop: true };
+
+  afterEach(() => setGpuUnsafeModuleIds([]));
+
+  test('the GPU crop route is ON by default (Task 10b); gpuCrop:false still forces the CPU bridge', () => {
+    expect(GPU_CROP_ROUTE_ENABLED).toBe(true);
+    const on = buildPassList([cropView(), basicView()], { width: 640, height: 480 });
+    expect(on.passes.map((p) => p.id)).toEqual(['crop', 'basicadj']);
+    expect(on.cpuBridges).toEqual([]);
+    const off = buildPassList([cropView(), basicView()], { width: 640, height: 480, gpuCrop: false });
+    expect(off.passes.map((p) => p.id)).toEqual(['basicadj']);
+    expect(off.cpuBridges).toEqual(['crop']);
+  });
+
+  test('active crop -> passes[0] is the crop geometry step; cpuBridges excludes crop', () => {
+    const view = cropView();
+    const { passes, cpuBridges } = buildPassList([view, basicView()], GPU_OPTS);
+    expect(passes.map((p) => p.id)).toEqual(['crop', 'basicadj']);
+    expect(cpuBridges).not.toContain('crop');
+    const step = passes[0].geometryStep!;
+    expect(step.kind).toBe('crop');
+    // The SAME geometry the CPU module renders (backstop clamp included).
+    expect(step.geom).toEqual(view.module.getRenderGeometry(640, 480));
+    expect(step.frameRect).toEqual(frameRectOf(step.geom));
+  });
+
+  test('drag suspension mirrors CropModule: full-frame rect renders the whole expanded canvas', () => {
+    const view = cropView({ x: 0, y: 0, width: 1, height: 1 });
+    const susp = buildPassList([view], { ...GPU_OPTS, cropSuspended: true }).passes[0].geometryStep!;
+    expect(susp.geom).toEqual(view.module.getRenderGeometry(640, 480, true));
+    expect([susp.geom.outW, susp.geom.outH]).toEqual([susp.geom.expW, susp.geom.expH]);
+    const normal = buildPassList([view], GPU_OPTS).passes[0].geometryStep!;
+    expect(normal.geom).toEqual(view.module.getRenderGeometry(640, 480, false));
+    expect(normal.geom.outW).toBeLessThan(normal.geom.expW);
+  });
+
+  test('gpu-unsafe crop -> cpuBridge', () => {
+    setGpuUnsafeModuleIds(['crop']);
+    const { passes, cpuBridges } = buildPassList([cropView(), basicView()], GPU_OPTS);
+    expect(passes.map((p) => p.id)).toEqual(['basicadj']);
+    expect(cpuBridges).toEqual(['crop']);
+  });
+
+  test('basicadj dehaze != 0 -> crop cpuBridge (dehaze statistic reads pre-crop source)', () => {
+    const { passes, cpuBridges } = buildPassList([cropView(), basicView(0.3)], GPU_OPTS);
+    expect(passes.map((p) => p.id)).toEqual(['basicadj']);
+    expect(cpuBridges).toEqual(['crop']);
+  });
+
+  test('unsupported resample method -> cpuBridge', () => {
+    const { passes, cpuBridges } = buildPassList([cropView({ resampleMethod: 'lanczos' })], GPU_OPTS);
+    expect(passes).toHaveLength(0);
+    expect(cpuBridges).toEqual(['crop']);
+  });
+
+  test('no render dims, identity crop, disabled crop, or output over the texture cap -> no crop pass', () => {
+    expect(buildPassList([cropView()]).cpuBridges).toEqual(['crop']);
+    const identity = cropView({ angle: 0, orientation: 0, flipHorizontal: false, x: 0, y: 0, width: 1, height: 1 });
+    expect(buildPassList([identity], GPU_OPTS).passes).toHaveLength(0);
+    expect(buildPassList([cropView({ enabled: false })], GPU_OPTS).passes).toHaveLength(0);
+    expect(buildPassList([cropView({}, false)], GPU_OPTS).passes).toHaveLength(0);
+    expect(buildPassList([cropView()], { ...GPU_OPTS, maxTextureSize: 300 }).passes).toHaveLength(0);
+  });
+
+  test('a crop that is not first in the chain stays on the CPU', () => {
+    const { passes, cpuBridges } = buildPassList([basicView(), cropView()], GPU_OPTS);
+    expect(passes.map((p) => p.id)).toEqual(['basicadj']);
+    expect(cpuBridges).toEqual(['crop']);
+  });
+
+  test('downstream passes are built at the post-crop dims (local-adjustment masks)', () => {
+    const view = cropView();
+    const geom = view.module.getRenderGeometry(640, 480);
+    const rebuildMask = jest.fn((_id: string, w: number, h: number) => new Float32Array(w * h).fill(0.5));
+    const la = {
+      getId: () => 'localadjustments', isEnabled: true,
+      getParams: () => ({ layers: [{ id: 'L1', enabled: true, opacity: 1, basicAdj: { exposure: 0.3 }, mask: new Float32Array(640 * 480) }] }),
+    };
+    const { passes } = buildPassList([view, la], { ...GPU_OPTS, rebuildMask });
+    expect(passes.map((p) => p.id)).toEqual(['crop', 'localadjustments']);
+    expect(rebuildMask).toHaveBeenCalledWith('L1', geom.outW, geom.outH);
+  });
 });

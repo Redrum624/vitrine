@@ -1,3 +1,4 @@
+import { cancelAllSliderWheels, createSliderWheelHandler, flushAllSliderWheels } from './utils/sliderWheel';
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { MenuBar } from './components/Layout/MenuBar';
 import { Toolbar } from './components/Layout/Toolbar';
@@ -1376,28 +1377,33 @@ function App() {
     checkpointService.recordDebounced((tool && TOOL_LABELS[tool]) || 'Edit');
   }, [processingVersion]);
 
-  // Global: mouse-wheel over any range slider adjusts it one step per tick. Sets the
-  // value via the native setter + dispatches input/change so React's onChange fires.
+  // Global: mouse-wheel over any range slider adjusts it one step per tick. The displayed
+  // value follows every notch; the input/change pair is coalesced to one trailing dispatch
+  // per burst (last value wins, see utils/sliderWheel). Flushed on blur/unmount.
   useEffect(() => {
-    const onWheel = (e: WheelEvent) => {
-      const input = e.target as HTMLInputElement | null;
-      if (!input || input.tagName !== 'INPUT' || input.type !== 'range' || input.disabled) return;
-      e.preventDefault();
-      const step = parseFloat(input.step) || 1;
-      const min = parseFloat(input.min);
-      const max = parseFloat(input.max);
-      const decimals = (input.step.split('.')[1] || '').length;
-      let val = (parseFloat(input.value) || 0) + (e.deltaY < 0 ? step : -step);
-      if (!Number.isNaN(min)) val = Math.max(min, val);
-      if (!Number.isNaN(max)) val = Math.min(max, val);
-      const next = decimals ? val.toFixed(decimals) : String(val);
-      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
-      setter?.call(input, next);
-      input.dispatchEvent(new Event('input', { bubbles: true }));
-      input.dispatchEvent(new Event('change', { bubbles: true }));
+    const wheel = createSliderWheelHandler();
+    // Any click/keystroke commits a pending wheel value first (to the image it happened on).
+    const commitPending = () => flushAllSliderWheels();
+    // A pending wheel preview is dropped (never applied to the new photo) when the
+    // current image CHANGES; same-file reloads (progressive base swaps) leave it alone.
+    let lastPath = imageService.getCurrentImage()?.filePath;
+    const offImage = imageService.addImageLoadListener(() => {
+      const path = imageService.getCurrentImage()?.filePath;
+      if (path !== lastPath) { lastPath = path; cancelAllSliderWheels(); }
+    });
+    window.addEventListener('wheel', wheel.onWheel, { passive: false });
+    window.addEventListener('focusout', wheel.flush, true);
+    window.addEventListener('pointerdown', commitPending, true);
+    window.addEventListener('keydown', commitPending, true);
+    return () => {
+      window.removeEventListener('wheel', wheel.onWheel);
+      window.removeEventListener('focusout', wheel.flush, true);
+      window.removeEventListener('pointerdown', commitPending, true);
+      window.removeEventListener('keydown', commitPending, true);
+      offImage();
+      wheel.flush();
+      wheel.dispose();
     };
-    window.addEventListener('wheel', onWheel, { passive: false });
-    return () => window.removeEventListener('wheel', onWheel);
   }, []);
 
   // Alignment axis: horizontal center (workspace-relative px) of the LIVE photo

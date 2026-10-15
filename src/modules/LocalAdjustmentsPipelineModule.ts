@@ -77,13 +77,12 @@ export class LocalAdjustmentsPipelineModule implements PipelineModule {
   setParameters(params: Partial<LocalAdjustmentsPipelineParams>): void {
     this.params = { ...this.params, ...params };
 
-    // Sync layers with the local adjustments module
+    // Rebuild the module's layers from the given ones (deep copies). This is the worker
+    // config path (applyWorkerConfig → fresh singleton per worker): clearing without
+    // rebuilding dropped every local adjustment on the worker routes (fix round 1, 12c).
     if (params.layers) {
-      localAdjustmentsModule.clearAllLayers();
-      for (const _layer of params.layers) {
-        // Note: In a full implementation, we'd need to recreate layers
-        // For now, we'll update the module's internal state
-      }
+      localAdjustmentsModule.replaceLayers(params.layers, params.activeLayerId ?? this.params.activeLayerId);
+      this.syncLayersFromModule();
     }
 
     logger.debug('Local adjustments parameters updated');
@@ -233,6 +232,15 @@ export class LocalAdjustmentsPipelineModule implements PipelineModule {
     return success;
   }
 
+  /** Geometry without a bake: the next render rebakes the mask at its own size (Task 12c). */
+  setLayerGeometryDeferred(layerId: string, geom: MaskGeometry, opts?: { draft?: boolean }): boolean {
+    const success = localAdjustmentsModule.setLayerGeometryDeferred(layerId, geom, opts);
+    if (success) {
+      this.syncLayersFromModule();
+    }
+    return success;
+  }
+
   updateLayerBasicAdj(layerId: string, params: Partial<BasicAdjParams>): boolean {
     const success = localAdjustmentsModule.updateLayerBasicAdj(layerId, params);
     if (success) {
@@ -248,10 +256,8 @@ export class LocalAdjustmentsPipelineModule implements PipelineModule {
    * layer doesn't exist or has no geometry to rebuild from.
    */
   rebuildMask(layerId: string, width: number, height: number): Float32Array | null {
-    const layer = localAdjustmentsModule.getLayer(layerId);
-    if (!layer || !layer.geometry) return null;
-    localAdjustmentsModule.setLayerGeometry(layerId, layer.geometry, width, height);
-    return localAdjustmentsModule.getLayer(layerId)?.mask ?? null;
+    // rebakeLayerMask: a fresh buffer, and a live-drag draft stays a (capped) draft.
+    return localAdjustmentsModule.rebakeLayerMask(layerId, width, height);
   }
 
   updateBrushParameters(params: Partial<BrushParameters>): void {

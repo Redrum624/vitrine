@@ -37,6 +37,7 @@ jest.mock('../services/ExportService', () => ({
 }));
 
 import { multiExportService } from '../services/MultiExportService';
+import { isExportInProgress } from '../services/exportActivity';
 
 const fileExists = jest.fn();
 
@@ -58,6 +59,16 @@ beforeEach(() => {
   getSavedEditState.mockResolvedValue(null);
   restoreState.mockReturnValue(true);
   exportImage.mockResolvedValue({ success: true, outputPath: 'out' });
+});
+
+describe('exportMany — export in progress (final-review fix 2)', () => {
+  it('the whole run counts as an export in progress, released after', async () => {
+    const seen: boolean[] = [];
+    exportImage.mockImplementation(async () => { seen.push(isExportInProgress()); return { success: true, outputPath: 'out' }; });
+    await multiExportService.exportMany(['/i/a.jpg', '/i/b.png'], okOptions, controls());
+    expect(seen).toEqual([true, true]);
+    expect(isExportInProgress()).toBe(false);
+  });
 });
 
 describe('exportMany — per-image edits', () => {
@@ -233,5 +244,42 @@ describe('exportMany — editor state restore', () => {
     loadImageForExport.mockRejectedValue(new Error('boom'));
     await multiExportService.exportMany(['/i/a.jpg', '/i/b.jpg'], okOptions, controls());
     expect(restore).toHaveBeenCalledWith({ snapshot: 'CURRENT' }, 200, 120);
+  });
+});
+
+describe('exportMany - overwrite policy (v1.40.0)', () => {
+  beforeEach(() => {
+    (window as unknown as { electronAPI: unknown }).electronAPI = { fileExists };
+    fileExists.mockImplementation(async (p: string) => p.endsWith('a_VIT.jpg'));
+  });
+  afterEach(() => { delete (window as unknown as { electronAPI?: unknown }).electronAPI; });
+
+  it('default (keep both) bumps an existing target to _VIT_1', async () => {
+    await multiExportService.exportMany(['/i/a.jpg'], okOptions, controls());
+    expect(exportImage.mock.calls[0][3]).toMatchObject({ filename: 'a_VIT_1.jpg' });
+  });
+
+  it('replace targets the exact existing name', async () => {
+    await multiExportService.exportMany(['/i/a.jpg'], { ...okOptions, overwritePolicy: 'replace' }, controls());
+    expect(exportImage.mock.calls[0][3]).toMatchObject({ filename: 'a_VIT.jpg', overwritePolicy: 'replace' });
+  });
+
+  it('findExistingTargets lists only the default targets already on disk', async () => {
+    const found = await multiExportService.findExistingTargets(['/i/a.jpg', '/i/b.jpg'], 'jpeg', 'C:/out');
+    expect(found).toEqual(['a_VIT.jpg']);
+  });
+});
+
+describe('exportMany - replace with duplicate base names (fix round 1)', () => {
+  beforeEach(() => {
+    (window as unknown as { electronAPI: unknown }).electronAPI = { fileExists };
+    fileExists.mockImplementation(async (p: string) => /a_VIT(_1)?\.jpg$/.test(p));
+  });
+  afterEach(() => { delete (window as unknown as { electronAPI?: unknown }).electronAPI; });
+
+  it('only the exact target skips the disk check; a same-run duplicate never lands on an existing _VIT_1', async () => {
+    await multiExportService.exportMany(['/i/a.jpg', '/j/a.png'], { ...okOptions, overwritePolicy: 'replace' }, controls());
+    expect(exportImage.mock.calls[0][3]).toMatchObject({ filename: 'a_VIT.jpg' });
+    expect(exportImage.mock.calls[1][3]).toMatchObject({ filename: 'a_VIT_2.jpg' });
   });
 });

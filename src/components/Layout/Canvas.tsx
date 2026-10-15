@@ -9,12 +9,16 @@ import { clampPan } from '../../utils/panBounds';
 import { computeRequiredPreviewCap, BASE_PREVIEW_CAP } from '../../utils/previewQuality';
 import { CropTransformOverlay } from '../Canvas/CropTransformOverlay';
 import { InteractiveCropHandles } from '../Canvas/InteractiveCropHandles';
+import { FULL_FRAME } from '../Canvas/cropFrameMapping';
+import { ROTATION_EPSILON_DEG } from '../../modules/cropGeometry';
 import { imageProcessingPipeline } from '../../services/ImageProcessingPipeline';
 import { editPersistenceService } from '../../services/EditPersistenceService';
 import { checkpointService } from '../../services/CheckpointService';
 import { CropPipelineModule } from '../../modules/CropPipelineModule';
 import { LocalAdjustmentsPipelineModule } from '../../modules/LocalAdjustmentsPipelineModule';
 import { LocalAdjustmentMaskOverlay } from '../Canvas/LocalAdjustmentMaskOverlay';
+import { applyMaskGeometry } from '../Canvas/maskGeometryApply';
+import { requestLivePreview } from '../../utils/livePreviewRequest';
 import { notificationService } from '../../services/NotificationService';
 import { gpuPreviewPipeline } from '../../shaders/GpuPreviewPipeline';
 import { DEFAULT_RAW_DECODE_OPTIONS } from '../../types/electron';
@@ -88,6 +92,10 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
   const isProcessing = useAppStore((s) => s.isProcessing);
   const renderMode = useAppStore((s) => s.renderMode);
   const gpuResultVersion = useAppStore((s) => s.gpuResultVersion);
+  // v1.40.0 Task 10b: the resident GPU result's size + crop frame, published synchronously
+  // with each GPU render (a GPU crop changes the result dims). Preferred in gpu mode over
+  // processedImageData, whose histogram readback lags ~150 ms.
+  const gpuResultGeometry = useAppStore((s) => s.gpuResultGeometry);
   const setRenderMode = useAppStore((s) => s.setRenderMode);
   // Whether attach() succeeded on this canvas (WebGL2 present available). When false the
   // app behaves exactly as before: GL canvas stays hidden and renderMode is forced 'cpu'.
@@ -313,6 +321,16 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
             // Fall back to original image dimensions
             console.warn('Canvas: Cannot infer preview dimensions, using original image size');
           }
+        }
+      }
+
+      // GPU mode: the resident result IS what is displayed — size from its geometry
+      // (post-crop when the GPU crops; Task 10b), never from a lagging readback.
+      if (renderMode === 'gpu' && glAvailable) {
+        const gpuGeom = useAppStore.getState().gpuResultGeometry;
+        if (gpuGeom && gpuGeom.width > 0 && gpuGeom.height > 0) {
+          dataWidth = gpuGeom.width;
+          dataHeight = gpuGeom.height;
         }
       }
 
@@ -746,6 +764,8 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
       // (utils/previewQuality.ts) — a previous image's deep-zoom cap must not
       // tax every slider drag on this one.
       useAppStore.getState().setPreviewQualityCap(BASE_PREVIEW_CAP);
+      // A crop-drag suspension never survives an image switch (Task 9b fix 1).
+      useAppStore.getState().setCropDragSuspended(false);
 
 
       setImageLoading(true);
@@ -1301,24 +1321,45 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
             {cropModule && displayImage && canvasDimensions.width > 0 && (() => {
               // Get base params from module, override with live params during drag for real-time feedback
               const baseParams = cropModule.getCropModule().getParams();
-              // While a crop is APPLIED (adapter enabled, no drag in progress) the
-              // displayed content IS the cropped image — the rect (normalized to the
-              // FULL image) would mis-map onto it. Render a full-frame rect instead:
-              // handles sit on the cropped image's edges; grabbing one suspends the
-              // crop (onDragStart below), the full picture returns and the rect
-              // snaps back to its true position (the drag anchors on the REAL
-              // params via anchorCropParams).
-              const cropIsApplied =
-                cropModule.getEnabled() && baseParams.enabled && !isCropHandleDragging;
-              const displayParams = cropIsApplied
-                ? { ...baseParams, x: 0, y: 0, width: 1, height: 1 }
-                : (liveCropParams ? { ...baseParams, ...liveCropParams } : baseParams);
+              // v1.40.0 Task 9b — overlay == result. The overlay and handles always
+              // draw the REAL rect, mapped through the frame the displayed image
+              // ACTUALLY shows (processedImageData.frameRect — the effective clamped
+              // rect the last pass rendered; full frame when crop did not run). This
+              // replaces the old "applied crop ⇒ draw a full-frame rect" hack, which
+              // mis-mapped whenever the frame on screen was stale (drag start before
+              // the suspension pass landed: overlay 82% of the result area).
+              // Between mousedown and the first move the module rect is zeroed for the
+              // suspension — keep drawing the pre-drag rect (the drag anchor) meanwhile.
+              const displayParams = liveCropParams
+                ? { ...baseParams, ...liveCropParams }
+                : (isCropHandleDragging && preDragRectRef.current
+                  ? { ...baseParams, ...preDragRectRef.current }
+                  : baseParams);
+              // GPU mode (Task 10b): the frame + dims of the resident result on screen.
+              const gpuShown = renderMode === 'gpu' && glAvailable ? gpuResultGeometry : null;
+              const displayFrame = gpuShown
+                ? gpuShown.frameRect ?? null
+                : (processedImageData && typeof processedImageData === 'object' && 'frameRect' in processedImageData)
+                  ? processedImageData.frameRect ?? null
+                  : null;
+              const shownWidth = gpuShown
+                ? gpuShown.width
+                : (processedImageData && typeof processedImageData === 'object' && 'width' in processedImageData) ? processedImageData.width : (imageService.getCurrentImage()?.width || 0);
+              const shownHeight = gpuShown
+                ? gpuShown.height
+                : (processedImageData && typeof processedImageData === 'object' && 'height' in processedImageData) ? processedImageData.height : (imageService.getCurrentImage()?.height || 0);
+              // Drag bounds = the whole expanded canvas (owner decision, Task 9b fix 1:
+              // the suspended drag shows the WHOLE rotated photo, Lightroom-style). The
+              // handles may go anywhere that stays wedge-free — clampRect (below) clamps
+              // every emitted rect with the handle's anchor; the APPLIED result never
+              // shows canvas (render backstop). FULL_FRAME is a frozen constant, so the
+              // handles' geometry callbacks keep their identity across renders.
 
               return (
               <>
                 <CropTransformOverlay
-                  imageWidth={(processedImageData && typeof processedImageData === 'object' && 'width' in processedImageData) ? processedImageData.width : (imageService.getCurrentImage()?.width || 0)}
-                  imageHeight={(processedImageData && typeof processedImageData === 'object' && 'height' in processedImageData) ? processedImageData.height : (imageService.getCurrentImage()?.height || 0)}
+                  imageWidth={shownWidth}
+                  imageHeight={shownHeight}
                   originalWidth={imageService.getCurrentImage()?.width || 0}
                   originalHeight={imageService.getCurrentImage()?.height || 0}
                   cropParams={displayParams}
@@ -1329,6 +1370,7 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
                   contentHeight={contentDimensions.height}
                   showOverlay={showCropOverlay}
                   showRotationGrid={isAdjustingRotation}
+                  displayFrame={displayFrame}
                 />
 
                 {/* Interactive Crop Handles - drag to resize crop */}
@@ -1369,15 +1411,25 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
                     const inner = cropModule.getCropModule();
                     const p = inner.getParams();
                     const rectCropped = p.x !== 0 || p.y !== 0 || p.width !== 1 || p.height !== 1;
+                    const rotated = Math.abs(p.angle || 0) > ROTATION_EPSILON_DEG;
                     preDragRectRef.current = { x: p.x, y: p.y, width: p.width, height: p.height };
-                    if (cropModule.getEnabled() && p.enabled && rectCropped) {
+                    if (cropModule.getEnabled() && p.enabled && (rectCropped || rotated)) {
                       inner.setParams({ x: 0, y: 0, width: 1, height: 1 });
+                      // Suspension pass renders the WHOLE expanded canvas (Task 9b fix 1);
+                      // cleared at release, before the apply pass.
+                      useAppStore.getState().setCropDragSuspended(true);
                       imageProcessingPipeline.invalidateModuleCache('crop');
                       triggerReprocessing();
                     }
                   }}
                   onDragEnd={() => {
                     setIsCropHandleDragging(false);
+                    // Single apply (Task 9b): a drag-start suspension pass still in
+                    // flight is now stale — mark it so the release pass starts at once
+                    // instead of queueing behind it (and the stale result never paints).
+                    useAppStore.getState().supersedeInFlightPreview();
+                    // End the suspension: the release pass is clamped by the backstop.
+                    useAppStore.getState().setCropDragSuspended(false);
                     // A plain click (no movement) must not lose the crop: the rect
                     // was zeroed for the drag — put the pre-drag rect back first.
                     if (!cropDragChangedRef.current && preDragRectRef.current) {
@@ -1394,6 +1446,15 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
                   showHandles={showCropOverlay}
                   aspectRatio={cropModule.getCropModule().getAspectRatioValue()}
                   canvasRef={canvasRef}
+                  displayFrame={displayFrame}
+                  boundsRect={FULL_FRAME}
+                  clampRect={(rect, anchor) => {
+                    // Wedge-free live during the drag, at the NATIVE dims (the
+                    // render backstop re-clamps at each pass's actual dims).
+                    const native = imageService.getCurrentImage();
+                    if (!native?.width || !native?.height) return rect;
+                    return cropModule.getCropModule().clampRectWedgeFree(rect, native.width, native.height, anchor);
+                  }}
                 />
               </>
               );
@@ -1408,6 +1469,11 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
               if (!layer || (layer.type !== 'radial_gradient' && layer.type !== 'linear_gradient') || !layer.geometry) {
                 return null;
               }
+              const maskGeometryHooks = {
+                invalidateModuleCache: (id: string) => imageProcessingPipeline.invalidateModuleCache(id),
+                requestLivePreview,
+                triggerReprocessing,
+              };
               return (
                 <LocalAdjustmentMaskOverlay
                   viewport={viewport}
@@ -1415,22 +1481,12 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
                   contentHeight={contentDimensions.height}
                   layerType={layer.type}
                   geometry={layer.geometry}
-                  onGeometryChange={(geom) => {
-                    const img = imageService.getCurrentImage();
-                    if (img) {
-                      // Bake the mask at PREVIEW resolution (capped long-edge), not the
-                      // full 20MP — the full-res bake stalls the drag for ~1s. The
-                      // pipeline rebuilds the mask at its actual processing size when it
-                      // differs (incl. full-res export), so correctness is preserved.
-                      const cap = 1024;
-                      const s = Math.min(1, cap / Math.max(img.width, img.height));
-                      const bw = Math.max(1, Math.round(img.width * s));
-                      const bh = Math.max(1, Math.round(img.height * s));
-                      la.setLayerGeometry(layer.id, geom, bw, bh);
-                    }
-                    imageProcessingPipeline.invalidateModuleCache('localadjustments');
-                    triggerReprocessing();
-                  }}
+                  // Live during the drag (one per frame) + the final commit on release.
+                  // No pre-bake: the render rebakes the mask once at its own (post-crop)
+                  // size on both routes (Task 12c). Only the commit bumps processingVersion
+                  // (History checkpoint + persistence).
+                  onGeometryPreview={(geom) => applyMaskGeometry(la, layer.id, geom, 'live', maskGeometryHooks)}
+                  onGeometryChange={(geom) => applyMaskGeometry(la, layer.id, geom, 'commit', maskGeometryHooks)}
                   onDeselect={() => {
                     // Clicking off the mask hides it: clear the active layer + signal the
                     // panel (externalParamsVersion) to drop its selection. Both this

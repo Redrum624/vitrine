@@ -11,6 +11,7 @@ import { EnhanceParams, enhanceAiUpscaled, aiFinishRequested } from '../utils/en
 import { gpuPreviewPipeline } from '../shaders/GpuPreviewPipeline';
 import { guardDeveloping } from '../utils/developingGuard';
 import { logger } from '../utils/Logger';
+import { laTiledWorkerUnsafe } from './previewRouting';
 
 /** Float32 RGBA 0..1 (pipeline domain) → Uint8 RGBA 0..255 (AI IPC domain). */
 function float32ToUint8Rgba(f: Float32Array): Uint8Array {
@@ -316,7 +317,7 @@ class EnhanceService {
       const edited = await imageProcessingPipeline.processImage(
         new Float32Array(original.data),
         { width, height, channels: 4 },
-        { useWebWorkers: true, cacheResults: false },
+        { useWebWorkers: !laTiledWorkerUnsafe(imageProcessingPipeline, width, height), cacheResults: false },
       );
       const developMs = Math.round(performance.now() - tDevelop0);
 
@@ -537,7 +538,7 @@ class EnhanceService {
       const edited = await imageProcessingPipeline.processImage(
         new Float32Array(original.data),
         { width, height, channels: 4 },
-        { useWebWorkers: true, cacheResults: false },
+        { useWebWorkers: !laTiledWorkerUnsafe(imageProcessingPipeline, width, height), cacheResults: false },
       );
       const developMs = Math.round(performance.now() - tDevelop0);
 

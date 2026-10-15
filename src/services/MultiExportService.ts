@@ -4,6 +4,7 @@ import { exportService, ExportOptions } from './ExportService';
 import { decideExportProcessing } from './exportRouting';
 import { suffixedName, baseNameOf } from '../utils/exportFilename';
 import { logger } from '../utils/Logger';
+import { trackExport } from './exportActivity';
 
 export interface MultiExportSummary {
   /** Output filenames that were written successfully. */
@@ -64,7 +65,16 @@ interface DecodedForExport {
  * N+1's edits. Do not "optimize" the restore into the decode-ahead stage.
  */
 class MultiExportService {
-  async exportMany(
+  /** The whole run counts as one export in progress (exportActivity): no quit mid-batch. */
+  exportMany(
+    paths: string[],
+    options: Partial<ExportOptions>,
+    controls: MultiExportControls,
+  ): Promise<MultiExportSummary> {
+    return trackExport(() => this.exportManyUntracked(paths, options, controls));
+  }
+
+  private async exportManyUntracked(
     paths: string[],
     options: Partial<ExportOptions>,
     controls: MultiExportControls,
@@ -148,9 +158,13 @@ class MultiExportService {
 
           // Resolve a non-clobbering output name: <base>_VIT.<ext>, then _VIT_1, …
           // `emitted` covers names chosen this run whose files may still be encoding.
+          // overwritePolicy 'replace' (user chose Replace in the overwrite prompt) skips the
+          // on-disk check ONLY for the planned exact target (index 0); same-run duplicates resolve
+          // to the next name that is free on disk, so an unrelated _VIT_N is never clobbered.
+          const replace = options.overwritePolicy === 'replace';
           let index = 0;
           let name = suffixedName(baseNameOf(path), ext, index);
-          while (emitted.has(name.toLowerCase()) || (await this.fileExists(joinPath(outputDirectory, name)))) {
+          while (emitted.has(name.toLowerCase()) || ((!replace || index > 0) && (await this.fileExists(joinPath(outputDirectory, name))))) {
             index++;
             name = suffixedName(baseNameOf(path), ext, index);
           }
@@ -197,6 +211,25 @@ class MultiExportService {
     }
 
     return summary;
+  }
+
+  /**
+   * Which of the default (`_VIT`) target files for `paths` already exist in
+   * `outputDirectory`. Used to ask ONE overwrite question for the whole batch.
+   * Same-run name collisions (two sources with one base name) are not "existing".
+   */
+  async findExistingTargets(paths: string[], format: string | undefined, outputDirectory: string): Promise<string[]> {
+    const ext = extForFormat(format);
+    const existing: string[] = [];
+    const seen = new Set<string>();
+    for (const p of paths) {
+      const name = suffixedName(baseNameOf(p), ext, 0);
+      const key = name.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      if (await this.fileExists(joinPath(outputDirectory, name))) existing.push(name);
+    }
+    return existing;
   }
 
   private async fileExists(path: string): Promise<boolean> {

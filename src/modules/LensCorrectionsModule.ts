@@ -1,14 +1,15 @@
 import { logger } from '../utils/Logger';
-import { smoothStep, rgbToHsl, hslToRgb } from './utils/ColorUtils';
+import { rgbToHsl, hslToRgb } from './utils/ColorUtils';
 import { webGLImageProcessor } from '../services/WebGLImageProcessor';
 import { applyGaussianBlur, applyFilmGrain } from '../utils/ImageFilters';
+import { vignetteFactor } from '../utils/vignetteMath';
 
 export interface LensCorrectionsParams {
   // Vignetting correction
   vignetting: {
     enabled: boolean;
-    amount: number;        // -100 to 100, default: 0
-    midpoint: number;      // 0.1 to 2.0, default: 1.0
+    amount: number;        // -100 to 100, default: 0 (+ darkens the edges, - brightens them)
+    midpoint: number;      // 0.5 to 1.5, default: 1.0
     roundness: number;     // -100 to 100, default: 0
     feather: number;       // 0 to 100, default: 50
   };
@@ -198,7 +199,8 @@ export class LensCorrectionsModule {
     }
   }
 
-  // Vignetting correction
+  // Creative vignette: + darkens the edges, - brightens them (v1.40.0). The falloff math lives in
+  // utils/vignetteMath.ts, shared with WebGLImageProcessor.vignettingCPU and mirrored by FRAG_VIGNETTE.
   private correctVignetting(imageData: Float32Array, width: number, height: number): Float32Array {
     const result = new Float32Array(imageData);
     const { amount, midpoint, roundness, feather } = this.params.vignetting;
@@ -208,8 +210,7 @@ export class LensCorrectionsModule {
     const centerX = width / 2;
     const centerY = height / 2;
 
-    // Normalize amount
-    const correctionStrength = amount / 100.0;
+    const strength = amount / 100.0;
     const featherNorm = feather / 100.0;
     const roundnessNorm = roundness / 100.0;
 
@@ -217,42 +218,15 @@ export class LensCorrectionsModule {
       for (let x = 0; x < width; x++) {
         const pixelIndex = (y * width + x) * 4;
 
-        // Calculate distance from center
         const dx = (x - centerX) / centerX;
-        const dy = (y - centerY) / centerY;
+        const dy = ((y - centerY) / centerY) * (1.0 + roundnessNorm);
+        const normalizedDistance = Math.sqrt(dx * dx + dy * dy) / Math.sqrt(2); // 1 at the corner
 
-        // Apply roundness adjustment
-        const adjustedDx = dx;
-        const adjustedDy = dy * (1.0 + roundnessNorm);
+        const factor = vignetteFactor(normalizedDistance, strength, midpoint, featherNorm);
 
-        const distance = Math.sqrt(adjustedDx * adjustedDx + adjustedDy * adjustedDy);
-        const normalizedDistance = distance / Math.sqrt(2); // Normalize to corner
-
-        // Calculate vignetting mask
-        let vignetteMask = 1.0;
-        if (normalizedDistance > 0) {
-          const falloffStart = midpoint * 0.5;
-          const falloffEnd = midpoint * 1.5;
-
-          if (normalizedDistance > falloffStart) {
-            const falloffProgress = Math.min(1.0,
-              (normalizedDistance - falloffStart) / (falloffEnd - falloffStart)
-            );
-
-            // Apply feathering
-            const smoothFalloff = smoothStep(0, 1, falloffProgress);
-            const featheredFalloff = falloffProgress * (1.0 - featherNorm) + smoothFalloff * featherNorm;
-
-            vignetteMask = 1.0 - featheredFalloff;
-          }
-        }
-
-        // Apply vignetting correction
-        const correctionFactor = 1.0 + correctionStrength * (1.0 / Math.max(0.1, vignetteMask) - 1.0);
-
-        result[pixelIndex] *= correctionFactor;     // R
-        result[pixelIndex + 1] *= correctionFactor; // G
-        result[pixelIndex + 2] *= correctionFactor; // B
+        result[pixelIndex] *= factor;     // R
+        result[pixelIndex + 1] *= factor; // G
+        result[pixelIndex + 2] *= factor; // B
       }
     }
 
@@ -571,7 +545,8 @@ export class LensCorrectionsModule {
 
     if (vignettingAmount > 5) {
       this.params.vignetting.enabled = true;
-      this.params.vignetting.amount = Math.min(50, vignettingAmount);
+      // Creative vignette: a lens falloff is countered by a NEGATIVE amount (brighten the edges).
+      this.params.vignetting.amount = -Math.min(50, vignettingAmount);
       logger.info(`Auto-detected vignetting: ${vignettingAmount.toFixed(1)}`);
     }
   }

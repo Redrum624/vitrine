@@ -17,6 +17,7 @@
  * framebuffers so GPU self-checks stay meaningful.
  */
 import { logger } from '../utils/Logger';
+import { getKeepGpuBuffers } from '../utils/previewQuality';
 import {
   VERT_SRC,
   VERT_PRESENT,
@@ -32,13 +33,18 @@ import {
   FRAG_SHADOWSHIGHLIGHTS,
   FRAG_HIGHLIGHTRECOVERY,
   FRAG_LAYER_BLEND,
+  FRAG_DENOISE,
 } from './sources';
 import type { PassDescriptor, PassRuntime, SubPassTexture, MaskUpload } from './passDescriptors';
-import { buildPassList, buildLocalAdjustmentsPass, getGpuUnsafeModuleIds } from './passDescriptors';
+import { buildPassList, buildLocalAdjustmentsPass, getGpuUnsafeModuleIds, nrPassDescriptor, enhanceResidentDescriptor, cropPassDescriptor } from './passDescriptors';
+import { FRAG_CROP } from './cropShader';
+import type { NormalizedCropRect } from '../modules/cropGeometry';
+import { CropModule } from '../modules/CropModule';
 import { ENHANCE_PROGRAM_SOURCES } from './enhance.frag';
 import { enhanceImage, DEFAULT_ENHANCE_PARAMS } from '../utils/enhanceChain';
 import type { EnhanceParams, EnhanceResult } from '../utils/enhanceChain';
 import { casPeak, effectiveEnhanceKernels } from '../utils/enhanceOps';
+import { MAX_GPU_ENHANCE_OUTPUT_PIXELS, ENH_GAUSS_MAXR, ENH_DENOISE_MAXR } from './enhanceGpuLimits';
 import { computeGlobalEdgeMax } from '../utils/enhanceOps';
 import { basicAdjUniforms, exposureUniforms, shadowsHighlightsUniforms, highlightRecoveryUniforms, gainsUniforms, colorBalanceUniforms, vignetteUniforms } from './uniforms';
 import type { ShadowsHighlightsUniformParams } from './uniforms';
@@ -56,12 +62,99 @@ import { LensCorrectionsModule } from '../modules/LensCorrectionsModule';
 export interface PreviewRenderResult {
   width: number;
   height: number;
+  /**
+   * Steps that were requested but could NOT run on the GPU this frame (e.g. a resident
+   * enhance whose FBO alloc failed). Present only when non-empty; the frame is then NOT
+   * the requested result and must not be presented as such.
+   */
+  failedSteps?: string[];
+  /**
+   * Present only when a GPU crop geometry step ran (Task 10a): the effective rendered rect,
+   * expanded-canvas normalised — the GPU twin of the CPU crop's cropFrameRect. width/height
+   * are then the crop's output dims.
+   */
+  frameRect?: NormalizedCropRect;
 }
 
 interface PingPong {
   framebuffer: WebGLFramebuffer;
   texture: WebGLTexture;
 }
+
+/** A pooled FBO+texture that remembers its size (the edge-max reduction pyramid). */
+interface SizedFbo extends PingPong {
+  w: number;
+  h: number;
+}
+
+/**
+ * Sobel gradient magnitude of `.r` (luma on a YCC texture) — the EXACT stencil of
+ * FRAG_ENH_SOBEL, but without the 1/mmax normalisation and pow: its output is reduced to
+ * the global max that FRAG_ENH_SOBEL then divides by (the GPU twin of computeGlobalEdgeMax,
+ * computed on the chain input instead of the source pixels).
+ */
+export const FRAG_ENH_EDGE_MAG = `#version 300 es
+precision highp float;
+uniform sampler2D u_image;
+uniform vec2 u_texel;
+in vec2 v_uv;
+out vec4 outColor;
+float at(vec2 o) { return texture(u_image, v_uv + o).r; }
+void main() {
+  vec2 t = u_texel;
+  float a = at(vec2(-t.x, -t.y)), b = at(vec2(0.0, -t.y)), c = at(vec2(t.x, -t.y));
+  float d = at(vec2(-t.x, 0.0)),                            f = at(vec2(t.x, 0.0));
+  float g = at(vec2(-t.x,  t.y)), h = at(vec2(0.0,  t.y)), i = at(vec2(t.x,  t.y));
+  float gx = -a - 2.0 * d - g + c + 2.0 * f + i;
+  float gy = -a - 2.0 * b - c + g + 2.0 * h + i;
+  float mag = sqrt(gx * gx + gy * gy);
+  outColor = vec4(mag, mag, mag, 1.0);
+}`;
+
+/**
+ * One level of the max-reduction pyramid: each output texel is the max of `.r` over its
+ * 4×4 source block, texelFetch'd exactly and bounds-checked against u_srcSize (the last
+ * block of a non-multiple-of-4 edge is partial — out-of-range texels are skipped).
+ */
+export const FRAG_MAX_REDUCE4 = `#version 300 es
+precision highp float;
+uniform sampler2D u_image;
+uniform ivec2 u_srcSize;
+out vec4 outColor;
+void main() {
+  ivec2 base = ivec2(gl_FragCoord.xy) * 4;
+  float m = texelFetch(u_image, base, 0).r;
+  for (int dy = 0; dy < 4; dy++) {
+    for (int dx = 0; dx < 4; dx++) {
+      ivec2 p = base + ivec2(dx, dy);
+      if (p.x >= u_srcSize.x || p.y >= u_srcSize.y) continue;
+      m = max(m, texelFetch(u_image, p, 0).r);
+    }
+  }
+  outColor = vec4(m, m, m, 1.0);
+}`;
+
+/**
+ * Output sizes of the successive max_reduce4 passes that take a w×h texture down to 1×1
+ * (each level is ceil(/4) per axis). Always at least one level, so a 1×1 input still
+ * yields one [1,1] pass (uniform code path).
+ */
+export function edgeMaxReductionSizes(w: number, h: number): Array<[number, number]> {
+  const out: Array<[number, number]> = [];
+  let cw = w, ch = h;
+  do {
+    cw = Math.max(1, Math.ceil(cw / 4));
+    ch = Math.max(1, Math.ceil(ch / 4));
+    out.push([cw, ch]);
+  } while (cw > 1 || ch > 1);
+  return out;
+}
+
+/** Enhance-chain programs (from ENHANCE_PROGRAM_SOURCES) the resident enhance step draws. */
+const RESIDENT_ENHANCE_KEYS = [
+  'enh_rgb2ycc', 'enh_ycc2rgb', 'enh_denoise_chroma', 'enh_gauss',
+  'enh_rl_ratio', 'enh_rl_update', 'enh_sobel', 'enh_graft', 'enh_cas',
+] as const;
 
 /** Constant quad vertices for the present pass (TRIANGLE_STRIP: BL, BR, TL, TR).
  *  Allocated once; uploaded to the GPU buffer at attach() time via STATIC_DRAW. */
@@ -80,6 +173,14 @@ const PROGRAM_SOURCES: Record<string, string> = {
   shadowshighlights: FRAG_SHADOWSHIGHLIGHTS,
   highlightrecovery: FRAG_HIGHLIGHTRECOVERY,
   layerblend: FRAG_LAYER_BLEND,
+  // Noise Reduction: the SAME string WebGLImageProcessor's denoise uses → parity by construction.
+  denoise: FRAG_DENOISE,
+  // Crop/straighten/orientation geometry step (Task 10a) — passes[0].geometryStep only.
+  crop: FRAG_CROP,
+  // Resident enhance helpers (edge-mask global max on the GPU). Deliberately NOT in
+  // ENHANCE_PROGRAM_SOURCES: that set's all-compiled loop gates the bake-time enhance chain.
+  enh_edge_mag: FRAG_ENH_EDGE_MAG,
+  max_reduce4: FRAG_MAX_REDUCE4,
 };
 
 /** Tone-curve LUT sampler-uniform names, in the same order runToneCurveGPU binds them. */
@@ -88,17 +189,9 @@ const TONECURVE_LUT_NAMES = ['u_master', 'u_red', 'u_green', 'u_blue'] as const;
 /** Maximum number of mask textures kept in maskCache before LRU eviction. */
 const MAX_MASK_TEXTURES = 32;
 
-/**
- * Cap (output pixels) on the GPU deterministic enhance chain. Above this the CPU worker
- * path — which tiles >48MP with the apron — handles it: the GPU chain holds several
- * RGBA32F buffers at output resolution, so an unbounded output would exhaust VRAM.
- * runEnhanceChain also fails gracefully (returns null → CPU) if any FBO alloc is incomplete.
- */
-const MAX_GPU_ENHANCE_OUTPUT_PIXELS = 96_000_000;
-/** Max Gaussian radius the enh_gauss shader's constant loop (MAXR) supports. */
-const ENH_GAUSS_MAXR = 16;
-/** Max joint-bilateral chroma-denoise radius the enh_denoise_chroma shader supports. */
-const ENH_DENOISE_MAXR = 5;
+// MAX_GPU_ENHANCE_OUTPUT_PIXELS / ENH_GAUSS_MAXR / ENH_DENOISE_MAXR live in ./enhanceGpuLimits
+// (shared with passDescriptors.enhanceResidentEligible). runEnhanceChain also fails gracefully
+// (returns null → CPU) if any FBO alloc is incomplete.
 
 /**
  * Self-test epsilons for the GPU enhance chain vs the CPU enhanceImage reference. Despite
@@ -190,6 +283,11 @@ export class GpuPreviewPipeline {
 
   private srcTexture: WebGLTexture | null = null;
   private srcData: Float32Array | null = null;
+  /** Source texture dims (setSource). Kept apart from width/height: a crop geometry step
+   *  renders the chain — and the result — at its output dims. */
+  private srcWidth = 0;
+  private srcHeight = 0;
+  /** WORKING dims: the ping-pong FBOs, the chain, the resident result, readback/getSize. */
   private width = 0;
   private height = 0;
 
@@ -201,8 +299,18 @@ export class GpuPreviewPipeline {
   // resized with the ping-pong pair, freed in destroy(). NOT used by single-pass passes.
   private scratch: PingPong | null = null;
 
+  // Resident enhance (PassDescriptor.residentStep) intermediates: w×h RGBA32F FBOs (~5-7
+  // live at peak) + the small edge-max reduction pyramid. Never `scratch` or the ping pair.
+  // Lazily allocated; freed on resize (ensureFramebuffers), in destroy(), and at any
+  // render() whose passes carry no resident step.
+  private enhancePool: PingPong[] = [];
+  private reducePool: SizedFbo[] = [];
+
   // The output texture of the most recent render() (NOT read back).
   private resultTexture: WebGLTexture | null = null;
+  /** The resident result went through a geometry step (GPU crop): its pixels no longer line
+   *  up with srcTexture, so present()'s before/after split must not sample the source. */
+  private resultHasGeometry = false;
 
   // Cache of uploaded LUT textures, keyed by Float32Array identity. Re-uploaded
   // only when the LUT array reference changes.
@@ -216,6 +324,9 @@ export class GpuPreviewPipeline {
   // Bounded to MAX_MASK_TEXTURES entries (LRU eviction: least-recently-used entry is
   // the first key in the insertion-ordered Map).
   private maskCache = new Map<string, WebGLTexture>();
+  // layerId → that layer's current maskCache key (Task 12c). A drag mints a new key every
+  // frame; the layer's previous texture is evicted on upload instead of filling the LRU.
+  private maskKeyByLayer = new Map<string, string>();
 
   /**
    * Create the WebGL2 context (on the given canvas, or an internally-created one for
@@ -329,6 +440,11 @@ export class GpuPreviewPipeline {
     return this.gl !== null;
   }
 
+  /** GL_MAX_TEXTURE_SIZE cached at attach(); 0 before attach. */
+  getMaxTextureSize(): number {
+    return this.maxTextureSize;
+  }
+
   /** Compile one WebGLProgram per programKey from PROGRAM_SOURCES, cache in programs map. */
   private compilePrograms(gl: WebGL2RenderingContext): void {
     for (const [key, frag] of Object.entries(PROGRAM_SOURCES)) {
@@ -414,6 +530,8 @@ export class GpuPreviewPipeline {
       gl.deleteTexture(this.scratch.texture);
       this.scratch = null;
     }
+    // Resident enhance pools are size-bound too — reallocated lazily on next use.
+    this.freeEnhancePools(gl);
 
     for (let i = 0; i < 2; i++) {
       const texture = this.makeTexture(gl, width, height, null);
@@ -445,6 +563,51 @@ export class GpuPreviewPipeline {
     return this.scratch;
   }
 
+  /** Create one w×h RGBA32F FBO+texture; deletes it and throws if incomplete. */
+  private makeFbo(gl: WebGL2RenderingContext, w: number, h: number): PingPong {
+    const texture = this.makeTexture(gl, w, h, null);
+    const framebuffer = gl.createFramebuffer()!;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+    if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.deleteFramebuffer(framebuffer);
+      gl.deleteTexture(texture);
+      throw new Error(`[GPU-PIPELINE] resident enhance framebuffer incomplete at ${w}x${h}`);
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    return { framebuffer, texture };
+  }
+
+  /** Release the resident-enhance intermediate pools (enhancePool + reducePool). */
+  private freeEnhancePools(gl: WebGL2RenderingContext): void {
+    for (const pp of this.enhancePool) {
+      gl.deleteFramebuffer(pp.framebuffer);
+      gl.deleteTexture(pp.texture);
+    }
+    for (const pp of this.reducePool) {
+      gl.deleteFramebuffer(pp.framebuffer);
+      gl.deleteTexture(pp.texture);
+    }
+    this.enhancePool = [];
+    this.reducePool = [];
+  }
+
+  /** The edge-max reduction pyramid for `sizes`, reusing the pool when the sizes match. */
+  private ensureReducePool(gl: WebGL2RenderingContext, sizes: Array<[number, number]>): SizedFbo[] {
+    const match =
+      this.reducePool.length === sizes.length &&
+      this.reducePool.every((r, i) => r.w === sizes[i][0] && r.h === sizes[i][1]);
+    if (match) return this.reducePool;
+    for (const pp of this.reducePool) {
+      gl.deleteFramebuffer(pp.framebuffer);
+      gl.deleteTexture(pp.texture);
+    }
+    this.reducePool = [];
+    for (const [w, h] of sizes) this.reducePool.push({ ...this.makeFbo(gl, w, h), w, h });
+    return this.reducePool;
+  }
+
   /**
    * Upload the source image to srcTexture ONCE (kept separate from the ping-pong
    * textures), and (re)allocate the ping-pong FBOs on size change. Holds a reference
@@ -460,9 +623,12 @@ export class GpuPreviewPipeline {
     this.srcTexture = this.makeTexture(gl, width, height, data);
 
     this.srcData = data;
+    this.srcWidth = width;
+    this.srcHeight = height;
     this.width = width;
     this.height = height;
     this.resultTexture = this.srcTexture; // identity until render() runs
+    this.resultHasGeometry = false;
 
     // Diagnostic: confirm the uploaded buffer is real image data (not all-zero / wrong
     // length / a single-channel ramp), which would explain a red/garbage present.
@@ -516,7 +682,18 @@ export class GpuPreviewPipeline {
       this.maskCache.set(upload.key, cached);
       return cached;
     }
-    // Cache miss: evict the oldest entry (first key) when at capacity.
+    // Cache miss for this layer: its previous mask is superseded (moved / rebaked) —
+    // free it now so per-frame keys during a drag never churn the cache (Task 12c).
+    if (upload.layerId !== undefined) {
+      const prevKey = this.maskKeyByLayer.get(upload.layerId);
+      const prevTex = prevKey !== undefined ? this.maskCache.get(prevKey) : undefined;
+      if (prevKey !== undefined && prevTex) {
+        gl.deleteTexture(prevTex);
+        this.maskCache.delete(prevKey);
+      }
+      this.maskKeyByLayer.set(upload.layerId, upload.key);
+    }
+    // Evict the oldest entry (first key) when still at capacity.
     if (this.maskCache.size >= MAX_MASK_TEXTURES) {
       const firstKey = this.maskCache.keys().next().value as string;
       const evicted = this.maskCache.get(firstKey)!;
@@ -543,8 +720,38 @@ export class GpuPreviewPipeline {
     if (!gl) throw new Error('[GPU-PIPELINE] render called before a successful attach()');
     if (!this.srcTexture) throw new Error('[GPU-PIPELINE] render called before setSource()');
 
-    const width = this.width;
-    const height = this.height;
+    // ── Geometry step (Task 10a GPU crop) ──────────────────────────────────────
+    // Only valid at passes[0] (it reads the SOURCE texture, never the chain). It sets the
+    // working dims for the whole frame; without it (or if it cannot run) the frame works at
+    // the source dims. A geometry step that cannot run is reported, never silently dropped.
+    const failedSteps: string[] = [];
+    let geometryPass: PassDescriptor | null = null;
+    for (let i = 0; i < passes.length; i++) {
+      const step = passes[i].geometryStep;
+      if (!step) continue;
+      if (i !== 0) {
+        failedSteps.push(step.kind);
+      } else if (!this.programs.get(passes[i].programKey)) {
+        logger.warn(`[GPU-PIPELINE] no program for geometry step '${passes[i].id}' — frame stays at source dims`);
+        failedSteps.push(step.kind);
+      } else if (step.geom.inW !== this.srcWidth || step.geom.inH !== this.srcHeight) {
+        logger.warn(`[GPU-PIPELINE] geometry step built for ${step.geom.inW}x${step.geom.inH} != source ${this.srcWidth}x${this.srcHeight}`);
+        failedSteps.push(step.kind);
+      } else {
+        geometryPass = passes[i];
+      }
+    }
+    const geom = geometryPass?.geometryStep?.geom;
+    const width = geom ? geom.outW : this.srcWidth;
+    const height = geom ? geom.outH : this.srcHeight;
+    // Resize BEFORE recording the dims (ensureFramebuffers' no-op check reads this.width):
+    // a resize also drops the scratch FBO and the enhance pools (size-bound invariants).
+    this.ensureFramebuffers(gl, width, height);
+    this.width = width;
+    this.height = height;
+    const sized = (r: PreviewRenderResult): PreviewRenderResult => (geometryPass
+      ? { ...r, frameRect: geometryPass.geometryStep!.frameRect }
+      : r);
 
     // One PassRuntime per render. Dehaze is computed from the source pixels via the
     // shared single-source estimator on WebGLImageProcessor (no formula copy). The
@@ -555,7 +762,13 @@ export class GpuPreviewPipeline {
       dehaze: this.computeRenderDehaze(),
     };
 
+    // A frame without a resident enhance step frees its intermediate pools (VRAM is only
+    // held while enhance is actually live in the preview chain).
+    // The High/Max memory presets keep them allocated (no re-allocation hitch when enhance toggles).
+    if (!getKeepGpuBuffers() && !passes.some((p) => p.residentStep)) this.freeEnhancePools(gl);
+
     // If there are no runnable passes, the result is the source itself.
+    this.resultHasGeometry = false;
     if (passes.length === 0) {
       this.resultTexture = this.srcTexture;
       return { width, height };
@@ -568,7 +781,27 @@ export class GpuPreviewPipeline {
     let idx = 0;
     let drew = false;
 
+    if (geometryPass) {
+      // srcTexture (srcWidth x srcHeight) -> ping[0] at the output dims.
+      const prog = this.programs.get(geometryPass.programKey)!;
+      const dst = this.ping[idx]!;
+      gl.bindFramebuffer(gl.FRAMEBUFFER, dst.framebuffer);
+      gl.viewport(0, 0, width, height);
+      gl.useProgram(prog);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, inputTexture);
+      gl.uniform1i(gl.getUniformLocation(prog, 'u_image'), 0);
+      geometryPass.setUniforms(gl, prog, rt);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      inputTexture = dst.texture;
+      idx = 1 - idx;
+      drew = true;
+    }
+
     for (const pass of passes) {
+      // Geometry steps were handled (or reported as failed) above.
+      if (pass.geometryStep) continue;
+
       // ── Multi-pass module step (subPasses) ──────────────────────────────────
       // Executed as one logical step: chainInput is preserved, intermediates go to
       // the scratch FBO, the net output becomes the chain texture for the next module.
@@ -579,6 +812,25 @@ export class GpuPreviewPipeline {
           idx = result.idx;
           drew = true;
         }
+        continue;
+      }
+
+      // ── Resident enhance step (residentStep) ────────────────────────────────
+      // Reads the chain input, writes ONLY its final output into ping[idx]; intermediates
+      // live in enhancePool/reducePool. A failure is reported (failedSteps), never hidden.
+      if (pass.residentStep) {
+        const ok = this.runResidentEnhance(gl, inputTexture, this.ping[idx]!, pass.residentStep);
+        if (ok) {
+          inputTexture = this.ping[idx]!.texture;
+          idx = 1 - idx;
+          drew = true;
+        } else {
+          failedSteps.push('enhance');
+        }
+        // The step changed VAO/viewport/active-unit state — restore the chain's.
+        gl.bindVertexArray(this.vao);
+        gl.viewport(0, 0, width, height);
+        gl.activeTexture(gl.TEXTURE0);
         continue;
       }
 
@@ -634,8 +886,10 @@ export class GpuPreviewPipeline {
     gl.bindVertexArray(null);
 
     // If every pass was skipped (no matching program), fall back to the source.
+    // (A geometry step always draws, so a source fallback is only possible at source dims.)
     this.resultTexture = drew ? inputTexture : this.srcTexture;
-    return { width, height };
+    this.resultHasGeometry = !!geometryPass;
+    return sized(failedSteps.length > 0 ? { width, height, failedSteps } : { width, height });
   }
 
   /**
@@ -747,6 +1001,236 @@ export class GpuPreviewPipeline {
     return { outputTexture, idx };
   }
 
+  /**
+   * Resident enhance (sharpen, no upscale) on the live preview chain — the stage order of
+   * runEnhanceChain minus the Lanczos resample and the base readback, on the SAME enhance
+   * programs, so the in-chain result tracks the bake-time GPU/CPU chain.
+   *
+   * Texture ownership: READS `input` (srcTexture or a ping — never written), WRITES only the
+   * final enh_ycc2rgb into `dst` (the free ping slot). Intermediates come from enhancePool /
+   * reducePool, never `scratch` or the other ping.
+   *
+   * The edge-mask normaliser is the global max Sobel magnitude of the CHAIN INPUT's luma
+   * (upstream NR/exposure change it, so the source pixels are the wrong reference): computed
+   * by enh_edge_mag → repeated max_reduce4 → a 1-texel readPixels.
+   *
+   * Eligibility (radii, size caps) is gated pre-render by enhanceResidentEligible; the guards
+   * here repeat it so an out-of-contract call fails safe. Any throw / incomplete FBO → false.
+   */
+  private runResidentEnhance(
+    gl: WebGL2RenderingContext,
+    input: WebGLTexture,
+    dst: PingPong,
+    step: { kind: 'enhance'; params: EnhanceParams; kernelScale: number },
+  ): boolean {
+    const params = step.params;
+    const w = this.width, h = this.height;
+    if (w <= 0 || h <= 0) return false;
+    for (const key of RESIDENT_ENHANCE_KEYS) {
+      if (!this.enhancePrograms.get(key)) return false;
+    }
+    if (!this.programs.get('enh_edge_mag') || !this.programs.get('max_reduce4')) return false;
+
+    const eff = effectiveEnhanceKernels(params.psfSigma, params.hpSigma, step.kernelScale);
+    const runRL = params.rlIters > 0 && params.psfSigma > 0;
+    const psfRadius = runRL ? Math.max(1, Math.ceil(eff.psfSigma * 3)) : 0;
+    const hpRadius = Math.max(1, Math.ceil(eff.hpSigma * 3));
+    const chromaRadius = Math.max(1, Math.ceil(1.2 * 3));   // cleanChroma sigma 1.2
+    const edgeBlurRadius = Math.max(1, Math.ceil(2.0 * 3)); // edgeMask blur sigma 2.0
+    if (Math.max(psfRadius, hpRadius, chromaRadius, edgeBlurRadius) > ENH_GAUSS_MAXR) return false;
+    const runDenoise = params.denoiseStrength > 0;
+    const denRadius = runDenoise ? Math.max(1, Math.ceil((0.4 + 0.12 * params.denoiseStrength) * 3)) : 0;
+    if (denRadius > ENH_DENOISE_MAXR) return false;
+
+    // Per-call slot allocator over the persistent enhancePool (lazy growth, reuse across frames).
+    const inUse = new Set<PingPong>();
+    const acquire = (): PingPong => {
+      for (const pp of this.enhancePool) {
+        if (!inUse.has(pp)) { inUse.add(pp); return pp; }
+      }
+      const pp = this.makeFbo(gl, w, h);
+      this.enhancePool.push(pp);
+      inUse.add(pp);
+      return pp;
+    };
+    const release = (pp: PingPong): void => { inUse.delete(pp); };
+
+    const loc = (prog: WebGLProgram, n: string) => gl.getUniformLocation(prog, n);
+    const draw = (
+      key: string, dstFb: WebGLFramebuffer, dstW: number, dstH: number,
+      inputs: { tex: WebGLTexture; sampler: string }[],
+      setU?: (prog: WebGLProgram) => void,
+    ): void => {
+      const prog = this.enhancePrograms.get(key) ?? this.programs.get(key);
+      if (!prog) throw new Error(`resident enhance: no program '${key}'`);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, dstFb);
+      gl.viewport(0, 0, dstW, dstH);
+      gl.useProgram(prog);
+      for (let u = 0; u < inputs.length; u++) {
+        gl.activeTexture(gl.TEXTURE0 + u);
+        gl.bindTexture(gl.TEXTURE_2D, inputs[u].tex);
+        gl.uniform1i(loc(prog, inputs[u].sampler), u);
+      }
+      if (setU) setU(prog);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    };
+    const gauss = (out: PingPong, src: WebGLTexture, horizontal: boolean, radius: number, twoSigma2: number): void => {
+      draw('enh_gauss', out.framebuffer, w, h, [{ tex: src, sampler: 'u_image' }], (prog) => {
+        gl.uniform2f(loc(prog, 'u_dir'), horizontal ? 1 / w : 0, horizontal ? 0 : 1 / h);
+        gl.uniform1i(loc(prog, 'u_radius'), radius);
+        gl.uniform1f(loc(prog, 'u_twoSigma2'), twoSigma2);
+      });
+    };
+
+    try {
+      gl.bindVertexArray(this.vao);
+
+      // ── Native-res luma/chroma work ─────────────────────────────────────────────
+      let running = acquire();
+      draw('enh_rgb2ycc', running.framebuffer, w, h, [{ tex: input, sampler: 'u_image' }]);
+
+      if (runDenoise) {
+        const sSigma = 0.4 + 0.12 * params.denoiseStrength;
+        const den = acquire();
+        draw('enh_denoise_chroma', den.framebuffer, w, h, [{ tex: running.texture, sampler: 'u_image' }], (prog) => {
+          gl.uniform2f(loc(prog, 'u_texel'), 1 / w, 1 / h);
+          gl.uniform1i(loc(prog, 'u_radius'), denRadius);
+          gl.uniform1f(loc(prog, 'u_s2'), 2 * sSigma * sSigma);
+          gl.uniform1f(loc(prog, 'u_r2'), 2 * 0.10 * 0.10);
+        });
+        release(running);
+        running = den;
+      }
+      // Y here == origY (denoise leaves .r untouched) — the RL y0 and graft origY source.
+      const yccTex = running.texture;
+
+      if (runRL) {
+        const twoPsf2 = 2 * eff.psfSigma * eff.psfSigma;
+        const estA = acquire(), estB = acquire();
+        const b1 = acquire(), b2 = acquire();
+        let curEst = yccTex; // iter-0 estimate = original luma (.r)
+        for (let k = 0; k < params.rlIters; k++) {
+          gauss(b1, curEst, true, psfRadius, twoPsf2);          // conv = H then V
+          gauss(b2, b1.texture, false, psfRadius, twoPsf2);
+          draw('enh_rl_ratio', b1.framebuffer, w, h, [{ tex: yccTex, sampler: 'u_y0' }, { tex: b2.texture, sampler: 'u_conv' }]);
+          gauss(b2, b1.texture, true, psfRadius, twoPsf2);      // corr = H then V
+          gauss(b1, b2.texture, false, psfRadius, twoPsf2);
+          const estNext = (k % 2 === 0) ? estA : estB;
+          draw('enh_rl_update', estNext.framebuffer, w, h, [{ tex: curEst, sampler: 'u_est' }, { tex: b1.texture, sampler: 'u_corr' }]);
+          curEst = estNext.texture;
+        }
+        const finalEst = ((params.rlIters - 1) % 2 === 0) ? estA : estB;
+        release(finalEst === estA ? estB : estA);
+        release(b1); release(b2);
+
+        // edgeMask(origY): global max |Sobel| of the CHAIN INPUT's luma, reduced on the GPU.
+        const mag = acquire();
+        draw('enh_edge_mag', mag.framebuffer, w, h, [{ tex: yccTex, sampler: 'u_image' }], (prog) => {
+          gl.uniform2f(loc(prog, 'u_texel'), 1 / w, 1 / h);
+        });
+        const sizes = edgeMaxReductionSizes(w, h);
+        const pyramid = this.ensureReducePool(gl, sizes);
+        let rSrc = mag.texture, rw = w, rh = h;
+        for (let i = 0; i < sizes.length; i++) {
+          const [ow, oh] = sizes[i];
+          const sw = rw, sh = rh;
+          draw('max_reduce4', pyramid[i].framebuffer, ow, oh, [{ tex: rSrc, sampler: 'u_image' }], (prog) => {
+            gl.uniform2i(loc(prog, 'u_srcSize'), sw, sh);
+          });
+          rSrc = pyramid[i].texture; rw = ow; rh = oh;
+        }
+        release(mag);
+        const px = new Float32Array(4);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, pyramid[pyramid.length - 1].framebuffer);
+        gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.FLOAT, px);
+        if (!Number.isFinite(px[0])) throw new Error(`resident enhance: edge max not finite (${px[0]})`);
+        const mmax = Math.max(1e-6, px[0]);
+
+        const em1 = acquire();
+        draw('enh_sobel', em1.framebuffer, w, h, [{ tex: yccTex, sampler: 'u_image' }], (prog) => {
+          gl.uniform2f(loc(prog, 'u_texel'), 1 / w, 1 / h);
+          gl.uniform1f(loc(prog, 'u_invMmax'), 1 / mmax);
+          gl.uniform1f(loc(prog, 'u_gamma'), 0.75);
+        });
+        const em2 = acquire();
+        gauss(em2, em1.texture, true, edgeBlurRadius, 2 * 2.0 * 2.0);
+        release(em1);
+        const em3 = acquire();
+        gauss(em3, em2.texture, false, edgeBlurRadius, 2 * 2.0 * 2.0);
+        release(em2);
+
+        // highpass(restored, hpSigma) — effective (scaled) sigma.
+        const twoHp2 = 2 * eff.hpSigma * eff.hpSigma;
+        const hp1 = acquire();
+        gauss(hp1, curEst, true, hpRadius, twoHp2);
+        const hp2 = acquire();
+        gauss(hp2, hp1.texture, false, hpRadius, twoHp2);
+        release(hp1);
+
+        const grafted = acquire();
+        draw('enh_graft', grafted.framebuffer, w, h, [
+          { tex: yccTex, sampler: 'u_running' },
+          { tex: em3.texture, sampler: 'u_mask' },
+          { tex: curEst, sampler: 'u_detail' },
+          { tex: hp2.texture, sampler: 'u_lowpass' },
+        ], (prog) => {
+          gl.uniform1f(loc(prog, 'u_alpha'), params.alpha);
+        });
+        release(em3); release(hp2); release(finalEst);
+        release(running); // old YCC replaced by grafted
+        running = grafted;
+      }
+
+      const cur = acquire();
+      draw('enh_ycc2rgb', cur.framebuffer, w, h, [
+        { tex: running.texture, sampler: 'u_luma' },
+        { tex: running.texture, sampler: 'u_chroma' },
+      ]);
+      release(running);
+
+      // ── Finish (CAS luma + chroma clean) — no resample on the resident path ────
+      const F = acquire();
+      draw('enh_rgb2ycc', F.framebuffer, w, h, [{ tex: cur.texture, sampler: 'u_image' }]);
+      release(cur);
+
+      // Peak from the SHARED casPeak × eff.casGain; sharpness ≤ 0 skips the draw (zero = off).
+      let casTex = F.texture;
+      if (params.sharpness > 0) {
+        const Fcas = acquire();
+        draw('enh_cas', Fcas.framebuffer, w, h, [{ tex: F.texture, sampler: 'u_image' }], (prog) => {
+          gl.uniform2f(loc(prog, 'u_texel'), 1 / w, 1 / h);
+          gl.uniform1f(loc(prog, 'u_peak'), casPeak(params.sharpness) * eff.casGain);
+        });
+        casTex = Fcas.texture;
+      }
+
+      let chromaTex = F.texture;
+      if (params.chromaClean) {
+        const twoChroma2 = 2 * 1.2 * 1.2;
+        const c1 = acquire();
+        gauss(c1, F.texture, true, chromaRadius, twoChroma2);
+        const c2 = acquire();
+        gauss(c2, c1.texture, false, chromaRadius, twoChroma2);
+        release(c1);
+        chromaTex = c2.texture;
+      }
+
+      draw('enh_ycc2rgb', dst.framebuffer, w, h, [
+        { tex: casTex, sampler: 'u_luma' },
+        { tex: chromaTex, sampler: 'u_chroma' },
+      ]);
+      return true;
+    } catch (e) {
+      logger.warn('[GPU-PIPELINE] resident enhance failed — step reported as failed:', e instanceof Error ? e.message : String(e));
+      // Drop the pools: a failed alloc may be VRAM pressure, and a half-built pool is useless.
+      this.freeEnhancePools(gl);
+      return false;
+    } finally {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.activeTexture(gl.TEXTURE0);
+    }
+  }
+
   // basicadj's dehaze PARAM (a scalar) is baked into the pass closure by buildPassList,
   // but the dehaze STATE (hazeStrength/hazeDivisor) is a pixel statistic of the source
   // and so belongs to the per-render PassRuntime. The caller therefore supplies the
@@ -769,7 +1253,8 @@ export class GpuPreviewPipeline {
       return { active: false, hazeStrength: 0, hazeDivisor: 1 };
     }
     // Single source of truth: reuse WebGLImageProcessor's estimator (no formula copy).
-    return webGLImageProcessor.computeDehazeState(this.srcData, this.width, this.height, this.dehazeParam);
+    // srcData is the SOURCE buffer — its dims, not the (possibly cropped) working dims.
+    return webGLImageProcessor.computeDehazeState(this.srcData, this.srcWidth, this.srcHeight, this.dehazeParam);
   }
 
   /** Current render dimensions (set by setSource; 0 before first setSource call). */
@@ -819,11 +1304,13 @@ export class GpuPreviewPipeline {
       this.lutTextures.clear();
       for (const tex of this.maskCache.values()) gl.deleteTexture(tex);
       this.maskCache.clear();
+      this.maskKeyByLayer.clear();
       if (this.srcTexture) gl.deleteTexture(this.srcTexture);
       if (this.scratch) {
         gl.deleteFramebuffer(this.scratch.framebuffer);
         gl.deleteTexture(this.scratch.texture);
       }
+      this.freeEnhancePools(gl);
       if (this.quadBuffer) gl.deleteBuffer(this.quadBuffer);
       if (this.presentQuadBuffer) gl.deleteBuffer(this.presentQuadBuffer);
       if (this.vao) gl.deleteVertexArray(this.vao);
@@ -835,10 +1322,13 @@ export class GpuPreviewPipeline {
     this.presentQuadBuffer = null;
     this.presentUniforms = null;
     this.scratch = null;
+    this.enhancePool = [];
+    this.reducePool = [];
     this.ping = [null, null];
     this.srcTexture = null;
     this.srcData = null;
     this.resultTexture = null;
+    this.resultHasGeometry = false;
     this.vao = null;
     this.quadBuffer = null;
     this.gl = null;
@@ -846,6 +1336,8 @@ export class GpuPreviewPipeline {
     // attach() wrap the NEW context it creates. No un-wrapping needed.
     this.rawGetUniformLocation = null;
     this.attached = false;
+    this.srcWidth = 0;
+    this.srcHeight = 0;
     this.width = 0;
     this.height = 0;
     this.presentFrames = 0;
@@ -881,6 +1373,7 @@ export class GpuPreviewPipeline {
    *
    * Before/after split: fragments with canvas-pixel x < splitX sample srcTexture
    * (original); others sample resultTexture (processed). Pass splitX < 0 to disable.
+   * A GPU-cropped result never pairs with the uncropped source (see the unit-1 bind).
    */
   present(opts: {
     zoom: number;
@@ -995,8 +1488,12 @@ export class GpuPreviewPipeline {
 
     // Bind source/original → unit 1 (u_original); fall back to resultTexture if no
     // source is available (split will show the same image on both sides, harmless).
+    // A geometry-stepped (GPU-cropped) result has other dims/orientation than the source:
+    // sampling the source at the same uv would show a misaligned "before" (Task 10b), so the
+    // split then shows the result on both sides. (Canvas passes splitX -1 anyway: the
+    // before/after view is the dedicated OriginalPane.)
     gl.activeTexture(gl.TEXTURE1);
-    gl.bindTexture(gl.TEXTURE_2D, this.srcTexture ?? this.resultTexture);
+    gl.bindTexture(gl.TEXTURE_2D, this.resultHasGeometry ? this.resultTexture : (this.srcTexture ?? this.resultTexture));
     gl.uniform1i(this.presentUniforms.u_original, 1);
 
     // Before/after split: pass canvas-pixel x, or -1 to disable.
@@ -1661,7 +2158,7 @@ export class GpuPreviewPipeline {
       // CA is a radial shift — both make pixel-exact comparison harder than a per-pixel op).
       // GPU shader is FRAG_VIGNETTE.
       // CPU reference: LensCorrectionsModule.processImage() with ONLY vignetting enabled.
-      const vigAmount = 50;   // amount / 100 = 0.5 in the uniform (negative = darken)
+      const vigAmount = 50;   // amount / 100 = 0.5 in the uniform (positive = darken, v1.40.0)
       const vigMidpoint = 1.0;
       const vigRoundness = 0;
       const vigFeather = 50;
@@ -1693,7 +2190,7 @@ export class GpuPreviewPipeline {
       for (let i = 0; i < refVig.length; i++) {
         vigMaxDiff = Math.max(vigMaxDiff, Math.abs(gpuVig[i] - refVig[i]));
       }
-      // Per-pixel smoothstep vignette — same formula both sides.
+      // Per-pixel smoothstep vignette - same formula both sides (utils/vignetteMath.ts <-> FRAG_VIGNETTE).
       const vigOk = vigMaxDiff < 1e-3;
       logger.info(`[GPU-PIPELINE] vignette self-test maxDiff=${vigMaxDiff.toExponential(2)} ${vigOk ? 'PASS' : 'FAIL'}`);
 
@@ -1755,8 +2252,140 @@ export class GpuPreviewPipeline {
       }
       logger.info(`[GPU-PIPELINE] enhance-upscale self-test maxDiff=${enhUpMaxDiff.toExponential(2)} ${enhUpOk ? 'PASS' : 'FAIL'}`);
 
-      const ok = basicAdjOk && exposureOk && shOk && hrOk && laOk && wbOk && tcOk && cbOk && vigOk && enhSharpenOk && enhUpOk;
-      const maxDiff = Math.max(basicAdjMaxDiff, exposureMaxDiff, shMaxDiff, hrMaxDiff, laMaxDiff, wbMaxDiff, tcMaxDiff, cbMaxDiff, vigMaxDiff, enhSharpenMaxDiff, enhUpMaxDiff);
+      // ── 12. noise-reduction sub-test (resident NLM 'denoise' pass vs CPU-side reference) ──
+      // Same 40x32 fixture + deterministic noise (LCG, no Math.random) so the NLM kernel has
+      // real structure to average. A null reference counts as FAIL.
+      const nrData = new Float32Array(enhData);
+      let nrSeed = 12345;
+      for (let i = 0; i < enhW * enhH; i++) {
+        for (let c = 0; c < 3; c++) {
+          nrSeed = (Math.imul(nrSeed, 1664525) + 1013904223) >>> 0;
+          nrData[i * 4 + c] = cl01(nrData[i * 4 + c] + ((nrSeed / 4294967296) - 0.5) * 0.1);
+        }
+      }
+      const nrStrength = 50;
+      const nrPass = nrPassDescriptor(nrStrength);
+      let nrMaxDiff = Infinity, nrEffect = 0, nrOk = false;
+      this.setSource(nrData, enhW, enhH);
+      this.render([nrPass]);
+      const gpuNr = this.readback();
+      const refNr = webGLImageProcessor.denoise(new Float32Array(nrData), enhW, enhH, nrStrength);
+      if (!refNr) {
+        logger.warn('[GPU-PIPELINE] noise-reduction self-test: CPU reference returned null');
+      } else {
+        nrMaxDiff = 0;
+        for (let i = 0; i < refNr.length; i++) {
+          nrMaxDiff = Math.max(nrMaxDiff, Math.abs(gpuNr[i] - refNr[i]));
+          nrEffect = Math.max(nrEffect, Math.abs(nrData[i] - refNr[i]));
+        }
+        // A skipped 'denoise' pass would leave the noisy fixture untouched; require the
+        // reference to actually differ from the input so that cannot PASS.
+        nrOk = nrMaxDiff < 1e-4 && nrEffect > 1e-4;
+      }
+      logger.info(`[GPU-PIPELINE] noise-reduction self-test maxDiff=${nrMaxDiff.toExponential(2)} effect=${nrEffect.toExponential(2)} ${nrOk ? 'PASS' : 'FAIL'}`);
+
+      // ── 13. enhance-resident sub-test (in-chain residentStep vs CPU enhanceImage) ──
+      // (a) native, (b) kernelScale 0.5, (c) [+1 EV exposure, enhance] — proves the edge max
+      // is taken from the CHAIN INPUT, not the source. A failed step (failedSteps) is a FAIL.
+      const runResident = (
+        passes: PassDescriptor[],
+        src: Float32Array,
+      ): Float32Array | null => {
+        this.setSource(src, enhW, enhH);
+        const res = this.render(passes);
+        if (res.failedSteps && res.failedSteps.length > 0) return null;
+        return this.readback();
+      };
+      const resMaxDiff = (gpu: Float32Array | null, ref: EnhanceResult): number => {
+        if (!gpu) return Infinity;
+        let m = 0;
+        for (let i = 0; i < ref.enhanced.length; i++) m = Math.max(m, Math.abs(gpu[i] - ref.enhanced[i]));
+        return m;
+      };
+      const mkEnhResPass = (kernelScale: number): PassDescriptor => enhanceResidentDescriptor(enhBaseParams, kernelScale);
+      const exposure1EvPass: PassDescriptor = {
+        id: 'exposure',
+        programKey: 'exposure',
+        setUniforms: (_gl, _prog) => exposureUniforms(2, 0)(_gl, _prog),
+      };
+      const enhResA = resMaxDiff(
+        runResident([mkEnhResPass(1)], enhData),
+        enhanceImage(new Float32Array(enhData), enhW, enhH, enhBaseParams),
+      );
+      const enhResB = resMaxDiff(
+        runResident([mkEnhResPass(0.5)], enhData),
+        enhanceImage(new Float32Array(enhData), enhW, enhH, enhBaseParams, undefined, 0.5),
+      );
+      const exp1Module = new ExposureModule();
+      exp1Module.setCurrentParams({ exposure: 1, black: 0 });
+      const enhExposed = exp1Module.process(new Float32Array(enhData), { width: enhW, height: enhH, channels: 4 });
+      const enhResPass = mkEnhResPass(1);
+      const enhResC = resMaxDiff(
+        runResident([exposure1EvPass, enhResPass], enhData),
+        enhanceImage(new Float32Array(enhExposed), enhW, enhH, enhBaseParams),
+      );
+      const enhResMaxDiff = Math.max(enhResA, enhResB, enhResC);
+      const enhResOk = enhResMaxDiff < ENH_SHARPEN_EPS;
+      logger.info(`[GPU-PIPELINE] enhance-resident self-test maxDiff=${enhResMaxDiff.toExponential(2)} (native=${enhResA.toExponential(2)} scale0.5=${enhResB.toExponential(2)} chained=${enhResC.toExponential(2)}) ${enhResOk ? 'PASS' : 'FAIL'}`);
+
+      // ── 14. crop geometry sub-test (Task 10a: GPU crop vs CropModule.process) ──
+      // 37x23 synthetic, 3.3 deg + orientation 90 + flipH, bicubic: exercises the un-orient /
+      // un-flip tap mapping, the fine rotation and Catmull-Rom with tap clamping, plus the
+      // size change (the frame renders at the crop's output dims). The descriptor is the
+      // SAME factory buildPassList uses, fed the module's render geometry (backstop included).
+      const cropW = 37, cropH = 23;
+      const cropData = new Float32Array(cropW * cropH * 4);
+      for (let yy = 0; yy < cropH; yy++) {
+        for (let xx = 0; xx < cropW; xx++) {
+          const i = (yy * cropW + xx) * 4;
+          cropData[i] = xx / cropW;
+          cropData[i + 1] = yy / cropH;
+          cropData[i + 2] = ((xx * 7 + yy * 3) % 11) / 11;
+          cropData[i + 3] = 1;
+        }
+      }
+      const cropModule = new CropModule();
+      cropModule.setParams({ enabled: true, angle: 3.3, orientation: 90, flipHorizontal: true, resampleMethod: 'bicubic' });
+      const cropGeom = cropModule.getRenderGeometry(cropW, cropH);
+      this.setSource(cropData, cropW, cropH);
+      const cropRes = this.render([cropPassDescriptor(cropGeom)]);
+      const gpuCrop = this.readback();
+      const refCrop = cropModule.process(new Float32Array(cropData), { width: cropW, height: cropH, channels: 4 });
+      const cropDimsOk = !cropRes.failedSteps &&
+        cropRes.width === cropGeom.outW && cropRes.height === cropGeom.outH &&
+        gpuCrop.length === refCrop.length && refCrop.length === cropGeom.outW * cropGeom.outH * 4;
+      let cropMaxDiffA = Infinity;
+      if (cropDimsOk) {
+        cropMaxDiffA = 0;
+        for (let i = 0; i < refCrop.length; i++) cropMaxDiffA = Math.max(cropMaxDiffA, Math.abs(gpuCrop[i] - refCrop[i]));
+      }
+      // (b) the suspended full-canvas drag preview: orientation 270 + flipV + bilinear, fill
+      // pixels in the wedges (the predicate path, u_wedgeFree = 0) vs processWithGeometry.
+      const cropModuleB = new CropModule();
+      cropModuleB.setParams({ enabled: true, angle: -3.3, orientation: 270, flipVertical: true, resampleMethod: 'bilinear', fillColor: [0.2, 0.4, 0.6, 1] });
+      const cropGeomB = cropModuleB.getRenderGeometry(cropW, cropH, true);
+      this.setSource(cropData, cropW, cropH);
+      const cropResB = this.render([cropPassDescriptor(cropGeomB)]);
+      const gpuCropB = this.readback();
+      const refCropB = cropModuleB.processWithGeometry(new Float32Array(cropData), cropGeomB, 4);
+      const cropDimsOkB = !cropResB.failedSteps &&
+        cropResB.width === cropGeomB.outW && cropResB.height === cropGeomB.outH &&
+        cropGeomB.outW === cropGeomB.expW && gpuCropB.length === refCropB.length;
+      let cropMaxDiffB = Infinity;
+      if (cropDimsOkB) {
+        cropMaxDiffB = 0;
+        for (let i = 0; i < refCropB.length; i++) cropMaxDiffB = Math.max(cropMaxDiffB, Math.abs(gpuCropB[i] - refCropB[i]));
+      }
+      const cropMaxDiff = Math.max(cropMaxDiffA, cropMaxDiffB);
+      const cropOk = cropDimsOk && cropDimsOkB && cropMaxDiff < 1e-3;
+      logger.info(
+        `[GPU-PIPELINE] crop self-test maxDiff=${cropMaxDiff.toExponential(2)} ` +
+        `(clamped ${cropRes.width}x${cropRes.height}=${cropMaxDiffA.toExponential(2)} ` +
+        `full-canvas ${cropResB.width}x${cropResB.height}=${cropMaxDiffB.toExponential(2)}) ${cropOk ? 'PASS' : 'FAIL'}`,
+      );
+
+      const ok = basicAdjOk && exposureOk && shOk && hrOk && laOk && wbOk && tcOk && cbOk && vigOk && enhSharpenOk && enhUpOk && nrOk && enhResOk && cropOk;
+      const maxDiff = Math.max(basicAdjMaxDiff, exposureMaxDiff, shMaxDiff, hrMaxDiff, laMaxDiff, wbMaxDiff, tcMaxDiff, cbMaxDiff, vigMaxDiff, enhSharpenMaxDiff, enhUpMaxDiff, nrMaxDiff, enhResMaxDiff, cropMaxDiff);
 
       // Map each failed sub-test to the MODULE ID buildPassList uses, so a broken GPU shader
       // is routed to the CPU bridge (proven path) instead of corrupting the image (e.g. the
@@ -1778,6 +2407,12 @@ export class GpuPreviewPipeline {
       // only the Lanczos-upscale route to CPU (sharpen-only can still run on GPU).
       if (!enhSharpenOk) unsafe.push('enhance');
       if (!enhUpOk) unsafe.push('enhance-upscale');
+      // Resident (in-chain) paths: NR 'denoise' pass and the enhance residentStep. These ids are
+      // honoured by buildPassList, NOT by runEnhanceChain (which gates on 'enhance' only).
+      if (!nrOk) unsafe.push('noise-reduction');
+      if (!enhResOk) unsafe.push('enhance-resident');
+      // GPU crop geometry step (buildPassList routes an unsafe 'crop' to the CPU bridge).
+      if (!cropOk) unsafe.push('crop');
 
       return { ok, maxDiff, unsafe };
     } catch (e) {
@@ -1787,7 +2422,7 @@ export class GpuPreviewPipeline {
       return {
         ok: false,
         maxDiff: Infinity,
-        unsafe: ['basicadj', 'exposure', 'shadowshighlights', 'highlightrecovery', 'localadjustments', 'temperature', 'tonecurve', 'colorbalance', 'lenscorrections', 'enhance', 'enhance-upscale'],
+        unsafe: ['basicadj', 'exposure', 'shadowshighlights', 'highlightrecovery', 'localadjustments', 'temperature', 'tonecurve', 'colorbalance', 'lenscorrections', 'enhance', 'enhance-upscale', 'noise-reduction', 'enhance-resident', 'crop'],
       };
     }
   }

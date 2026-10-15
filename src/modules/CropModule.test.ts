@@ -358,8 +358,13 @@ describe('CropModule', () => {
       const output = module.process(input, context);
 
       expect(isValidImageData(output)).toBe(true);
-      // Rotated image with expanded canvas should be larger
-      expect(output.length).toBeGreaterThanOrEqual(input.length);
+      // v1.40.0: the full-frame rect on a rotated canvas is clamped wedge-free at
+      // render time (the inscribed region), never the expanded canvas with fill
+      // wedges. Output matches getOutputDimensions and contains no fill pixels.
+      const dims = module.getOutputDimensions(width, height);
+      expect(output.length).toBe(dims.width * dims.height * 4);
+      expect(dims.width).toBeLessThanOrEqual(width);
+      for (let i = 0; i < output.length; i += 4) expect(output[i]).toBeCloseTo(0.5, 5);
     });
 
     it('should handle negative rotation angles', () => {

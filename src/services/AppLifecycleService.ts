@@ -2,6 +2,8 @@ import { electronService } from './ElectronService';
 import { editPersistenceService } from './EditPersistenceService';
 import { checkpointService } from './CheckpointService';
 import { logger } from '../utils/Logger';
+import { isExportInProgress } from './exportActivity';
+import { notificationService } from './NotificationService';
 
 interface UnsavedChangesChecker {
   hasUnsavedChanges(): boolean;
@@ -59,6 +61,16 @@ class AppLifecycleService {
     if (this.isClosing) return;
 
     try {
+      // An export writes files in place: quitting now would kill it mid-write (truncated file;
+      // under "Replace" the original is lost). Refuse at once (no dialog: an unanswered question
+      // would be timed out by the main process) and say why. The updater shows its own box.
+      if (isExportInProgress()) {
+        logger.info('App close refused: an export is in progress');
+        notificationService.warning('Export in progress', 'Vitrine can close once the export finishes.');
+        electronService.sendCloseResponse(false, 'export-in-progress');
+        return;
+      }
+
       logger.info('App close requested, checking for unsaved changes...');
 
       // Check for unsaved changes

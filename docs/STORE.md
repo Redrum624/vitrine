@@ -4,7 +4,7 @@ Vitrine ships through two channels:
 
 | Channel | Package | Signing | SmartScreen | Updates |
 |---|---|---|---|---|
-| GitHub Releases | NSIS installer (`Vitrine Setup X.Y.Z.exe`) | unsigned | "Windows protected your PC" until reputation accrues | manual |
+| GitHub Releases | NSIS installer (`Vitrine-Setup-X.Y.Z.exe`) | unsigned | "Windows protected your PC" until reputation accrues | manual |
 | Microsoft Store | MSIX (`Vitrine X.Y.Z.appx`) | **signed by Microsoft** | none | automatic |
 
 Both installs use the **same** user data. Verified empirically on Windows 11 (see

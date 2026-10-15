@@ -28,14 +28,15 @@ interface StatusBarProps {
 /** Rating-filter segmented control values: '0' = All, '1'-'5' = >= N stars. */
 type RatingFilterValue = '0' | '1' | '2' | '3' | '4' | '5';
 
-const RATING_FILTER_OPTIONS: { value: RatingFilterValue; label: string }[] = [
-  { value: '0', label: 'All' },
-  { value: '1', label: '≥1★' },
-  { value: '2', label: '≥2★' },
-  { value: '3', label: '≥3★' },
-  { value: '4', label: '≥4★' },
-  { value: '5', label: '≥5★' },
-];
+/** Active chip shows its mode: '≥N★' (N or more) or '=N★' (exactly N). */
+const ratingFilterOptions = (activeN: number, mode: 'min' | 'exact') =>
+  (['0', '1', '2', '3', '4', '5'] as RatingFilterValue[]).map((value) => ({
+    value,
+    label: value === '0' ? 'All' : `${Number(value) === activeN && mode === 'exact' ? '=' : '≥'}${value}★`,
+  }));
+
+const RATING_FILTER_TOOLTIP =
+  'Click a star chip: N or more. Click again: exactly N. Click a third time: clear the filter.';
 
 /** Footer stars use the safelight accent (ratings are one of the accent's few jobs). */
 const FOOTER_STAR_COLOR = 'var(--accent)';
@@ -133,7 +134,8 @@ export function StatusBar({ currentImage, processingStats, images }: StatusBarPr
   const imageRatings = useAppStore((s) => s.imageRatings);
   const setImageRating = useAppStore((s) => s.setImageRating);
   const ratingFilter = useAppStore((s) => s.ratingFilter);
-  const setRatingFilter = useAppStore((s) => s.setRatingFilter);
+  const ratingFilterMode = useAppStore((s) => s.ratingFilterMode) ?? 'min';
+  const cycleRatingFilter = useAppStore((s) => s.cycleRatingFilter);
   const viewMode = useAppStore((s) => s.viewMode);
   const alignmentAxisX = useAppStore((s) => s.alignmentAxisX);
   const selectedImageIds = useAppStore((s) => s.selectedImageIds);
@@ -196,12 +198,15 @@ export function StatusBar({ currentImage, processingStats, images }: StatusBarPr
       {/* Center — rating filter segmented + current photo's rating. Axis-centered
           in Develop, window-centered in Gallery (see clusterLeft above). */}
       <div className="absolute flex items-center gap-3" style={{ left: clusterLeft, top: '50%', transform: 'translate(-50%, -50%)' }}>
-        <Segmented<RatingFilterValue>
-          size="sm"
-          options={RATING_FILTER_OPTIONS}
-          value={String(ratingFilter ?? 0) as RatingFilterValue}
-          onChange={(v) => setRatingFilter(Number(v))}
-        />
+        <div title={RATING_FILTER_TOOLTIP}>
+          <Segmented<RatingFilterValue>
+            size="sm"
+            options={ratingFilterOptions(ratingFilter ?? 0, ratingFilterMode)}
+            value={String(ratingFilter ?? 0) as RatingFilterValue}
+            onChange={(v) => cycleRatingFilter(Number(v))}
+            onReselect={(v) => cycleRatingFilter(Number(v))}
+          />
+        </div>
         {currentImage && (
           <StarRating
             size={13}

@@ -1,9 +1,19 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useAppStore } from '../../stores/appStore';
 import { SectionLabel } from '../Controls/SectionLabel';
 import { ChipButton } from '../Controls/ChipButton';
 import { imageCacheService } from '../../services/ImageCacheService';
 import { notificationService } from '../../services/NotificationService';
+import { Segmented } from '../Controls/Segmented';
+import { applyMemoryPreset, getTotalRamBytes, loadStoredPreset, budgetsFor } from '../../services/memoryPresetRuntime';
+import { DEFAULT_MEMORY_PRESET, describeBudgets, MEMORY_PRESET_KEY, type MemoryPreset } from '../../utils/memoryPreset';
+import { logger } from '../../utils/Logger';
+
+const MEMORY_OPTIONS: { value: MemoryPreset; label: string }[] = [
+  { value: 'balanced', label: 'Balanced' },
+  { value: 'high', label: 'High' },
+  { value: 'max', label: 'Maximum' },
+];
 
 // Same key the Welcome screen's "Don't show again" writes and App reads at startup.
 const WELCOME_DISMISSED_KEY = 'photo-editor-welcome-dismissed';
@@ -42,6 +52,40 @@ export function SettingsPanel() {
   const [appVersion, setAppVersion] = useState<string | null>(null);
   const [welcomeEnabled, setWelcomeEnabled] = useState(readWelcomeEnabled);
   const [cacheSize, setCacheSize] = useState(() => imageCacheService.getStats().totalSize);
+  const [memoryPreset, setMemoryPreset] = useState<MemoryPreset>(DEFAULT_MEMORY_PRESET);
+  const [totalRam, setTotalRam] = useState(0);
+
+  // A pick made before the mount-time load resolves must win over the (stale) stored value.
+  const userPicked = useRef(false);
+  // Rapid clicks apply strictly in order, so the last pick wins.
+  const applyQueue = useRef<Promise<void>>(Promise.resolve());
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const [stored, ram] = await Promise.all([loadStoredPreset(), getTotalRamBytes()]);
+      if (cancelled) return;
+      if (!userPicked.current) setMemoryPreset(stored);
+      setTotalRam(ram);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Live-applicable: caches, pipeline budget, preview cap and GPU buffers change at once (a
+  // smaller budget evicts immediately). No restart: there is no JS-heap setting (see memoryPreset.ts).
+  const changeMemoryPreset = (preset: MemoryPreset) => {
+    userPicked.current = true;
+    setMemoryPreset(preset);
+    applyQueue.current = applyQueue.current.then(async () => {
+      try {
+        await window.electronAPI?.storeSet?.(MEMORY_PRESET_KEY, preset);
+        await applyMemoryPreset(preset);
+        setCacheSize(imageCacheService.getStats().totalSize);
+      } catch (e) {
+        logger.warn('Failed to apply memory preset:', e);
+      }
+    });
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -90,6 +134,12 @@ export function SettingsPanel() {
             <Row label="Memory cache" hint={`${formatBytes(cacheSize)} in use`}>
               <ChipButton onClick={clearCache}>Clear</ChipButton>
             </Row>
+            <Row label="Memory use" hint={totalRam > 0 ? `${(totalRam / 1024 ** 3).toFixed(0)} GB installed` : undefined}>
+              <Segmented<MemoryPreset> options={MEMORY_OPTIONS} value={memoryPreset} onChange={changeMemoryPreset} size="sm" />
+            </Row>
+            <ul aria-label="Memory budgets" style={{ margin: 0, padding: 0, listStyle: 'none', fontSize: 11.5, color: 'var(--vt-text-3)' }}>
+              {describeBudgets(budgetsFor(memoryPreset, totalRam)).map((line) => <li key={line}>{line}</li>)}
+            </ul>
           </section>
 
           <section className="flex flex-col" style={{ gap: 6 }} aria-label="About">

@@ -1,5 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { CropParams } from '../../modules/CropModule';
+import { autoCropRectForRotation, normalizeOrientation, type NormalizedCropRect } from '../../modules/cropGeometry';
+import { mapRectToBox, normToScreenX, normToScreenY, resolveFrame } from './cropFrameMapping';
 
 interface CropTransformOverlayProps {
   // Image dimensions (processed dimensions after any transforms)
@@ -34,6 +36,11 @@ interface CropTransformOverlayProps {
 
   // Show just the 3x3 grid during rotation adjustment (without darkened areas)
   showRotationGrid?: boolean;
+
+  // v1.40.0 Task 9b: the frame the displayed image ACTUALLY shows (processedImageData
+  // .frameRect, expanded-canvas normalised). Every rect is mapped through it:
+  // screen = box + (r - d.xy)/d.wh * box. Absent ⇒ full frame.
+  displayFrame?: NormalizedCropRect | null;
 }
 
 /**
@@ -59,7 +66,8 @@ export function CropTransformOverlay({
   contentWidth,
   contentHeight,
   showOverlay,
-  showRotationGrid = false
+  showRotationGrid = false,
+  displayFrame
 }: CropTransformOverlayProps) {
   // Content base for image scaling (fit-rect); the box stays canvasDisplay* (viewport).
   const contentW = contentWidth ?? canvasDisplayWidth;
@@ -124,44 +132,48 @@ export function CropTransformOverlay({
       const origH = originalHeight || imageHeight;
 
       if (Math.abs(angle) > 0.01 && origW > 0 && origH > 0) {
-        // Calculate the inscribed rectangle that fits within the rotated image
-        // This is the visible content without black borders
-        const angleRad = Math.abs(angle * Math.PI / 180);
-        const sin = Math.sin(angleRad);
-        const cos = Math.cos(angleRad);
-
-        // Calculate scale factor for inscribed rectangle
-        const aspectRatio = origW / origH;
-        let scale: number;
-        if (aspectRatio >= 1) {
-          scale = cos + sin * (origH / origW);
-        } else {
-          scale = cos + sin * (origW / origH);
-        }
-
-        // The inscribed rectangle dimensions in original pixels
-        const inscribedW = origW / scale;
-        const inscribedH = origH / scale;
-
-        // Convert to normalized coordinates relative to the expanded canvas
-        gridCropWidth = Math.min(1.0, inscribedW / imageWidth);
-        gridCropHeight = Math.min(1.0, inscribedH / imageHeight);
-        gridCropX = (1.0 - gridCropWidth) / 2;
-        gridCropY = (1.0 - gridCropHeight) / 2;
+        // The visible content without fill wedges: the module's own inscribed
+        // rect (one source — cropGeometry), on the ORIENTED frame.
+        const swapped = normalizeOrientation(cropParams.orientation) % 180 !== 0;
+        const inscribed = autoCropRectForRotation(swapped ? origH : origW, swapped ? origW : origH, angle);
+        // Clip to the DISPLAYED frame (Task 9b fix 4): with a crop applied the image
+        // box shows only that crop, so the grid covers the visible part of the
+        // wedge-free region — never area off the displayed image.
+        const f = resolveFrame(displayFrame);
+        const left = Math.max(inscribed.x, f.x);
+        const top = Math.max(inscribed.y, f.y);
+        const right = Math.min(inscribed.x + inscribed.width, f.x + f.width);
+        const bottom = Math.min(inscribed.y + inscribed.height, f.y + f.height);
+        const clipped = right > left && bottom > top
+          ? { x: left, y: top, width: right - left, height: bottom - top }
+          : f;
+        gridCropX = clipped.x;
+        gridCropY = clipped.y;
+        gridCropWidth = clipped.width;
+        gridCropHeight = clipped.height;
       } else {
-        // No rotation, use full image
-        gridCropX = 0;
-        gridCropY = 0;
-        gridCropWidth = 1.0;
-        gridCropHeight = 1.0;
+        // No rotation: the grid covers the displayed frame (the whole box).
+        const f = resolveFrame(displayFrame);
+        gridCropX = f.x;
+        gridCropY = f.y;
+        gridCropWidth = f.width;
+        gridCropHeight = f.height;
       }
     }
 
-    // Convert normalized crop coordinates to canvas pixel coordinates
-    const cropLeft = imageX + gridCropX * scaledImageWidth;
-    const cropTop = imageY + gridCropY * scaledImageHeight;
-    const cropRight = cropLeft + gridCropWidth * scaledImageWidth;
-    const cropBottom = cropTop + gridCropHeight * scaledImageHeight;
+    // Convert normalized crop coordinates to canvas pixels THROUGH THE DISPLAYED
+    // FRAME (Task 9b): the image box shows frame d, not the whole expanded
+    // canvas — e.g. the inscribed frame while straightening or drag-suspended,
+    // or a stale previous crop while the next pass runs.
+    const frame = resolveFrame(displayFrame);
+    const box = { left: imageX, top: imageY, width: scaledImageWidth, height: scaledImageHeight };
+    const mapped = mapRectToBox(
+      { x: gridCropX, y: gridCropY, width: gridCropWidth, height: gridCropHeight }, frame, box,
+    );
+    const cropLeft = mapped.left;
+    const cropTop = mapped.top;
+    const cropRight = cropLeft + mapped.width;
+    const cropBottom = cropTop + mapped.height;
 
     const cropDisplayWidth = cropRight - cropLeft;
     const cropDisplayHeight = cropBottom - cropTop;
@@ -258,8 +270,9 @@ export function CropTransformOverlay({
       ctx.restore();
 
       // Draw rotation center point indicator (small crosshair at image center)
-      const centerX = imageX + scaledImageWidth / 2;
-      const centerY = imageY + scaledImageHeight / 2;
+      // Rotation centre = the expanded canvas centre, through the displayed frame.
+      const centerX = normToScreenX(0.5, frame, box);
+      const centerY = normToScreenY(0.5, frame, box);
 
       ctx.save();
       ctx.strokeStyle = 'rgba(100, 200, 255, 0.8)';
@@ -341,7 +354,8 @@ export function CropTransformOverlay({
     contentH,
     showOverlay,
     showRotationGrid,
-    shouldShow
+    shouldShow,
+    displayFrame
   ]);
 
   if (!shouldShow) {

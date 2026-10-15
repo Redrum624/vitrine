@@ -10,6 +10,18 @@ const { app, BrowserWindow, Menu, dialog, ipcMain, shell } = require('electron')
 // injects productName into the packaged manifest.
 app.setName('photo_app');
 
+// MEMORY PRESET (v1.40.0): read synchronously so the disk-cache budget is right from init.
+// MEASURED (Electron 43): a js-flags --max-old-space-size above ~3.5 GB does NOT raise the
+// renderer heap limit (V8 pointer-compression cage; default already 3586 MB), so no heap flag is
+// shipped. The limit is still logged at startup (see did-finish-load) to keep that visible.
+const memoryHeap = require('./memoryPresetMain.cjs');
+const memoryPresetAtStart = memoryHeap.readPresetSync(require('path').join(app.getPath('userData'), 'store'));
+let measuredHeapLimitMB = null;
+
+const { createCloseGuard } = require('./closeGuard.cjs');
+const { createCloseRequester } = require('./closeRequest.cjs');
+const { createUpdater, registerUpdaterIpc } = require('./updater.cjs');
+
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -42,6 +54,25 @@ const RAW_FORMATS = [
 // Keep a global reference of the window objects
 let mainWindow;
 let splashWindow;
+
+// Self-update from GitHub Releases (electron/updater.cjs): created in
+// app.whenReady, started once the main window is shown, disposed on will-quit.
+let updater = null;
+
+// Lets the updater's "Restart and install now" through the async 'close'
+// handler below (see closeGuard.cjs). requestAppClose/performAppCleanup are
+// function declarations further down, hoisted.
+const closeRequester = createCloseRequester({
+  ipcMain,
+  getWindow: () => mainWindow,
+});
+const closeGuard = createCloseGuard({
+  requestAppClose: () => requestAppClose(),
+  // "Restart and install now": an unanswered question is a NO (the install stays
+  // queued for a normal quit) and an export in progress refuses with its reason.
+  requestInstallClose: () => closeRequester.request({ fallback: false }),
+  performAppCleanup: () => performAppCleanup(),
+});
 
 // Better development detection - check if dist/index.html exists for production mode
 const distPath = path.join(__dirname, '../dist/index.html');
@@ -94,6 +125,7 @@ function closeSplashAndShowMain() {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.maximize();
     mainWindow.show();
+    if (updater) updater.start();
   }
 
   if (splashWindow && !splashWindow.isDestroyed()) {
@@ -126,6 +158,20 @@ function createWindow() {
     icon: path.join(__dirname, '../assets/icon.ico'),
     show: false, // Don't show until ready
     backgroundColor: '#282828' // Match our dark theme
+  });
+
+  // Memory preset verification (v1.40.0): measure the renderer's REAL heap limit once loaded and
+  // log it, so the (non-raisable) limit is visible in the log.
+  mainWindow.webContents.once('did-finish-load', async () => {
+    try {
+      const bytes = await mainWindow.webContents.executeJavaScript('performance.memory ? performance.memory.jsHeapSizeLimit : 0');
+      measuredHeapLimitMB = bytes > 0 ? Math.round(bytes / (1024 * 1024)) : null;
+      const line = `[memory] preset=${memoryPresetAtStart} rendererHeapLimitMB=${measuredHeapLimitMB} totalRamMB=${Math.round(os.totalmem() / 1048576)}`;
+      console.log(line);
+      fs.appendFileSync(logFile, `${new Date().toISOString()} ${line}\n`);
+    } catch (e) {
+      console.warn('heap limit probe failed:', e && e.message);
+    }
   });
 
   // Load the app
@@ -164,20 +210,7 @@ function createWindow() {
   });
 
   // Handle window close request
-  mainWindow.on('close', async (event) => {
-    event.preventDefault(); // Prevent immediate close
-
-    // Ask the renderer to prepare for closing
-    const shouldClose = await requestAppClose();
-
-    if (shouldClose) {
-      // Perform cleanup
-      await performAppCleanup();
-
-      // Actually close the window
-      mainWindow.destroy();
-    }
-  });
+  mainWindow.on('close', (event) => closeGuard.handleClose(mainWindow, event));
 
   // Emitted when the window is closed
   mainWindow.on('closed', () => {
@@ -394,6 +427,15 @@ ipcMain.handle('app-ready', () => {
   closeSplashAndShowMain();
 });
 
+ipcMain.handle('memory-info', () => ({
+  totalRamBytes: os.totalmem(),
+  measuredHeapLimitMB,
+}));
+ipcMain.handle('memory-set-disk-budget', async (event, preset) => {
+  if (!memoryHeap.isPreset(preset)) return false;
+  await require('./baseCache.cjs').setBudget(memoryHeap.diskBudget(preset));
+  return true;
+});
 ipcMain.handle('get-app-version', () => {
   const packageJson = require('../package.json');
   return packageJson.version;
@@ -1224,6 +1266,27 @@ ipcMain.handle('base-cache-write', async (event, filePath, options, payload) => 
 
 // App event handlers
 app.whenReady().then(() => {
+  updater = createUpdater({
+    // A getter: reading electron-updater's autoUpdater constructs it, and the
+    // disabled gates must never call into electron-updater.
+    get autoUpdater() {
+      return require('electron-updater').autoUpdater;
+    },
+    isPackaged: app.isPackaged,
+    isWindowsStore: process.windowsStore === true,
+    portableDir: process.env.PORTABLE_EXECUTABLE_DIR,
+    resourcesPath: process.resourcesPath,
+    fs: require('node:fs'),
+    dialog,
+    getWindow: () => (mainWindow && !mainWindow.isDestroyed() ? mainWindow : null),
+    confirmQuit: () => closeGuard.confirmQuit(),
+    disarmQuit: () => closeGuard.disarmQuit(),
+    logFile: path.join(app.getPath('userData'), 'logs', 'updater.log'),
+    productName: 'Vitrine',
+    currentVersion: app.getVersion(),
+  });
+  registerUpdaterIpc(ipcMain, updater);
+
   // Create splash screen first
   createSplashWindow();
 
@@ -1244,7 +1307,7 @@ app.whenReady().then(() => {
   // wrapped in try/catch so a broken cache dir can never break startup. Must run after app-ready
   // (userData path is only valid then).
   try {
-    const indexed = require('./baseCache.cjs').init(path.join(app.getPath('userData'), 'base-cache'));
+    const indexed = require('./baseCache.cjs').init(path.join(app.getPath('userData'), 'base-cache'), { budget: memoryHeap.diskBudget(memoryPresetAtStart) });
     console.log(`Base cache (L2) initialised: ${indexed} persisted RAW base(s) indexed`);
   } catch (baseCacheInitError) {
     console.warn('Base cache init failed (continuing without disk cache):', baseCacheInitError.message);
@@ -1269,6 +1332,12 @@ app.whenReady().then(() => {
       setTimeout(() => createWindow(), 300);
     }
   });
+});
+
+// dispose() removes only the updater's own listeners (electron-updater's own
+// 'error' listener must stay).
+app.on('will-quit', () => {
+  if (updater) updater.dispose();
 });
 
 app.on('window-all-closed', () => {
@@ -1308,40 +1377,11 @@ app.on('web-contents-created', (event, contents) => {
 
 // App closing cycle functions
 async function requestAppClose() {
-  try {
-    if (!mainWindow || mainWindow.isDestroyed()) {
-      return true;
-    }
-
-    console.log('Requesting app close from renderer...');
-
-    // Send close request to renderer and wait for response
-    const result = await new Promise((resolve) => {
-      // Set up timeout in case renderer doesn't respond
-      const timeout = global.setTimeout(() => {
-        console.warn('Renderer did not respond to close request, proceeding with close');
-        resolve(true);
-      }, 5000); // 5 second timeout
-
-      // Set up response listener
-      const handleCloseResponse = (event, shouldClose, reason) => {
-        global.clearTimeout(timeout);
-        ipcMain.removeListener('app-close-response', handleCloseResponse);
-        console.log(`Renderer close response: ${shouldClose ? 'proceed' : 'cancel'} - ${reason || 'no reason'}`);
-        resolve(shouldClose);
-      };
-
-      ipcMain.on('app-close-response', handleCloseResponse);
-
-      // Send the close request
-      mainWindow.webContents.send('app-close-request');
-    });
-
-    return result;
-  } catch (error) {
-    console.error('Error during close request:', error);
-    return true; // Default to allowing close on error
-  }
+  // A normal window close: a renderer that does not answer within 5 s (or a
+  // failed round trip) still lets the window close (closeRequest.cjs).
+  console.log('Requesting app close from renderer...');
+  const answer = await closeRequester.request({ fallback: true });
+  return answer.ok;
 }
 
 async function performAppCleanup() {

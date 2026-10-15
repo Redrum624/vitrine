@@ -39,6 +39,7 @@ function makeNrModule() {
 describe('EnhanceModuleComponent', () => {
   beforeEach(() => {
     enhanceModule.resetParams();
+    enhanceModule.setParams({ upscale: false }); // pre-v1.40 baseline; fresh-default behaviour has its own describe
     useAppStore.setState({ upscaleProgress: null, upscaleMode: null });
     mockOriginalDims = null;
   });
@@ -131,6 +132,7 @@ describe('EnhanceModuleComponent', () => {
 describe('EnhanceModuleComponent — upscale feasibility (160 MP output cap)', () => {
   beforeEach(() => {
     enhanceModule.resetParams();
+    enhanceModule.setParams({ upscale: false }); // pre-v1.40 baseline; fresh-default behaviour has its own describe
     useAppStore.setState({ upscaleProgress: null, upscaleMode: null });
     mockOriginalDims = null;
     (enhanceService.applyUpscale as jest.Mock).mockClear();
@@ -187,6 +189,7 @@ describe('EnhanceModuleComponent — upscale feasibility (160 MP output cap)', (
 describe('EnhanceModuleComponent — staleness affordance (P7 item 3)', () => {
   beforeEach(() => {
     enhanceModule.resetParams();
+    enhanceModule.setParams({ upscale: false }); // pre-v1.40 baseline; fresh-default behaviour has its own describe
     useAppStore.setState({ upscaleProgress: null, upscaleMode: null, externalParamsVersion: 0 });
     mockOriginalDims = null;
     (enhanceService.isEnhanceStale as jest.Mock).mockReturnValue(false);
@@ -228,6 +231,7 @@ describe('EnhanceModuleComponent — staleness affordance (P7 item 3)', () => {
 describe('EnhanceModuleComponent — NR + Upscale single reprocess (P7 item 4)', () => {
   beforeEach(() => {
     enhanceModule.resetParams();
+    enhanceModule.setParams({ upscale: false }); // pre-v1.40 baseline; fresh-default behaviour has its own describe
     useAppStore.setState({ upscaleProgress: null, upscaleMode: null });
     mockOriginalDims = { width: 2000, height: 1500 };
     (enhanceService.applyUpscale as jest.Mock).mockClear();
@@ -282,6 +286,7 @@ describe('EnhanceModuleComponent — NR + Upscale single reprocess (P7 item 4)',
 describe('EnhanceModuleComponent — Chroma noise + Detail radius sliders (P10 R4)', () => {
   beforeEach(() => {
     enhanceModule.resetParams();
+    enhanceModule.setParams({ upscale: false }); // pre-v1.40 baseline; fresh-default behaviour has its own describe
     useAppStore.setState({ upscaleProgress: null, upscaleMode: null });
     mockOriginalDims = null;
   });
@@ -310,6 +315,7 @@ describe('EnhanceModuleComponent — Chroma noise + Detail radius sliders (P10 R
 describe('EnhanceModuleComponent — reopen upscale re-apply notice (Q7)', () => {
   beforeEach(() => {
     enhanceModule.resetParams();
+    enhanceModule.setParams({ upscale: false }); // pre-v1.40 baseline; fresh-default behaviour has its own describe
     mockBaked = false;
     mockOriginalDims = { width: 2000, height: 1500 };
     useAppStore.setState({ upscaleProgress: null, upscaleMode: null, upscaleIntent: null, developing: false });
@@ -360,6 +366,7 @@ describe('EnhanceModuleComponent — reopen upscale re-apply notice (Q7)', () =>
 describe('EnhanceModuleComponent — reopen re-apply notice for deblur + stacked (Z1)', () => {
   beforeEach(() => {
     enhanceModule.resetParams();
+    enhanceModule.setParams({ upscale: false }); // pre-v1.40 baseline; fresh-default behaviour has its own describe
     mockBaked = false;
     mockDeblurBaked = false;
     mockOriginalDims = { width: 2000, height: 1500 };
@@ -413,6 +420,7 @@ describe('EnhanceModuleComponent — re-apply replays post-bake edits; mid-repla
 
   beforeEach(() => {
     enhanceModule.resetParams();
+    enhanceModule.setParams({ upscale: false }); // pre-v1.40 baseline; fresh-default behaviour has its own describe
     mockBaked = false;
     mockDeblurBaked = false;
     mockOriginalDims = { width: 2000, height: 1500 };
@@ -452,5 +460,19 @@ describe('EnhanceModuleComponent — re-apply replays post-bake edits; mid-repla
     expect(editPersistenceService.applyPostBakeEdits).not.toHaveBeenCalled();
     expect(editPersistenceService.persistPostBakeEdits).toHaveBeenCalledWith(savedEdits);
     expect(screen.getByRole('alert')).toHaveTextContent('deblur backend gone');
+  });
+});
+
+describe('EnhanceModuleComponent - fresh panel defaults (v1.40.0)', () => {
+  it('opens with Upscale ticked, "Apply Enhance (x2)" offered and nothing applied', () => {
+    enhanceModule.resetParams();
+    (enhanceService.applyUpscale as jest.Mock).mockClear();
+    const onParamsChange = jest.fn();
+    render(<EnhanceModuleComponent module={enhanceModule} noiseReductionModule={makeNrModule()} onParamsChange={onParamsChange} />);
+    expect(screen.getByRole('button', { name: /upscale/i })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByText('Apply Enhance (×2)')).toBeInTheDocument();
+    expect(enhanceModule.getParams().enabled).toBe(false);
+    expect(enhanceService.applyUpscale).not.toHaveBeenCalled();
+    expect(onParamsChange).not.toHaveBeenCalled();
   });
 });

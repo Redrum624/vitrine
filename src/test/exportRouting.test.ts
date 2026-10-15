@@ -9,7 +9,8 @@ jest.mock('../services/WebWorkerImageProcessor', () => ({
   webWorkerImageProcessor: { isHealthy: () => isHealthy() },
 }));
 
-import { chooseExportProcessing, decideExportProcessing, EXPORT_TILED_MIN_PIXELS } from '../services/exportRouting';
+import { WORKER_TILED_MIN_PIXELS } from '../services/previewRouting';
+import { chooseExportProcessing, decideExportProcessing, laTiledWorkerUnsafe, EXPORT_TILED_MIN_PIXELS } from '../services/exportRouting';
 
 describe('chooseExportProcessing — decision table', () => {
   const base = { workersHealthy: true, nrActive: false, width: 5184, height: 3888 }; // 20MP
@@ -91,5 +92,24 @@ describe('decideExportProcessing — live wrapper', () => {
   it('small exports (both dims ≤4096) stay on the main thread through the live wrapper too', () => {
     expect(decideExportProcessing(pipelineWith(false), 4000, 3000))
       .toEqual({ useWebWorkers: false, reason: 'small-image-gpu-parity' });
+  });
+});
+
+describe('Local Adjustments vs the TILED (> 48 MP) worker path (Task 12c fix 1)', () => {
+  const laOn = { isModuleActive: (id: string) => id === 'localadjustments' };
+  const laOff = { isModuleActive: () => false };
+
+  it('an LA-active export above 48 MP routes to the main thread', () => {
+    expect(chooseExportProcessing({ workersHealthy: true, nrActive: false, width: 10000, height: 6000 }).useWebWorkers).toBe(false);
+    expect(decideExportProcessing(laOn, 10000, 6000).useWebWorkers).toBe(false);
+  });
+
+  it('laTiledWorkerUnsafe: only LA active AND above the tiled threshold', () => {
+    expect(laTiledWorkerUnsafe(laOn, 10000, 6000)).toBe(true);
+    expect(laTiledWorkerUnsafe(laOn, 8000, 6000)).toBe(false); // exactly 48 MP = single-worker path
+    expect(laTiledWorkerUnsafe(laOff, 10000, 6000)).toBe(false);
+    expect(laTiledWorkerUnsafe(null, 10000, 6000)).toBe(false);
+    expect(EXPORT_TILED_MIN_PIXELS).toBe(8000 * 6000);
+    expect(WORKER_TILED_MIN_PIXELS).toBe(EXPORT_TILED_MIN_PIXELS);
   });
 });

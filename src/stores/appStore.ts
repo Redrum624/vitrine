@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { AppState, Layer, ViewportState, ProcessedImageData, RenderMode } from '../types';
+import type { RatingFilterMode } from '../utils/gallerySelection';
 import { DEFAULT_RAW_DECODE_OPTIONS, type RawDecodeOptions, type BakedUpscaleIntent } from '../types/electron';
 
 interface AppStore extends AppState {
@@ -22,6 +23,18 @@ interface AppStore extends AppState {
   // Processing trigger - increments to signal that reprocessing is needed
   processingVersion: number;
   triggerReprocessing: () => void;
+  // v1.40.0 Task 9b (single apply): bumped at crop-handle release. A preview pass that
+  // started BEFORE the bump and is still awaiting its worker is stale — the panel
+  // abandons it (never paints, never falls back, never replays) and starts the
+  // release pass at once instead of queueing behind it.
+  previewSupersedeVersion: number;
+  supersedeInFlightPreview: () => void;
+  // v1.40.0 Task 9b fix 1: true ONLY between a crop-handle mousedown that suspended the
+  // crop and its release. The interactive preview pass forwards it as
+  // ProcessingContext.cropSuspended so the drag shows the WHOLE rotated photo (expanded
+  // canvas). Transient UI state: never serialized, never read by export/bake/history.
+  cropDragSuspended: boolean;
+  setCropDragSuspended: (v: boolean) => void;
   // Preview quality cap (long-edge px) the AdjustmentPanel downsamples the
   // source to. Base 1024; Canvas RATCHETS it up when zoom exceeds the image's
   // previous farthest zoom or a crop apply raises effective magnification
@@ -92,7 +105,11 @@ interface AppStore extends AppState {
   setRenderMode: (mode: RenderMode) => void;
   // Bumped every time a GPU render completes so the Canvas re-presents the new result.
   gpuResultVersion: number;
-  bumpGpuResult: () => void;
+  // v1.40.0 Task 10b: the resident GPU result's size + the crop frame it shows, published
+  // SYNCHRONOUSLY with the bump (the histogram readback lags ~150 ms). A GPU crop changes the
+  // result dims, so Canvas sizing / overlays read this in gpu mode. null before a GPU frame.
+  gpuResultGeometry: { width: number; height: number; frameRect?: { x: number; y: number; width: number; height: number } } | null;
+  bumpGpuResult: (geometry?: { width: number; height: number; frameRect?: { x: number; y: number; width: number; height: number } }) => void;
   // Bumped when the working BASE image pixels are replaced in place (RAW re-decode,
   // upscale, rotate/flip). Path AND dimensions can stay the same across such a swap
   // (a re-decode changes neither), so consumers that key a cache off path+dims — e.g.
@@ -138,7 +155,13 @@ interface AppStore extends AppState {
   // Shared rating filter (0 = All, 1-5 = show only images rated >= N). Consumed by
   // the footer's segmented control, the filmstrip dock, and (Task 7) the gallery grid.
   ratingFilter: number;
-  setRatingFilter: (n: number) => void;
+  /** 'min' = show >= N stars (default); 'exact' = show only == N. Undefined (old
+   * snapshots/mocks) is treated as 'min'. */
+  ratingFilterMode: RatingFilterMode;
+  /** Sets N with an explicit mode (default 'min'; 0 always resets to 'min'). */
+  setRatingFilter: (n: number, mode?: RatingFilterMode) => void;
+  /** Footer chip click: new chip -> >=N; same chip again -> =N; again -> off. */
+  cycleRatingFilter: (n: number) => void;
   // View mode (Task 7, Glass · Sectioned 5a): 'develop' is the editing workspace
   // (default); 'gallery' is the library grid. Toggled by the filmstrip dock's
   // Gallery chip (Develop -> Gallery) and the toolbar's Develop|Gallery segmented,
@@ -203,6 +226,8 @@ export const useAppStore = create<AppStore>((set) => ({
   sidebarCollapsed: false,
   isAdjustingRotation: false,
   processingVersion: 0,
+  previewSupersedeVersion: 0,
+  cropDragSuspended: false,
   previewQualityCap: 1024,
   externalParamsVersion: 0,
   isProcessing: false,
@@ -217,6 +242,7 @@ export const useAppStore = create<AppStore>((set) => ({
   developing: false,
   renderMode: 'cpu',
   gpuResultVersion: 0,
+  gpuResultGeometry: null,
   baseImageVersion: 0,
   originalSnapshotVersion: 0,
   alignmentAxisX: null,
@@ -231,6 +257,7 @@ export const useAppStore = create<AppStore>((set) => ({
   referenceImageName: null,
   imageRatings: {},
   ratingFilter: 0,
+  ratingFilterMode: 'min',
   viewMode: 'develop',
   gallerySortAscending: false,
   selectedImageIds: [],
@@ -253,6 +280,12 @@ export const useAppStore = create<AppStore>((set) => ({
     processingVersion: state.processingVersion + 1
   })),
 
+  supersedeInFlightPreview: () => set((state) => ({
+    previewSupersedeVersion: state.previewSupersedeVersion + 1
+  })),
+
+  setCropDragSuspended: (v) => set({ cropDragSuspended: v }),
+
   setPreviewQualityCap: (cap) => set({ previewQualityCap: cap }),
 
   notifyExternalParamsChange: () => set((state) => ({
@@ -274,7 +307,9 @@ export const useAppStore = create<AppStore>((set) => ({
 
   setRenderMode: (mode) => set({ renderMode: mode }),
 
-  bumpGpuResult: () => set((state) => ({ gpuResultVersion: state.gpuResultVersion + 1 })),
+  bumpGpuResult: (geometry) => set((state) => (geometry
+    ? { gpuResultVersion: state.gpuResultVersion + 1, gpuResultGeometry: geometry }
+    : { gpuResultVersion: state.gpuResultVersion + 1 })),
 
   bumpBaseImageVersion: () => set((state) => ({ baseImageVersion: state.baseImageVersion + 1 })),
 
@@ -335,7 +370,13 @@ export const useAppStore = create<AppStore>((set) => ({
     imageRatings: { ...state.imageRatings, [imageId]: rating }
   })),
 
-  setRatingFilter: (n) => set({ ratingFilter: n }),
+  setRatingFilter: (n, mode = 'min') => set({ ratingFilter: n, ratingFilterMode: n === 0 ? 'min' : mode }),
+  cycleRatingFilter: (n) =>
+    set((s) => {
+      if (n === 0 || s.ratingFilter !== n) return { ratingFilter: n, ratingFilterMode: 'min' };
+      if ((s.ratingFilterMode ?? 'min') === 'min') return { ratingFilter: n, ratingFilterMode: 'exact' };
+      return { ratingFilter: 0, ratingFilterMode: 'min' };
+    }),
 
   setViewMode: (mode) => set({ viewMode: mode }),
 

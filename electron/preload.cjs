@@ -85,8 +85,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   splashProgress: (progress, message) => ipcRenderer.invoke('splash-progress', progress, message),
   appReady: () => ipcRenderer.invoke('app-ready'),
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
+  // Memory preset (v1.40.0)
+  getMemoryInfo: () => ipcRenderer.invoke('memory-info'),
+  setDiskCacheBudget: (preset) => ipcRenderer.invoke('memory-set-disk-budget', preset),
   getAppInfo: () => ipcRenderer.invoke('get-app-info'),
   openExternalUrl: (url) => ipcRenderer.invoke('open-external-url', url),
+  // Help > Check for Updates...: resolves to the updater's state string.
+  checkForUpdates: () => ipcRenderer.invoke('updater:check'),
   onSplashProgress: (callback) => ipcRenderer.on('splash-progress', (event, data) => callback(data)),
 
   // AI super-resolution upscale

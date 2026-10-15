@@ -23,6 +23,8 @@ const baseCache = require('../../electron/baseCache.cjs') as {
   init: (dir: string, opts?: { budget?: number }) => number;
   read: (filePath: string, o?: { demosaic?: string; highlightMode?: string }) => Promise<{ data: ArrayBuffer; width: number; height: number; channels: number; bitDepth: number } | null>;
   write: (filePath: string, o: { demosaic?: string; highlightMode?: string } | undefined, payload: { data: ArrayBuffer; width: number; height: number; channels: number; bitDepth: number }) => Promise<void>;
+  setBudget: (b?: number) => Promise<number>;
+  getBudget: () => number;
   DEFAULT_BUDGET_BYTES: number;
 };
 
@@ -209,6 +211,21 @@ describe('baseCache fs round-trip', () => {
     expect(await baseCache.read(srcA, OPTS)).toBeNull();     // A evicted
     expect(await baseCache.read(srcB, OPTS)).not.toBeNull(); // B, C survive
     expect(await baseCache.read(srcC, OPTS)).not.toBeNull();
+  });
+
+  it('setBudget shrinks the disk budget and evicts oldest-first immediately', async () => {
+    const srcs = ['a', 'b', 'c'].map((n) => {
+      const f = path.join(dir, n + '.orf'); fs.writeFileSync(f, Buffer.alloc(10, 1)); return f;
+    });
+    for (let i = 0; i < 3; i++) {
+      await baseCache.write(srcs[i], OPTS, makePayload(4, 2, i + 1)); // 48 B each
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    expect(await baseCache.setBudget(100)).toBe(1); // 144 -> 96: oldest (a) goes
+    expect(await baseCache.read(srcs[0], OPTS)).toBeNull();
+    expect(await baseCache.read(srcs[2], OPTS)).not.toBeNull();
+    expect(await baseCache.setBudget(undefined)).toBe(0); // back to the 2 GB default
+    expect(baseCache.getBudget()).toBe(baseCache.DEFAULT_BUDGET_BYTES);
   });
 
   it('init rebuilds the in-memory index from an existing dir (survives a fresh init)', async () => {

@@ -20,6 +20,7 @@ const fs                        = require('fs');
 const path                      = require('path');
 const { spawnSync }             = require('child_process');
 const os                        = require('os');
+const { missingRequired }       = require('./release-assets.cjs');
 
 const ROOT    = path.join(__dirname, '..');
 const RELEASE = path.join(ROOT, 'release');
@@ -51,9 +52,11 @@ console.log(`[gh-release] Targeting release ${TAG}`);
 // 2. Locate artifacts
 // ---------------------------------------------------------------------------
 const CANDIDATES = [
-  `Vitrine Setup ${VERSION}.exe`,
-  `Vitrine ${VERSION} portable.exe`,
-  `Vitrine ${VERSION} README.txt`,
+  `Vitrine-Setup-${VERSION}.exe`,
+  `Vitrine-Setup-${VERSION}.exe.blockmap`, // electron-updater delta downloads
+  'latest.yml',                             // electron-updater feed: REQUIRED or installed copies cannot update
+  `Vitrine-${VERSION}-portable.exe`,
+  `Vitrine-${VERSION}-README.txt`,
   'SHA256SUMS.txt',
   'LICENSE',
   'THIRD-PARTY-LICENSES.md',
@@ -71,6 +74,13 @@ for (const name of CANDIDATES) {
     missing.push(name);
     console.warn(`[gh-release]   MISSING (skipping): ${name}`);
   }
+}
+
+// The updater's assets are mandatory: fail before creating/uploading anything.
+const fatal = missingRequired(existing.map((f) => path.basename(f)), VERSION);
+if (fatal.length) {
+  console.error(`[gh-release] ERROR: required updater asset(s) missing from release/: ${fatal.join(', ')}. Run npm run build:win first.`);
+  process.exit(1);
 }
 
 if (existing.length === 0) {

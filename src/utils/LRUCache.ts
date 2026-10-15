@@ -241,6 +241,20 @@ export class LRUCache<T> {
   }
 
   /**
+   * Change the memory budget at runtime and evict LRU entries until the cache fits it.
+   * Returns the number of entries evicted.
+   */
+  setMaxMemory(maxMemory: number): number {
+    this.options.maxMemory = maxMemory;
+    let evicted = 0;
+    while (this.currentMemory > maxMemory && this.accessOrder.length > 0) {
+      this.evictLRU();
+      evicted++;
+    }
+    return evicted;
+  }
+
+  /**
    * Prune cache to specific size (useful for memory pressure)
    */
   prune(targetSize: number): number {

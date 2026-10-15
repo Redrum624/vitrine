@@ -293,6 +293,10 @@ export interface ProcessedImageData {
   width: number;
   height: number;
   isPreview: boolean;
+  /** v1.40.0 Task 9b: the crop rect this frame ACTUALLY shows, normalised to the expanded
+   *  (rotated) canvas — the effective clamped rect the pass rendered. Absent = full frame
+   *  (crop did not run). Overlays map the crop rect through it: screen = box + (r - d.xy)/d.wh * box. */
+  frameRect?: { x: number; y: number; width: number; height: number };
 }
 
 export type RenderMode = 'gpu' | 'cpu';

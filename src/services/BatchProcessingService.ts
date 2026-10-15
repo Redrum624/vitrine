@@ -3,6 +3,7 @@ import { imageService } from './ImageService';
 import { imageProcessingPipeline } from './ImageProcessingPipeline';
 import { exportService, ExportOptions } from './ExportService';
 import { ImageFileInfo } from './FileSystemService';
+import { trackExport } from './exportActivity';
 
 interface ModuleParameters {
   [key: string]: unknown;
@@ -237,8 +238,12 @@ export class BatchProcessingService {
     return this.executeBatchJob(jobId);
   }
 
-  // Execute a batch job
-  private async executeBatchJob(jobId: string): Promise<boolean> {
+  // Execute a batch job. The job counts as an export in progress (exportActivity): no quit mid-job.
+  private executeBatchJob(jobId: string): Promise<boolean> {
+    return trackExport(() => this.executeBatchJobUntracked(jobId));
+  }
+
+  private async executeBatchJobUntracked(jobId: string): Promise<boolean> {
     const job = this.jobs.get(jobId);
     if (!job) return false;
 

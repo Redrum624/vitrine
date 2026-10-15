@@ -74,7 +74,7 @@ describe('LocalAdjustmentsModule', () => {
       expect(bottom).toBeGreaterThan(top); // default gradient runs top -> bottom
     });
 
-    it('the linear gradient is one-sided; feather 1 = solid below, 0.5 = ramp', () => {
+    it('the linear gradient is one-sided; feather 0.01 = hard edge (solid below), 0.5 = ramp', () => {
       const id = module.createLayer('linear_gradient', 'Grad', width, height);
       const geom = (feather: number): MaskGeometry => ({
         type: 'linear', centerX: 0.5, centerY: 0.5, radiusX: 0.3, radiusY: 0.3,
@@ -82,7 +82,7 @@ describe('LocalAdjustmentsModule', () => {
       });
       const mid = width >> 1;
 
-      module.setLayerGeometry(id, geom(1), width, height);
+      module.setLayerGeometry(id, geom(0.01), width, height);
       let mask = module.getLayer(id)!.mask;
       expect(mask[2 * width + mid]).toBeLessThan(0.05);           // nothing above the line
       expect(mask[(height - 3) * width + mid]).toBeGreaterThan(0.95); // solid full effect below
@@ -94,6 +94,23 @@ describe('LocalAdjustmentsModule', () => {
       expect(mask[2 * width + mid]).toBeLessThan(0.05);           // still one-sided
       expect(midBot).toBeLessThan(farBot);                        // ramps toward the bottom
       expect(farBot).toBeGreaterThan(0.75);                       // near-full by the bottom edge
+    });
+
+    it('linear Feather: higher = softer (wider ramp), like radial (v1.40.0)', () => {
+      const id = module.createLayer('linear_gradient', 'Grad', width, height);
+      const geom = (feather: number): MaskGeometry => ({
+        type: 'linear', centerX: 0.5, centerY: 0.5, radiusX: 0.3, radiusY: 0.3,
+        startX: 0.5, startY: 0.15, endX: 0.5, endY: 0.85, feather, invert: false, rotation: 0,
+      });
+      const band = (feather: number) => {
+        module.setLayerGeometry(id, geom(feather), width, height);
+        const m = module.getLayer(id)!.mask;
+        let n = 0;
+        for (let i = 0; i < m.length; i++) if (m[i] > 0.05 && m[i] < 0.95) n++;
+        return n;
+      };
+      expect(band(0.1)).toBeLessThan(band(0.9));
+      expect(band(0.1)).toBeGreaterThan(0);
     });
 
     it('a mask with basicAdj applies Basic Adjustments to the masked region only', () => {

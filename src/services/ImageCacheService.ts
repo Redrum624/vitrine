@@ -472,6 +472,21 @@ export class ImageCacheService {
     };
   }
 
+  /** Current RAW/decode base-cache budget in bytes. */
+  getBaseBudget(): number {
+    return this.baseMaxSize;
+  }
+
+  /**
+   * Resize ONLY the base-cache budget (memory preset) and evict the oldest bases down to it
+   * immediately. Sized/thumbnail entries are untouched.
+   */
+  setBaseBudget(bytes: number): void {
+    this.baseMaxSize = bytes > 0 ? bytes : this.DEFAULT_BASE_MAX_SIZE;
+    if (this.baseCurrentSize > this.baseMaxSize) this.cleanup(0, true);
+    logger.info(`Cache: base budget now ${this.formatBytes(this.baseMaxSize)}`);
+  }
+
   /**
    * Set cache limits. `maxBaseSize` is optional and defaults back to DEFAULT_BASE_MAX_SIZE
    * (700MB) when omitted, so existing 2-arg call sites (e.g. "restore defaults" in tests)

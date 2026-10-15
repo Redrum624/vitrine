@@ -122,4 +122,27 @@ describe('CheckpointService', () => {
     expect(checkpointService.canUndo()).toBe(false);
     expect(checkpointService.canRedo()).toBe(false);
   });
+
+  it('dedupes the first record() after reopening a migrated legacy history (key order differs from serialize())', async () => {
+    basicadj().setParams({ exposure: 0.3 });
+    checkpointService.record('A');
+    const cp = checkpointService.getCheckpoints()[0];
+    // Legacy shape: no schema stamp, then re-added LAST by the migration (serialize() places it second).
+    const { schema: _schema, ...rest } = cp.state as unknown as Record<string, unknown>;
+    void _schema;
+    const legacy = { ...rest };
+    const store: Record<string, unknown> = { 'history:/x.jpg': { version: 1, nextSeq: cp.id, checkpoints: [{ ...cp, state: legacy }] } };
+    (window as unknown as { electronAPI: unknown }).electronAPI = {
+      storeGet: jest.fn(async (k: string) => store[k] ?? null),
+      storeSet: jest.fn(async () => true),
+    };
+    try {
+      await checkpointService.loadForPath('/x.jpg');
+      expect(checkpointService.getCheckpoints().length).toBe(1);
+      checkpointService.record('again'); // state unchanged since the stored checkpoint
+      expect(checkpointService.getCheckpoints().length).toBe(1);
+    } finally {
+      delete (window as unknown as { electronAPI?: unknown }).electronAPI;
+    }
+  });
 });

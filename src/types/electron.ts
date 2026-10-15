@@ -272,6 +272,10 @@ export interface ElectronAPI {
   splashProgress: (progress: number, message: string) => Promise<void>;
   appReady: () => Promise<void>;
   getAppVersion: () => Promise<string>;
+  /** Installed RAM (os.totalmem) plus the renderer heap limit measured at startup. */
+  getMemoryInfo: () => Promise<{ totalRamBytes: number; measuredHeapLimitMB: number | null }>;
+  /** Resize the on-disk RAW cache budget for a preset; evicts to fit immediately. */
+  setDiskCacheBudget: (preset: string) => Promise<boolean>;
   getAppInfo: () => Promise<{
     name: string;
     version: string;
@@ -287,6 +291,8 @@ export interface ElectronAPI {
     arch: string;
   }>;
   openExternalUrl: (url: string) => Promise<boolean>;
+  /** Help > Check for Updates...: resolves to the updater state (e.g. 'up-to-date', 'disabled-portable'). */
+  checkForUpdates: () => Promise<string>;
   onSplashProgress: (callback: (data: { progress?: number; message?: string; error?: string }) => void) => void;
 
   // AI super-resolution upscale
