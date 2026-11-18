@@ -53,6 +53,66 @@ function sumDownloads(releases) {
   return { total, by_release };
 }
 
+// GitHub's download_count lives on each asset, not on the project: deleting or
+// re-uploading an .exe drops its downloads from the sum, and GitHub sometimes
+// revises counts down after the fact (observed 2026-10-15: 369 -> 337). So the
+// charted total is a ledger, not a plain sum:
+//   - data.assets keeps the highest count ever seen per asset id. A deleted
+//     asset keeps contributing what it had; a re-uploaded one gets a new id and
+//     counts from zero on top of that; a count GitHub lowers keeps its peak.
+//   - data.legacy_offset holds the downloads lost before this ledger existed,
+//     worked out once from the per-release history in the samples.
+// total = legacy_offset + sum of per-asset peaks. It can only go up.
+
+// Per-release drops across consecutive samples (a vanished release counts as 0).
+// Rewrites past sample totals so the chart history is monotonic too, keeping
+// the original sum as raw_total. Returns the lost count up to `current`.
+function backfillLegacy(samples, current) {
+  let lost = 0;
+  let prev = null;
+  const step = (by_release) => {
+    if (prev) {
+      for (const [tag, was] of Object.entries(prev)) {
+        const now = by_release[tag] || 0;
+        if (now < was) lost += was - now;
+      }
+    }
+    prev = by_release;
+  };
+  for (const s of samples) {
+    step(s.by_release || {});
+    if (s.raw_total === undefined) s.raw_total = s.total;
+    s.total = s.raw_total + lost;
+  }
+  if (current) step(current);
+  return lost;
+}
+
+function exeAssets(releases) {
+  const out = [];
+  for (const rel of releases) {
+    for (const a of rel.assets || []) {
+      if (/\.exe$/i.test(a.name || "")) out.push({ id: String(a.id), tag: rel.tag_name, name: a.name, count: a.download_count || 0 });
+    }
+  }
+  return out;
+}
+
+// Mutates data (assets, legacy_offset, and past samples on first run); returns the monotonic total.
+function updateLedger(data, releases, by_release) {
+  const current = exeAssets(releases);
+  if (!data.assets) {
+    data.legacy_offset = backfillLegacy(data.samples || [], by_release);
+    data.assets = {};
+  }
+  for (const a of current) {
+    const seen = data.assets[a.id];
+    data.assets[a.id] = { tag: a.tag, name: a.name, max: Math.max(seen ? seen.max : 0, a.count) };
+  }
+  const peaks = Object.values(data.assets).reduce((sum, a) => sum + a.max, 0);
+  return (data.legacy_offset || 0) + peaks;
+}
+
 async function sample(args) {
   if (!args.repo || !args.data) throw new Error("sample needs --repo owner/name and --data file.json");
   const headers = { "User-Agent": "download-stats", Accept: "application/vnd.github+json" };
@@ -68,18 +128,19 @@ async function sample(args) {
     releases.push(...batch);
     if (batch.length < 100) break;
   }
-  const { total, by_release } = sumDownloads(releases);
+  const { total: raw_total, by_release } = sumDownloads(releases);
   const data = loadData(args.data);
+  const total = updateLedger(data, releases, by_release);
   // Newest non-draft, non-prerelease tag — the API returns releases newest-first.
   const latestRel = releases.find((r) => !r.draft && !r.prerelease);
   if (latestRel) data.latest_release = latestRel.tag_name;
   const today = new Date().toISOString().slice(0, 10);
   data.samples = (data.samples || []).filter((s) => s.date !== today); // re-run same day = replace
-  data.samples.push({ date: today, total, by_release });
+  data.samples.push({ date: today, total, raw_total, by_release });
   data.samples.sort((a, b) => a.date.localeCompare(b.date));
   fs.mkdirSync(path.dirname(args.data), { recursive: true });
   fs.writeFileSync(args.data, JSON.stringify(data, null, 2) + "\n");
-  console.log(`sampled ${args.repo}: total=${total} releases=${releases.length} samples=${data.samples.length}`);
+  console.log(`sampled ${args.repo}: total=${total} raw=${raw_total} releases=${releases.length} samples=${data.samples.length}`);
 }
 
 function render(args) {
@@ -171,4 +232,4 @@ if (require.main === module) {
 })();
 }
 
-module.exports = { sumDownloads };
+module.exports = { sumDownloads, updateLedger, backfillLegacy };
