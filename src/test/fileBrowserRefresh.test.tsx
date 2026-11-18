@@ -198,6 +198,7 @@ describe('FileBrowser — the File Explorer re-reads the disk', () => {
     await flush();
     onFolderSelected.mockClear();
     onImageSelected.mockClear();
+    mockFss.setCurrentImages.mockClear();
 
     setListing(AB, [], ['C:\\AB\\ab1.jpg', 'C:\\AB\\ab2.jpg']);
     await fireFolderChanged(api, { folderPath: AB, eventType: 'rename', filename: 'ab2.jpg' });
@@ -210,6 +211,8 @@ describe('FileBrowser — the File Explorer re-reads the disk', () => {
     await waitFor(() => expect(onFolderSelected).toHaveBeenCalledTimes(1));
     expect(names(onFolderSelected.mock.calls[0][0])).toEqual(['a1.jpg', 'a3.jpg']);
     expect(onImageSelected).not.toHaveBeenCalled();
+    // A background refresh never resets the navigation context to a first image (brief A3).
+    expect(mockFss.setCurrentImages).not.toHaveBeenCalled();
   });
 
   it('T4 the gallery folder losing its last image empties the filmstrip', async () => {
@@ -351,6 +354,7 @@ describe('FileBrowser — the File Explorer re-reads the disk', () => {
     await waitFor(() => expect(onFolderSelected).toHaveBeenCalledTimes(1));
     await flush();
     onFolderSelected.mockClear();
+    mockFss.setCurrentImages.mockClear();
 
     await act(async () => { window.dispatchEvent(new Event('focus')); });
     await flush();
@@ -363,6 +367,26 @@ describe('FileBrowser — the File Explorer re-reads the disk', () => {
     expect(readsOf(A)).toBe(3);
     expect(onFolderSelected).toHaveBeenCalledTimes(1);
     expect(names(onFolderSelected.mock.calls[0][0])).toEqual(['a1.jpg', 'a4.jpg']);
+    expect(mockFss.setCurrentImages).not.toHaveBeenCalled();
+  });
+
+  it('T7c focus re-reads a collapsed gallery folder without watching it again', async () => {
+    const api = installElectronAPI();
+    const onFolderSelected = jest.fn();
+    await mountTree({ onFolderSelected });
+
+    clickName('A');
+    await waitFor(() => expect(onFolderSelected).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(callsWith(api.watchFolder, A)).toBe(1));
+    await flush();
+    clickArrow('A'); // collapse: A is released, but stays the gallery folder
+    await flush();
+    expect(callsWith(api.unwatchFolder, A)).toBe(1);
+
+    await act(async () => { window.dispatchEvent(new Event('focus')); });
+    await flush();
+    expect(readsOf(A)).toBe(2);
+    expect(callsWith(api.watchFolder, A)).toBe(1);
   });
 
   it('T8 collapsing a parent unwatches and collapses its expanded children (path prefix, not id prefix)', async () => {
@@ -407,10 +431,15 @@ describe('FileBrowser — the File Explorer re-reads the disk', () => {
     await waitFor(() => expect(onFolderSelected).toHaveBeenCalledTimes(1));
     await screen.findByText('a1.jpg');
     await waitFor(() => expect(callsWith(api.watchFolder, A)).toBe(1));
+    clickArrow('AB'); // expanded in the tree, not the gallery folder
+    await waitFor(() => expect(callsWith(api.watchFolder, AB)).toBe(1));
     await flush();
     onFolderSelected.mockClear();
     mockFss.getFolderContents.mockClear();
-    queueOnce(A, () => Promise.reject(new Error('ENOENT')));
+
+    // A folder that is not in the filmstrip leaves the filmstrip alone.
+    await fireFolderChanged(api, { folderPath: AB, eventType: 'removed', filename: null });
+    expect(onFolderSelected).not.toHaveBeenCalled();
 
     await fireFolderChanged(api, { folderPath: A, eventType: 'removed', filename: null });
     await waitFor(() => expect(screen.queryByText('a1.jpg')).toBeNull());
@@ -419,6 +448,88 @@ describe('FileBrowser — the File Explorer re-reads the disk', () => {
     // No longer watched: a later event for that path reads nothing.
     await fireFolderChanged(api, { folderPath: A, eventType: 'rename', filename: 'x.jpg' });
     expect(readsOf(A)).toBe(0);
+
+    // A 'removed' also follows a watcher 'error' while the folder still exists: expanding
+    // it again watches it again (it was dropped from the watched set, not only collapsed).
+    clickArrow('A');
+    await screen.findByText('a1.jpg');
+    await flush();
+    expect(callsWith(api.watchFolder, A)).toBe(2);
+  });
+
+  // Windows Explorer's ordinary Delete MOVES a folder to the Recycle Bin, and fs.watch on the
+  // moved folder itself delivers no event (measured, X1 review F1), so main never sends
+  // 'removed'. The parent's watcher still fires: its new listing lacks the folder.
+  it('T9b a tracked folder missing from its parent\'s new listing is dropped and unwatched, with the tracked folders inside it', async () => {
+    const api = installElectronAPI();
+    const onFolderSelected = jest.fn();
+    await mountTree({ onFolderSelected });
+
+    clickName('A'); // gallery folder, expanded and watched
+    await waitFor(() => expect(onFolderSelected).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(callsWith(api.watchFolder, A)).toBe(1));
+    clickArrow('Sub');
+    await waitFor(() => expect(callsWith(api.watchFolder, SUB)).toBe(1));
+    clickArrow('AB');
+    await waitFor(() => expect(callsWith(api.watchFolder, AB)).toBe(1));
+    await flush();
+    onFolderSelected.mockClear();
+    api.unwatchFolder.mockClear();
+
+    // AB (not the gallery folder) moved away: only AB is released.
+    setListing(ROOT, [A], []);
+    await fireFolderChanged(api, { folderPath: ROOT, eventType: 'rename', filename: 'AB' });
+    await waitFor(() => expect(api.unwatchFolder).toHaveBeenCalledTimes(1));
+    expect(api.unwatchFolder).toHaveBeenCalledWith(AB);
+    expect(onFolderSelected).not.toHaveBeenCalled();
+
+    // A (the gallery folder, with Sub expanded inside it) moved away.
+    setListing(ROOT, [], []);
+    await fireFolderChanged(api, { folderPath: ROOT, eventType: 'rename', filename: 'A' });
+    await waitFor(() => expect(onFolderSelected).toHaveBeenCalledWith([]));
+    expect(api.unwatchFolder.mock.calls.map((c) => c[0]).sort()).toEqual([A, AB, SUB].sort());
+
+    // Nothing of them is tracked any more: a focus reads only the root.
+    mockFss.getFolderContents.mockClear();
+    await act(async () => { window.dispatchEvent(new Event('focus')); });
+    await flush();
+    expect(mockFss.getFolderContents.mock.calls.map((c) => c[0])).toEqual([ROOT]);
+  });
+
+  // The gallery folder can be collapsed (so unwatched) while its parent is collapsed too: no
+  // listing will show it gone. Its focus re-read then fails with ENOENT, which Electron passes
+  // as the main-process message only (ipcMain.handle docs; Node's readdir text measured).
+  it('T9c the gallery folder\'s re-read failing with ENOENT empties the filmstrip; another failure keeps it', async () => {
+    const api = installElectronAPI();
+    const onFolderSelected = jest.fn();
+    await mountTree({ onFolderSelected });
+
+    clickArrow('A');
+    await screen.findByText('Sub', { selector: 'span' });
+    clickName('Sub'); // gallery folder
+    await waitFor(() => expect(onFolderSelected).toHaveBeenCalledTimes(1));
+    await flush();
+    clickArrow('A'); // collapse A, and Sub with it
+    await flush();
+    onFolderSelected.mockClear();
+
+    queueOnce(SUB, () => Promise.reject(new Error("Error invoking remote method 'get-folder-contents': Error: EIO: i/o error, scandir 'C:\\A\\Sub'")));
+    await act(async () => { window.dispatchEvent(new Event('focus')); });
+    await flush();
+    expect(readsOf(SUB)).toBe(2);
+    expect(onFolderSelected).not.toHaveBeenCalled();
+
+    queueOnce(SUB, () => Promise.reject(new Error("Error invoking remote method 'get-folder-contents': Error: ENOENT: no such file or directory, scandir 'C:\\A\\Sub'")));
+    await act(async () => { window.dispatchEvent(new Event('focus')); });
+    await flush();
+    expect(readsOf(SUB)).toBe(3);
+    expect(onFolderSelected).toHaveBeenCalledWith([]);
+
+    // Forgotten: the next focus does not read it again.
+    await act(async () => { window.dispatchEvent(new Event('focus')); });
+    await flush();
+    expect(readsOf(SUB)).toBe(3);
+    expect(callsWith(api.watchFolder, SUB)).toBe(1);
   });
 });
 
