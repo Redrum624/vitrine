@@ -131,3 +131,45 @@ describe('openFolderFromDialog', () => {
     expect(spies.showError).toHaveBeenCalledTimes(1);
   });
 });
+
+// X2 (2026-11-18): the opened folder becomes the File Explorer's gallery folder, so it is
+// watched and refreshed. App learns the path through onFolderOpened, called once on success
+// only, after the filmstrip was fed.
+describe('openFolderFromDialog — onFolderOpened', () => {
+  test('called once with the folder path on success, after onFolderSelected', async () => {
+    const images = [makeImage('a.jpg')];
+    const onFolderOpened = jest.fn();
+    const { deps, spies } = makeDeps({ onFolderOpened });
+    spies.showOpenDialog.mockResolvedValue({ canceled: false, filePaths: ['C:/pics'] });
+    spies.getFolderContents.mockResolvedValue({ folders: [], images });
+
+    await openFolderFromDialog(deps);
+
+    expect(onFolderOpened).toHaveBeenCalledTimes(1);
+    expect(onFolderOpened).toHaveBeenCalledWith('C:/pics');
+    expect(spies.onFolderSelected.mock.invocationCallOrder[0])
+      .toBeLessThan(onFolderOpened.mock.invocationCallOrder[0]);
+  });
+
+  test.each([
+    ['a canceled dialog', (s: ReturnType<typeof makeDeps>['spies']) => {
+      s.showOpenDialog.mockResolvedValue({ canceled: true, filePaths: [] });
+    }],
+    ['an empty folder', (s: ReturnType<typeof makeDeps>['spies']) => {
+      s.showOpenDialog.mockResolvedValue({ canceled: false, filePaths: ['C:/empty'] });
+      s.getFolderContents.mockResolvedValue({ folders: [], images: [] });
+    }],
+    ['a read error', (s: ReturnType<typeof makeDeps>['spies']) => {
+      s.showOpenDialog.mockResolvedValue({ canceled: false, filePaths: ['C:/pics'] });
+      s.getFolderContents.mockRejectedValue(new Error('readdir failed'));
+    }],
+  ])('not called on %s', async (_label, arrange) => {
+    const onFolderOpened = jest.fn();
+    const { deps, spies } = makeDeps({ onFolderOpened });
+    arrange(spies);
+
+    await openFolderFromDialog(deps);
+
+    expect(onFolderOpened).not.toHaveBeenCalled();
+  });
+});

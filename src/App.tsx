@@ -302,6 +302,11 @@ export interface OpenFolderDeps {
   getFolderContents: (folderPath: string) => Promise<{ images: ImageFileInfo[] }>;
   /** The working folder-load path (filmstrip + open-first). */
   onFolderSelected: (images: ImageFileInfo[]) => void;
+  /**
+   * Told the opened folder's path after the filmstrip was fed, on success only (not on
+   * cancel, empty folder or error): App hands it to the File Explorer, which watches it.
+   */
+  onFolderOpened?: (folderPath: string) => void;
   /** Shows/hides the Welcome overlay. */
   setWelcomeVisible: (visible: boolean) => void;
   showSuccess: (title: string, message: string) => void;
@@ -334,6 +339,7 @@ export async function openFolderFromDialog(deps: OpenFolderDeps): Promise<void> 
     }
 
     deps.onFolderSelected(images);
+    deps.onFolderOpened?.(folderPath);
     deps.setWelcomeVisible(false);
     deps.showSuccess('Folder Opened', `${images.length} image(s)`);
   } catch (error) {
@@ -439,6 +445,75 @@ export function resizeCurrentImage(toasts: TransformToasts, newWidth: number, ne
   imageService.updateCurrentImageData(result.data, result.width, result.height);
   useAppStore.getState().triggerReprocessing();
   toasts.showSuccess('Resized', `${result.width} x ${result.height}`);
+}
+
+export interface InspectorColumnProps {
+  viewMode: 'develop' | 'gallery';
+  selectedTool: string | null;
+  histogramVisible: boolean;
+  currentImage: ImageFileInfo | null;
+  onImageSelected: (image: ImageFileInfo) => void;
+  onFolderSelected: (images: ImageFileInfo[]) => void;
+}
+
+/**
+ * The docked inspector column: the histogram on top, the selected tool's panel below.
+ * Exported so its mount behaviour can be tested without rendering the whole App.
+ *
+ * The File Explorer (FileBrowser) is mounted ONCE for the window's life and only hidden
+ * (X2, diagnosis C5/R11): unmounting it released every folder watcher and its tree while
+ * the filmstrip kept showing the folder, so nothing refreshed it any more. The aside and
+ * the module slot therefore always render, with `display: none` when not shown; the other
+ * panels keep their mount gates (they mount and unmount exactly as before).
+ */
+export function InspectorColumn({
+  viewMode, selectedTool, histogramVisible, currentImage, onImageSelected, onFolderSelected,
+}: InspectorColumnProps) {
+  const rightColumnVisible = !!(selectedTool || histogramVisible);
+  const inspectorVisible = viewMode === 'develop' && rightColumnVisible;
+  const slotVisible = inspectorVisible && !!selectedTool;
+  return (
+    <aside
+      aria-label={inspectorVisible ? 'Inspector' : undefined}
+      className="flex flex-col"
+      style={{
+        width: INSPECTOR_WIDTH,
+        flex: 'none',
+        minHeight: 0,
+        background: 'var(--vt-panel)',
+        borderLeft: '1px solid var(--vt-line-soft)',
+        ...(inspectorVisible ? {} : { display: 'none' }),
+      }}
+    >
+      {inspectorVisible && histogramVisible && (
+        <div style={{ flex: '0 0 auto' }}>
+          <HistogramPanel />
+        </div>
+      )}
+
+      {/* Module slot — grows to fill; each panel scrolls internally.
+          Panels stay mounted (display toggle) so their state persists. */}
+      <div style={{ flex: '1 1 auto', minHeight: 0, position: 'relative', ...(slotVisible ? {} : { display: 'none' }) }}>
+        <div style={{ display: slotVisible && selectedTool === 'file-explorer' ? 'block' : 'none', height: '100%', overflow: 'hidden' }}>
+          <FileBrowser
+            onImageSelected={onImageSelected}
+            onFolderSelected={onFolderSelected}
+          />
+        </div>
+        {slotVisible && selectedTool && (
+          <>
+            <div style={{ display: selectedTool === 'settings' ? 'block' : 'none', height: '100%', overflowY: 'auto' }}>
+              <SettingsPanel />
+            </div>
+            {/* Module panels. */}
+            <div style={{ display: !['file-explorer', 'settings'].includes(selectedTool) ? 'block' : 'none', height: '100%' }}>
+              <AdjustmentPanel selectedModule={selectedTool} currentImage={currentImage} />
+            </div>
+          </>
+        )}
+      </div>
+    </aside>
+  );
 }
 
 function App() {
@@ -1706,45 +1781,14 @@ function App() {
 
         {/* Docked inspector — histogram on top, the selected module below (it
             scrolls inside). Develop-only; collapses when nothing is selected. */}
-        {viewMode === 'develop' && rightColumnVisible && (
-          <aside
-            aria-label="Inspector"
-            className="flex flex-col"
-            style={{
-              width: INSPECTOR_WIDTH,
-              flex: 'none',
-              minHeight: 0,
-              background: 'var(--vt-panel)',
-              borderLeft: '1px solid var(--vt-line-soft)',
-            }}
-          >
-            {histogramVisible && (
-              <div style={{ flex: '0 0 auto' }}>
-                <HistogramPanel />
-              </div>
-            )}
-
-            {/* Module slot — grows to fill; each panel scrolls internally.
-                Panels stay mounted (display toggle) so their state persists. */}
-            {selectedTool && (
-              <div style={{ flex: '1 1 auto', minHeight: 0, position: 'relative' }}>
-                <div style={{ display: selectedTool === 'file-explorer' ? 'block' : 'none', height: '100%', overflow: 'hidden' }}>
-                  <FileBrowser
-                    onImageSelected={handleImageSelected}
-                    onFolderSelected={handleFolderSelected}
-                  />
-                </div>
-                <div style={{ display: selectedTool === 'settings' ? 'block' : 'none', height: '100%', overflowY: 'auto' }}>
-                  <SettingsPanel />
-                </div>
-                {/* Module panels. */}
-                <div style={{ display: selectedTool && !['file-explorer', 'settings'].includes(selectedTool) ? 'block' : 'none', height: '100%' }}>
-                  <AdjustmentPanel selectedModule={selectedTool} currentImage={currentImage} />
-                </div>
-              </div>
-            )}
-          </aside>
-        )}
+        <InspectorColumn
+          viewMode={viewMode}
+          selectedTool={selectedTool}
+          histogramVisible={histogramVisible}
+          currentImage={currentImage}
+          onImageSelected={handleImageSelected}
+          onFolderSelected={handleFolderSelected}
+        />
 
         {/* Docked tool strip. Develop-only chrome — hidden in Gallery. */}
         {viewMode === 'develop' && (
