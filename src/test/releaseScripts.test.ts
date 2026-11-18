@@ -4,7 +4,7 @@ const { validateLatestYml } = require('../../scripts/collect-installer.cjs');
 const {
   missingRequired, releaseReadbackErrors, feedErrors, preUploadErrors,
 } = require('../../scripts/release-assets.cjs');
-const { sumDownloads } = require('../../.github/scripts/sample-downloads.cjs');
+const { sumDownloads, updateLedger } = require('../../.github/scripts/sample-downloads.cjs');
 
 // Real GitHub answers for v1.40.0, recorded 2026-11-18 (see fixtures/update-feed). No test here
 // touches the network: the scripts' I/O lives in check-update-feed.cjs and is not required.
@@ -92,6 +92,45 @@ describe('sumDownloads', () => {
       ],
     }];
     expect(sumDownloads(releases)).toEqual({ total: 7, by_release: { 'v1.40.0': 7 } });
+  });
+});
+
+describe('updateLedger', () => {
+  type Sample = { date: string; total: number; raw_total?: number; by_release: Record<string, number> };
+  type Data = { samples: Sample[]; legacy_offset?: number };
+  const rel = (tag: string, assets: Array<[number, string, number]>) => ({
+    tag_name: tag,
+    assets: assets.map(([id, name, download_count]) => ({ id, name, download_count })),
+  });
+
+  it('backfills drops from sample history and rewrites past totals', () => {
+    const data: Data = {
+      samples: [
+        { date: 'd1', total: 10, by_release: { a: 10 } },
+        { date: 'd2', total: 7, by_release: { a: 7 } },
+        { date: 'd3', total: 9, by_release: { a: 9 } },
+      ],
+    };
+    const total = updateLedger(data, [rel('a', [[1, 'x.exe', 9]])], { a: 9 });
+    expect(data.legacy_offset).toBe(3);
+    expect(data.samples.map((s: Sample) => s.total)).toEqual([10, 10, 12]);
+    expect(data.samples[1].raw_total).toBe(7);
+    expect(total).toBe(12);
+  });
+
+  it('keeps downloads of deleted and re-uploaded assets', () => {
+    const data: Data = { samples: [] };
+    updateLedger(data, [rel('a', [[1, 'x.exe', 30], [2, 'y.exe', 5]])], {});
+    // y.exe deleted, x.exe re-uploaded under a new id
+    const total = updateLedger(data, [rel('a', [[3, 'x.exe', 2]])], {});
+    expect(total).toBe(37);
+  });
+
+  it('holds the peak when GitHub lowers a count', () => {
+    const data: Data = { samples: [] };
+    updateLedger(data, [rel('a', [[1, 'x.exe', 20]])], {});
+    expect(updateLedger(data, [rel('a', [[1, 'x.exe', 18]])], {})).toBe(20);
+    expect(updateLedger(data, [rel('a', [[1, 'x.exe', 25]])], {})).toBe(25);
   });
 });
 
