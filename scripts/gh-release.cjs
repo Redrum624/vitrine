@@ -9,7 +9,11 @@
  *   - Extracts release notes from CHANGELOG.md (## [version] section)
  *   - Runs: gh release create v<version> <files> --title "..." --notes-file <tmp>
  *   - If release already exists: gh release upload v<version> <files> --clobber
- *   - Prints the release URL on success
+ *   - Before any upload: release/latest.yml must describe release/Vitrine-Setup-<version>.exe
+ *     (name, sha512, size) and carry the package version, else nothing is published (exit 1)
+ *   - After create/upload: reads the release back (gh release view --json) and the live feed
+ *     (/releases/latest, then its latest.yml, as installed copies read them); any failed check
+ *     exits 1. SUCCESS and the release URL are printed only when every check passes.
  *
  * Requires: gh CLI authenticated (gh auth status).
  */
@@ -18,9 +22,11 @@
 
 const fs                        = require('fs');
 const path                      = require('path');
+const crypto                    = require('crypto');
 const { spawnSync }             = require('child_process');
 const os                        = require('os');
-const { missingRequired }       = require('./release-assets.cjs');
+const { missingRequired, preUploadErrors } = require('./release-assets.cjs');
+const { publishRepo, checkPublished, formatCheck } = require('./check-update-feed.cjs');
 
 const ROOT    = path.join(__dirname, '..');
 const RELEASE = path.join(ROOT, 'release');
@@ -85,6 +91,33 @@ if (fatal.length) {
 
 if (existing.length === 0) {
   console.error('[gh-release] ERROR: No artifacts found in release/. Run npm run build:win first.');
+  process.exit(1);
+}
+
+// latest.yml must describe the installer being uploaded, under this version: a mismatch makes every
+// installed copy fail its update (wrong name/size/sha512) or skip it (wrong version).
+const INSTALLER_NAME = `Vitrine-Setup-${VERSION}.exe`;
+const installerBuf   = fs.readFileSync(path.join(RELEASE, INSTALLER_NAME));
+const INSTALLER_SIZE = installerBuf.length;
+const gateErrors = preUploadErrors(fs.readFileSync(path.join(RELEASE, 'latest.yml'), 'utf8'), {
+  installerName: INSTALLER_NAME,
+  installerSha512: crypto.createHash('sha512').update(installerBuf).digest('base64'),
+  installerSize: INSTALLER_SIZE,
+  version: VERSION,
+});
+if (gateErrors.length) {
+  for (const e of gateErrors) console.error(`[gh-release] ERROR: ${e}`);
+  console.error('[gh-release] Nothing was published. Rebuild with npm run build:win.');
+  process.exit(1);
+}
+console.log(`[gh-release] release/latest.yml matches ${INSTALLER_NAME} (name, sha512, size) and version ${VERSION}`);
+
+// The feed installed copies read (build.publish, the source of app-update.yml); checked after publishing.
+let feedRepo;
+try {
+  feedRepo = publishRepo(pkg);
+} catch (e) {
+  console.error(`[gh-release] ERROR: ${e.message}. Nothing was published.`);
   process.exit(1);
 }
 
@@ -170,17 +203,38 @@ if (releaseExists()) {
   releaseUrl = (create.stdout || '').trim();
 }
 
-// ---------------------------------------------------------------------------
-// 7. Done
-// ---------------------------------------------------------------------------
 try { fs.unlinkSync(notesFile); } catch { /* best-effort cleanup */ }
 
-console.log('');
-console.log('[gh-release] SUCCESS');
-console.log(`[gh-release] Release URL: ${releaseUrl}`);
-if (missing.length) {
-  console.log(`[gh-release] Missing artifacts (not uploaded): ${missing.join(', ')}`);
-}
+// ---------------------------------------------------------------------------
+// 7. Read the release back and the live feed, as installed copies read them
+//    (owner/repo from build.publish, the source of the installed app-update.yml)
+// ---------------------------------------------------------------------------
+checkPublished({ ...feedRepo, version: VERSION, installerName: INSTALLER_NAME, installerSize: INSTALLER_SIZE }).then(
+  (checks) => {
+    const failed = checks.filter((c) => c.error);
+    for (const c of checks) console.log(`[gh-release]   ${formatCheck(c)}`);
+    if (failed.length) {
+      console.error(`[gh-release] ERROR: ${TAG} is on GitHub but installed copies cannot see or verify it (${failed.length} failed check(s) above).`);
+      console.error('[gh-release] Fix the release on GitHub, then re-check (read-only): node scripts/check-update-feed.cjs');
+      console.error(`[gh-release] Release URL: ${releaseUrl}`);
+      process.exit(1);
+    }
+    // -------------------------------------------------------------------------
+    // 8. Done
+    // -------------------------------------------------------------------------
+    console.log('');
+    console.log('[gh-release] SUCCESS');
+    console.log(`[gh-release] Release URL: ${releaseUrl}`);
+    if (missing.length) {
+      console.log(`[gh-release] Missing artifacts (not uploaded): ${missing.join(', ')}`);
+    }
+  },
+  (e) => {
+    console.error(`[gh-release] ERROR: could not read ${TAG} back: ${e.message}`);
+    console.error('[gh-release] Re-check (read-only): node scripts/check-update-feed.cjs');
+    process.exit(1);
+  },
+);
 
 // ---------------------------------------------------------------------------
 // Helpers
