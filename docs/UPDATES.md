@@ -39,6 +39,59 @@ name or its `sha512` is not the installer's sha512 (`validateLatestYml`).
 The download counter (`.github/scripts/sample-downloads.cjs`) sums only `.exe` assets, because every
 installed copy fetches `latest.yml` on each launch.
 
+## Release checklist
+
+An installed copy finds a release only through GitHub's "latest" release (`/releases/latest`) and
+that release's `latest.yml`. A release left as draft or prerelease, missing one of the three assets,
+or carrying a `latest.yml` that does not describe the uploaded installer is invisible or unverifiable
+for every installed copy, and a failed automatic check shows the user nothing.
+
+What `node scripts/gh-release.cjs` checks (the checks are in `scripts/release-assets.cjs`):
+
+1. Before anything is uploaded: the installer, its blockmap and `latest.yml` are in `release\`;
+   `release\latest.yml` names `Vitrine-Setup-X.Y.Z.exe` in `path` and `files[].url`, carries its
+   sha512 and size, and its `version` is `package.json`'s. Any error: exit 1, nothing published.
+2. After `gh release create` (or `upload --clobber`): it reads the release back with
+   `gh release view vX.Y.Z --json isDraft,isPrerelease,tagName,assets` (not a draft, not a
+   prerelease, tag `vX.Y.Z`, the three assets present and `uploaded`, the installer's size equal to
+   the local one, `latest.yml` not empty), then reads the live feed the way electron-updater does
+   (`https://github.com/<owner>/<repo>/releases/latest` as JSON for the tag, then
+   `/releases/download/<tag>/latest.yml`): the latest tag is `vX.Y.Z`, the live `latest.yml` says
+   `version: X.Y.Z`, its `path` and `files[0].url` are assets of the release and `files[0].size`
+   is that asset's size. Any failed check is printed and the script exits 1; `SUCCESS` is printed
+   only when every check passes. Owner and repo come from `build.publish`.
+
+The same read-back runs on its own, read-only, at any time:
+
+```
+node scripts/check-update-feed.cjs                  # the package.json version
+node scripts/check-update-feed.cjs --version 1.40.0
+```
+
+It prints one `PASS`/`FAIL` line per check and exits 0 only when all pass. It has no local installer,
+so it skips the installer size check (the `files[0].size` check still compares the feed with the
+asset). Run it again after a fix on GitHub, or whenever updates look stuck.
+
+Then the hand check, once per release:
+
+1. Keep one install of the previous version (an NSIS setup install, not the portable exe).
+2. After publishing, launch it and read `%APPDATA%\photo_app\logs\updater.log`. In order:
+   `update available X.Y.Z`, `update downloaded X.Y.Z`, then the **Update ready** prompt; answer
+   **Restart and install now**: `installing X.Y.Z`; after the relaunch, `started Vitrine X.Y.Z`.
+
+**A changed build gets a new version, never a re-upload under the same version.** Installed copies
+compare only the version in `latest.yml` with their own (electron-updater takes an update only when
+it is newer): a copy that already has X.Y.Z never fetches a second X.Y.Z.
+
+## Known limits
+
+- The check runs once at launch and on **Help > Check for Updates...**. A copy left running does not
+  notice a release until it is restarted or the menu item is used.
+- A per-machine ("for all users") install raises a Windows permission (UAC) prompt on every update,
+  including the install at quit after **Later**. That path has never been tested.
+- The installer is unsigned (`win.verifyUpdateCodeSignature` is false); the integrity of an update
+  rests on the sha512 in `latest.yml`, which electron-updater checks after the download.
+
 ## Gates
 
 Update checks run only when all of these hold; otherwise the state is logged and nothing is fetched:
@@ -60,7 +113,8 @@ through the same unsaved-work guard as closing the window. The log is
 1. `npm run build:win`, then check `release\win-unpacked\resources\app-update.yml` and
    `installer\latest.yml`.
 2. Install an older release, publish a newer one (with the three assets above), launch the old one
-   and watch `updater.log`: `checking`, `update available X`, `update downloaded X`, then the prompt.
+   and watch `updater.log`: `checking`, `update available X`, `update downloaded X`, then the prompt
+   (the full hand check is in "Release checklist").
 3. Run the portable exe and the dev build: the log shows `disabled-portable` / `disabled-dev`.
 4. Unit tests: `npx jest src/test/updater.test.ts src/test/releaseScripts.test.ts`.
 
