@@ -271,6 +271,11 @@ describe('InspectorColumn — the File Explorer is mounted once and only hidden'
       await flush();
       expect(visibleLayout(container)).toBeNull();
       expect(screen.queryByRole('complementary', { name: 'Inspector' })).toBeNull();
+      // As on BASE, nothing labelled "Inspector" exists while it is hidden, and no aside
+      // takes space (BASE rendered none; an undisplayed one takes no width or border).
+      expect(screen.queryByLabelText('Inspector')).toBeNull();
+      const aside = container.querySelector('aside');
+      expect(aside === null || !displayed(aside as HTMLElement, container)).toBe(true);
     }
   });
 

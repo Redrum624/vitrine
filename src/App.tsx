@@ -3,7 +3,7 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { MenuBar } from './components/Layout/MenuBar';
 import { Toolbar } from './components/Layout/Toolbar';
 import { IconSidebar } from './components/Layout/IconSidebar';
-import { FileBrowser } from './components/Layout/FileBrowser';
+import { FileBrowser, type OpenFolderRequest } from './components/Layout/FileBrowser';
 import { Canvas } from './components/Layout/Canvas';
 import { AdjustmentPanel } from './components/Panels/AdjustmentPanel';
 import { HistogramPanel } from './components/Panels/HistogramPanel';
@@ -454,6 +454,7 @@ export interface InspectorColumnProps {
   currentImage: ImageFileInfo | null;
   onImageSelected: (image: ImageFileInfo) => void;
   onFolderSelected: (images: ImageFileInfo[]) => void;
+  openFolderRequest?: OpenFolderRequest | null;
 }
 
 /**
@@ -467,7 +468,7 @@ export interface InspectorColumnProps {
  * panels keep their mount gates (they mount and unmount exactly as before).
  */
 export function InspectorColumn({
-  viewMode, selectedTool, histogramVisible, currentImage, onImageSelected, onFolderSelected,
+  viewMode, selectedTool, histogramVisible, currentImage, onImageSelected, onFolderSelected, openFolderRequest,
 }: InspectorColumnProps) {
   const rightColumnVisible = !!(selectedTool || histogramVisible);
   const inspectorVisible = viewMode === 'develop' && rightColumnVisible;
@@ -498,6 +499,7 @@ export function InspectorColumn({
           <FileBrowser
             onImageSelected={onImageSelected}
             onFolderSelected={onFolderSelected}
+            openFolderRequest={openFolderRequest}
           />
         </div>
         {slotVisible && selectedTool && (
@@ -606,6 +608,8 @@ function App() {
   // snapshot of the selection taken when Del is pressed). null = dialog closed.
   const [removeTargetIds, setRemoveTargetIds] = useState<string[] | null>(null);
   const [isWelcomeVisible, setIsWelcomeVisible] = useState(false);
+  // The last "Open Folder" for the File Explorer (seq increases on every open).
+  const [openFolderRequest, setOpenFolderRequest] = useState<OpenFolderRequest | null>(null);
   const [availableImages, setAvailableImages] = useState<ImageFileInfo[]>([]);
   // Mirrors availableImages OUTSIDE React state so handleFolderSelected can detect a
   // genuine list change synchronously (see its use below) without adding
@@ -1035,6 +1039,9 @@ function App() {
   // folder-load path — shared by the Welcome screen's "Open Folder" and the
   // Gallery toolbar's "Open Folder" button.
   const handleOpenFolder = useCallback(() => {
+    // The list this open fed the filmstrip, handed to the File Explorer with the path so
+    // it does not feed an identical re-read again.
+    let openedImages: ImageFileInfo[] = [];
     void openFolderFromDialog({
       isElectron: () => electronService.isElectron(),
       showOpenDialog: (options) => {
@@ -1044,7 +1051,14 @@ function App() {
         return window.electronAPI.showOpenDialog(options);
       },
       getFolderContents: (folderPath) => fileSystemService.getFolderContents(folderPath),
-      onFolderSelected: handleFolderSelected,
+      onFolderSelected: (images) => {
+        openedImages = images;
+        handleFolderSelected(images);
+      },
+      // The File Explorer makes the opened folder its gallery folder: watched and refreshed.
+      onFolderOpened: (folderPath) => {
+        setOpenFolderRequest(prev => ({ path: folderPath, seq: (prev?.seq ?? 0) + 1, images: openedImages }));
+      },
       setWelcomeVisible: setIsWelcomeVisible,
       showSuccess,
       showError,
@@ -1788,6 +1802,7 @@ function App() {
           currentImage={currentImage}
           onImageSelected={handleImageSelected}
           onFolderSelected={handleFolderSelected}
+          openFolderRequest={openFolderRequest}
         />
 
         {/* Docked tool strip. Develop-only chrome — hidden in Gallery. */}
