@@ -339,6 +339,32 @@ describe('FileBrowser — the File Explorer re-reads the disk', () => {
     expect(mockFss.getFolderContents).not.toHaveBeenCalled();
   });
 
+  // App.handleFolderSelected re-shows a closed filmstrip on every call (setShowThumbnailPanel,
+  // diagnosis C7), so a background refresh with an unchanged list must not call it: an
+  // alt-tab would bring the closed filmstrip back, or replace a folder opened another way.
+  it('T7b a background refresh with an unchanged image list does not feed the filmstrip; a changed one does', async () => {
+    installElectronAPI();
+    const onFolderSelected = jest.fn();
+    await mountTree({ onFolderSelected });
+
+    clickName('A');
+    await waitFor(() => expect(onFolderSelected).toHaveBeenCalledTimes(1));
+    await flush();
+    onFolderSelected.mockClear();
+
+    await act(async () => { window.dispatchEvent(new Event('focus')); });
+    await flush();
+    expect(readsOf(A)).toBe(2);
+    expect(onFolderSelected).not.toHaveBeenCalled();
+
+    setListing(A, [SUB], ['C:\\A\\a1.jpg', 'C:\\A\\a4.jpg']);
+    await act(async () => { window.dispatchEvent(new Event('focus')); });
+    await flush();
+    expect(readsOf(A)).toBe(3);
+    expect(onFolderSelected).toHaveBeenCalledTimes(1);
+    expect(names(onFolderSelected.mock.calls[0][0])).toEqual(['a1.jpg', 'a4.jpg']);
+  });
+
   it('T8 collapsing a parent unwatches and collapses its expanded children (path prefix, not id prefix)', async () => {
     const api = installElectronAPI();
     await mountTree();

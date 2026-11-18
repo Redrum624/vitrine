@@ -4,6 +4,7 @@ import { fileSystemService, DriveInfo, FolderInfo, ImageFileInfo } from '../../s
 import { logger } from '../../utils/Logger';
 import { isElectron } from '../../types/electron';
 import { getDisplayFormat } from '../../utils/imageFormat';
+import { sameImageList } from '../../utils/imageList';
 
 interface FileBrowserProps {
   onImageSelected?: (image: ImageFileInfo) => void;
@@ -37,8 +38,8 @@ export function FileBrowser({ onImageSelected, onFolderSelected }: FileBrowserPr
   const [loadingFolders, setLoadingFolders] = useState<Set<string>>(new Set());
   const watchedFolders = useRef<Map<string, string>>(new Map()); // Maps folderId to folderPath
   const folderIdToPath = useRef<Map<string, string>>(new Map()); // Maps folderId to folderPath for lookups
-  // Ids that have a stored listing: a synchronous mirror of folderContents' keys.
-  const listedFolders = useRef<Set<string>>(new Set());
+  // A synchronous mirror of folderContents (the stored listing of each folder).
+  const storedListings = useRef<Map<string, FolderListing>>(new Map());
   // Per-folder read generation: only the newest read of a folder is applied.
   const readGeneration = useRef<Map<string, number>>(new Map());
   // The folder whose images the filmstrip shows (set when a folder-name click feeds it).
@@ -82,7 +83,7 @@ export function FileBrowser({ onImageSelected, onFolderSelected }: FileBrowserPr
         if (!removedId) return;
         logger.info(`Watched folder removed: ${data.folderPath}`);
         watchedFolders.current.delete(removedId);
-        listedFolders.current.delete(removedId);
+        storedListings.current.delete(removedId);
         // Discard any read still in flight for it.
         readGeneration.current.set(removedId, (readGeneration.current.get(removedId) ?? 0) + 1);
         if (pendingSelectionRef.current === removedId) pendingSelectionRef.current = null;
@@ -227,12 +228,12 @@ export function FileBrowser({ onImageSelected, onFolderSelected }: FileBrowserPr
     readGeneration.current.set(folderId, generation);
     const isNewestRead = () => readGeneration.current.get(folderId) === generation;
     const storeListing = (contents: FolderListing) => {
-      listedFolders.current.add(folderId);
+      storedListings.current.set(folderId, contents);
       setFolderContents(prev => new Map(prev).set(folderId, contents));
     };
 
     // Spinner only while the folder has nothing to show yet.
-    if (!listedFolders.current.has(folderId)) {
+    if (!storedListings.current.has(folderId)) {
       setLoadingFolders(prev => (prev.has(folderId) ? prev : new Set(prev).add(folderId)));
     }
 
@@ -248,6 +249,7 @@ export function FileBrowser({ onImageSelected, onFolderSelected }: FileBrowserPr
 
       if (!isNewestRead()) return; // a newer read of this folder owns the result
 
+      const previousImages = storedListings.current.get(folderId)?.images;
       storeListing(contents);
 
       // A name click still waiting for this folder (even if a background read superseded
@@ -263,8 +265,11 @@ export function FileBrowser({ onImageSelected, onFolderSelected }: FileBrowserPr
         onImageSelected?.(contents.images[0]);
         logger.info(`Auto-selected first image: ${contents.images[0].name}`);
         logger.info(`Gallery triggered for folder with ${contents.images.length} images`);
-      } else if (galleryFolderRef.current === folderId) {
-        // The filmstrip shows this folder: refresh its list, even when it is now empty.
+      } else if (galleryFolderRef.current === folderId
+        && !(previousImages && sameImageList(previousImages, contents.images))) {
+        // The filmstrip shows this folder and its file list changed: refresh it, even
+        // when it is now empty. An unchanged list is not sent: App.handleFolderSelected
+        // re-shows a closed filmstrip on every call, and focus re-reads are frequent.
         onFolderSelected?.(contents.images);
       }
 
@@ -274,7 +279,7 @@ export function FileBrowser({ onImageSelected, onFolderSelected }: FileBrowserPr
       logger.error(`Failed to load folder contents for ${folderPath}:`, error);
       if (pendingSelectionRef.current === folderId) pendingSelectionRef.current = null;
       // Keep the previous listing. With none yet, store an empty one so the spinner ends.
-      if (!listedFolders.current.has(folderId)) storeListing({ folders: [], images: [] });
+      if (!storedListings.current.has(folderId)) storeListing({ folders: [], images: [] });
     } finally {
       clearTimeout(timeoutId);
       if (isNewestRead()) {
