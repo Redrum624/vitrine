@@ -112,6 +112,15 @@ if (gateErrors.length) {
 }
 console.log(`[gh-release] release/latest.yml matches ${INSTALLER_NAME} (name, sha512, size) and version ${VERSION}`);
 
+// The feed installed copies read (build.publish, the source of app-update.yml); checked after publishing.
+let feedRepo;
+try {
+  feedRepo = publishRepo(pkg);
+} catch (e) {
+  console.error(`[gh-release] ERROR: ${e.message}. Nothing was published.`);
+  process.exit(1);
+}
+
 // ---------------------------------------------------------------------------
 // 3. Extract release notes from CHANGELOG.md
 // ---------------------------------------------------------------------------
@@ -200,8 +209,7 @@ try { fs.unlinkSync(notesFile); } catch { /* best-effort cleanup */ }
 // 7. Read the release back and the live feed, as installed copies read them
 //    (owner/repo from build.publish, the source of the installed app-update.yml)
 // ---------------------------------------------------------------------------
-const { owner, repo } = publishRepo(pkg);
-checkPublished({ owner, repo, version: VERSION, installerName: INSTALLER_NAME, installerSize: INSTALLER_SIZE }).then(
+checkPublished({ ...feedRepo, version: VERSION, installerName: INSTALLER_NAME, installerSize: INSTALLER_SIZE }).then(
   (checks) => {
     const failed = checks.filter((c) => c.error);
     for (const c of checks) console.log(`[gh-release]   ${formatCheck(c)}`);
