@@ -10,14 +10,20 @@
  *   B) sameImageList(a, b) — the renderer keeps the existing images array
  *      reference when a watcher reload returns an identical file list.
  */
+import fs from 'fs';
+import path from 'path';
+import { EventEmitter } from 'events';
 import { sameImageList } from '../utils/imageList';
 import type { ImageFileInfo } from '../services/FileSystemService';
 
 const {
   markSelfWrite,
+  markSelfWriteIfExists,
   isSelfWrite,
   SELF_WRITE_TTL_MS,
+  DEFAULT_MAX_WAIT_MS,
   createFolderChangeDebouncer,
+  createFolderWatcher,
   _clearAll
 } = require('../../electron/selfWriteRegistry.cjs');
 
@@ -138,12 +144,66 @@ describe('createFolderChangeDebouncer (watcher debounce vs self-write suppressio
     expect(emit).toHaveBeenCalledWith({ eventType: 'change', filename: 'b.jpg' });
   });
 
-  it('ignores events with empty/undefined filenames', () => {
+  // T10 (M3): fs.watch reports an overflow / unknown change with no filename. It is an
+  // external change (it replaced the old "ignores events with empty/undefined filenames").
+  it('an event without a filename counts as an external change and emits once', () => {
     const d = make();
     d.handleEvent('change', '');
     d.handleEvent('change', undefined);
+    d.handleEvent('rename', null);
     jest.advanceTimersByTime(1000);
+    expect(emit).toHaveBeenCalledTimes(1);
+    expect(emit).toHaveBeenCalledWith({ eventType: 'rename', filename: null });
+  });
+
+  // T11 (M5): a trailing-only debounce never emits under a continuous stream.
+  it('a continuous stream still emits, each emit no later than maxWaitMs after its first pending event', () => {
+    const emits: number[] = [];
+    emit.mockImplementation(() => { emits.push(Date.now()); });
+    const d = createFolderChangeDebouncer({ delayMs: 100, emit }); // default maxWaitMs
+    const eventTimes: number[] = [];
+    for (let t = 0; t < 3000; t += 50) {
+      eventTimes.push(Date.now());
+      d.handleEvent('change', `f${t}.jpg`);
+      jest.advanceTimersByTime(50);
+    }
+    expect(emits.length).toBeGreaterThanOrEqual(2);
+    let previousEmit = -Infinity;
+    for (const at of emits) {
+      const firstPending = eventTimes.find((t) => t >= previousEmit) as number;
+      expect(at - firstPending).toBeLessThanOrEqual(DEFAULT_MAX_WAIT_MS);
+      previousEmit = at;
+    }
+  });
+
+  // T12: the maximum wait must not turn self-write events into emits.
+  it('a continuous stream of self-write events alone never emits, past the maximum wait', () => {
+    markSelfWrite('D:\\Photos\\rated.jpg');
+    const d = make();
+    for (let t = 0; t < 2000; t += 50) {
+      d.handleEvent('change', 'rated.jpg');
+      jest.advanceTimersByTime(50);
+    }
+    jest.advanceTimersByTime(2000);
     expect(emit).not.toHaveBeenCalled();
+  });
+
+  // T13 (M2): only an overwrite is marked; a file the app creates (a new export) must show up.
+  it('a marked overwrite is swallowed while a newly created file (not marked) emits once', () => {
+    const exists = (p: string) => p === 'D:\\Photos\\old.jpg';
+    markSelfWriteIfExists('D:\\Photos\\old.jpg', exists);
+    markSelfWriteIfExists('D:\\Photos\\new-export.jpg', exists);
+    expect(isSelfWrite('old.jpg')).toBe(true);
+    expect(isSelfWrite('new-export.jpg')).toBe(false);
+    const d = make();
+    d.handleEvent('change', 'old.jpg');
+    jest.advanceTimersByTime(500);
+    expect(emit).not.toHaveBeenCalled();
+    d.handleEvent('rename', 'new-export.jpg');
+    d.handleEvent('change', 'new-export.jpg');
+    jest.advanceTimersByTime(500);
+    expect(emit).toHaveBeenCalledTimes(1);
+    expect(emit).toHaveBeenCalledWith({ eventType: 'change', filename: 'new-export.jpg' });
   });
 
   it('cancel() discards a pending emit (unwatch-folder mid-window)', () => {
@@ -152,6 +212,131 @@ describe('createFolderChangeDebouncer (watcher debounce vs self-write suppressio
     d.cancel();
     jest.advanceTimersByTime(1000);
     expect(emit).not.toHaveBeenCalled();
+  });
+});
+
+// M1/M7: deleting a watched folder makes fs.watch on Windows deliver ~160,000 events in 2 s,
+// all with a filename and no 'error' (diagnosis M1, measured). The watcher must notice the
+// folder is gone, close itself, leave the registry and tell the renderer once.
+describe('createFolderWatcher (watch-folder: a vanished folder or a watcher error)', () => {
+  const FOLDER = 'D:\\Shoot';
+
+  function fakeWatch() {
+    const watcher = Object.assign(new EventEmitter(), { close: jest.fn() });
+    let listener: (eventType: string, filename: string | null) => void = () => {};
+    const watchFn = jest.fn((_p: string, _opts: unknown, cb: typeof listener) => { listener = cb; return watcher; });
+    return { watcher, watchFn, fire: (t: string, f: string | null) => listener(t, f) };
+  }
+
+  beforeEach(() => {
+    jest.useFakeTimers();
+    _clearAll();
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('registers itself and forwards a change while the folder exists', () => {
+    const { watchFn, fire } = fakeWatch();
+    const send = jest.fn();
+    const watchers = new Map();
+    const handle = createFolderWatcher({ folderPath: FOLDER, watchers, watchFn, existsFn: () => true, send, delayMs: 100 });
+    expect(watchers.get(FOLDER)).toBe(handle);
+    expect(watchFn).toHaveBeenCalledWith(FOLDER, { persistent: false }, expect.any(Function));
+    fire('rename', 'new.jpg');
+    jest.advanceTimersByTime(100);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith({ folderPath: FOLDER, eventType: 'rename', filename: 'new.jpg' });
+  });
+
+  it("a vanished folder under an endless event storm: closes the watcher, leaves the map, sends exactly one 'removed'", () => {
+    const { watcher, watchFn, fire } = fakeWatch();
+    const send = jest.fn();
+    const watchers = new Map();
+    let present = true;
+    createFolderWatcher({ folderPath: FOLDER, watchers, watchFn, existsFn: () => present, send, delayMs: 100 });
+
+    present = false; // deleted in Windows Explorer
+    const sentAt: number[] = [];
+    send.mockImplementation(() => { sentAt.push(Date.now()); });
+    const stormStart = Date.now();
+    for (let t = 0; t < 3000; t++) { // one event per ms for 3 s
+      fire('rename', 'x.jpg');
+      jest.advanceTimersByTime(1);
+    }
+    jest.advanceTimersByTime(5000);
+
+    expect(watcher.close).toHaveBeenCalledTimes(1);
+    expect(watchers.has(FOLDER)).toBe(false);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith({ folderPath: FOLDER, eventType: 'removed', filename: null });
+    expect(sentAt[0] - stormStart).toBeLessThanOrEqual(DEFAULT_MAX_WAIT_MS);
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
+  it("an 'error' from the watcher does the same, once", () => {
+    const { watcher, watchFn } = fakeWatch();
+    const send = jest.fn();
+    const watchers = new Map();
+    createFolderWatcher({ folderPath: FOLDER, watchers, watchFn, existsFn: () => true, send, delayMs: 100 });
+
+    watcher.emit('error', new Error('EPERM'));
+    watcher.emit('error', new Error('EPERM'));
+    jest.advanceTimersByTime(5000);
+
+    expect(watcher.close).toHaveBeenCalledTimes(1);
+    expect(watchers.has(FOLDER)).toBe(false);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith({ folderPath: FOLDER, eventType: 'removed', filename: null });
+  });
+
+  it('an explicit close (unwatch-folder) sends nothing and leaves the map', () => {
+    const { watcher, watchFn, fire } = fakeWatch();
+    const send = jest.fn();
+    const watchers = new Map();
+    const handle = createFolderWatcher({ folderPath: FOLDER, watchers, watchFn, existsFn: () => true, send, delayMs: 100 });
+    fire('change', 'a.jpg');
+    handle._debouncer.cancel();
+    handle.close();
+    fire('change', 'b.jpg');
+    jest.advanceTimersByTime(5000);
+    expect(watcher.close).toHaveBeenCalledTimes(1);
+    expect(watchers.has(FOLDER)).toBe(false);
+    expect(send).not.toHaveBeenCalled();
+  });
+});
+
+// electron/main.cjs requires('electron') at module scope (not loadable under Jest), so its
+// wiring is checked on the source text, as in showItemInFolderIpc.test.ts.
+describe('electron/main.cjs — watcher and self-write wiring', () => {
+  const mainSource = fs.readFileSync(path.join(__dirname, '..', '..', 'electron', 'main.cjs'), 'utf8');
+  const handlerBody = (channel: string) => {
+    const start = mainSource.indexOf(`ipcMain.handle('${channel}'`);
+    expect(start).toBeGreaterThan(-1);
+    const next = mainSource.indexOf('ipcMain.handle(', start + 1);
+    return mainSource.slice(start, next === -1 ? undefined : next);
+  };
+
+  it('write-file and write-image-file mark only an overwrite, so a created file shows up', () => {
+    for (const channel of ['write-file', 'write-image-file']) {
+      const body = handlerBody(channel);
+      expect(body).toMatch(/markSelfWriteIfExists\(safeFilePath\)/);
+      expect(body).not.toMatch(/\bmarkSelfWrite\(/);
+    }
+  });
+
+  it('write-image-metadata and write-image-rating still mark every write', () => {
+    expect(handlerBody('write-image-metadata')).toMatch(/\bmarkSelfWrite\(safeFilePath\)/);
+    expect(handlerBody('write-image-rating')).toMatch(/\bmarkSelfWrite\(sidecar\)/);
+    expect(handlerBody('write-image-rating')).toMatch(/\bmarkSelfWrite\(safeFilePath\)/);
+  });
+
+  it('watch-folder builds its watcher with createFolderWatcher over the folderWatchers map', () => {
+    const body = handlerBody('watch-folder');
+    expect(body).toMatch(/createFolderWatcher\(\{/);
+    expect(body).toMatch(/watchers:\s*folderWatchers/);
+    expect(body).toMatch(/existsFn:\s*fs\.existsSync/);
   });
 });
 

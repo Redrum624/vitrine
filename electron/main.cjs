@@ -26,7 +26,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { writeImageFile, writeImageMetadata } = require('./imageWriter.cjs');
-const { markSelfWrite, createFolderChangeDebouncer } = require('./selfWriteRegistry.cjs');
+const { markSelfWrite, markSelfWriteIfExists, createFolderWatcher } = require('./selfWriteRegistry.cjs');
 const {
   computeDeniedBases,
   validateWritePath: enforceWritePolicy,
@@ -611,30 +611,26 @@ ipcMain.handle('watch-folder', async (event, folderPath) => {
     }
 
     // Debounce rapid changes, swallowing events caused by the app's own writes
-    // (rating XMP, exports) — forwarding those makes the renderer reload an
+    // (rating XMP, overwrites) — forwarding those makes the renderer reload an
     // unchanged folder and the filmstrip scroll back to the start. The
     // debouncer guarantees: emit iff a NON-self-write event occurred in the
     // window; self-writes alone never emit and never delay/suppress a genuine
-    // external event. (Logic lives in selfWriteRegistry.cjs — unit-tested.)
-    const debouncer = createFolderChangeDebouncer({
+    // external event; a continuous stream still emits within its maximum wait.
+    // Before each emit the folder's existence is checked: a deleted folder (or
+    // a watcher 'error') closes the watcher, removes it from folderWatchers and
+    // sends one 'removed'. (Logic lives in selfWriteRegistry.cjs — unit-tested.)
+    createFolderWatcher({
+      folderPath,
+      watchers: folderWatchers,
+      watchFn: fs.watch,
+      existsFn: fs.existsSync,
       delayMs: 100,
-      emit: ({ eventType, filename }) => {
+      send: (payload) => {
         if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send('folder-changed', {
-            folderPath,
-            eventType,
-            filename
-          });
+          mainWindow.webContents.send('folder-changed', payload);
         }
       }
     });
-
-    const watcher = fs.watch(folderPath, { persistent: false }, (eventType, filename) => {
-      debouncer.handleEvent(eventType, filename);
-    });
-    watcher._debouncer = debouncer;
-
-    folderWatchers.set(folderPath, watcher);
     return { success: true };
   } catch (error) {
     console.error(`Failed to watch folder ${folderPath}:`, error);
@@ -908,7 +904,8 @@ function validateWritePath(p, opts = {}) {
 ipcMain.handle('write-file', async (event, filePath, data) => {
   try {
     const safeFilePath = validateWritePath(filePath, { requireAllowedExtension: true });
-    markSelfWrite(safeFilePath); // don't let the folder watcher react to our own write
+    // Swallow the watcher event of an overwrite only; a created file must appear.
+    markSelfWriteIfExists(safeFilePath);
     await fs.promises.writeFile(safeFilePath, data);
     return true;
   } catch (error) {
@@ -922,7 +919,9 @@ ipcMain.handle('write-image-file', async (event, filePath, imageData, format, op
     const safeFilePath = validateWritePath(filePath, { requireAllowedExtension: true });
     // Delegates to electron/imageWriter.cjs (unit-tested). Correctly handles
     // 8-bit and 16-bit raw RGBA buffers and embeds an sRGB ICC profile.
-    markSelfWrite(safeFilePath); // exports into a watched folder must not retrigger it
+    // An overwritten export must not retrigger the watcher; a NEW export must
+    // (writeImageFile writes the final name directly: one emit, no reload loop).
+    markSelfWriteIfExists(safeFilePath);
     return await writeImageFile(safeFilePath, imageData, format, options);
   } catch (error) {
     console.error('Failed to write image file:', error);
