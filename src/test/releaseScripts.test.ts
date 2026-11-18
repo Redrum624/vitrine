@@ -173,4 +173,9 @@ describe('preUploadErrors (gh-release.cjs gate, before anything is published)', 
     expect(errors.length).toBeGreaterThan(0);
     expect(errors.join(' ')).toMatch(/sha512/);
   });
+  it('fails when the installer size does not match latest.yml', () => {
+    const errors = preUploadErrors(LATEST_YML, { ...gate, installerSize: SETUP_SIZE + 1 });
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatch(/size/);
+  });
 });
