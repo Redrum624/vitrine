@@ -4,6 +4,15 @@ All notable changes to **Vitrine** (formerly Photo Editor Pro) are documented in
 this file. The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.40.1] - 2026-11-18
+
+### Fixed
+- **The File Explorer showed an old listing of a folder.** Cause: opening a folder (the arrow or its name) read the disk only the first time and then served the copy in memory, and collapsing a folder stopped watching it for good, so files added or removed later never appeared. Fix: every open reads the folder again (the previous rows stay on screen while it reads, and a failed or slow read keeps them), re-expanding watches it again, coming back to the window re-reads the open folders, and collapsing a folder also releases the folders opened inside it. Affects: `src/components/Layout/FileBrowser.tsx`, `src/services/FileSystemService.ts`.
+- **The filmstrip could switch to a folder only browsed in the tree, and never emptied.** Cause: a background refresh followed the folder last opened with the arrow instead of the folder shown in the filmstrip, and skipped an empty folder. Fix: a refresh updates the filmstrip only for the folder it shows and only when that folder's files changed (so coming back to the window does not reopen a closed filmstrip), never selects an image, and empties it when that folder loses its last photo or is deleted. Affects: `src/components/Layout/FileBrowser.tsx`.
+- **An export into the open folder did not appear in it.** Cause: the app ignored the folder watcher's event for every file it wrote, new files included. Fix: only an overwrite is ignored. Affects: `electron/main.cjs`, `electron/selfWriteRegistry.cjs`.
+- **A busy folder could stop refreshing, and deleting an open folder kept the app busy.** Cause: the watcher waited for a quiet moment that a continuous stream of changes never gives, dropped events without a file name, and after the folder was deleted Windows kept sending events without end. Fix: a refresh comes at the latest one second after the first change, and a deleted folder (or a watcher error) closes its watcher and is removed from the File Explorer. Affects: `electron/selfWriteRegistry.cjs`, `electron/main.cjs`, `src/types/electron.ts`.
+- **A folder deleted with Windows Explorer's ordinary Delete (to the Recycle Bin) stayed in the filmstrip and kept its watcher.** Cause: that Delete moves the folder, and Windows sends no event for a watched folder that is moved away, renamed included. Fix: when a folder's new listing no longer has a folder the File Explorer has open, or a re-read finds the folder gone, the File Explorer forgets it and the folders open inside it, releases their watchers, and empties the filmstrip if it showed one of them. Affects: `src/components/Layout/FileBrowser.tsx`.
+
 ## [1.40.0] - 2026-10-14
 
 ### Added

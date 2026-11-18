@@ -179,7 +179,9 @@ export interface ElectronAPI {
   // Folder watching
   watchFolder: (folderPath: string) => Promise<{ success: boolean; alreadyWatching?: boolean; error?: string }>;
   unwatchFolder: (folderPath: string) => Promise<{ success: boolean; error?: string }>;
-  onFolderChanged: (callback: (data: { folderPath: string; eventType: string; filename: string }) => void) => void;
+  // filename is null for an fs.watch event without one, and for eventType 'removed'
+  // (the watched folder is gone; main has already closed its watcher).
+  onFolderChanged: (callback: (data: { folderPath: string; eventType: string; filename: string | null }) => void) => void;
 
   // Advanced file operations
   writeImageFile: (filePath: string, imageData: ArrayBuffer, format: string, options: {

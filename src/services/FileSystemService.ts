@@ -141,8 +141,12 @@ export class FileSystemService {
         return { folders: [], images: [] };
       }
     } catch (error) {
+      // Reject instead of answering with an empty listing: a transient read failure
+      // must not look like an empty folder. FileBrowser then keeps the folder's
+      // previous listing; the Open Folder dialog path (App.openFolderFromDialog)
+      // shows "Could not read folder" from its own catch.
       logger.error(`Failed to get folder contents for ${folderPath}:`, error);
-      return { folders: [], images: [] };
+      throw error;
     }
   }
 
