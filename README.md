@@ -90,8 +90,8 @@ Build a distributable Windows installer:
 
 ```bash
 npm run build:win       # clean -> tsc + vite build -> NSIS installer + portable exe -> collect into installer/
-# Output: installer/Vitrine-Setup-1.40.0.exe + Vitrine-1.40.0-portable.exe
-#         (+ latest.yml, Vitrine-Setup-1.40.0.exe.blockmap, SHA256SUMS.txt, Vitrine-1.40.0-README.txt,
+# Output: installer/Vitrine-Setup-1.40.1.exe + Vitrine-1.40.1-portable.exe
+#         (+ latest.yml, Vitrine-Setup-1.40.1.exe.blockmap, SHA256SUMS.txt, Vitrine-1.40.1-README.txt,
 #          LICENSE, THIRD-PARTY-LICENSES.md)
 npm run build:win:dir   # fast unpacked build (no installer, quick iteration)
 ```
