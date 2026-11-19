@@ -6,12 +6,67 @@ import { isElectron } from '../../types/electron';
 import { getDisplayFormat } from '../../utils/imageFormat';
 import { sameImageList } from '../../utils/imageList';
 
+/**
+ * An "Open Folder" (Welcome screen, Gallery toolbar) from App: the dialog already fed the
+ * filmstrip; this tree makes the folder its gallery folder, so it is watched and refreshed.
+ */
+export interface OpenFolderRequest {
+  path: string;
+  /** Increases on every open, so the same folder can be opened twice. */
+  seq: number;
+  /** The list the dialog fed the filmstrip: an identical re-read is not fed again. */
+  images?: ImageFileInfo[];
+}
+
 interface FileBrowserProps {
   onImageSelected?: (image: ImageFileInfo) => void;
   onFolderSelected?: (images: ImageFileInfo[]) => void;
+  openFolderRequest?: OpenFolderRequest | null;
 }
 
 type FolderListing = { folders: FolderInfo[]; images: ImageFileInfo[] };
+
+// A path in one comparable form: `\` and `/` alike, no trailing separator, any case
+// (Windows paths are case-insensitive).
+function comparablePath(p: string): string {
+  return p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+}
+
+// Start watching a folder (Electron only). Registered before the IPC resolves so a collapse
+// in the meantime finds it and unwatches it; dropped again if main refuses.
+function startWatch(watched: Map<string, string>, folderId: string, folderPath: string) {
+  if (!isElectron() || !window.electronAPI || watched.has(folderId)) return;
+  watched.set(folderId, folderPath);
+  window.electronAPI.watchFolder(folderPath).then(result => {
+    if (result.success) {
+      logger.debug(`Started watching folder: ${folderPath}`);
+    } else if (watched.get(folderId) === folderPath) {
+      watched.delete(folderId);
+    }
+  }).catch(err => {
+    if (watched.get(folderId) === folderPath) watched.delete(folderId);
+    logger.warn(`Failed to watch folder ${folderPath}:`, err);
+  });
+}
+
+// Stop one folder id's watch. Main keeps ONE watcher per path string, so the path is
+// unwatched only when no other id still watches that same path (the tree and an Open Folder
+// folder tracked outside it may both hold it).
+function releaseWatch(
+  watched: Map<string, string>,
+  folderId: string,
+  api: { unwatchFolder: (folderPath: string) => unknown } | undefined,
+): void {
+  const watchedPath = watched.get(folderId);
+  if (watchedPath === undefined) return;
+  watched.delete(folderId);
+  let shared = false;
+  watched.forEach(p => { if (p === watchedPath) shared = true; });
+  if (api && !shared) {
+    api.unwatchFolder(watchedPath);
+    logger.debug(`Stopped watching folder: ${watchedPath}`);
+  }
+}
 
 // How long one folder read may take before it counts as failed (the previous listing stays).
 const FOLDER_READ_TIMEOUT_MS = 5000;
@@ -44,7 +99,7 @@ function isFolderGoneError(error: unknown): boolean {
   return /\bENOENT\b/.test(message);
 }
 
-export function FileBrowser({ onImageSelected, onFolderSelected }: FileBrowserProps) {
+export function FileBrowser({ onImageSelected, onFolderSelected, openFolderRequest }: FileBrowserProps) {
   const [drives, setDrives] = useState<DriveInfo[]>([]);
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
   const [folderContents, setFolderContents] = useState<Map<string, FolderListing>>(new Map());
@@ -59,15 +114,29 @@ export function FileBrowser({ onImageSelected, onFolderSelected }: FileBrowserPr
   const storedListings = useRef<Map<string, FolderListing>>(new Map());
   // Per-folder read generation: only the newest read of a folder is applied.
   const readGeneration = useRef<Map<string, number>>(new Map());
-  // The folder whose images the filmstrip shows (set when a folder-name click feeds it).
+  // The folder whose images the filmstrip shows (set when a folder-name click feeds it, or
+  // by an Open Folder request) and the list the filmstrip was last given for it.
   const galleryFolderRef = useRef<string | null>(null);
+  const galleryImagesRef = useRef<ImageFileInfo[] | null>(null);
+  // An Open Folder folder the tree cannot reach, tracked outside it under `opened:<path>`.
+  const outsideFolderRef = useRef<string | null>(null);
+  // Open Folder walk generation: a newer request or a folder-name click abandons a walk.
+  const revealGenerationRef = useRef(0);
+  const lastRequestSeqRef = useRef<number | null>(null);
+  // Resolves with the root list once loadSystemDrives has it (an Open Folder walk waits for it).
+  const drivesReadyRef = useRef<{ promise: Promise<DriveInfo[]>; resolve: (d: DriveInfo[]) => void } | null>(null);
+  if (drivesReadyRef.current === null) {
+    let resolve!: (d: DriveInfo[]) => void;
+    const promise = new Promise<DriveInfo[]>(res => { resolve = res; });
+    drivesReadyRef.current = { promise, resolve };
+  }
   // The folder a name click asked for, until its newest read is applied.
   const pendingSelectionRef = useRef<string | null>(null);
   // Latest-value refs so the MOUNT-ONCE listeners below read current state
   // without being re-registered on every change (see the leak note on that effect).
   const expandedFoldersRef = useRef(expandedFolders);
   const onFolderSelectedRef = useRef(onFolderSelected);
-  const loadFolderContentsRef = useRef<(folderPath: string, folderId: string, shallow?: boolean, watch?: boolean) => void>(() => {});
+  const loadFolderContentsRef = useRef<(folderPath: string, folderId: string, shallow?: boolean, watch?: boolean) => Promise<FolderListing | null>>(async () => null);
 
   // Keep the refs pointed at the latest render's values. Cheap post-commit syncs; they do
   // NOT re-register the IPC listener (that effect has an empty dep array on purpose).
@@ -90,14 +159,11 @@ export function FileBrowser({ onImageSelected, onFolderSelected }: FileBrowserPr
   const forgetFolders = useCallback((ids: Set<string>, unwatch: boolean) => {
     const api = unwatch && isElectron() ? window.electronAPI : undefined;
     ids.forEach(id => {
-      const watchedPath = watchedFolders.current.get(id);
-      if (watchedPath !== undefined) {
-        watchedFolders.current.delete(id);
-        if (api) api.unwatchFolder(watchedPath);
-      }
+      releaseWatch(watchedFolders.current, id, api);
       storedListings.current.delete(id);
       readGeneration.current.set(id, (readGeneration.current.get(id) ?? 0) + 1);
       if (pendingSelectionRef.current === id) pendingSelectionRef.current = null;
+      if (outsideFolderRef.current === id) outsideFolderRef.current = null;
     });
     const dropIds = <T extends Set<string> | Map<string, unknown>>(prev: T, copy: (p: T) => T): T => {
       let hit = false;
@@ -112,9 +178,48 @@ export function FileBrowser({ onImageSelected, onFolderSelected }: FileBrowserPr
     setLoadingFolders(prev => dropIds(prev, p => new Set(p)));
     if (galleryFolderRef.current && ids.has(galleryFolderRef.current)) {
       galleryFolderRef.current = null;
+      galleryImagesRef.current = null;
       onFolderSelectedRef.current?.([]);
     }
   }, []);
+
+  // Stop tracking the Open Folder folder kept outside the tree: release its watch (its path
+  // stays watched while a tree folder still holds it), discard any read in flight for it and
+  // drop its listing, so the status bar no longer counts it. Refs and setters only, so any
+  // closure may call it.
+  const releaseOutsideFolder = (reason: string) => {
+    const outside = outsideFolderRef.current;
+    if (!outside) return;
+    outsideFolderRef.current = null;
+    releaseWatch(watchedFolders.current, outside, isElectron() ? window.electronAPI : undefined);
+    storedListings.current.delete(outside);
+    readGeneration.current.set(outside, (readGeneration.current.get(outside) ?? 0) + 1);
+    folderIdToPath.current.delete(outside);
+    setFolderContents(prev => {
+      if (!prev.has(outside)) return prev;
+      const next = new Map(prev);
+      next.delete(outside);
+      return next;
+    });
+    setLoadingFolders(prev => {
+      if (!prev.has(outside)) return prev;
+      const next = new Set(prev);
+      next.delete(outside);
+      return next;
+    });
+    logger.info(`Open Folder: stopped tracking ${outside} (${reason})`);
+  };
+
+  // The filmstrip now shows `folderId`'s `images`. An Open Folder folder tracked outside the
+  // tree is released when another folder takes its place. Refs and setters only, so any
+  // closure may call it.
+  const takeGallery = (folderId: string | null, images: ImageFileInfo[] | null) => {
+    if (outsideFolderRef.current && outsideFolderRef.current !== folderId) {
+      releaseOutsideFolder('another folder is shown');
+    }
+    galleryFolderRef.current = folderId;
+    galleryImagesRef.current = images;
+  };
 
   // Set up folder change listener — MOUNT ONCE. Registering this per-`expandedFolders`
   // (the previous behaviour) added a fresh ipcRenderer.on('folder-changed') listener on
@@ -127,42 +232,44 @@ export function FileBrowser({ onImageSelected, onFolderSelected }: FileBrowserPr
     const handleFolderChanged = (data: { folderPath: string; eventType: string; filename: string | null }) => {
       logger.debug(`Folder changed: ${data.folderPath} - ${data.eventType} - ${data.filename}`);
 
-      // Find the folderId for this path
-      let changedFolderId: string | null = null;
+      // Find the folder ids watching this path (a tree folder and an Open Folder folder
+      // tracked outside the tree may share one).
+      const changedFolderIds: string[] = [];
       watchedFolders.current.forEach((path, id) => {
-        if (path === data.folderPath) {
-          changedFolderId = id;
-        }
+        if (path === data.folderPath) changedFolderIds.push(id);
       });
 
       // The folder is gone (main closed its watcher): drop it from the tree's state, and
       // empty the filmstrip if it showed this folder.
       if (data.eventType === 'removed') {
-        const removedId = changedFolderId as string | null;
-        if (!removedId) return;
+        if (changedFolderIds.length === 0) return;
         logger.info(`Watched folder removed: ${data.folderPath}`);
-        forgetFolders(new Set([removedId]), false);
+        forgetFolders(new Set(changedFolderIds), false);
         return;
       }
 
-      if (changedFolderId && expandedFoldersRef.current.has(changedFolderId)) {
+      changedFolderIds.forEach(changedFolderId => {
+        if (!expandedFoldersRef.current.has(changedFolderId) && outsideFolderRef.current !== changedFolderId) return;
         // Reload the folder contents
         const folderPath = watchedFolders.current.get(changedFolderId);
         if (folderPath) {
           logger.info(`Reloading folder due to changes: ${folderPath}`);
-          loadFolderContentsRef.current(folderPath, changedFolderId, true);
+          void loadFolderContentsRef.current(folderPath, changedFolderId, true);
         }
-      }
+      });
     };
 
     window.electronAPI.onFolderChanged(handleFolderChanged);
 
     return () => {
+      // An Open Folder walk still reading is abandoned: it must not watch its chain after
+      // this cleanup has released everything (nothing would ever unwatch it).
+      revealGenerationRef.current += 1;
       // Drop the single 'folder-changed' listener (onFolderChanged wraps the callback in a
       // fresh closure each call, so removeAllListeners on the channel is the correct remover)
       // and release every folder watcher held open by this component.
       window.electronAPI?.removeAllListeners?.('folder-changed');
-      watchedFolders.current.forEach((path) => {
+      new Set(watchedFolders.current.values()).forEach((path) => {
         window.electronAPI?.unwatchFolder(path);
       });
       watchedFolders.current.clear();
@@ -180,7 +287,7 @@ export function FileBrowser({ onImageSelected, onFolderSelected }: FileBrowserPr
       ids.forEach(id => {
         const folderPath = folderIdToPath.current.get(id);
         // A collapsed gallery folder is re-read but not watched again (collapse released it).
-        if (folderPath) loadFolderContentsRef.current(folderPath, id, true, expanded.has(id));
+        if (folderPath) void loadFolderContentsRef.current(folderPath, id, true, expanded.has(id));
       });
     };
     window.addEventListener('focus', handleWindowFocus);
@@ -203,6 +310,7 @@ export function FileBrowser({ onImageSelected, onFolderSelected }: FileBrowserPr
 
       const systemDrives = await fileSystemService.getSystemDrives();
       setDrives(systemDrives);
+      drivesReadyRef.current?.resolve(systemDrives);
       logger.info(`Loaded ${systemDrives.length} system drives`);
 
       // Report completion progress
@@ -223,6 +331,7 @@ export function FileBrowser({ onImageSelected, onFolderSelected }: FileBrowserPr
 
     } catch (error) {
       logger.error('Failed to load system drives:', error);
+      drivesReadyRef.current?.resolve([]); // an Open Folder walk then tracks its folder outside the tree
       // Even on error, signal app ready so user can see the error
       if (isElectron() && window.electronAPI?.appReady) {
         await window.electronAPI.appReady();
@@ -236,26 +345,15 @@ export function FileBrowser({ onImageSelected, onFolderSelected }: FileBrowserPr
   // read (arrow expand, watcher event, window focus): it refreshes the filmstrip only when
   // the filmstrip shows this folder, and never selects an image. A non-shallow read is a
   // folder-name click: the gallery gets the list and the first image is selected.
-  const loadFolderContents = useCallback(async (folderPath: string, folderId: string, shallow = false, watch = true) => {
+  // Resolves with the listing read from disk (even when a newer read of the folder owns
+  // the result), or null when the read failed.
+  const loadFolderContents = useCallback(async (folderPath: string, folderId: string, shallow = false, watch = true): Promise<FolderListing | null> => {
     // Store mapping for later lookups
     folderIdToPath.current.set(folderId, folderPath);
     if (!shallow) pendingSelectionRef.current = folderId;
 
-    // Start watching this folder for changes (if in Electron). Registered before the IPC
-    // resolves so a collapse in the meantime finds it and unwatches it.
-    if (watch && isElectron() && window.electronAPI && !watchedFolders.current.has(folderId)) {
-      watchedFolders.current.set(folderId, folderPath);
-      window.electronAPI.watchFolder(folderPath).then(result => {
-        if (result.success) {
-          logger.debug(`Started watching folder: ${folderPath}`);
-        } else if (watchedFolders.current.get(folderId) === folderPath) {
-          watchedFolders.current.delete(folderId);
-        }
-      }).catch(err => {
-        if (watchedFolders.current.get(folderId) === folderPath) watchedFolders.current.delete(folderId);
-        logger.warn(`Failed to watch folder ${folderPath}:`, err);
-      });
-    }
+    // Start watching this folder for changes (if in Electron).
+    if (watch) startWatch(watchedFolders.current, folderId, folderPath);
 
     const generation = (readGeneration.current.get(folderId) ?? 0) + 1;
     readGeneration.current.set(folderId, generation);
@@ -280,9 +378,8 @@ export function FileBrowser({ onImageSelected, onFolderSelected }: FileBrowserPr
       const contentsPromise = fileSystemService.getFolderContents(folderPath);
       const contents = await Promise.race([contentsPromise, timeoutPromise]);
 
-      if (!isNewestRead()) return; // a newer read of this folder owns the result
+      if (!isNewestRead()) return contents; // a newer read of this folder owns the result
 
-      const previousImages = storedListings.current.get(folderId)?.images;
       storeListing(contents);
 
       // A name click still waiting for this folder (even if a background read superseded
@@ -291,7 +388,7 @@ export function FileBrowser({ onImageSelected, onFolderSelected }: FileBrowserPr
       if (selectionRequested) pendingSelectionRef.current = null;
 
       if (selectionRequested && contents.images.length > 0) {
-        galleryFolderRef.current = folderId;
+        takeGallery(folderId, contents.images);
         onFolderSelected?.(contents.images);
         // Set up navigation context and auto-select the first image (folder-name click)
         fileSystemService.setCurrentImages(contents.images, 0);
@@ -299,10 +396,12 @@ export function FileBrowser({ onImageSelected, onFolderSelected }: FileBrowserPr
         logger.info(`Auto-selected first image: ${contents.images[0].name}`);
         logger.info(`Gallery triggered for folder with ${contents.images.length} images`);
       } else if (galleryFolderRef.current === folderId
-        && !(previousImages && sameImageList(previousImages, contents.images))) {
+        && !(galleryImagesRef.current && sameImageList(galleryImagesRef.current, contents.images))) {
         // The filmstrip shows this folder and its file list changed: refresh it, even
         // when it is now empty. An unchanged list is not sent: App.handleFolderSelected
         // re-shows a closed filmstrip on every call, and focus re-reads are frequent.
+        // Compared with the list the filmstrip was given (by this tree or Open Folder).
+        galleryImagesRef.current = contents.images;
         onFolderSelected?.(contents.images);
       }
 
@@ -315,6 +414,9 @@ export function FileBrowser({ onImageSelected, onFolderSelected }: FileBrowserPr
       const gone = new Set<string>();
       tracked.forEach(id => {
         const childPath = folderIdToPath.current.get(id);
+        // An Open Folder folder tracked outside the tree is never in a listing by its id;
+        // its own watcher and reads tell when it is gone.
+        if (id === outsideFolderRef.current) return;
         if (present.has(id) || !childPath || !isDirectChild(folderPath, childPath)) return;
         gone.add(id);
         tracked.forEach(other => {
@@ -327,8 +429,9 @@ export function FileBrowser({ onImageSelected, onFolderSelected }: FileBrowserPr
       }
 
       logger.info(`Loaded folder contents: ${contents.folders.length} folders, ${contents.images.length} images`);
+      return contents;
     } catch (error) {
-      if (!isNewestRead()) return;
+      if (!isNewestRead()) return null;
       logger.error(`Failed to load folder contents for ${folderPath}:`, error);
       if (pendingSelectionRef.current === folderId) pendingSelectionRef.current = null;
       if (isFolderGoneError(error)) {
@@ -339,10 +442,11 @@ export function FileBrowser({ onImageSelected, onFolderSelected }: FileBrowserPr
           if (isInsideFolder(folderPath, folderIdToPath.current.get(id))) gone.add(id);
         });
         forgetFolders(gone, true);
-        return;
+        return null;
       }
       // Keep the previous listing. With none yet, store an empty one so the spinner ends.
       if (!storedListings.current.has(folderId)) storeListing({ folders: [], images: [] });
+      return null;
     } finally {
       clearTimeout(timeoutId);
       if (isNewestRead()) {
@@ -372,7 +476,8 @@ export function FileBrowser({ onImageSelected, onFolderSelected }: FileBrowserPr
         if (isInsideFolder(parentPath, folderIdToPath.current.get(id))) closing.add(id);
       });
       watchedFolders.current.forEach((path, id) => {
-        if (isInsideFolder(parentPath, path)) closing.add(id);
+        // An Open Folder folder tracked outside the tree is not the tree's to release.
+        if (id !== outsideFolderRef.current && isInsideFolder(parentPath, path)) closing.add(id);
       });
 
       setExpandedFolders(prev => {
@@ -384,14 +489,7 @@ export function FileBrowser({ onImageSelected, onFolderSelected }: FileBrowserPr
       // Stop watching this folder and all child folders
       const api = isElectron() ? window.electronAPI : undefined;
       if (api) {
-        closing.forEach(id => {
-          const watchedPath = watchedFolders.current.get(id);
-          if (watchedPath) {
-            api.unwatchFolder(watchedPath);
-            watchedFolders.current.delete(id);
-            logger.debug(`Stopped watching folder: ${watchedPath}`);
-          }
-        });
+        closing.forEach(id => releaseWatch(watchedFolders.current, id, api));
       }
       return;
     }
@@ -421,6 +519,9 @@ export function FileBrowser({ onImageSelected, onFolderSelected }: FileBrowserPr
   const handleFolderNameClick = useCallback((e: React.MouseEvent, folderId: string, folderPath: string) => {
     e.stopPropagation(); // Prevent any parent handlers
 
+    // A name click is the newest choice: an Open Folder walk still running is abandoned.
+    revealGenerationRef.current += 1;
+
     // Expand folder if not already expanded
     setExpandedFolders(prev => (prev.has(folderId) ? prev : new Set(prev).add(folderId)));
 
@@ -431,6 +532,89 @@ export function FileBrowser({ onImageSelected, onFolderSelected }: FileBrowserPr
     // image is selected. A cached listing stays in the tree while the read runs.
     void loadFolderContents(folderPath, folderId, false);
   }, [loadFolderContents]);
+
+  // Open Folder could not be reached in the tree: track it outside it under a synthetic id,
+  // watched, re-read on its watcher events and on window focus, feeding the filmstrip.
+  const trackOutsideTree = async (request: OpenFolderRequest, reason: string) => {
+    const id = `opened:${request.path}`;
+    logger.info(`Open Folder: tracking ${request.path} outside the tree (${reason})`);
+    folderIdToPath.current.set(id, request.path);
+    takeGallery(id, request.images ?? null);
+    outsideFolderRef.current = id;
+    startWatch(watchedFolders.current, id, request.path);
+    await loadFolderContentsRef.current(request.path, id, true, false);
+  };
+
+  // Open Folder (Welcome screen, Gallery toolbar): make the opened folder this tree's gallery
+  // folder (X2, diagnosis C9/R10). Best effort: walk down from the root whose path is the
+  // longest prefix, one ancestor at a time, taking each child's id FROM its parent's listing
+  // (ids are made in main). Reached: expand and watch every ancestor and the folder, select
+  // it. Not reached: track it outside the tree. A newer request or a name click abandons it.
+  const revealOpenedFolder = async (request: OpenFolderRequest) => {
+    const generation = ++revealGenerationRef.current;
+    const isCurrent = () => revealGenerationRef.current === generation;
+    // The filmstrip shows this folder from now on: no older choice may feed it, and a folder
+    // an earlier open tracked outside the tree is released now (an abandoned walk would
+    // otherwise leave it watched; trackOutsideTree takes it again if this is the same folder).
+    pendingSelectionRef.current = null;
+    releaseOutsideFolder('a newer Open Folder');
+    galleryFolderRef.current = null;
+    galleryImagesRef.current = request.images ?? null;
+
+    const roots = await drivesReadyRef.current!.promise;
+    if (!isCurrent()) return;
+    const target = comparablePath(request.path);
+    let root: DriveInfo | null = null;
+    let rootKey = '';
+    roots.forEach(r => {
+      const key = comparablePath(r.path);
+      if ((target === key || target.startsWith(key + '/')) && (!root || key.length > rootKey.length)) {
+        root = r;
+        rootKey = key;
+      }
+    });
+    if (!root) return trackOutsideTree(request, 'no root is a prefix of its path');
+    const rootInfo: DriveInfo = root;
+
+    const chain: Array<{ id: string; path: string }> = [{ id: rootInfo.id, path: rootInfo.path }];
+    let key = rootKey;
+    for (const segment of target.slice(rootKey.length).split('/').filter(Boolean)) {
+      const parent = chain[chain.length - 1];
+      // A plain read (not watched): an abandoned walk leaves nothing watched or expanded.
+      const listing = await loadFolderContentsRef.current(parent.path, parent.id, true, false);
+      if (!isCurrent()) return;
+      if (!listing) return trackOutsideTree(request, `could not read ${parent.path}`);
+      key = `${key}/${segment}`;
+      const child = listing.folders.find(f => comparablePath(f.path) === key);
+      if (!child) return trackOutsideTree(request, `${parent.path} does not list it`);
+      chain.push({ id: child.id, path: child.path });
+    }
+
+    const opened = chain[chain.length - 1];
+    logger.info(`Open Folder: revealing ${opened.path} in the tree`);
+    chain.forEach(c => {
+      folderIdToPath.current.set(c.id, c.path);
+      startWatch(watchedFolders.current, c.id, c.path);
+    });
+    setExpandedFolders(prev => {
+      const next = new Set(prev);
+      chain.forEach(c => next.add(c.id));
+      return next;
+    });
+    setSelectedFolder(opened.id);
+    takeGallery(opened.id, request.images ?? null);
+    // Re-read it (now watched): only a list that differs from the dialog's is fed.
+    await loadFolderContentsRef.current(opened.path, opened.id, true, false);
+  };
+
+  // A new Open Folder request (seq increases on every open, the same folder included).
+  const revealOpenedFolderRef = useRef(revealOpenedFolder);
+  revealOpenedFolderRef.current = revealOpenedFolder;
+  useEffect(() => {
+    if (!openFolderRequest || openFolderRequest.seq === lastRequestSeqRef.current) return;
+    lastRequestSeqRef.current = openFolderRequest.seq;
+    void revealOpenedFolderRef.current(openFolderRequest);
+  }, [openFolderRequest]);
 
   const renderDriveOrFolder = (item: DriveInfo, depth = 0) => {
     const isExpanded = expandedFolders.has(item.id);

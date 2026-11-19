@@ -4,6 +4,12 @@ All notable changes to **Vitrine** (formerly Photo Editor Pro) are documented in
 this file. The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.40.2] - 2026-11-18
+
+### Fixed
+- **The filmstrip stopped refreshing after the File Explorer was closed or in Gallery view.** Cause: closing the File Explorer panel (or switching off every tool) and the Gallery view removed the File Explorer from the window, which released every folder watcher and forgot the tree, while the filmstrip kept showing the folder: files added or removed on disk no longer appeared. Fix: the File Explorer is created once for the window and only hidden, so its folders stay watched and re-read when you come back to the window, and the tree is as you left it when you open it again. The other inspector panels appear and close as before. Affects: `src/App.tsx`.
+- **A folder opened with "Open Folder" never refreshed.** Cause: the Welcome screen's and the Gallery toolbar's *Open Folder* listed the folder once and filled the filmstrip; the File Explorer never heard of it, so nothing watched it and the tree kept marking another folder. Fix: the opened folder becomes the File Explorer's folder: it is revealed in the tree (each parent opened, the folder selected) and watched, and a folder the tree cannot reach (a network share, a folder its parent does not list) is watched on its own; either way its changes reach the filmstrip, and clicking another folder in the tree takes over as before. Affects: `src/App.tsx`, `src/components/Layout/FileBrowser.tsx`.
+
 ## [1.40.1] - 2026-11-18
 
 ### Changed

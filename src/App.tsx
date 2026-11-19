@@ -3,7 +3,7 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { MenuBar } from './components/Layout/MenuBar';
 import { Toolbar } from './components/Layout/Toolbar';
 import { IconSidebar } from './components/Layout/IconSidebar';
-import { FileBrowser } from './components/Layout/FileBrowser';
+import { FileBrowser, type OpenFolderRequest } from './components/Layout/FileBrowser';
 import { Canvas } from './components/Layout/Canvas';
 import { AdjustmentPanel } from './components/Panels/AdjustmentPanel';
 import { HistogramPanel } from './components/Panels/HistogramPanel';
@@ -302,6 +302,11 @@ export interface OpenFolderDeps {
   getFolderContents: (folderPath: string) => Promise<{ images: ImageFileInfo[] }>;
   /** The working folder-load path (filmstrip + open-first). */
   onFolderSelected: (images: ImageFileInfo[]) => void;
+  /**
+   * Told the opened folder's path after the filmstrip was fed, on success only (not on
+   * cancel, empty folder or error): App hands it to the File Explorer, which watches it.
+   */
+  onFolderOpened?: (folderPath: string) => void;
   /** Shows/hides the Welcome overlay. */
   setWelcomeVisible: (visible: boolean) => void;
   showSuccess: (title: string, message: string) => void;
@@ -334,6 +339,7 @@ export async function openFolderFromDialog(deps: OpenFolderDeps): Promise<void> 
     }
 
     deps.onFolderSelected(images);
+    deps.onFolderOpened?.(folderPath);
     deps.setWelcomeVisible(false);
     deps.showSuccess('Folder Opened', `${images.length} image(s)`);
   } catch (error) {
@@ -441,6 +447,77 @@ export function resizeCurrentImage(toasts: TransformToasts, newWidth: number, ne
   toasts.showSuccess('Resized', `${result.width} x ${result.height}`);
 }
 
+export interface InspectorColumnProps {
+  viewMode: 'develop' | 'gallery';
+  selectedTool: string | null;
+  histogramVisible: boolean;
+  currentImage: ImageFileInfo | null;
+  onImageSelected: (image: ImageFileInfo) => void;
+  onFolderSelected: (images: ImageFileInfo[]) => void;
+  openFolderRequest?: OpenFolderRequest | null;
+}
+
+/**
+ * The docked inspector column: the histogram on top, the selected tool's panel below.
+ * Exported so its mount behaviour can be tested without rendering the whole App.
+ *
+ * The File Explorer (FileBrowser) is mounted ONCE for the window's life and only hidden
+ * (X2, diagnosis C5/R11): unmounting it released every folder watcher and its tree while
+ * the filmstrip kept showing the folder, so nothing refreshed it any more. The aside and
+ * the module slot therefore always render, with `display: none` when not shown; the other
+ * panels keep their mount gates (they mount and unmount exactly as before).
+ */
+export function InspectorColumn({
+  viewMode, selectedTool, histogramVisible, currentImage, onImageSelected, onFolderSelected, openFolderRequest,
+}: InspectorColumnProps) {
+  const rightColumnVisible = !!(selectedTool || histogramVisible);
+  const inspectorVisible = viewMode === 'develop' && rightColumnVisible;
+  const slotVisible = inspectorVisible && !!selectedTool;
+  return (
+    <aside
+      aria-label={inspectorVisible ? 'Inspector' : undefined}
+      className="flex flex-col"
+      style={{
+        width: INSPECTOR_WIDTH,
+        flex: 'none',
+        minHeight: 0,
+        background: 'var(--vt-panel)',
+        borderLeft: '1px solid var(--vt-line-soft)',
+        ...(inspectorVisible ? {} : { display: 'none' }),
+      }}
+    >
+      {inspectorVisible && histogramVisible && (
+        <div style={{ flex: '0 0 auto' }}>
+          <HistogramPanel />
+        </div>
+      )}
+
+      {/* Module slot — grows to fill; each panel scrolls internally.
+          Panels stay mounted (display toggle) so their state persists. */}
+      <div style={{ flex: '1 1 auto', minHeight: 0, position: 'relative', ...(slotVisible ? {} : { display: 'none' }) }}>
+        <div style={{ display: slotVisible && selectedTool === 'file-explorer' ? 'block' : 'none', height: '100%', overflow: 'hidden' }}>
+          <FileBrowser
+            onImageSelected={onImageSelected}
+            onFolderSelected={onFolderSelected}
+            openFolderRequest={openFolderRequest}
+          />
+        </div>
+        {slotVisible && selectedTool && (
+          <>
+            <div style={{ display: selectedTool === 'settings' ? 'block' : 'none', height: '100%', overflowY: 'auto' }}>
+              <SettingsPanel />
+            </div>
+            {/* Module panels. */}
+            <div style={{ display: !['file-explorer', 'settings'].includes(selectedTool) ? 'block' : 'none', height: '100%' }}>
+              <AdjustmentPanel selectedModule={selectedTool} currentImage={currentImage} />
+            </div>
+          </>
+        )}
+      </div>
+    </aside>
+  );
+}
+
 function App() {
   const { setViewport, resetZoom, viewport, processedImageData, setSelectedTool: storeSetSelectedTool, showGrid, showRulers, showOriginal, toggleGrid, toggleRulers, toggleOriginal, referenceMode, referenceImageUrl, referenceImageName, toggleReferenceMode, setReferenceImage, lastProcessingTimeMs, modulesActive, modulesTotal, setAlignmentAxisX, viewMode, selectedImageIds, developing, sidewaysHint, originalSnapshotVersion } = useAppStore();
   const [selectedTool, setSelectedToolLocal] = useState<string | null>('file-explorer'); // Default to file explorer
@@ -531,6 +608,8 @@ function App() {
   // snapshot of the selection taken when Del is pressed). null = dialog closed.
   const [removeTargetIds, setRemoveTargetIds] = useState<string[] | null>(null);
   const [isWelcomeVisible, setIsWelcomeVisible] = useState(false);
+  // The last "Open Folder" for the File Explorer (seq increases on every open).
+  const [openFolderRequest, setOpenFolderRequest] = useState<OpenFolderRequest | null>(null);
   const [availableImages, setAvailableImages] = useState<ImageFileInfo[]>([]);
   // Mirrors availableImages OUTSIDE React state so handleFolderSelected can detect a
   // genuine list change synchronously (see its use below) without adding
@@ -960,6 +1039,9 @@ function App() {
   // folder-load path — shared by the Welcome screen's "Open Folder" and the
   // Gallery toolbar's "Open Folder" button.
   const handleOpenFolder = useCallback(() => {
+    // The list this open fed the filmstrip, handed to the File Explorer with the path so
+    // it does not feed an identical re-read again.
+    let openedImages: ImageFileInfo[] = [];
     void openFolderFromDialog({
       isElectron: () => electronService.isElectron(),
       showOpenDialog: (options) => {
@@ -969,7 +1051,14 @@ function App() {
         return window.electronAPI.showOpenDialog(options);
       },
       getFolderContents: (folderPath) => fileSystemService.getFolderContents(folderPath),
-      onFolderSelected: handleFolderSelected,
+      onFolderSelected: (images) => {
+        openedImages = images;
+        handleFolderSelected(images);
+      },
+      // The File Explorer makes the opened folder its gallery folder: watched and refreshed.
+      onFolderOpened: (folderPath) => {
+        setOpenFolderRequest(prev => ({ path: folderPath, seq: (prev?.seq ?? 0) + 1, images: openedImages }));
+      },
       setWelcomeVisible: setIsWelcomeVisible,
       showSuccess,
       showError,
@@ -1706,45 +1795,15 @@ function App() {
 
         {/* Docked inspector — histogram on top, the selected module below (it
             scrolls inside). Develop-only; collapses when nothing is selected. */}
-        {viewMode === 'develop' && rightColumnVisible && (
-          <aside
-            aria-label="Inspector"
-            className="flex flex-col"
-            style={{
-              width: INSPECTOR_WIDTH,
-              flex: 'none',
-              minHeight: 0,
-              background: 'var(--vt-panel)',
-              borderLeft: '1px solid var(--vt-line-soft)',
-            }}
-          >
-            {histogramVisible && (
-              <div style={{ flex: '0 0 auto' }}>
-                <HistogramPanel />
-              </div>
-            )}
-
-            {/* Module slot — grows to fill; each panel scrolls internally.
-                Panels stay mounted (display toggle) so their state persists. */}
-            {selectedTool && (
-              <div style={{ flex: '1 1 auto', minHeight: 0, position: 'relative' }}>
-                <div style={{ display: selectedTool === 'file-explorer' ? 'block' : 'none', height: '100%', overflow: 'hidden' }}>
-                  <FileBrowser
-                    onImageSelected={handleImageSelected}
-                    onFolderSelected={handleFolderSelected}
-                  />
-                </div>
-                <div style={{ display: selectedTool === 'settings' ? 'block' : 'none', height: '100%', overflowY: 'auto' }}>
-                  <SettingsPanel />
-                </div>
-                {/* Module panels. */}
-                <div style={{ display: selectedTool && !['file-explorer', 'settings'].includes(selectedTool) ? 'block' : 'none', height: '100%' }}>
-                  <AdjustmentPanel selectedModule={selectedTool} currentImage={currentImage} />
-                </div>
-              </div>
-            )}
-          </aside>
-        )}
+        <InspectorColumn
+          viewMode={viewMode}
+          selectedTool={selectedTool}
+          histogramVisible={histogramVisible}
+          currentImage={currentImage}
+          onImageSelected={handleImageSelected}
+          onFolderSelected={handleFolderSelected}
+          openFolderRequest={openFolderRequest}
+        />
 
         {/* Docked tool strip. Develop-only chrome — hidden in Gallery. */}
         {viewMode === 'develop' && (
