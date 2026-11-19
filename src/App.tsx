@@ -17,7 +17,7 @@ import { BatchProcessingDialog } from './components/Dialogs/BatchProcessingDialo
 import { PresetDialog } from './components/Dialogs/PresetDialog';
 import { ImageSizeDialog } from './components/Dialogs/ImageSizeDialog';
 import { GalleryRemoveDialog } from './components/Dialogs/GalleryRemoveDialog';
-import { computeRemoval, trashImages, shouldHandleGalleryDelete } from './utils/galleryRemove';
+import { computeRemoval, trashImages, shouldHandleGalleryDelete, resolveVanishedCurrent } from './utils/galleryRemove';
 import { keyboardEventBlocked } from './utils/keyboardScope';
 import { NotificationSystem } from './components/UI/NotificationSystem';
 import { useNotifications } from './hooks/useNotifications';
@@ -898,7 +898,26 @@ function App() {
     if (!sameImageList(prevAvailableImagesRef.current, images)) {
       useAppStore.getState().clearImageDimensions();
     }
+    const previousImages = prevAvailableImagesRef.current;
     prevAvailableImagesRef.current = images;
+    // The photo open in the editor may have been deleted or renamed on disk: when this list
+    // no longer has it and its file is gone, the editor moves to its neighbour (or clears),
+    // as Gallery's Del does. Applied only if, once the disk has answered, the same photo is
+    // still open and this is still the newest list.
+    const openImage = currentImageRef.current;
+    if (openImage) {
+      void resolveVanishedCurrent({
+        previous: previousImages,
+        refreshed: images,
+        current: openImage,
+        fileExists: window.electronAPI?.fileExists,
+      }).then((result) => {
+        if (!result.changed) return;
+        if (currentImageRef.current?.id !== openImage.id || prevAvailableImagesRef.current !== images) return;
+        logger.info(`Open image is gone from disk: ${openImage.name}; showing ${result.image?.name ?? 'nothing'}`);
+        setCurrentImage(result.image);
+      });
+    }
     // Keep the existing array reference when the file list is unchanged (e.g.
     // a watcher-triggered reload after our own rating write, cloud sync or
     // antivirus touching a file) so effects keyed on `images` don't re-run

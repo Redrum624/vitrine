@@ -68,6 +68,44 @@ export function computeRemoval(
   return { images: survivors, currentImage: next, currentChanged: true };
 }
 
+export type VanishedCurrentResult =
+  | { changed: false }
+  | { changed: true; image: ImageFileInfo | null };
+
+/**
+ * The filmstrip's list was replaced by `refreshed`. Says whether the photo open in the editor
+ * was deleted (or renamed) on disk, and what the editor should show instead.
+ *
+ * It changes only when all three hold: the open photo was in the `previous` list, it is not in
+ * the `refreshed` one, and its file no longer exists. The disk check is what tells a deleted
+ * photo from another folder being opened (its file is still there) and from a file caught in
+ * the middle of a rewrite. The successor follows computeRemoval: the next photo of the previous
+ * order still listed, else the nearest one before it, else the first photo of the new list, else nothing (null:
+ * clear the editor).
+ * Without a way to ask the disk (browser mode) or when the check fails, nothing changes.
+ */
+export async function resolveVanishedCurrent(params: {
+  previous: ImageFileInfo[];
+  refreshed: ImageFileInfo[];
+  current: ImageFileInfo | null;
+  fileExists: ((path: string) => Promise<boolean>) | undefined;
+}): Promise<VanishedCurrentResult> {
+  const { previous, refreshed, current, fileExists } = params;
+  if (!current || !fileExists) return { changed: false };
+  if (refreshed.some((i) => i.id === current.id)) return { changed: false };
+  if (!previous.some((i) => i.id === current.id)) return { changed: false };
+  try {
+    if (await fileExists(current.path)) return { changed: false };
+  } catch {
+    return { changed: false };
+  }
+  const listed = new Map(refreshed.map((i) => [i.id, i]));
+  const goneIds = previous.filter((i) => !listed.has(i.id)).map((i) => i.id);
+  const successor = computeRemoval(previous, goneIds, current.id).currentImage;
+  const image = successor ? listed.get(successor.id) : undefined;
+  return { changed: true, image: image ?? refreshed[0] ?? null };
+}
+
 export interface TrashOutcome {
   /** Ids whose file was successfully moved to the OS trash (drop these). */
   trashedIds: string[];

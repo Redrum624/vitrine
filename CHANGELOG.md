@@ -4,6 +4,11 @@ All notable changes to **Vitrine** (formerly Photo Editor Pro) are documented in
 this file. The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.40.3] - 2026-11-18
+
+### Fixed
+- **A photo deleted on disk stayed open in the editor.** Cause: when the folder refreshed, the filmstrip dropped the deleted photo but nothing looked at the photo open in the editor, which kept showing it under its name. Fix: when a refresh no longer lists the open photo and its file is gone from disk, the editor moves to the next photo (the previous one if it was the last) and clears when the folder has none left. A renamed photo counts as gone: the editor moves to its neighbour and the photo is in the filmstrip under its new name. A photo whose file still exists stays open, so opening another folder does not change the editor. Affects: `src/App.tsx`, `src/utils/galleryRemove.ts`.
+
 ## [1.40.2] - 2026-11-18
 
 ### Fixed
