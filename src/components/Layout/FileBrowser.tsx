@@ -183,18 +183,39 @@ export function FileBrowser({ onImageSelected, onFolderSelected, openFolderReque
     }
   }, []);
 
-  // The filmstrip now shows `folderId`'s `images`. An Open Folder folder tracked outside the
-  // tree is released when another folder takes its place (its path stays watched while a
-  // tree folder still holds it). Refs only, so any closure may call it.
-  const takeGallery = (folderId: string | null, images: ImageFileInfo[] | null) => {
+  // Stop tracking the Open Folder folder kept outside the tree: release its watch (its path
+  // stays watched while a tree folder still holds it), discard any read in flight for it and
+  // drop its listing, so the status bar no longer counts it. Refs and setters only, so any
+  // closure may call it.
+  const releaseOutsideFolder = (reason: string) => {
     const outside = outsideFolderRef.current;
-    if (outside && outside !== folderId) {
-      outsideFolderRef.current = null;
-      releaseWatch(watchedFolders.current, outside, isElectron() ? window.electronAPI : undefined);
-      storedListings.current.delete(outside);
-      readGeneration.current.set(outside, (readGeneration.current.get(outside) ?? 0) + 1);
-      folderIdToPath.current.delete(outside);
-      logger.info(`Open Folder: stopped tracking ${outside} (another folder is shown)`);
+    if (!outside) return;
+    outsideFolderRef.current = null;
+    releaseWatch(watchedFolders.current, outside, isElectron() ? window.electronAPI : undefined);
+    storedListings.current.delete(outside);
+    readGeneration.current.set(outside, (readGeneration.current.get(outside) ?? 0) + 1);
+    folderIdToPath.current.delete(outside);
+    setFolderContents(prev => {
+      if (!prev.has(outside)) return prev;
+      const next = new Map(prev);
+      next.delete(outside);
+      return next;
+    });
+    setLoadingFolders(prev => {
+      if (!prev.has(outside)) return prev;
+      const next = new Set(prev);
+      next.delete(outside);
+      return next;
+    });
+    logger.info(`Open Folder: stopped tracking ${outside} (${reason})`);
+  };
+
+  // The filmstrip now shows `folderId`'s `images`. An Open Folder folder tracked outside the
+  // tree is released when another folder takes its place. Refs and setters only, so any
+  // closure may call it.
+  const takeGallery = (folderId: string | null, images: ImageFileInfo[] | null) => {
+    if (outsideFolderRef.current && outsideFolderRef.current !== folderId) {
+      releaseOutsideFolder('another folder is shown');
     }
     galleryFolderRef.current = folderId;
     galleryImagesRef.current = images;
@@ -241,6 +262,9 @@ export function FileBrowser({ onImageSelected, onFolderSelected, openFolderReque
     window.electronAPI.onFolderChanged(handleFolderChanged);
 
     return () => {
+      // An Open Folder walk still reading is abandoned: it must not watch its chain after
+      // this cleanup has released everything (nothing would ever unwatch it).
+      revealGenerationRef.current += 1;
       // Drop the single 'folder-changed' listener (onFolderChanged wraps the callback in a
       // fresh closure each call, so removeAllListeners on the channel is the correct remover)
       // and release every folder watcher held open by this component.
@@ -529,8 +553,11 @@ export function FileBrowser({ onImageSelected, onFolderSelected, openFolderReque
   const revealOpenedFolder = async (request: OpenFolderRequest) => {
     const generation = ++revealGenerationRef.current;
     const isCurrent = () => revealGenerationRef.current === generation;
-    // The filmstrip shows this folder from now on: no older choice may feed it.
+    // The filmstrip shows this folder from now on: no older choice may feed it, and a folder
+    // an earlier open tracked outside the tree is released now (an abandoned walk would
+    // otherwise leave it watched; trackOutsideTree takes it again if this is the same folder).
     pendingSelectionRef.current = null;
+    releaseOutsideFolder('a newer Open Folder');
     galleryFolderRef.current = null;
     galleryImagesRef.current = request.images ?? null;
 

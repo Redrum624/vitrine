@@ -336,4 +336,92 @@ describe('FileBrowser — Open Folder makes the opened folder the gallery folder
     expect(removeListener.mock.calls.some((c) => String(c[0]) === 'focus')).toBe(true);
     removeListener.mockRestore();
   });
+
+  // Fix round 1 (X2 review C1-C5).
+  const statusText = (container: HTMLElement) =>
+    (container.firstElementChild!.lastElementChild as HTMLElement).textContent;
+
+  test('C1. once a name click takes over, the status bar no longer counts the folder tracked outside the tree', async () => {
+    setListing(NAS, [], [`${NAS}\\p1.jpg`, `${NAS}\\p2.jpg`, `${NAS}\\p3.jpg`]);
+    const { container, open } = await mountBrowser();
+    await open({ path: NAS, seq: 1, images: dialogImages(NAS) });
+    fireEvent.click(arrowOf('C:'));
+    await screen.findByText('D', { selector: 'span' });
+    await flush();
+    fireEvent.click(folderLabel('D'));
+    await flush();
+    expect(callsWith(api.unwatchFolder, NAS)).toBe(1);
+    // The tree holds C:\ (no images) and D (one image); NAS is no longer tracked.
+    expect(statusText(container)).toBe('1 image · 1 KB');
+  });
+
+  test('C2. a walk abandoned by a name click on a folder without images leaves the previous outside folder unwatched', async () => {
+    const E = 'C:\\E';
+    setListing(ROOT, [A, D, E], []);
+    const { open } = await mountBrowser();
+    await open({ path: NAS, seq: 1, images: dialogImages(NAS) });
+    fireEvent.click(arrowOf('C:'));
+    await screen.findByText('E', { selector: 'span' });
+    await flush();
+    const held = deferred<Listing>();
+    queueOnce(A, () => held.promise); // the walk to B waits on A
+    await open({ path: B, seq: 2, images: dialogImages(B) });
+    fireEvent.click(folderLabel('E')); // no images: abandons the walk, does not take the gallery
+    await flush();
+    await act(async () => { held.resolve(defaults.get(A)!); });
+    await flush();
+    expect(callsWith(api.unwatchFolder, NAS)).toBe(1);
+    const before = readsOf(NAS);
+    await fireFolderChanged(api, NAS);
+    expect(readsOf(NAS) - before).toBe(0);
+  });
+
+  test('C3. a walk still reading at unmount watches nothing after the unmount', async () => {
+    const held = deferred<Listing>();
+    queueOnce(ROOT, () => held.promise); // the walk to B waits on C:\
+    const { open, unmount } = await mountBrowser();
+    await open({ path: B, seq: 1, images: dialogImages(B) });
+    unmount();
+    const watchesBefore = api.watchFolder.mock.calls.length;
+    await act(async () => { held.resolve(defaults.get(ROOT)!); });
+    await flush();
+    expect(api.watchFolder.mock.calls.slice(watchesBefore)).toEqual([]);
+  });
+
+  test.each([
+    ['revealed in the tree', B, 'C:\\A\\B\\b2.jpg'],
+    ['tracked outside the tree', NAS, `${NAS}\\p2.jpg`],
+  ])("C4. a file added between the dialog's read and the watch start reaches the filmstrip (%s)", async (_label, path, added) => {
+    const dialog = dialogImages(path);
+    setListing(path, [], [...dialog.map((i) => i.path), added]);
+    const { open } = await mountBrowser();
+    await open({ path, seq: 1, images: dialog });
+    expect(onFolderSelected).toHaveBeenCalledTimes(1);
+    expect(onFolderSelected).toHaveBeenCalledWith([...dialog, image(added)]);
+    expect(onImageSelected).not.toHaveBeenCalled();
+  });
+
+  test.each([
+    ["a sibling whose name starts with the nested root's walks from C:\\ (separator boundary)", 'C:\\U\\Desk2\\X',
+      [ROOT, 'C:\\U', 'C:\\U\\Desk2', 'C:\\U\\Desk2\\X']],
+    ['a folder inside the nested root walks from that root (longest prefix)', 'C:\\U\\Desk\\Y',
+      ['C:\\U\\Desk', 'C:\\U\\Desk\\Y']],
+  ])('C5. roots [C:\\, C:\\U\\Desk]: %s', async (_label, target, reads) => {
+    // The real root list (get-system-drives) has C:\ first and user folders nested under it.
+    mockFss.getSystemDrives.mockResolvedValue([
+      { id: 'driveC', name: 'C:', path: ROOT, type: 'drive' },
+      { id: 'desktop', name: 'Desktop', path: 'C:\\U\\Desk', type: 'folder' },
+    ]);
+    setListing(ROOT, ['C:\\U'], []);
+    setListing('C:\\U', ['C:\\U\\Desk', 'C:\\U\\Desk2'], []);
+    setListing('C:\\U\\Desk2', ['C:\\U\\Desk2\\X'], []);
+    setListing('C:\\U\\Desk', ['C:\\U\\Desk\\Y'], []);
+    setListing(target, [], [`${target}\\t1.jpg`]);
+    const { open } = await mountBrowser();
+    mockFss.getFolderContents.mockClear();
+    await open({ path: target, seq: 1, images: dialogImages(target) });
+    expect(mockFss.getFolderContents.mock.calls.map((c) => c[0])).toEqual(reads);
+    expect(callsWith(api.watchFolder, target)).toBe(1);
+    expect(rowOf(baseName(target)).style.backgroundColor).toBe('var(--vt-raised)');
+  });
 });
