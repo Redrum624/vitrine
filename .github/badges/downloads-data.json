@@ -3427,220 +3427,282 @@
         "v1.24.1": 12,
         "v1.24.0": 3
       }
+    },
+    {
+      "date": "2026-11-19",
+      "total": 615,
+      "raw_total": 582,
+      "by_release": {
+        "v1.40.3": 5,
+        "v1.40.2": 2,
+        "v1.40.1": 3,
+        "v1.40.0": 192,
+        "v1.39.0": 6,
+        "v1.38.1": 7,
+        "v1.38.0": 9,
+        "v1.37.0": 281,
+        "v1.36.0": 3,
+        "v1.35.0": 5,
+        "v1.34.2": 4,
+        "v1.34.1": 2,
+        "v1.34.0": 3,
+        "v1.33.0": 2,
+        "v1.32.0": 2,
+        "v1.31.0": 2,
+        "v1.30.0": 3,
+        "v1.29.0": 5,
+        "v1.28.1": 2,
+        "v1.28.0": 4,
+        "v1.27.0": 2,
+        "v1.26.0": 16,
+        "v1.25.0": 5,
+        "v1.24.1": 13,
+        "v1.24.0": 4
+      }
     }
   ],
-  "latest_release": "v1.40.0",
+  "latest_release": "v1.40.3",
   "legacy_offset": 33,
   "assets": {
     "474757395": {
       "tag": "v1.24.0",
       "name": "Vitrine.Setup.1.24.0.exe",
-      "max": 3
+      "max": 4
     },
     "474827707": {
       "tag": "v1.24.1",
       "name": "Vitrine.Setup.1.24.1.exe",
-      "max": 12
+      "max": 13
     },
     "477808091": {
       "tag": "v1.25.0",
       "name": "Vitrine.1.25.0.portable.exe",
-      "max": 0
+      "max": 1
     },
     "477808095": {
       "tag": "v1.25.0",
       "name": "Vitrine.Setup.1.25.0.exe",
-      "max": 3
+      "max": 4
     },
     "477975878": {
       "tag": "v1.26.0",
       "name": "Vitrine.1.26.0.portable.exe",
-      "max": 6
+      "max": 7
     },
     "477975879": {
       "tag": "v1.26.0",
       "name": "Vitrine.Setup.1.26.0.exe",
-      "max": 8
+      "max": 9
     },
     "480331713": {
       "tag": "v1.27.0",
       "name": "Vitrine.Setup.1.27.0.exe",
-      "max": 0
+      "max": 1
     },
     "480331714": {
       "tag": "v1.27.0",
       "name": "Vitrine.1.27.0.portable.exe",
-      "max": 0
+      "max": 1
     },
     "480400235": {
       "tag": "v1.28.0",
       "name": "Vitrine.1.28.0.portable.exe",
-      "max": 2
+      "max": 3
     },
     "480400237": {
       "tag": "v1.28.0",
       "name": "Vitrine.Setup.1.28.0.exe",
-      "max": 0
+      "max": 1
     },
     "482092398": {
       "tag": "v1.28.1",
       "name": "Vitrine.1.28.1.portable.exe",
-      "max": 0
+      "max": 1
     },
     "482092402": {
       "tag": "v1.28.1",
       "name": "Vitrine.Setup.1.28.1.exe",
-      "max": 0
+      "max": 1
     },
     "482126666": {
       "tag": "v1.29.0",
       "name": "Vitrine.1.29.0.portable.exe",
-      "max": 1
+      "max": 2
     },
     "482126669": {
       "tag": "v1.29.0",
       "name": "Vitrine.Setup.1.29.0.exe",
-      "max": 2
+      "max": 3
     },
     "482632973": {
       "tag": "v1.30.0",
       "name": "Vitrine.Setup.1.30.0.exe",
-      "max": 1
+      "max": 2
     },
     "482632975": {
       "tag": "v1.30.0",
       "name": "Vitrine.1.30.0.portable.exe",
-      "max": 0
+      "max": 1
     },
     "482667833": {
       "tag": "v1.31.0",
       "name": "Vitrine.Setup.1.31.0.exe",
-      "max": 0
+      "max": 1
     },
     "482667834": {
       "tag": "v1.31.0",
       "name": "Vitrine.1.31.0.portable.exe",
-      "max": 0
+      "max": 1
     },
     "482692604": {
       "tag": "v1.32.0",
       "name": "Vitrine.1.32.0.portable.exe",
-      "max": 0
+      "max": 1
     },
     "482692605": {
       "tag": "v1.32.0",
       "name": "Vitrine.Setup.1.32.0.exe",
-      "max": 0
+      "max": 1
     },
     "482706184": {
       "tag": "v1.33.0",
       "name": "Vitrine.Setup.1.33.0.exe",
-      "max": 0
+      "max": 1
     },
     "482706187": {
       "tag": "v1.33.0",
       "name": "Vitrine.1.33.0.portable.exe",
-      "max": 0
+      "max": 1
     },
     "482716141": {
       "tag": "v1.34.0",
       "name": "Vitrine.1.34.0.portable.exe",
-      "max": 0
+      "max": 1
     },
     "482716142": {
       "tag": "v1.34.0",
       "name": "Vitrine.Setup.1.34.0.exe",
-      "max": 1
+      "max": 2
     },
     "482730481": {
       "tag": "v1.34.1",
       "name": "Vitrine.1.34.1.portable.exe",
-      "max": 0
+      "max": 1
     },
     "482730484": {
       "tag": "v1.34.1",
       "name": "Vitrine.Setup.1.34.1.exe",
-      "max": 0
+      "max": 1
     },
     "482748602": {
       "tag": "v1.34.2",
       "name": "Vitrine.1.34.2.portable.exe",
-      "max": 1
+      "max": 2
     },
     "482748606": {
       "tag": "v1.34.2",
       "name": "Vitrine.Setup.1.34.2.exe",
-      "max": 1
+      "max": 2
     },
     "483984688": {
       "tag": "v1.35.0",
       "name": "Vitrine.1.35.0.portable.exe",
-      "max": 2
+      "max": 3
     },
     "483984689": {
       "tag": "v1.35.0",
       "name": "Vitrine.Setup.1.35.0.exe",
-      "max": 1
+      "max": 2
     },
     "487289027": {
       "tag": "v1.36.0",
       "name": "Vitrine.Setup.1.36.0.exe",
-      "max": 1
+      "max": 2
     },
     "487289035": {
       "tag": "v1.36.0",
       "name": "Vitrine.1.36.0.portable.exe",
-      "max": 0
+      "max": 1
     },
     "487525899": {
       "tag": "v1.37.0",
       "name": "Vitrine.Setup.1.37.0.exe",
-      "max": 189
+      "max": 190
     },
     "487525900": {
       "tag": "v1.37.0",
       "name": "Vitrine.1.37.0.portable.exe",
-      "max": 90
+      "max": 91
     },
     "628377000": {
       "tag": "v1.38.0",
       "name": "Vitrine.Setup.1.38.0.exe",
-      "max": 6
+      "max": 7
     },
     "628377003": {
       "tag": "v1.38.0",
       "name": "Vitrine.1.38.0.portable.exe",
-      "max": 1
+      "max": 2
     },
     "635306021": {
       "tag": "v1.38.1",
       "name": "Vitrine.Setup.1.38.1.exe",
-      "max": 3
+      "max": 4
     },
     "635306023": {
       "tag": "v1.38.1",
       "name": "Vitrine.1.38.1.portable.exe",
-      "max": 2
+      "max": 3
     },
     "637136047": {
       "tag": "v1.39.0",
       "name": "Vitrine.1.39.0.portable.exe",
-      "max": 3
+      "max": 4
     },
     "637136051": {
       "tag": "v1.39.0",
       "name": "Vitrine.Setup.1.39.0.exe",
-      "max": 1
+      "max": 2
     },
     "642430777": {
       "tag": "v1.40.0",
       "name": "Vitrine-1.40.0-portable.exe",
-      "max": 63
+      "max": 64
     },
     "642430778": {
       "tag": "v1.40.0",
       "name": "Vitrine-Setup-1.40.0.exe",
-      "max": 126
+      "max": 128
+    },
+    "765267407": {
+      "tag": "v1.40.1",
+      "name": "Vitrine-Setup-1.40.1.exe",
+      "max": 2
+    },
+    "765267413": {
+      "tag": "v1.40.1",
+      "name": "Vitrine-1.40.1-portable.exe",
+      "max": 1
+    },
+    "765643754": {
+      "tag": "v1.40.2",
+      "name": "Vitrine-1.40.2-portable.exe",
+      "max": 1
+    },
+    "765643759": {
+      "tag": "v1.40.2",
+      "name": "Vitrine-Setup-1.40.2.exe",
+      "max": 1
+    },
+    "766208148": {
+      "tag": "v1.40.3",
+      "name": "Vitrine-1.40.3-portable.exe",
+      "max": 1
+    },
+    "766208151": {
+      "tag": "v1.40.3",
+      "name": "Vitrine-Setup-1.40.3.exe",
+      "max": 4
     }
   }
 }
