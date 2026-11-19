@@ -89,8 +89,13 @@ export async function resolveVanishedCurrent(params: {
   refreshed: ImageFileInfo[];
   current: ImageFileInfo | null;
   fileExists: ((path: string) => Promise<boolean>) | undefined;
+  /** Read once the disk has answered: the photo open now and the list shown now. Another
+   *  photo opened meanwhile cancels the change; a newer list is the one the successor is
+   *  taken from (so a deletion is not missed because a second refresh came in between). */
+  latest?: () => { currentId: string | null; images: ImageFileInfo[] };
 }): Promise<VanishedCurrentResult> {
-  const { previous, refreshed, current, fileExists } = params;
+  const { previous, current, fileExists, latest } = params;
+  let refreshed = params.refreshed;
   if (!current || !fileExists) return { changed: false };
   if (refreshed.some((i) => i.id === current.id)) return { changed: false };
   if (!previous.some((i) => i.id === current.id)) return { changed: false };
@@ -98,6 +103,12 @@ export async function resolveVanishedCurrent(params: {
     if (await fileExists(current.path)) return { changed: false };
   } catch {
     return { changed: false };
+  }
+  if (latest) {
+    const now = latest();
+    if (now.currentId !== current.id) return { changed: false };
+    refreshed = now.images;
+    if (refreshed.some((i) => i.id === current.id)) return { changed: false };
   }
   const listed = new Map(refreshed.map((i) => [i.id, i]));
   const goneIds = previous.filter((i) => !listed.has(i.id)).map((i) => i.id);

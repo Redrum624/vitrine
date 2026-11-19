@@ -479,7 +479,9 @@ ipcMain.handle('open-external-url', async (_e, url) => {
   return false;
 });
 
-ipcMain.handle('file-exists', (_e, p) => { try { return fs.existsSync(p); } catch { return false; } });
+// Asynchronous on purpose: the renderer asks it for the open photo on a folder refresh, and a
+// blocking check of a path on an unreachable network share would freeze the main process.
+ipcMain.handle('file-exists', async (_e, p) => { try { await fs.promises.access(p); return true; } catch { return false; } });
 
 // AI super-resolution upscale (Real-ESRGAN via onnxruntime-node, main-process native). Availability
 // is DirectML-gated (see aiUpscaler.cjs, W5 R1) so a CPU-only machine reports unavailable and the

@@ -903,7 +903,7 @@ function App() {
     // The photo open in the editor may have been deleted or renamed on disk: when this list
     // no longer has it and its file is gone, the editor moves to its neighbour (or clears),
     // as Gallery's Del does. Applied only if, once the disk has answered, the same photo is
-    // still open and this is still the newest list.
+    // still open; the neighbour is taken from the list shown by then.
     const openImage = currentImageRef.current;
     if (openImage) {
       void resolveVanishedCurrent({
@@ -911,9 +911,9 @@ function App() {
         refreshed: images,
         current: openImage,
         fileExists: window.electronAPI?.fileExists,
+        latest: () => ({ currentId: currentImageRef.current?.id ?? null, images: prevAvailableImagesRef.current }),
       }).then((result) => {
         if (!result.changed) return;
-        if (currentImageRef.current?.id !== openImage.id || prevAvailableImagesRef.current !== images) return;
         logger.info(`Open image is gone from disk: ${openImage.name}; showing ${result.image?.name ?? 'nothing'}`);
         setCurrentImage(result.image);
       });

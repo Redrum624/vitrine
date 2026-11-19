@@ -30,6 +30,37 @@ describe('resolveVanishedCurrent', () => {
     expect(r).toEqual({ changed: true, image: A });
   });
 
+  it('a renamed open photo: the editor moves to the next photo of the OLD order, not to the new name', async () => {
+    const a2 = img('a2.png'); // b.png renamed to a2.png sorts before c.png
+    const r = await resolveVanishedCurrent({ previous: [A, B, C], refreshed: [A, a2, C], current: B, fileExists: gone });
+    expect(r).toEqual({ changed: true, image: C });
+  });
+
+  it('changes nothing when another photo was opened while the disk was asked', async () => {
+    const r = await resolveVanishedCurrent({
+      previous: [A, B, C], refreshed: [A, C], current: B, fileExists: gone,
+      latest: () => ({ currentId: C.id, images: [A, C] }),
+    });
+    expect(r).toEqual({ changed: false });
+  });
+
+  it('takes the neighbour from the list shown once the disk has answered', async () => {
+    // A second refresh (c.png deleted too) arrived while the disk was asked.
+    const r = await resolveVanishedCurrent({
+      previous: [A, B, C], refreshed: [A, C], current: B, fileExists: gone,
+      latest: () => ({ currentId: B.id, images: [A] }),
+    });
+    expect(r).toEqual({ changed: true, image: A });
+  });
+
+  it('changes nothing when the newest list has the photo again', async () => {
+    const r = await resolveVanishedCurrent({
+      previous: [A, B], refreshed: [A], current: B, fileExists: gone,
+      latest: () => ({ currentId: B.id, images: [A, B] }),
+    });
+    expect(r).toEqual({ changed: false });
+  });
+
   it('shows the first photo of the new list when no earlier neighbour is left', async () => {
     const r = await resolveVanishedCurrent({ previous: [A, B], refreshed: [C], current: B, fileExists: gone });
     expect(r).toEqual({ changed: true, image: C });

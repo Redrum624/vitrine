@@ -896,6 +896,27 @@ export function Canvas({ onFitWindow: _onFitWindow, onActualSize: _onActualSize,
     }
   }, [currentImage, displayImage, loadImage]);
 
+  // The open photo was closed with no other photo taking its place (the folder's last photo
+  // deleted on disk, or removed from the list): unload it, so the canvas, the panels and the
+  // edit store stop working on a photo that is no longer open. Its edits are saved first, as
+  // on a switch; after clearImage() a later flush has no photo to write for.
+  useEffect(() => {
+    if (currentImage || !displayImage) return;
+    loadTokenRef.current++; // a load still in flight is stale
+    editPersistenceService.flush();
+    checkpointService.flush();
+    canvasCache.current = {};
+    const store = useAppStore.getState();
+    store.setProcessedImageData(null);
+    store.setRenderMode('cpu');
+    store.setCropDragSuspended(false);
+    imageService.clearImage();
+    imageProcessingPipeline.resetAllModules();
+    setImageLoading(false);
+    setDisplayImage(null);
+    logger.info(`Image unloaded: ${displayImage.name}`);
+  }, [currentImage, displayImage]);
+
   // Redraw canvas when processed image data changes. Also re-run when renderMode or
   // gpuResultVersion changes so the (shared) sizing logic keeps the GL canvas's
   // drawing-buffer + CSS size synced with the 2D canvas before present() runs — this
